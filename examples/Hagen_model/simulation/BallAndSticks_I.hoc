@@ -1,0 +1,44 @@
+/* -----------------------------------------------------------------------------
+BallAndSticksI.hoc
+----------------------------------------------------------------------------- */
+// Create sections:
+create soma[1]
+create dend[1]
+create apic[1]
+
+// Add 3D information:
+soma[0] {
+    pt3dadd(0, 0, -15, 15)
+    pt3dadd(0, 0, 15, 15)
+}
+dend[0] {
+    pt3dadd(0, 0, -15, 2)
+    pt3dadd(0, 0, -215, 2)
+}
+apic[0] {
+    pt3dadd(0, 0, 15, 2)
+    pt3dadd(0, 0, 215, 2)
+}
+
+// Connect section end points:
+connect dend[0](0), soma[0](0)
+connect apic[0](0), soma[0](1)
+
+// Set biophysical parameters:
+forall {
+    Ra = 100.
+    cm = 1.
+    all.append()
+}
+/* --- biophysics
+soma { insert hh }
+dend {
+    insert pas
+    g_pas = 0.0002
+    e_pas = -65
+}
+apic {
+    insert pas
+    g_pas = 0.0002
+    e_pas = -65.
+} --- */
