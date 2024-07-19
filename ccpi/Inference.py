@@ -6,10 +6,10 @@ from sklearn.neural_network import MLPRegressor
 
 
 class Inference(object):
-    '''
+    """
     Class for inferring circuit model parameters from features of
     electrophysiological recordings.
-    '''
+    """
 
     def __init__(self, X, y):
         self.X = X
