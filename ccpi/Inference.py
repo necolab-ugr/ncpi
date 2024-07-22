@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sbi.inference import SNPE
 
 
-class inference(object):
+class Inference(object):
     """
     Class for inferring cortical circuit parameters from features of
     electrophysiological recordings.
@@ -75,9 +75,13 @@ class inference(object):
         if X.shape[0] != Y.shape[0]:
             raise ValueError('X and Y must have the same number of rows.')
 
+        # Stack X and Y
+        X = np.stack(X)
+        Y = np.stack(Y)
+
         # Append X and Y to training data
-        self.features.append(X)
-        self.theta.append(Y)
+        self.features = X
+        self.theta = Y
 
     def train(self, param_grid=None):
         """
@@ -178,9 +182,9 @@ class inference(object):
                                 X_test[sample], dtype=np.float32))
                             # do not consider samples with inf or nan values
                             if (np.isinf(x_o).sum() < 1) and (np.isnan(x_o).sum() < 1):
-                                theta_o = torch.from_numpy(np.array(Y_test[sample],dtype=np.float32))
+                                theta_o = torch.from_numpy(np.array(Y_test[sample], dtype=np.float32))
                                 # sample the posterior
-                                posterior_samples = posterior.sample((5000,),x=x_o)
+                                posterior_samples = posterior.sample((5000,), x=x_o)
 
                                 # compute the parameter recovery error (PRE),
                                 # defined as the average absolute error using all
@@ -212,9 +216,7 @@ class inference(object):
 
             # Train the neural density estimator
             density_estimator = model.train()
-
-            # Build the posterior
-            model.build_posterior(density_estimator)
+            best_model = density_estimator
 
         # Save the best model and the StandardScaler
         if not os.path.exists('data'):
@@ -223,3 +225,47 @@ class inference(object):
             pickle.dump(best_model, file)
         with open('data/scaler.pkl', 'wb') as file:
             pickle.dump(scaler, file)
+
+    def predict(self, features):
+        """
+        Method to predict the parameters.
+        """
+
+        # Load the best model and the StandardScaler
+        with open('data/best_model.pkl', 'rb') as file:
+            best_model = pickle.load(file)
+        with open('data/scaler.pkl', 'rb') as file:
+            scaler = pickle.load(file)
+
+        # Assert that features is a numpy array
+        if type(features) is not np.ndarray:
+            raise ValueError('features must be a numpy array.')
+
+        # Stack features
+        features = np.stack(features)
+
+        # Predict the parameters
+        predictions = []
+        for feat in features:
+            # Transform the features
+            feat = scaler.transform(feat.reshape(1, -1))
+
+            # Predict the parameters
+            if self.model == 'Ridge' or self.model == 'MLPRegressor':
+                pred = best_model.predict(feat)
+            if self.model == 'SNPE':
+                # Build the posterior
+                posterior = best_model.build_posterior()
+
+                # Sample the posterior
+                x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
+                posterior_samples = posterior.sample((5000,), x=x_o)
+
+                # Compute the mean of the posterior samples
+                pred = np.mean(posterior_samples.numpy(), axis=0)
+
+            # Append the predictions
+            predictions.append(pred[0])
+
+        # Return the predictions
+        return predictions
