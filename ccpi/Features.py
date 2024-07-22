@@ -2,18 +2,18 @@ import importlib
 import subprocess
 
 class Features:
-    '''
+    """
     Class for computing features from electrophysiological data recordings.
-    '''
+    """
     def __init__(self, method = 'catch22'):
-        '''
+        """
         Constructor method.
 
         Parameters
         ----------
         method: str
             Method to compute features. Default is 'catch22'.
-        '''
+        """
         self.method = method
 
         # Check if the method is valid
@@ -22,20 +22,20 @@ class Features:
 
 
     def install(self,module):
-        '''
+        """
         Function to install a Python module.
 
         Parameters
         ----------
         module: str
             Module name.
-        '''
+        """
         subprocess.check_call(['pip', 'install', module])
         print(f"The module {module} was installed!")
 
 
     def catch22(self,sample):
-        '''
+        """
         Function to compute the catch22 features.
 
         Parameters
@@ -47,7 +47,7 @@ class Features:
         -------
         features: np.array
             Array with the catch22 features.
-        '''
+        """
 
         # Dynamically import the pycatch22 module
         try:
