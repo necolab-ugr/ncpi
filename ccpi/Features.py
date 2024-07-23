@@ -3,12 +3,29 @@ import subprocess
 import pandas as pd
 import os
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+
+def install(module):
+    """
+    Function to install a Python module.
+
+    Parameters
+    ----------
+    module: str
+        Module name.
+    """
+    subprocess.check_call(['pip', 'install', module])
+    print(f"The module {module} was installed!")
+
 
 class Features:
     """
     Class for computing features from electrophysiological data recordings.
     """
-    def __init__(self, method = 'catch22'):
+
+    def __init__(self, method='catch22'):
         """
         Constructor method.
 
@@ -19,25 +36,50 @@ class Features:
         """
         self.method = method
 
+        # Assert that the method is a string
+        if not isinstance(self.method, str):
+            raise ValueError("The method must be a string.")
+
         # Check if the method is valid
         if self.method not in ['catch22']:
             raise ValueError("Invalid method. Please use 'catch22'.")
 
-
-    def install(self,module):
+    def compute_features(self, data):
         """
-        Function to install a Python module.
+        Function to compute features from the data.
 
         Parameters
         ----------
-        module: str
-            Module name.
+        data: pd.DataFrame
+            DataFrame containing the data.
+
+        Returns
+        -------
+        data: pd.DataFrame
+            DataFrame containing the data with the features appended.
         """
-        subprocess.check_call(['pip', 'install', module])
-        print(f"The module {module} was installed!")
 
+        def compute_sample_features(sample):
+            """ Compute the features for a single sample."""
+            # Normalize the sample
+            sample = (sample - np.mean(sample)) / np.std(sample)
+            if self.method == 'catch22':
+                return self.catch22(sample)
+            return []
 
-    def catch22(self,sample):
+        # Compute the features in parallel using all available CPUs
+        features = []
+        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
+            futures = [executor.submit(compute_sample_features, sample) for sample in data['Data']]
+            for future in tqdm(as_completed(futures), total=len(futures), desc="Computing features"):
+                features.append(future.result())
+
+        # Append the features to the DataFrame
+        pd_feat = pd.DataFrame({'Features': features})
+        data = pd.concat([data, pd_feat], axis=1)
+        return data
+
+    def catch22(self, sample):
         """
         Function to compute the catch22 features.
 
@@ -57,7 +99,7 @@ class Features:
             pycatch22 = importlib.import_module('pycatch22')
         except ImportError:
             print("pycatch22 is not installed!")
-            self.install('pycatch22')
+            install('pycatch22')
 
         features = pycatch22.catch22_all(sample)
         return features['values']
@@ -85,7 +127,6 @@ class Features:
         for i in range(n_channels):
             data_epochs = []
             for l in range(n_epochs):
-
                 data_epochs.append(data[l * epoch_l_samp: (l + 1) * epoch_l_samp, i])
 
             df_new = pd.DataFrame({
@@ -122,7 +163,7 @@ class Features:
             - Location (electrode number for EEG, ROI for MEG and, perhaps, 0 for LFP that only has 1 electrode normally).
             - Data (time-series data).
 
-            and the following atributes:
+            and the following attributes:
             - fs (sampling frequency).
             - Recording (type of recording: LFP, EEG, MEG...).
 
@@ -160,7 +201,6 @@ class Features:
         # Initialize an empty DataFrame
         df = pd.DataFrame(columns=['ID', 'Group', 'Epoch', 'Sensor', 'Data'])
         fs = 500
-
 
         if data_format == 'mat':
 

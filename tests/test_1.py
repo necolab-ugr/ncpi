@@ -1,4 +1,4 @@
-""" Create artificial test data and assess the methods of the Features and Inference classes."""
+""" Create artificial test data and train a regression model using the ccpi toolbox. """
 
 import sys
 import os
@@ -93,19 +93,7 @@ def plot_df(df):
 def compute_features(data):
     """ Compute features from the time-series data."""
     ccpi_feat = ccpi.Features(method='catch22')
-    features = []
-    for i, sample in enumerate(data['Data']):
-        print(f'\rComputing features from sample {i} / {len(data)}', end='', flush=True)
-        # Normalize the sample
-        sample = (sample - np.mean(sample)) / np.std(sample)
-        feats = ccpi_feat.catch22(sample)
-        features.append(feats)
-    print()
-
-    # append the features to the DataFrame
-    pd_feat = pd.DataFrame({'Features': features})
-    data = pd.concat([data, pd_feat], axis=1)
-    return data
+    return ccpi_feat.compute_features(data)
 
 
 def split_data(data):
