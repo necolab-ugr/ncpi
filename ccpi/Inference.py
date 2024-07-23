@@ -208,7 +208,10 @@ class Inference(object):
 
             # Update the model with the best hyperparameters
             if best_config is not None:
-                model.set_params(**best_config)
+                if self.model == 'Ridge' or self.model == 'MLPRegressor':
+                    model.set_params(**best_config)
+                if self.model == 'SNPE':
+                    model = SNPE(**best_config)
                 # print best hyperparameters
                 print(f'\nBest hyperparameters: {best_config}')
             else:
