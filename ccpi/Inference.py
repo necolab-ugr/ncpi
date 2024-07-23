@@ -99,13 +99,14 @@ class Inference(object):
             if self.model == 'Ridge':
                 model = Ridge(alpha=1.0)
             elif self.model == 'MLPRegressor':
-                model = MLPRegressor(random_state=0,
+                model = MLPRegressor(hidden_layer_sizes=(100,),
+                                     random_state=0,
                                      max_iter=500,
                                      tol=1e-1,
                                      n_iter_no_change=2,
                                      verbose=False)
             elif self.model == 'SNPE':
-                model = SNPE(prior=None)
+                model = SNPE(prior=None, logging_level='ERROR')# Does logging_level='ERROR' work?
 
         # Initialize model with user-defined hyperparameters
         else:
@@ -133,22 +134,28 @@ class Inference(object):
 
         # Perform repeated grid search if param_grid is provided
         if param_grid is not None:
+            # Assert that param_grid is a list
+            if type(param_grid) is not list:
+                raise ValueError('param_grid must be a list.')
+
             # Loop over each set of hyperparameters
             best_score = np.inf
             best_config = None
             for params in param_grid:
+                print(f'\nHyperparameters: {params}')
                 # Initialize RepeatedKFold
                 rkf = RepeatedKFold(n_splits=10, n_repeats=10, random_state=0)
 
                 # Loop over each repeat and fold
                 mean_scores = []
-                for train_index, test_index in rkf.split(self.features):
+                for repeat_idx, (train_index, test_index) in enumerate(rkf.split(self.features)):
+                    print(f'\rRepeat {repeat_idx // 10 + 1}, Fold {repeat_idx % 10 + 1}', end='', flush=True)
                     # Split the data
                     X_train, X_test = self.features[train_index], self.features[test_index]
                     Y_train, Y_test = self.theta[train_index], self.theta[test_index]
 
                     if self.model == 'Ridge' or self.model == 'MLPRegressor':
-                        # Update parameters using set_params
+                        # Update parameters of SNPE using set_params
                         model.set_params(**params)
 
                         # Fit the model
@@ -164,10 +171,18 @@ class Inference(object):
                         mean_scores.append(mse)
 
                     if self.model == 'SNPE':
-                        # pass the simulated data to the inference object
+                        # Create a new model with the hyperparameters
+                        model = SNPE(**params)
+
+                        # Ensure theta is a 2D array with a single column
+                        if Y_train.ndim == 1:
+                            Y_train = Y_train.reshape(-1, 1)
+
+                        # Append simulations
                         model.append_simulations(
-                            torch.from_numpy(np.array(Y_train, dtype=np.float32)),
-                            torch.from_numpy(np.array(X_train, dtype=np.float32)))
+                            torch.from_numpy(Y_train.astype(np.float32)),
+                            torch.from_numpy(X_train.astype(np.float32))
+                        )
 
                         # Train the neural density estimator
                         density_estimator = model.train()
@@ -175,25 +190,16 @@ class Inference(object):
                         # Build the posterior
                         posterior = model.build_posterior(density_estimator)
 
-                        # Sample the posterior and compute the parameter recovery error
-                        for sample in range(X_test.shape[0]):
-                            # x_o and theta_o values
-                            x_o = torch.from_numpy(np.array(
-                                X_test[sample], dtype=np.float32))
-                            # do not consider samples with inf or nan values
-                            if (np.isinf(x_o).sum() < 1) and (np.isnan(x_o).sum() < 1):
-                                theta_o = torch.from_numpy(np.array(Y_test[sample], dtype=np.float32))
-                                # sample the posterior
-                                posterior_samples = posterior.sample((5000,), x=x_o)
-
-                                # compute the parameter recovery error (PRE),
-                                # defined as the average absolute error using all
-                                # values from posterior
-                                absdiff = (posterior_samples - theta_o).abs()
-                                avg_error = np.array(absdiff.mean(axis=0))
-
-                                # Append the average error
-                                mean_scores.append(avg_error)
+                        # loop over all test samples
+                        for i in range(len(X_test)):
+                            # Compute the mean of the posterior samples
+                            pred = np.mean(
+                                posterior.sample((5000,),
+                                                 x=torch.from_numpy(X_test[i].reshape(1, -1).astype(np.float32))).numpy(), axis=0)
+                            # Compute the mean squared error
+                            mse = np.mean((pred - Y_test[i]) ** 2)
+                            # Append the mean squared error
+                            mean_scores.append(mse)
 
                 # Compute the mean of the mean squared errors
                 if np.mean(mean_scores) < best_score:
@@ -201,30 +207,43 @@ class Inference(object):
                     best_config = params
 
             # Update the model with the best hyperparameters
-            model.set_params(**best_config)
+            if best_config is not None:
+                model.set_params(**best_config)
+                # print best hyperparameters
+                print(f'\nBest hyperparameters: {best_config}')
+            else:
+                raise ValueError('No best hyperparameters found.')
 
         # Fit the model using all the data
         if self.model == 'Ridge' or self.model == 'MLPRegressor':
             model.fit(self.features, self.theta)
-            best_model = model
 
         if self.model == 'SNPE':
-            # pass all data to the inference object
+            # Ensure theta is a 2D array with a single column
+            if self.theta.ndim == 1:
+                self.theta = self.theta.reshape(-1, 1)
+
+            # Append simulations
             model.append_simulations(
-                torch.from_numpy(np.array(self.theta, dtype=np.float32)),
-                torch.from_numpy(np.array(self.features, dtype=np.float32)))
+                torch.from_numpy(self.theta.astype(np.float32)),
+                torch.from_numpy(self.features.astype(np.float32))
+            )
 
             # Train the neural density estimator
             density_estimator = model.train()
-            best_model = density_estimator
 
         # Save the best model and the StandardScaler
         if not os.path.exists('data'):
             os.makedirs('data')
-        with open('data/best_model.pkl', 'wb') as file:
-            pickle.dump(best_model, file)
+        with open('data/model.pkl', 'wb') as file:
+            pickle.dump(model, file)
         with open('data/scaler.pkl', 'wb') as file:
             pickle.dump(scaler, file)
+
+        # Save also the density estimator if the model is SNPE
+        if self.model == 'SNPE':
+            with open('data/density_estimator.pkl', 'wb') as file:
+                pickle.dump(density_estimator, file)
 
     def predict(self, features):
         """
@@ -232,10 +251,14 @@ class Inference(object):
         """
 
         # Load the best model and the StandardScaler
-        with open('data/best_model.pkl', 'rb') as file:
-            best_model = pickle.load(file)
+        with open('data/model.pkl', 'rb') as file:
+            model = pickle.load(file)
         with open('data/scaler.pkl', 'rb') as file:
             scaler = pickle.load(file)
+
+        if self.model == 'SNPE':
+            with open('data/density_estimator.pkl', 'rb') as file:
+                density_estimator = pickle.load(file)
 
         # Assert that features is a numpy array
         if type(features) is not np.ndarray:
@@ -252,10 +275,10 @@ class Inference(object):
 
             # Predict the parameters
             if self.model == 'Ridge' or self.model == 'MLPRegressor':
-                pred = best_model.predict(feat)
+                pred = model.predict(feat)
             if self.model == 'SNPE':
                 # Build the posterior
-                posterior = best_model.build_posterior()
+                posterior = model.build_posterior(density_estimator)
 
                 # Sample the posterior
                 x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
