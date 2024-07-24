@@ -1,13 +1,12 @@
 import os
 import pickle
-
 import numpy as np
-import torch
-from sklearn.linear_model import Ridge
-from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import RepeatedKFold
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils import all_estimators
+from sklearn.base import RegressorMixin
 from sbi.inference import SNPE
+import torch
 
 
 class Inference(object):
@@ -23,8 +22,8 @@ class Inference(object):
         Parameters
         ----------
         model : str
-            Name of the machine-learning model to use. Options are 'Ridge',
-            'MLPRegressor', and 'SNPE'.
+            Name of the machine-learning model to use. It can be any of the regression models from sklearn or 'SNPE'
+            from sbi.
         hyperparams : dict, optional
             Dictionary of hyperparameters of the model. The default is None.
         """
@@ -33,57 +32,59 @@ class Inference(object):
         if type(model) is not str:
             raise ValueError('Model must be a string.')
 
-        # Check if model is in the list of machine-learning models
-        self.model_list = {'Ridge', 'MLPRegressor', 'SNPE'}
-        if model not in self.model_list:
-            raise ValueError(f'{model} not in the list of machine-learning models.')
+        # Check if model is in the list of regression models from sklearn, or it is SNPE
+        regressors = [estimator for estimator in all_estimators() if issubclass(estimator[1], RegressorMixin)]
+        if model not in [regressor[0] for regressor in regressors] + ['SNPE']:
+            raise ValueError(f'{model} not in the list of machine-learning models from sklearn or sbi libraries that '
+                             f'can be used for inference.')
 
-        # Set model
-        self.model = model
+        # Set model and library
+        self.model = [model, 'sbi'] if model == 'SNPE' else [model, 'sklearn']
 
         # Check if hyperparameters is a dictionary
         if hyperparams is not None:
             if type(hyperparams) is not dict:
                 raise ValueError('Hyperparameters must be a dictionary.')
+            # Set hyperparameters
             self.hyperparams = hyperparams
         else:
             self.hyperparams = None
 
-        # Initialize X and Y training data
+        # Initialize features and parameters
         self.features = []
         self.theta = []
 
-    def append_simulation_data(self, X, Y):
+    def add_simulation_data(self, features, parameters):
         """
-        Method to append simulation data.
+        Method to add features and parameters to the training data.
 
         Parameters
         ----------
-        X : np.ndarray
+        features : np.ndarray
             Features.
-        Y : np.ndarray
+        parameters : np.ndarray
             Parameters to infer.
         """
 
-        # Assert that X and Y are numpy arrays
-        if type(X) is not np.ndarray:
+        # Assert that features and parameters are numpy arrays
+        if type(features) is not np.ndarray:
             raise ValueError('X must be a numpy array.')
-        if type(Y) is not np.ndarray:
+        if type(parameters) is not np.ndarray:
             raise ValueError('Y must be a numpy array.')
 
-        # Assert that X and Y have the same number of rows
-        if X.shape[0] != Y.shape[0]:
-            raise ValueError('X and Y must have the same number of rows.')
+        # Assert that features and parameters have the same number of rows
+        if features.shape[0] != parameters.shape[0]:
+            raise ValueError('Features and parameters must have the same number of rows.')
 
-        # Stack X and Y
-        X = np.stack(X)
-        Y = np.stack(Y)
+        # Stack features and parameters
+        features = np.stack(features)
+        parameters = np.stack(parameters)
 
-        # Append X and Y to training data
-        self.features = X
-        self.theta = Y
+        # Add features and parameters to training data
+        self.features = features
+        self.theta = parameters
 
-    def train(self, param_grid=None):
+    def train(self, param_grid=None, n_splits=10, n_repeats=10):
         """
         Method to train the model.
 
@@ -92,32 +93,33 @@ class Inference(object):
         param_grid : list of dictionaries, optional
             List of dictionaries of hyperparameters to search over. The default
             is None (no hyperparameter search).
+        n_splits : int, optional
+            Number of splits for RepeatedKFold cross-validation. The default is 10.
+        n_repeats : int, optional
+            Number of repeats for RepeatedKFold cross-validation. The default is 10.
         """
 
         # Initialize model with default hyperparameters
         if self.hyperparams is None:
-            if self.model == 'Ridge':
-                model = Ridge(alpha=1.0)
-            elif self.model == 'MLPRegressor':
-                model = MLPRegressor(hidden_layer_sizes=(100,),
-                                     random_state=0,
-                                     max_iter=500,
-                                     tol=1e-1,
-                                     n_iter_no_change=2,
-                                     verbose=False)
+            if self.model[1] == 'sklearn':
+                # Import and initialize the model
+                exec(f'from sklearn.linear_model import {self.model[0]}')
+                model = eval(f'{self.model[0]}')()
             elif self.model == 'SNPE':
-                model = SNPE(prior=None, logging_level='ERROR')# Does logging_level='ERROR' work?
+                model = SNPE(prior=None, logging_level='ERROR')  # Does logging_level='ERROR' work?
 
         # Initialize model with user-defined hyperparameters
         else:
-            if self.model == 'Ridge':
-                model = Ridge(**self.hyperparams)
-            elif self.model == 'MLPRegressor':
-                model = MLPRegressor(**self.hyperparams)
+            if self.model[1] == 'sklearn':
+                # Import and initialize the model
+                exec(f'from sklearn.linear_model import {self.model[0]}')
+                model = eval(f'{self.model[0]}')(**self.hyperparams)
             elif self.model == 'SNPE':
+                # Add first logging_level to hyperparams
+                self.hyperparams['logging_level'] = 'ERROR'  # Does logging_level='ERROR' work?
                 model = SNPE(**self.hyperparams)
 
-        # Check if X_train and Y_train are not empty
+        # Check if features and parameters are not empty
         if len(self.features) == 0:
             raise ValueError('No features provided.')
         if len(self.theta) == 0:
@@ -132,7 +134,8 @@ class Inference(object):
         # Transform the features
         self.features = scaler.transform(self.features)
 
-        # Perform repeated grid search if param_grid is provided
+        # Search for the best hyperparameters using RepeatedKFold cross-validation and grid search if param_grid is
+        # provided
         if param_grid is not None:
             # Assert that param_grid is a list
             if type(param_grid) is not list:
@@ -144,7 +147,7 @@ class Inference(object):
             for params in param_grid:
                 print(f'\nHyperparameters: {params}')
                 # Initialize RepeatedKFold
-                rkf = RepeatedKFold(n_splits=10, n_repeats=10, random_state=0)
+                rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
 
                 # Loop over each repeat and fold
                 mean_scores = []
@@ -154,8 +157,8 @@ class Inference(object):
                     X_train, X_test = self.features[train_index], self.features[test_index]
                     Y_train, Y_test = self.theta[train_index], self.theta[test_index]
 
-                    if self.model == 'Ridge' or self.model == 'MLPRegressor':
-                        # Update parameters of SNPE using set_params
+                    if self.model[1] == 'sklearn':
+                        # Update parameters
                         model.set_params(**params)
 
                         # Fit the model
@@ -171,7 +174,7 @@ class Inference(object):
                         mean_scores.append(mse)
 
                     if self.model == 'SNPE':
-                        # Create a new model with the hyperparameters
+                        # Re-initialize the SNPE object with the new configuration
                         model = SNPE(**params)
 
                         # Ensure theta is a 2D array with a single column
@@ -190,12 +193,12 @@ class Inference(object):
                         # Build the posterior
                         posterior = model.build_posterior(density_estimator)
 
-                        # loop over all test samples
+                        # Loop over all test samples
                         for i in range(len(X_test)):
-                            # Compute the mean of the posterior samples
-                            pred = np.mean(
-                                posterior.sample((5000,),
-                                                 x=torch.from_numpy(X_test[i].reshape(1, -1).astype(np.float32))).numpy(), axis=0)
+                            # Sample the posterior
+                            x_o = torch.from_numpy(np.array(X_test[i], dtype=np.float32))
+                            posterior_samples = posterior.sample((5000,), x=x_o)
+                            pred = np.mean(posterior_samples.numpy(), axis=0)
                             # Compute the mean squared error
                             mse = np.mean((pred - Y_test[i]) ** 2)
                             # Append the mean squared error
@@ -208,7 +211,7 @@ class Inference(object):
 
             # Update the model with the best hyperparameters
             if best_config is not None:
-                if self.model == 'Ridge' or self.model == 'MLPRegressor':
+                if self.model[1] == 'sklearn':
                     model.set_params(**best_config)
                 if self.model == 'SNPE':
                     model = SNPE(**best_config)
@@ -218,7 +221,7 @@ class Inference(object):
                 raise ValueError('No best hyperparameters found.')
 
         # Fit the model using all the data
-        if self.model == 'Ridge' or self.model == 'MLPRegressor':
+        if self.model[1] == 'sklearn':
             model.fit(self.features, self.theta)
 
         if self.model == 'SNPE':
@@ -277,7 +280,7 @@ class Inference(object):
             feat = scaler.transform(feat.reshape(1, -1))
 
             # Predict the parameters
-            if self.model == 'Ridge' or self.model == 'MLPRegressor':
+            if self.model[1] == 'sklearn':
                 pred = model.predict(feat)
             if self.model == 'SNPE':
                 # Build the posterior
