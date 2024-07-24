@@ -1,4 +1,4 @@
-""" Create artificial test data and train a regression model using the ccpi toolbox. """
+""" Create artificial test data and train regression models using the ccpi toolbox. """
 
 import sys
 import os
@@ -13,30 +13,53 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import ccpi
 
 
-def create_artificial_data():
-    """ Create artificial data for testing."""
-    # Create a Pandas DataFrame with the following columns: 'ID', 'Group', 'Epoch', 'Recording', 'Sensor',
-    # 'Sampling_freq' and 'Data'. The 'ID' column contains the unique identifier of the subject or animal. The
-    # 'Group' column defines the group in which the subject/animal has been classified: for example, 'Control' or
-    # 'Patient'. The 'Epoch' column contains the epoch number. The 'Recording' column contains the type of recording
-    # (e.g., 'LFP'). The 'Sensor' column contains the sensor number. The 'Sampling_freq' column contains the sampling
-    # frequency of the data. The 'Data' column contains the time-series data values.
+def create_artificial_data(type=0, n_samples=1000):
+    """ Create artificial data for testing.
+
+    Create a Pandas DataFrame with the following columns: 'ID', 'Group', 'Epoch', 'Recording', 'Sensor',
+    'Sampling_freq' and 'Data'. The 'ID' column contains the unique identifier of the subject or animal. The
+    'Group' column defines the group in which the subject/animal has been classified: for example, 'Control' or
+    'Patient'. The 'Epoch' column contains the epoch number. The 'Recording' column contains the type of recording
+    (e.g., 'LFP'). The 'Sensor' column contains the sensor number. The 'Sampling_freq' column contains the sampling
+    frequency of the data. The 'Data' column contains the time-series data values.
+
+    Parameters
+    ----------
+    type : int
+        Type of artificial data to generate. The following types are available:
+        - 0: The first 500 samples are a sine wave with noise, while the last 500 samples are a polynomial with noise.
+        - 1: Convolution of a Poisson process with an exponential decay with different exponential decay rates.
+    n_samples : int
+        Number of samples to generate.
+
+    Returns
+    -------
+    df : Pandas DataFrame
+        Pandas DataFrame containing the artificial data
+    """
 
     # Create a list of unique identifiers.
-    ID = np.repeat(np.arange(1, 11), 100)
+    ID = np.repeat(np.arange(1, 11), int(n_samples/10))
     # Create a list of groups.
-    Group = np.repeat(['Control', 'Optogenetics'], 500)
+    Group = np.repeat(['Control', 'Optogenetics'], int(n_samples/2))
     # Create a list of epochs.
-    Epoch = np.tile(np.arange(1, 101), 10)
+    Epoch = np.tile(np.arange(1, int(n_samples/10)+1), 10)
     # Create a list of recordings.
-    Recording = np.repeat(['LFP'], 1000)
+    Recording = np.repeat(['LFP'], n_samples)
     # Create a list of sensors.
-    Sensor = np.ones(1000)
+    Sensor = np.ones(n_samples)
     # Create a list of sampling frequencies (Hz).
-    Sampling_freq = 100.0 * np.ones(1000)
+    Sampling_freq = 100.0 * np.ones(n_samples)
     # Create a list of random data values in which the first 500 samples are different from the last 500 samples.
-    Data = [np.random.randn(1000) + 2. * np.sin(np.arange(1000) / 100.) for _ in range(500)] + \
-           [np.random.randn(1000) + (np.linspace(0, 2, 1000)) ** 2 for _ in range(500)]
+    if type == 0:
+        # The first 500 samples are a sine wave with noise, while the last 500 samples are a polynomial with noise.
+        Data = [np.random.randn(1000) + 2. * np.sin(np.arange(1000) / 100.) for _ in range(int(n_samples/2))] + \
+               [np.random.randn(1000) + (np.linspace(0, 2, 1000)) ** 2 for _ in range(int(n_samples/2))]
+    elif type == 1:
+        # Convolution of a Poisson process with an exponential decay with different exponential decay rates.
+        Data = [np.convolve(np.random.poisson(lam=0.1, size=1200),
+                            np.power(np.e, -np.linspace(0, 1, 100)*(int(i/2)+1)),
+                            mode='same')[100:1100] for i in range(n_samples)]
 
     # Create a Pandas DataFrame.
     df = pd.DataFrame({'ID': ID, 'Group': Group, 'Epoch': Epoch, 'Recording': Recording, 'Sensor': Sensor,
@@ -90,46 +113,54 @@ def plot_df(df):
     plt.show()
 
 
-def compute_features(data):
-    """ Compute features from the time-series data."""
-    ccpi_feat = ccpi.Features(method='catch22')
-    return ccpi_feat.compute_features(data)
+if __name__ == '__main__':
+    # Create artificial data
+    data = create_artificial_data(type=0)
 
+    # Compute features
+    features = ccpi.Features(method='catch22')
+    data = features.compute_features(data)
 
-def split_data(data):
-    """ Split the data into training and testing sets."""
+    # Plot data
+    plot_df(data)
+
+    # Split data into training and testing sets
     train_data = data.sample(frac=0.9, random_state=0)
     test_data = data.drop(train_data.index)
-    return train_data, test_data
 
-
-def train(data):
-    """ Train a regression model using the training data."""
-    ccpi_inf = ccpi.Inference(model='Ridge')
     # Assume that the 'Group' column can be interpreted as the parameters to be estimated
     le = LabelEncoder()
-    parameters = le.fit_transform(data['Group'])
+    parameters = le.fit_transform(train_data['Group'])
 
-    # Append the simulation data
-    ccpi_inf.append_simulation_data(data['Features'].values, parameters)
+    # sklearn models to test
+    models = ['Ridge', 'Lasso', 'ElasticNet', 'MLPRegressor']
+    predictions = {}
 
-    # Train the model
-    ccpi_inf.train()
+    for model in models:
+        print(f'Training {model}...')
+        # Create an instance of the Inference class
+        inference = ccpi.Inference(model=model)
 
-    return ccpi_inf
+        # Add simulation data
+        inference.add_simulation_data(train_data['Features'].values, parameters)
 
+        # Train
+        inference.train(param_grid=None)
 
-if __name__ == '__main__':
-    data = create_artificial_data()
-    data = compute_features(data)
-    plot_df(data)
-    train_data, test_data = split_data(data)
-    ccpi_inf = train(train_data)
-    predictions = ccpi_inf.predict(test_data['Features'].values)
+        # Predict
+        predictions[model] = inference.predict(test_data['Features'].values)
 
-    # boxplots of predictions as a function of the group
-    plt.figure(figsize=(5, 3), dpi=300)
+    # Boxplots of the predictions as a function of the group
+    sns.set(style='whitegrid')
+    plt.figure(figsize=(8, 5), dpi=300)
     plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
-    sns.boxplot(x='Group', y=predictions, data=test_data, linewidth=1)
-    plt.title('Predictions')
+    for i, model in enumerate(models):
+        plt.subplot(2, 2, i + 1)
+        sns.boxplot(x='Group', y=predictions[model], data=test_data, linewidth=1, palette='Set2', legend=False,
+                    hue='Group')
+        plt.title(model)
+    plt.tight_layout()
     plt.show()
+
+
+

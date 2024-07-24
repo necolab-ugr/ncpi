@@ -11,21 +11,50 @@ import torch
 
 class Inference(object):
     """
-    Class for inferring cortical circuit parameters from features of
-    electrophysiological recordings.
+    Class for inferring cortical circuit parameters from features of field potential recordings.
+
+    Attributes
+    ----------
+    model : list
+        List of the model name and the library where it is implemented.
+    hyperparams : dict
+        Dictionary of hyperparameters of the model.
+    features : np.ndarray
+        Features.
+    theta : np.ndarray
+        Parameters to infer.
+
+    Methods
+    -------
+    __init__(model, hyperparams=None)
+        Initializes the Inference class with the specified model and hyperparameters.
+    add_training_data(features, parameters)
+        Adds features and parameters to the training data.
+    initialize_training_data()
+        Initializes the training data.
+    train(param_grid=None, n_splits=10, n_repeats=10)
+        Trains the model using the provided training data.
+    predict(features)
+        Predicts the parameters for the given features.
     """
 
     def __init__(self, model, hyperparams=None):
         """
-        Constructor method.
+        Initializes the Inference class with the specified model and hyperparameters.
 
         Parameters
         ----------
         model : str
-            Name of the machine-learning model to use. It can be any of the regression models from sklearn or 'SNPE'
-            from sbi.
+            Name of the machine-learning model to use. It can be any of the regression models from sklearn or 'SNPE' from sbi.
         hyperparams : dict, optional
             Dictionary of hyperparameters of the model. The default is None.
+
+        Raises
+        ------
+        ValueError
+            If model is not a string.
+            If model is not in the list of regression models from sklearn or 'SNPE'.
+            If hyperparameters is not a dictionary.
         """
 
         # Assert that model is a string
@@ -102,8 +131,11 @@ class Inference(object):
         # Initialize model with default hyperparameters
         if self.hyperparams is None:
             if self.model[1] == 'sklearn':
-                # Import and initialize the model
-                exec(f'from sklearn.linear_model import {self.model[0]}')
+                # Import and initialize the model.
+                if self.model[0] == 'MLPRegressor':
+                    exec('from sklearn.neural_network import MLPRegressor')
+                else:
+                    exec(f'from sklearn.linear_model import {self.model[0]}')
                 model = eval(f'{self.model[0]}')()
             elif self.model == 'SNPE':
                 model = SNPE(prior=None, logging_level='ERROR')  # Does logging_level='ERROR' work?
@@ -112,7 +144,10 @@ class Inference(object):
         else:
             if self.model[1] == 'sklearn':
                 # Import and initialize the model
-                exec(f'from sklearn.linear_model import {self.model[0]}')
+                if self.model[0] == 'MLPRegressor':
+                    exec('from sklearn.neural_network import MLPRegressor')
+                else:
+                    exec(f'from sklearn.linear_model import {self.model[0]}')
                 model = eval(f'{self.model[0]}')(**self.hyperparams)
             elif self.model == 'SNPE':
                 # Add first logging_level to hyperparams
