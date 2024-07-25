@@ -5,3 +5,4 @@ inference (ccpi) from electrophysiological recordings.
 
 from .Inference import *
 from .Features import *
+from .Analysis import *
