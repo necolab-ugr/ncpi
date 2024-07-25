@@ -59,20 +59,24 @@ class Features:
             DataFrame containing the data with the features appended.
         """
 
-        def compute_sample_features(sample):
+        def compute_sample_features(index, sample):
             """ Compute the features for a single sample."""
             # Normalize the sample
             sample = (sample - np.mean(sample)) / np.std(sample)
             if self.method == 'catch22':
-                return self.catch22(sample)
-            return []
+                return index, self.catch22(sample)
+            return index, []
 
         # Compute the features in parallel using all available CPUs
         features = []
         with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = [executor.submit(compute_sample_features, sample) for sample in data['Data']]
+            futures = [executor.submit(compute_sample_features, idx, sample) for idx, sample in enumerate(data['Data'])]
             for future in tqdm(as_completed(futures), total=len(futures), desc="Computing features"):
                 features.append(future.result())
+
+        # Sort the features based on the original index
+        features.sort(key=lambda x: x[0])
+        features = [feature[1] for feature in features]
 
         # Append the features to the DataFrame
         pd_feat = pd.DataFrame({'Features': features})
