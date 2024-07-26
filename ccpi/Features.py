@@ -3,7 +3,6 @@ import subprocess
 import pandas as pd
 import os
 import numpy as np
-from pathos.multiprocessing import ProcessingPool as Pool
 from tqdm import tqdm
 
 pycatch22_imported = False
@@ -92,7 +91,7 @@ class Features:
 
         # Extract the data to be processed
         samples = [(index, row['Data']) for index, row in data.iterrows()]
-        Pool = modules('pathos.multiprocessing').ProcessingPool
+        Pool = getattr(modules('pathos'), 'multiprocessing').ProcessingPool
 
         # Compute the features in parallel using all available CPUs
         with Pool() as pool:
