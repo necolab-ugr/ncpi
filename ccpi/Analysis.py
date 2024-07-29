@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 
 # from rpy2.robjects.packages import importr
-import rpy2.robjects as ro
-from rpy2.robjects import pandas2ri, r
+# import rpy2.robjects as ro
+# from rpy2.robjects import pandas2ri, r
 # from rpy2.robjects.conversion import localconverter
 import matplotlib.pyplot as plt
 
@@ -192,26 +192,67 @@ class Analysis:
             #                     f'Results_{group_sel}_fooof_{fc}.pkl')
 
 
-    def EEG_topographic_plot(self, group='AD', p_value=0.05, system=19, figsize=(5, 5), radius=0.6, pos=0):
+    def EEG_topographic_plot(self, group='AD', system=19, **kwargs):
         '''
         This function creates a topographic plot of the EEG data.
 
         Parameters
         ----------
-        df: pd.DataFrame
-            DataFrame containing the EEG data.
-        group: str
+        group: (str)
             Name of the group to plot.
-        p.value: float
-            P-value threshold for the analysis.
-        system: int
+        system: (int)
             Number of electrodes in the EEG system.
+        **kwargs: Additional keyword arguments like:
+            - radius: (float)
+                Radius of the head circumference.
+            - pos: (float)
+                Position of the head on the x-axis.
+            - figsize: (tuple)
+                Size of the figure.
+            - p_value: (float)
+                P-value threshold for plotting.
+            - electrode_size: (float)
+                Size of the electrodes.
+            - label: (bool)
+                Show the colorbar label.
         '''
-        if type(self.data) is not pd.DataFrame:
-            raise ValueError('The df parameter must be a pandas DataFrame.')
-        if type(system) is not int:
+        default_parameters = {
+            'p_value': 0.05,
+            'figsize': (8, 8),
+            'radius': 0.6,
+            'pos': 0.0,
+            'electrode_size': 0.9,
+            'label': True
+        }
+
+        for key in kwargs.keys():
+            if key not in default_parameters.keys():
+                raise ValueError(f'Invalid parameter: {key}')
+
+        p_value = kwargs.get('p_value', default_parameters['p_value'])
+        figsize = kwargs.get('figsize', default_parameters['figsize'])
+        radius = kwargs.get('radius', default_parameters['radius'])
+        pos = kwargs.get('pos', default_parameters['pos'])
+        electrode_size = kwargs.get('electrode_size', default_parameters['electrode_size'])
+        label = kwargs.get('label', default_parameters['label'])
+
+        if not isinstance(group, str):
+            raise ValueError('The group parameter must be a string.')
+        if not isinstance(system, int):
             raise ValueError('The system parameter must be an integer.')
-        
+        if not isinstance(figsize, tuple):
+            raise ValueError('The figsize parameter must be a tuple.')
+        if not isinstance(radius, float):
+            raise ValueError('The radius parameter must be a float.')
+        if not isinstance(pos, float):
+            raise ValueError('The pos parameter must be a float.')
+        if not isinstance(electrode_size, float):
+            raise ValueError('The electrode_size parameter must be a float.')
+        if not isinstance(label, bool):
+            raise ValueError('The label parameter must be a boolean.')
+        if not isinstance(p_value, float) or not (0.0 <= p_value <= 1.0):
+            raise ValueError('The p_value parameter must be a float between 0 and 1.')
+                
         def plot_simple_head_feature(ax, radius=0.6, pos=0):
             '''
             Plot a simple head feature for adding results of the EEG data analysis later.
@@ -249,7 +290,7 @@ class Analysis:
             # Nose
             ax.plot([pos - radius / 10, pos, pos + radius / 10], [radius + 0.02, radius + radius / 10 + 0.02,0.02 + radius], 'k')
 
-        def plot_EEG(fig, Vax, data, radius, pos, vmin, vmax, label, **kwargs):
+        def plot_EEG(fig, Vax, data, radius, pos, vmin, vmax, label, electrode_size):
             '''
             Plot slopes or E/I predictions on EEG electrodes (20 EEG montage) as a
             contour plot.
@@ -353,7 +394,7 @@ class Analysis:
 
             # Add the EEG electrode positions
             print(len(koord))
-            Vax.scatter(x[:system], y[:system], marker = 'o', c = 'k', s = 0.9, zorder = 3)
+            Vax.scatter(x[:system], y[:system], marker = 'o', c = 'k', s = electrode_size, zorder = 3)
         
         results = self.data['Ratio'].where((self.data['Group'] == group) & (self.data['p.value'] < p_value))
         
@@ -364,11 +405,12 @@ class Analysis:
         vmin = -max_Ratio
         vmax = max_Ratio
 
+        
+
         fig = plt.figure(figsize=figsize)
         ax = fig.add_subplot(111)
         print("Aqui")
         plot_simple_head_feature(ax, radius, pos)
 
-        plot_EEG(fig, ax, data, radius, pos, vmin, vmax, True)
+        plot_EEG(fig, ax, data, radius, pos, vmin, vmax, label, electrode_size)
 
-        plt.show()
