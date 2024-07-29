@@ -14,8 +14,21 @@ df = pd.DataFrame({'Group': group_arr, 'Ratio': z_ratio, 'p.value': p_value})
 
 def test_plot_df(df):
     
-    ccpi_analysis = Analysis(df, group='HCvsADMIL', system=19, p_value=0.2, s=1.2, radius=1)
-    ccpi_analysis.EEG_topographic_plot(df,'HCvsADMIL', p_value=0.2, system=19)
+    ccpi_analysis = Analysis(df)
+    ccpi_analysis.EEG_topographic_plot(
+        group='HCvsADMIL', 
+        system=19,
+        p_value=0.05,
+        electrode_size=0.9
+        )
+    
+    ccpi_analysis2 = Analysis(df)
+    ccpi_analysis2.EEG_topographic_plot(
+        group='HCvsADMIL', 
+        system=19,
+        p_value=0.05,
+        electrode_size=1.0
+        )
     # assert os.path.exists('EEG_tomography_plot.png')
     # os.remove('EEG_tomography_plot.png')
 
