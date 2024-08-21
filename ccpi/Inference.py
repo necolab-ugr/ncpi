@@ -11,21 +11,50 @@ import torch
 
 class Inference(object):
     """
-    Class for inferring cortical circuit parameters from features of
-    electrophysiological recordings.
+    Class for inferring cortical circuit parameters from features of field potential recordings.
+
+    Attributes
+    ----------
+    model : list
+        List of the model name and the library where it is implemented.
+    hyperparams : dict
+        Dictionary of hyperparameters of the model.
+    features : np.ndarray
+        Features.
+    theta : np.ndarray
+        Parameters to infer.
+
+    Methods
+    -------
+    __init__(model, hyperparams=None)
+        Initializes the Inference class with the specified model and hyperparameters.
+    add_training_data(features, parameters)
+        Adds features and parameters to the training data.
+    initialize_training_data()
+        Initializes the training data.
+    train(param_grid=None, n_splits=10, n_repeats=10)
+        Trains the model using the provided training data.
+    predict(features)
+        Predicts the parameters for the given features.
     """
 
     def __init__(self, model, hyperparams=None):
         """
-        Constructor method.
+        Initializes the Inference class with the specified model and hyperparameters.
 
         Parameters
         ----------
         model : str
-            Name of the machine-learning model to use. It can be any of the regression models from sklearn or 'SNPE'
-            from sbi.
+            Name of the machine-learning model to use. It can be any of the regression models from sklearn or 'SNPE' from sbi.
         hyperparams : dict, optional
             Dictionary of hyperparameters of the model. The default is None.
+
+        Raises
+        ------
+        ValueError
+            If model is not a string.
+            If model is not in the list of regression models from sklearn or 'SNPE'.
+            If hyperparameters is not a dictionary.
         """
 
         # Assert that model is a string
@@ -99,22 +128,25 @@ class Inference(object):
             Number of repeats for RepeatedKFold cross-validation. The default is 10.
         """
 
+        # Import the sklearn model
+        if self.model[1] == 'sklearn':
+            regressors = [estimator for estimator in all_estimators() if issubclass(estimator[1], RegressorMixin)]
+            pos = np.where(np.array([regressor[0] for regressor in regressors]) == self.model[0])[0][0]
+            cl = str(regressors[pos][1]).split('.')[1]
+            exec(f'from sklearn.{cl} import {self.model[0]}')
+
         # Initialize model with default hyperparameters
         if self.hyperparams is None:
             if self.model[1] == 'sklearn':
-                # Import and initialize the model
-                exec(f'from sklearn.linear_model import {self.model[0]}')
                 model = eval(f'{self.model[0]}')()
-            elif self.model == 'SNPE':
+            elif self.model[1] == 'sbi':
                 model = SNPE(prior=None, logging_level='ERROR')  # Does logging_level='ERROR' work?
 
         # Initialize model with user-defined hyperparameters
         else:
             if self.model[1] == 'sklearn':
-                # Import and initialize the model
-                exec(f'from sklearn.linear_model import {self.model[0]}')
                 model = eval(f'{self.model[0]}')(**self.hyperparams)
-            elif self.model == 'SNPE':
+            elif self.model[1] == 'sbi':
                 # Add first logging_level to hyperparams
                 self.hyperparams['logging_level'] = 'ERROR'  # Does logging_level='ERROR' work?
                 model = SNPE(**self.hyperparams)
@@ -146,13 +178,14 @@ class Inference(object):
             best_config = None
             for params in param_grid:
                 print(f'\nHyperparameters: {params}')
+
                 # Initialize RepeatedKFold
                 rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
 
                 # Loop over each repeat and fold
                 mean_scores = []
                 for repeat_idx, (train_index, test_index) in enumerate(rkf.split(self.features)):
-                    print(f'\rRepeat {repeat_idx // 10 + 1}, Fold {repeat_idx % 10 + 1}', end='', flush=True)
+                    print(f'\rRepeat {repeat_idx // n_splits + 1}, Fold {repeat_idx % n_splits + 1}', end='', flush=True)
                     # Split the data
                     X_train, X_test = self.features[train_index], self.features[test_index]
                     Y_train, Y_test = self.theta[train_index], self.theta[test_index]
@@ -173,11 +206,11 @@ class Inference(object):
                         # Append the mean squared error
                         mean_scores.append(mse)
 
-                    if self.model == 'SNPE':
+                    if self.model[1] == 'sbi':
                         # Re-initialize the SNPE object with the new configuration
                         model = SNPE(**params)
 
-                        # Ensure theta is a 2D array with a single column
+                        # Ensure theta is a 2D array
                         if Y_train.ndim == 1:
                             Y_train = Y_train.reshape(-1, 1)
 
@@ -196,11 +229,11 @@ class Inference(object):
                         # Loop over all test samples
                         for i in range(len(X_test)):
                             # Sample the posterior
-                            x_o = torch.from_numpy(np.array(X_test[i], dtype=np.float32))
-                            posterior_samples = posterior.sample((5000,), x=x_o)
+                            x_o = torch.from_numpy(np.array(X_test[i], dtype=np.float32).reshape(1, -1))
+                            posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
                             pred = np.mean(posterior_samples.numpy(), axis=0)
                             # Compute the mean squared error
-                            mse = np.mean((pred - Y_test[i]) ** 2)
+                            mse = np.mean((pred[0] - Y_test[i]) ** 2)
                             # Append the mean squared error
                             mean_scores.append(mse)
 
@@ -213,7 +246,7 @@ class Inference(object):
             if best_config is not None:
                 if self.model[1] == 'sklearn':
                     model.set_params(**best_config)
-                if self.model == 'SNPE':
+                if self.model[1] == 'sbi':
                     model = SNPE(**best_config)
                 # print best hyperparameters
                 print(f'\nBest hyperparameters: {best_config}')
@@ -224,8 +257,8 @@ class Inference(object):
         if self.model[1] == 'sklearn':
             model.fit(self.features, self.theta)
 
-        if self.model == 'SNPE':
-            # Ensure theta is a 2D array with a single column
+        if self.model[1] == 'sbi':
+            # Ensure theta is a 2D array
             if self.theta.ndim == 1:
                 self.theta = self.theta.reshape(-1, 1)
 
@@ -247,7 +280,7 @@ class Inference(object):
             pickle.dump(scaler, file)
 
         # Save also the density estimator if the model is SNPE
-        if self.model == 'SNPE':
+        if self.model[1] == 'sbi':
             with open('data/density_estimator.pkl', 'wb') as file:
                 pickle.dump(density_estimator, file)
 
@@ -255,6 +288,9 @@ class Inference(object):
         """
         Method to predict the parameters.
         """
+        # Assert that the model has been trained
+        if not os.path.exists('data/model.pkl'):
+            raise ValueError('Model has not been trained.')
 
         # Load the best model and the StandardScaler
         with open('data/model.pkl', 'rb') as file:
@@ -262,9 +298,11 @@ class Inference(object):
         with open('data/scaler.pkl', 'rb') as file:
             scaler = pickle.load(file)
 
-        if self.model == 'SNPE':
+        if self.model[1] == 'sbi':
             with open('data/density_estimator.pkl', 'rb') as file:
                 density_estimator = pickle.load(file)
+                # Build the posterior
+                posterior = model.build_posterior(density_estimator)
 
         # Assert that features is a numpy array
         if type(features) is not np.ndarray:
@@ -282,13 +320,10 @@ class Inference(object):
             # Predict the parameters
             if self.model[1] == 'sklearn':
                 pred = model.predict(feat)
-            if self.model == 'SNPE':
-                # Build the posterior
-                posterior = model.build_posterior(density_estimator)
-
+            if self.model[1] == 'sbi':
                 # Sample the posterior
                 x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
-                posterior_samples = posterior.sample((5000,), x=x_o)
+                posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
 
                 # Compute the mean of the posterior samples
                 pred = np.mean(posterior_samples.numpy(), axis=0)
