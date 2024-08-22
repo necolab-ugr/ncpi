@@ -3,9 +3,9 @@ import subprocess
 import pandas as pd
 import os
 import numpy as np
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
 
+pycatch22_imported = False
 
 def install(module):
     """
@@ -19,6 +19,27 @@ def install(module):
     subprocess.check_call(['pip', 'install', module])
     print(f"The module {module} was installed!")
 
+def modules(module_name):
+    """
+    Function to dynamically import a module.
+
+    Parameters
+    ----------
+    module_name: str
+        Name of the module to import.
+
+    Returns
+    -------
+    module
+        The imported module.
+    """
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        print(f"{module_name} is not installed!")
+        install(module_name)
+        module = importlib.import_module(module_name)
+    return module
 
 class Features:
     """
@@ -59,20 +80,22 @@ class Features:
             DataFrame containing the data with the features appended.
         """
 
-        def compute_sample_features(index, sample):
+        def compute_sample_features(sample_tuple):
             """ Compute the features for a single sample."""
+            index, sample = sample_tuple
             # Normalize the sample
             sample = (sample - np.mean(sample)) / np.std(sample)
             if self.method == 'catch22':
                 return index, self.catch22(sample)
             return index, []
 
+        # Extract the data to be processed
+        samples = [(index, row['Data']) for index, row in data.iterrows()]
+        Pool = getattr(modules('pathos'), 'multiprocessing').ProcessingPool
+
         # Compute the features in parallel using all available CPUs
-        features = []
-        with ThreadPoolExecutor(max_workers=os.cpu_count()) as executor:
-            futures = [executor.submit(compute_sample_features, idx, sample) for idx, sample in enumerate(data['Data'])]
-            for future in tqdm(as_completed(futures), total=len(futures), desc="Computing features"):
-                features.append(future.result())
+        with Pool() as pool:
+            features = list(tqdm(pool.imap(compute_sample_features, samples), total=len(samples), desc="Computing features"))
 
         # Sort the features based on the original index
         features.sort(key=lambda x: x[0])
@@ -97,18 +120,17 @@ class Features:
         features: np.array
             Array with the catch22 features.
         """
+        global pycatch22_imported
 
-        # Dynamically import the pycatch22 module
-        try:
-            pycatch22 = importlib.import_module('pycatch22')
-        except ImportError:
-            print("pycatch22 is not installed!")
-            install('pycatch22')
+        # Dynamically import the pycatch22 module only if it hasn't been imported yet
+        if not pycatch22_imported:
+            pycatch22 = modules('pycatch22')
+            pycatch22_imported = True
 
         features = pycatch22.catch22_all(sample)
         return features['values']
 
-    def create_df_patient(self, data, epoch_l_samp, df_pat, group, ID):
+    def create_df(self, data, epoch_l_samp, df_pat, group, ID):
 
         '''
         Create epochs of the data and save them in a dataframe containing all data.
@@ -143,28 +165,16 @@ class Features:
 
             df_pat = pd.concat([df_pat, df_new], ignore_index=True)
 
-            remaining_d = len(data) % epoch_l_samp
-            if remaining_d == epoch_l_samp:
-                last_epoch = data[n_epochs * epoch_l_samp:, i]
-                data_epochs.extend(last_epoch)
-                n_epochs += 1
-                print(f"Last epoch has {remaining_d} samples. Adding it to the dataframe.")
-            else:
-                print(f"Last epoch has {remaining_d} samples. Discarding it.")
-
-            # epoch_data = pd.DataFrame({'Data': data_epochs, 'Group': [group] * n_epochs})
-            # df = pd.concat([df, epoch_data], ignore_index=True)
-
         return df_pat
 
-    def create_dataframe(self, data_path, recording_type, data_format, epoch_l):
+    def load_data(self, data_path, recording_type, data_format, epoch_l):
 
         '''
         Create a dataframe with the following columns:
             - ID (subject/animal ID).
             - Epoch (epoch number).
             - Group (e.g. HC/AD in neuroimaging, P2/P4... in development, Control/Opto in optogenetics).
-            - Location (electrode number for EEG, ROI for MEG and, perhaps, 0 for LFP that only has 1 electrode normally).
+            - Sensor (electrode number for EEG, ROI for MEG and, perhaps, 0 for LFP that only has 1 electrode normally).
             - Data (time-series data).
 
             and the following attributes:
@@ -200,17 +210,15 @@ class Features:
 
         '''
 
-        import matlab.engine
-
         # Initialize an empty DataFrame
         df = pd.DataFrame(columns=['ID', 'Group', 'Epoch', 'Sensor', 'Data'])
         fs = 500
 
         if data_format == 'mat':
 
+            loadmat = modules('scipy.io').loadmat
+
             file_list = [f for f in os.listdir(data_path) if f.endswith('.mat')]
-            # Initialize MATLAB engine
-            eng = matlab.engine.start_matlab()
             # Load the data
             data_tot = []
             ID = 0
@@ -219,15 +227,15 @@ class Features:
                 ts = {'data': [], 'group': []}
                 print(f"Loading file: {file_name}")
                 file_full_path = os.path.join(data_path, file_name)
-                eng.load(file_full_path, nargout=0)
+                mat_data = loadmat(file_full_path)
                 # Dictionary with the data
-                ts['data'] = np.array(eng.eval('data.signal', nargout=1))
+                ts['data'] = mat_data['data'][0][0]['signal']
                 print(f"Data loaded for patient {file_name}")
-                ts['group'] = eng.eval('group', nargout=1)
+                ts['group'] = mat_data['group']
                 epoch_l_samp = epoch_l * fs
-                print(type(df))  # Should print <class 'pandas.core.frame.DataFrame'>
-                df = self.create_df_patient(ts['data'], epoch_l_samp, df, ts['group'], ID)
-                print(df)  # Should also print <class 'pandas.core.frame.DataFrame'>
+                # print(type(df))  # Should print <class 'pandas.core.frame.DataFrame'>
+                df = self.create_df(ts['data'], epoch_l_samp, df, ts['group'], ID)
+                # print(df)
                 ID += 1
 
             df.Recording = recording_type

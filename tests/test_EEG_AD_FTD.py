@@ -19,9 +19,9 @@ epoch_l = 5
 
 ccpi_feat = ccpi.Features()
 
-# ##### Create DataFrame #####
+# ##### Load Data and Create DataFrame #####
 
-# data = ccpi_feat.create_dataframe(data_path, recording_type, data_format, epoch_l)
+# data = ccpi_feat.load_data(data_path, recording_type, data_format, epoch_l)
 # Save the data
 # data.to_pickle(df_path)
 
