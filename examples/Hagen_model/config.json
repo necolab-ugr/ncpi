@@ -1,5 +1,4 @@
 {
   "simulation_features_path": "/DATOS/pablomc/data/catch22",
-  "LFP_development_data_path": "/DATOS/pablomc/development_EI_decorrelation/baseline/LFP",
-  "multi_compartment_model_path": "/DATOS/pablomc/multi_compartment_model"
+  "LFP_development_data_path": "/DATOS/pablomc/development_EI_decorrelation/baseline/LFP"
 }
