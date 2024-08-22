@@ -94,7 +94,8 @@ class Features:
         Pool = getattr(modules('pathos'), 'multiprocessing').ProcessingPool
 
         # Compute the features in parallel using all available CPUs
-        with Pool() as pool:
+        num_cpus = os.cpu_count()
+        with Pool(num_cpus) as pool:
             features = list(tqdm(pool.imap(compute_sample_features, samples), total=len(samples), desc="Computing features"))
 
         # Sort the features based on the original index
