@@ -7,6 +7,7 @@ from sklearn.utils import all_estimators
 from sklearn.base import RegressorMixin
 from sbi.inference import SNPE
 import torch
+from sbi.utils import posterior_nn
 
 
 class Inference(object):
@@ -113,6 +114,57 @@ class Inference(object):
         self.features = features
         self.theta = parameters
 
+    def initialize_sbi(self, hyperparams):
+        """
+        Method to initialize the SNPE model with the specified hyperparameters. The hyperparameters must contain, at
+        least, the density_estimator and prior. The density_estimator must contain the keys 'hidden_features',
+        'num_transforms' and 'model'.
+
+        Parameters
+        ----------
+        hyperparams : dict
+            Dictionary of hyperparameters of the model.
+
+        Returns
+        -------
+        model : sbi.inference.snpe.SNPE
+            SNPE model.
+        """
+        # Check if density_estimator is in hyperparams
+        if 'density_estimator' in hyperparams:
+            # Check that density_estimator is a dictionary and contain the keys 'hidden_features',
+            # 'num_transforms' and 'model'
+            if type(hyperparams['density_estimator']) is not dict:
+                raise ValueError('density_estimator must be a dictionary.')
+            if 'hidden_features' not in hyperparams['density_estimator']:
+                raise ValueError('hidden_features must be in density_estimator.')
+            if 'num_transforms' not in hyperparams['density_estimator']:
+                raise ValueError('num_transforms must be in density_estimator.')
+            if 'model' not in hyperparams['density_estimator']:
+                raise ValueError('model must be in density_estimator.')
+            # Initialize the posterior neural network
+            density_estimator_build_fun = posterior_nn(
+                model=hyperparams['density_estimator']['model'],
+                hidden_features=hyperparams['density_estimator']['hidden_features'],
+                num_transforms=hyperparams['density_estimator']['num_transforms']
+            )
+        else:
+            raise ValueError('density_estimator must be in hyperparams.')
+        # Check that prior is in hyperparams
+        if 'prior' not in hyperparams:
+            raise ValueError('prior must be in hyperparams.')
+        # Create a dict with the remaining hyperparameters
+        others = {key: value for key, value in hyperparams.items() if key not in ['density_estimator', 'prior']}
+        # Initialize SNPE
+        model = SNPE(
+            prior=hyperparams['prior'],
+            density_estimator=density_estimator_build_fun,
+            **others
+        )
+
+        return model
+
+
     def train(self, param_grid=None, n_splits=10, n_repeats=10):
         """
         Method to train the model.
@@ -140,16 +192,14 @@ class Inference(object):
             if self.model[1] == 'sklearn':
                 model = eval(f'{self.model[0]}')()
             elif self.model[1] == 'sbi':
-                model = SNPE(prior=None, logging_level='ERROR')  # Does logging_level='ERROR' work?
+                model = SNPE(prior=None)
 
         # Initialize model with user-defined hyperparameters
         else:
             if self.model[1] == 'sklearn':
                 model = eval(f'{self.model[0]}')(**self.hyperparams)
             elif self.model[1] == 'sbi':
-                # Add first logging_level to hyperparams
-                self.hyperparams['logging_level'] = 'ERROR'  # Does logging_level='ERROR' work?
-                model = SNPE(**self.hyperparams)
+                model = self.initialize_sbi(self.hyperparams)
 
         # Check if features and parameters are not empty
         if len(self.features) == 0:
@@ -177,7 +227,7 @@ class Inference(object):
             best_score = np.inf
             best_config = None
             for params in param_grid:
-                print(f'\nHyperparameters: {params}')
+                print(f'\n\n--> Hyperparameters: {params}')
 
                 # Initialize RepeatedKFold
                 rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
@@ -185,7 +235,11 @@ class Inference(object):
                 # Loop over each repeat and fold
                 mean_scores = []
                 for repeat_idx, (train_index, test_index) in enumerate(rkf.split(self.features)):
+                    # Print info of repeat and fold
+                    print('\n') if self.model[1] == 'sbi' else None
                     print(f'\rRepeat {repeat_idx // n_splits + 1}, Fold {repeat_idx % n_splits + 1}', end='', flush=True)
+                    print('\n') if self.model[1] == 'sbi' else None
+
                     # Split the data
                     X_train, X_test = self.features[train_index], self.features[test_index]
                     Y_train, Y_test = self.theta[train_index], self.theta[test_index]
@@ -208,7 +262,7 @@ class Inference(object):
 
                     if self.model[1] == 'sbi':
                         # Re-initialize the SNPE object with the new configuration
-                        model = SNPE(**params)
+                        model = self.initialize_sbi(params)
 
                         # Ensure theta is a 2D array
                         if Y_train.ndim == 1:
@@ -247,11 +301,11 @@ class Inference(object):
                 if self.model[1] == 'sklearn':
                     model.set_params(**best_config)
                 if self.model[1] == 'sbi':
-                    model = SNPE(**best_config)
+                    model = self.initialize_sbi(best_config)
                 # print best hyperparameters
-                print(f'\nBest hyperparameters: {best_config}')
+                print(f'\n\n--> Best hyperparameters: {best_config}\n')
             else:
-                raise ValueError('No best hyperparameters found.')
+                raise ValueError('\nNo best hyperparameters found.\n')
 
         # Fit the model using all the data
         if self.model[1] == 'sklearn':

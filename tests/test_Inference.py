@@ -1,4 +1,7 @@
-""" Create artificial test data and train regression models using the ccpi toolbox. """
+""" Create artificial test data or use the Wine Quality Dataset from the UCI Machine Learning Repository to test the
+Inference class. The Inference class is used to train and test different regression models (e.g., Ridge, MLPRegressor,
+SNPE) for parameter estimation.
+ """
 
 import os
 import sys
@@ -7,7 +10,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sbi.utils import posterior_nn
 from sklearn.preprocessing import LabelEncoder
 
 # ccpi toolbox
@@ -92,8 +94,8 @@ def create_artificial_data(dataset_type=0, n_samples=1000):
                          sep=';')
         # There are as many subjects as samples in the Wine Quality Dataset
         ID = np.arange(1, wq_df.shape[0]+1)
-        # There are two groups: 'Control' (Quality < 5.5) and 'Experiment' (Quality >= 5.5)
-        Group = np.where(wq_df['quality'] < 5.5, 'Control', 'Experiment')
+        # There are two groups: 'Control' (Quality < 6.) and 'Experiment' (Quality >= 6.)
+        Group = np.where(wq_df['quality'] < 6., 'Control', 'Experiment')
         # There is just one epoch per subject
         Epoch = np.ones(wq_df.shape[0])
         # There is just one sensor
@@ -112,8 +114,8 @@ def create_artificial_data(dataset_type=0, n_samples=1000):
 
 
 if __name__ == '__main__':
-    # Create artificial data
-    data = create_artificial_data(dataset_type=0,n_samples=10000)
+    # Create the dataset
+    data = create_artificial_data(dataset_type=0,n_samples=5000)
 
     # Compute features
     if len(data['Data'][0]) > 100:
@@ -148,28 +150,22 @@ if __name__ == '__main__':
     # Hyperparameters to be optimized
     hyperparams_opt = {'Ridge': [{'alpha': 0.1}, {'alpha': 1.0}, {'alpha': 10.0}, {'alpha': 100.0}],
                        'MLPRegressor':
-                           [{'hidden_layer_sizes': (25,), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (50,), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (200,), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (25,25), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (50,50), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (200,200), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (25,25,25), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (50,50,50), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4},
-                            {'hidden_layer_sizes': (200,200,200), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 4}],
+                           [{'hidden_layer_sizes': (25,), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (50,), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (100,), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (25,25), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (50,50), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (100,100), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (25,25,25), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (50,50,50), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4},
+                            {'hidden_layer_sizes': (100,100,100), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4}],
                        'SNPE':
-                           [{'prior': None, 'density_estimator': posterior_nn(
-                               model="maf", hidden_features=50, num_transforms=1)},
-                            {'prior': None, 'density_estimator': posterior_nn(
-                                model="maf", hidden_features=100, num_transforms=1)},
-                            {'prior': None, 'density_estimator': posterior_nn(
-                                model="maf", hidden_features=50, num_transforms=3)},
-                            {'prior': None, 'density_estimator': posterior_nn(
-                                model="maf", hidden_features=100, num_transforms=3)},
-                            {'prior': None, 'density_estimator': posterior_nn(
-                                model="maf", hidden_features=50, num_transforms=5)},
-                            {'prior': None, 'density_estimator': posterior_nn(
-                                model="maf", hidden_features=100, num_transforms=5)}
+                           [{'prior': None, 'density_estimator': {
+                               'model':"maf", 'hidden_features':2, 'num_transforms':1}},
+                            {'prior': None, 'density_estimator': {
+                                'model':"maf", 'hidden_features':5, 'num_transforms':1}},
+                            {'prior': None, 'density_estimator': {
+                                'model':"maf", 'hidden_features':10, 'num_transforms':1}}
                             ]}
     predictions = {}
 
@@ -184,16 +180,18 @@ if __name__ == '__main__':
             else:
                 hyperparams = None
 
+            # Create the Inference object and add the train data
             inference = ccpi.Inference(model=model, hyperparams=hyperparams)
             inference.add_simulation_data(np.array(train_data['Features'].tolist()), parameters)
 
+            # Train the model
             if mode == 'no_param_grid':
                 inference.train(param_grid=None)
             else:
                 inference.train(param_grid=hyperparams_opt[model], n_splits=5, n_repeats=1)
 
             # Test the model
-            print(f'Testing {model}...')
+            print(f'\nComputing predictions for {model}...')
             predictions[model+'_'+mode] = inference.predict(np.array(test_data['Features'].tolist()))
 
     # Plot results
