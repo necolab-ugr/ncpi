@@ -5,23 +5,23 @@ import os
 import numpy as np
 from tqdm import tqdm
 
-pycatch22_imported = False
 
-def install(module):
+def install(module_name):
     """
     Function to install a Python module.
 
     Parameters
     ----------
-    module: str
+    module_name: str
         Module name.
     """
-    subprocess.check_call(['pip', 'install', module])
-    print(f"The module {module} was installed!")
+    subprocess.check_call(['pip', 'install', module_name])
+    print(f"The module {module_name} was installed!")
 
-def modules(module_name):
+
+def module(module_name):
     """
-    Function to dynamically import a module.
+    Function to dynamically import a Python module.
 
     Parameters
     ----------
@@ -40,6 +40,31 @@ def modules(module_name):
         install(module_name)
         module = importlib.import_module(module_name)
     return module
+
+
+def catch22(sample):
+    """
+    Function to compute the catch22 features from a time-series sample.
+
+    Parameters
+    ----------
+    sample: np.array
+        Sample data.
+
+    Returns
+    -------
+    features: np.array
+        Array with the catch22 features.
+    """
+
+    # Dynamically import the pycatch22 module
+    pycatch22 = module('pycatch22')
+
+    # Compute the catch22 features
+    features = pycatch22.catch22_all(sample)
+
+    return features['values']
+
 
 class Features:
     """
@@ -65,6 +90,7 @@ class Features:
         if self.method not in ['catch22']:
             raise ValueError("Invalid method. Please use 'catch22'.")
 
+
     def compute_features(self, data):
         """
         Function to compute features from the data.
@@ -72,7 +98,7 @@ class Features:
         Parameters
         ----------
         data: pd.DataFrame
-            DataFrame containing the data.
+            DataFrame containing the data. The time-series samples must be in the 'Data' column.
 
         Returns
         -------
@@ -80,56 +106,50 @@ class Features:
             DataFrame containing the data with the features appended.
         """
 
-        def compute_sample_features(sample_tuple):
-            """ Compute the features for a single sample."""
-            index, sample = sample_tuple
-            # Normalize the sample
-            sample = (sample - np.mean(sample)) / np.std(sample)
-            if self.method == 'catch22':
-                return index, self.catch22(sample)
-            return index, []
+        def process_batch(batch_tuple):
+            """
+            Function to process a batch of samples.
 
-        # Extract the data to be processed
-        samples = [(index, row['Data']) for index, row in data.iterrows()]
-        Pool = getattr(modules('pathos'), 'multiprocessing').ProcessingPool
+            Parameters
+            ----------
+            batch: list
+                List of samples.
+
+            Returns
+            -------
+            features: list
+                List of features.
+            """
+
+            batch_index, batch = batch_tuple
+            features = []
+            for sample in batch:
+                # Normalize the sample
+                sample = (sample - np.mean(sample)) / np.std(sample)
+                if self.method == 'catch22':
+                    features.append(catch22(sample))
+            return batch_index,features
+
+        # Split the data into batches using the number of available CPUs
+        num_cpus = os.cpu_count()
+        batch_size = len(data['Data']) // num_cpus
+        batches = [(i, data['Data'][i:i + batch_size]) for i in range(0, len(data['Data']), batch_size)]
+
+        # Import the multiprocessing module and create a ProcessingPool
+        Pool = getattr(module('pathos'), 'multiprocessing').ProcessingPool
 
         # Compute the features in parallel using all available CPUs
-        num_cpus = os.cpu_count()
         with Pool(num_cpus) as pool:
-            features = list(tqdm(pool.imap(compute_sample_features, samples), total=len(samples), desc="Computing features"))
+            results = list(tqdm(pool.imap(process_batch, batches), total=len(batches), desc="Computing features"))
 
         # Sort the features based on the original index
-        features.sort(key=lambda x: x[0])
-        features = [feature[1] for feature in features]
+        results.sort(key=lambda x: x[0])
+        features = [feature for _, batch_features in results for feature in batch_features]
 
         # Append the features to the DataFrame
         pd_feat = pd.DataFrame({'Features': features})
         data = pd.concat([data, pd_feat], axis=1)
         return data
-
-    def catch22(self, sample):
-        """
-        Function to compute the catch22 features.
-
-        Parameters
-        ----------
-        sample: np.array
-            Sample data.
-
-        Returns
-        -------
-        features: np.array
-            Array with the catch22 features.
-        """
-        global pycatch22_imported
-
-        # Dynamically import the pycatch22 module only if it hasn't been imported yet
-        if not pycatch22_imported:
-            pycatch22 = modules('pycatch22')
-            pycatch22_imported = True
-
-        features = pycatch22.catch22_all(sample)
-        return features['values']
 
     def create_df(self, data, epoch_l_samp, df_pat, group, ID):
 
@@ -217,7 +237,7 @@ class Features:
 
         if data_format == 'mat':
 
-            loadmat = modules('scipy.io').loadmat
+            loadmat = module('scipy.io').loadmat
 
             file_list = [f for f in os.listdir(data_path) if f.endswith('.mat')]
             # Load the data
