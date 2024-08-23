@@ -106,6 +106,13 @@ class Inference(object):
         if features.shape[0] != parameters.shape[0]:
             raise ValueError('Features and parameters must have the same number of rows.')
 
+        # Create a mask to identify rows without NaN or Inf values
+        mask = np.all(np.isfinite(features), axis=1) & np.all(np.isfinite(parameters), axis=1)
+
+        # Apply the mask to filter out rows with NaN or Inf values
+        features = features[mask]
+        parameters = parameters[mask]
+
         # Stack features and parameters
         features = np.stack(features)
         parameters = np.stack(parameters)
@@ -215,6 +222,11 @@ class Inference(object):
 
         # Transform the features
         self.features = scaler.transform(self.features)
+
+        # Remove Nan and Inf values from features
+        mask = np.all(np.isfinite(self.features), axis=1)
+        self.features = self.features[mask]
+        self.theta = self.theta[mask]
 
         # Search for the best hyperparameters using RepeatedKFold cross-validation and grid search if param_grid is
         # provided
@@ -341,6 +353,16 @@ class Inference(object):
     def predict(self, features):
         """
         Method to predict the parameters.
+
+        Parameters
+        ----------
+        features : np.ndarray
+            Features.
+
+        Returns
+        -------
+        predictions : list
+            List of predictions.
         """
         # Assert that the model has been trained
         if not os.path.exists('data/model.pkl'):
@@ -371,19 +393,22 @@ class Inference(object):
             # Transform the features
             feat = scaler.transform(feat.reshape(1, -1))
 
-            # Predict the parameters
-            if self.model[1] == 'sklearn':
-                pred = model.predict(feat)
-            if self.model[1] == 'sbi':
-                # Sample the posterior
-                x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
-                posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
+            # Check that feat has no NaN or Inf values
+            if np.all(np.isfinite(feat)):
+                # Predict the parameters
+                if self.model[1] == 'sklearn':
+                    pred = model.predict(feat)
+                if self.model[1] == 'sbi':
+                    # Sample the posterior
+                    x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
+                    posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
 
-                # Compute the mean of the posterior samples
-                pred = np.mean(posterior_samples.numpy(), axis=0)
+                    # Compute the mean of the posterior samples
+                    pred = np.mean(posterior_samples.numpy(), axis=0)
 
-            # Append the predictions
-            predictions.append(pred[0])
+                predictions.append(pred[0])
+            else:
+                predictions.append([np.nan for _ in range(self.theta.shape[1])])
 
         # Return the predictions
         return predictions
