@@ -1,5 +1,6 @@
 {
-  "simulation_data_path": "/DATOS/pablomc/Hagen_model_v1",
+  "simulation_raw_data_path": "/DATOS/pablomc/Hagen_model_v1",
+  "simulation_processed_data_path": "/DATOS/pablomc/data/Hagen_model_v1",
   "simulation_features_path": "/DATOS/pablomc/data/catch22",
   "LFP_development_data_path": "/DATOS/pablomc/empirical_datasets/development_EI_decorrelation/baseline/LFP"
 }

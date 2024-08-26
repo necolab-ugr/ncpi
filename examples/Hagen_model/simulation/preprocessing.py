@@ -66,10 +66,10 @@ def process_batch(ldir):
 
 
 if __name__ == '__main__':
-    # Path to the folder containing the simulation data
+    # Path to the folders containing the simulation data
     with open('../config.json', 'r') as config_file:
         config = json.load(config_file)
-    sim_file_path = config['simulation_data_path']
+    sim_file_path = config['simulation_raw_data_path']
 
     # List of all the folders containing the simulation data (there are three folders that correspond
     # to the different computing environments used to run the simulations)
@@ -93,37 +93,49 @@ if __name__ == '__main__':
     # Current Dipole Moment (CDM) data
     CDM_data = []
 
-    # Split the list of folders into sublists to be processed in parallel
-    num_cpus = os.cpu_count()
-    batch_size = len(ldir) // (num_cpus * 1000) # 1000 is a factor to get updates in tqdm more often
-    batches = [ldir[i:i + batch_size] for i in range(0, len(ldir), batch_size)]
+    # Split the list of folders into batches
+    batch_size_1 = len(ldir) // 5 # 5 is a factor to avoid memory issues
+                                  # (set it to a smaller size if your system has sufficient memory)
+    batches_1 = [ldir[i:i + batch_size_1] for i in range(0, len(ldir), batch_size_1)]
 
     # Preprocess data in parallel using all available CPUs
-    with Pool(num_cpus) as pool:
-        results = list(tqdm(pool.imap(process_batch, batches), total=len(batches), desc="Processing data"))
+    num_cpus = os.cpu_count()
+    for ii, batch in enumerate(batches_1):
+        print(f"Processing batch {ii+1}/{len(batches_1)}")
+        batch_size_2 = len(batch) // (num_cpus*10) # 10 is a factor to update the progress bar more frequently
+        batches_2 = [batch[i:i + batch_size_2] for i in range(0, len(batch), batch_size_2)]
 
-    # Collect the results
-    for result in results:
-        CDM_data.extend(result[0])
-        theta_data['data'].extend(result[1])
+        with Pool(num_cpus) as pool:
+            results = list(tqdm(pool.imap(process_batch, batches_2),
+                                total=len(batches_2), desc="Processing data"))
 
-    # Transform to numpy arrays
-    theta_data['data'] = np.array(theta_data['data'],dtype="float32")
-    CDM_data = np.array(CDM_data,dtype="float32")
+        # Collect the results
+        for result in results:
+            CDM_data.extend(result[0])
+            theta_data['data'].extend(result[1])
 
-    print(f"Number of simulations: {len(ldir)}")
-    print(f"Number of samples processed: {CDM_data.shape[0]}")
+        # Transform to numpy arrays
+        theta_data['data'] = np.array(theta_data['data'],dtype="float32")
+        CDM_data = np.array(CDM_data,dtype="float32")
 
-    # Create folders
-    data_path = '/DATOS/pablomc'
-    if not os.path.isdir(os.path.join(data_path,'data')):
-        os.mkdir(os.path.join(data_path,'data'))
-    if not os.path.isdir(os.path.join(data_path,'data','Hagen_model_v1')):
-        os.mkdir(os.path.join(data_path,'data','Hagen_model_v1'))
+        print(f"Number of simulations in the batch: {len(ldir)}")
+        print(f"Number of samples processed: {CDM_data.shape[0]}\n")
 
-    # Save numpy arrays to file
-    pickle.dump(theta_data,open(os.path.join(data_path,'data','Hagen_model_v1',
-                                             'theta_data'),'wb'))
-    pickle.dump(CDM_data,open(os.path.join(data_path,'data','Hagen_model_v1',
-                                             'CDM_data'),'wb'))
+        # Path to the folder containing the processed data
+        sim_file_path = config['simulation_processed_data_path']
 
+        # Create folders if they do not exist
+        splits = os.path.split(sim_file_path)
+        if not os.path.isdir(splits[0]):
+            os.mkdir(splits[0])
+        if not os.path.isdir(sim_file_path):
+            os.mkdir(sim_file_path)
+
+        # Save numpy arrays to file
+        pickle.dump(theta_data,open(os.path.join(sim_file_path,f'theta_data_{ii}'),'wb'))
+        pickle.dump(CDM_data,open(os.path.join(sim_file_path,f'CDM_data_{ii}'),'wb'))
+
+        # Clear memory
+        theta_data['data'] = []
+        CDM_data = []
+        results = []
