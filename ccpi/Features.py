@@ -132,7 +132,9 @@ class Features:
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
-        batch_size = len(data['Data']) // num_cpus
+        batch_size = len(data['Data']) // (num_cpus*10) # 10 is a factor to update the progress bar more frequently
+        if batch_size == 0:
+            batch_size = 1
         batches = [(i, data['Data'][i:i + batch_size]) for i in range(0, len(data['Data']), batch_size)]
 
         # Import the multiprocessing module and create a ProcessingPool
