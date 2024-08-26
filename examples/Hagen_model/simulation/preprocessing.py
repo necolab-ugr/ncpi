@@ -103,6 +103,8 @@ if __name__ == '__main__':
     for ii, batch in enumerate(batches_1):
         print(f"Processing batch {ii+1}/{len(batches_1)}")
         batch_size_2 = len(batch) // (num_cpus*10) # 10 is a factor to update the progress bar more frequently
+        if batch_size_2 < 1:
+            batch_size_2 = 1
         batches_2 = [batch[i:i + batch_size_2] for i in range(0, len(batch), batch_size_2)]
 
         with Pool(num_cpus) as pool:
@@ -118,7 +120,7 @@ if __name__ == '__main__':
         theta_data['data'] = np.array(theta_data['data'],dtype="float32")
         CDM_data = np.array(CDM_data,dtype="float32")
 
-        print(f"Number of simulations in the batch: {len(ldir)}")
+        print(f"Number of simulations in the batch: {len(batch)}")
         print(f"Number of samples processed: {CDM_data.shape[0]}\n")
 
         # Path to the folder containing the processed data
