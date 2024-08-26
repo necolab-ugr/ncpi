@@ -181,10 +181,10 @@ if __name__ == "__main__":
     print(f'Samples loaded: {len(theta["data"])}')
     print(f'Done in {end_time - start_time} s')
 
-    # Randomly subsample the simulation data
-    idx = np.random.choice(len(theta['data']), 100000, replace=False)
-    X = X[idx]
-    theta['data'] = theta['data'][idx]
+    # # Randomly subsample the simulation data
+    # idx = np.random.choice(len(theta['data']), 100000, replace=False)
+    # X = X[idx]
+    # theta['data'] = theta['data'][idx]
 
     # Load empirical data
     print('\n--- Loading empirical data.')
@@ -205,7 +205,7 @@ if __name__ == "__main__":
     print('\n--- Training the regression model.')
     start_time = time.time()
     model = 'MLPRegressor'
-    hyperparams = {'hidden_layer_sizes': (100,100), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4,
+    hyperparams = {'hidden_layer_sizes': (50,50), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4,
                    'verbose': True}
     inference = ccpi.Inference(model=model, hyperparams=hyperparams)
     inference.add_simulation_data(X, theta['data'])
