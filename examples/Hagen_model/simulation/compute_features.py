@@ -51,6 +51,9 @@ if __name__ == '__main__':
             pickle.dump(np.array(df['Features'].tolist()),
                         open(os.path.join(features_path, 'tmp', 'sim_X_'+file.split('_')[-1]), 'wb'))
 
+            # clear memory
+            del CDM, df, features
+
         # Theta data
         elif file[:5] == 'theta':
             theta = pickle.load(open(os.path.join(sim_file_path, file), 'rb'))
