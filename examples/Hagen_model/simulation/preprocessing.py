@@ -67,7 +67,7 @@ def process_batch(ldir):
 
 if __name__ == '__main__':
     # Path to the folder containing the simulation data
-    with open('config.json', 'r') as config_file:
+    with open('../config.json', 'r') as config_file:
         config = json.load(config_file)
     sim_file_path = config['simulation_data_path']
 
@@ -93,9 +93,9 @@ if __name__ == '__main__':
     # Current Dipole Moment (CDM) data
     CDM_data = []
 
-    # Split the list of folders into sublists using the number of available CPUs
+    # Split the list of folders into sublists to be processed in parallel
     num_cpus = os.cpu_count()
-    batch_size = len(ldir) // num_cpus
+    batch_size = len(ldir) // (num_cpus * 1000) # 1000 is a factor to get updates in tqdm more often
     batches = [ldir[i:i + batch_size] for i in range(0, len(ldir), batch_size)]
 
     # Preprocess data in parallel using all available CPUs
