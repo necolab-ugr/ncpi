@@ -107,7 +107,14 @@ class Inference(object):
             raise ValueError('Features and parameters must have the same number of rows.')
 
         # Create a mask to identify rows without NaN or Inf values
-        mask = np.all(np.isfinite(features), axis=1) & np.all(np.isfinite(parameters), axis=1)
+        if features.ndim == 1 and parameters.ndim == 1:
+            mask = np.isfinite(features) & np.isfinite(parameters)
+        elif features.ndim == 1:
+            mask = np.isfinite(features) & np.all(np.isfinite(parameters), axis=1)
+        elif parameters.ndim == 1:
+            mask = np.all(np.isfinite(features), axis=1) & np.isfinite(parameters)
+        else:
+            mask = np.all(np.isfinite(features), axis=1) & np.all(np.isfinite(parameters), axis=1)
 
         # Apply the mask to filter out rows with NaN or Inf values
         features = features[mask]
