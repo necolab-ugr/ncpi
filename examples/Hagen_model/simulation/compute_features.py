@@ -80,7 +80,7 @@ if __name__ == '__main__':
     pickle.dump(np.concatenate(X), open(os.path.join(features_path, 'sim_X'), 'wb'))
     th = {'data': np.concatenate(theta), 'parameters': parameters[0]}
     pickle.dump(th, open(os.path.join(features_path, 'sim_theta'), 'wb'))
-    print(f'\nFeatures computed for {len(X)} samples.')
+    print(f'\nFeatures computed for {len(np.concatenate(X))} samples.')
 
     # Remove the 'tmp' folder
     shutil.rmtree(os.path.join(features_path, 'tmp'))
