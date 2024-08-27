@@ -231,7 +231,10 @@ class Inference(object):
         self.features = scaler.transform(self.features)
 
         # Remove Nan and Inf values from features
-        mask = np.all(np.isfinite(self.features), axis=1)
+        if self.features.ndim == 1:
+            mask = np.isfinite(self.features)
+        else:
+            mask = np.all(np.isfinite(self.features), axis=1)
         self.features = self.features[mask]
         self.theta = self.theta[mask]
 
