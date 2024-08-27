@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import pickle
-
+import shutil
 import numpy as np
 import pandas as pd
 
@@ -65,18 +65,22 @@ if __name__ == '__main__':
     print('\nMerging features and parameters into single files.')
     X = []
     theta = []
+    parameters = []
 
     ldir = os.listdir(os.path.join(features_path, 'tmp'))
     for file in ldir:
+        data = pickle.load(open(os.path.join(features_path, 'tmp', file), 'rb'))
         if file[:5] == 'sim_X':
-            X.append(pickle.load(open(os.path.join(features_path, 'tmp', file), 'rb')))
+            X.append(data)
         elif file[:9] == 'sim_theta':
-            theta.append(pickle.load(open(os.path.join(features_path, 'tmp', file), 'rb')))
+            theta.append(data['data'])
+            parameters.append(data['parameters'])
 
     # Save the features and parameters to files
     pickle.dump(np.concatenate(X), open(os.path.join(features_path, 'sim_X'), 'wb'))
-    pickle.dump(np.concatenate(theta), open(os.path.join(features_path, 'sim_theta'), 'wb'))
+    th = {'data': np.concatenate(theta), 'parameters': parameters[0]}
+    pickle.dump(th, open(os.path.join(features_path, 'sim_theta'), 'wb'))
     print(f'\nFeatures computed for {len(X)} samples.')
 
     # Remove the 'tmp' folder
-    os.rmdir(os.path.join(features_path, 'tmp'))
+    shutil.rmtree(os.path.join(features_path, 'tmp'))
