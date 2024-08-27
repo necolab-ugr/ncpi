@@ -1,7 +1,3 @@
-"""
-To do.
-"""
-import importlib
 import os
 import sys
 import pickle
@@ -205,7 +201,7 @@ if __name__ == "__main__":
     print('\n--- Training the regression model.')
     start_time = time.time()
     model = 'MLPRegressor'
-    hyperparams = {'hidden_layer_sizes': (50,50), 'max_iter': 1000, 'tol': 1e-2, 'n_iter_no_change': 4,
+    hyperparams = {'hidden_layer_sizes': (50,50), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 20,
                    'verbose': True}
     inference = ccpi.Inference(model=model, hyperparams=hyperparams)
     inference.add_simulation_data(X, theta['data'])
@@ -220,16 +216,19 @@ if __name__ == "__main__":
     end_time = time.time()
     print(f'Done in {end_time - start_time} s')
 
+    # Save the data including predictions of all parameters
+    if not os.path.exists('data'):
+        os.makedirs('data')
+    emp_data.to_pickle('data/emp_data_all.pkl')
+
     # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
     E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
     others = emp_data['Predictions'].apply(lambda x: x[4:])
     emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
                                                np.array(others.tolist())), axis=1)).tolist()
 
-    # Save the predictions
-    if not os.path.exists('data'):
-        os.makedirs('data')
-    emp_data.to_pickle('data/emp_data.pkl')
+    # Save the data including predictions of (E/I)_net
+    emp_data.to_pickle('data/emp_data_reduced.pkl')
 
     # Plot predictions as a function of age
     plt.figure(dpi = 300)
