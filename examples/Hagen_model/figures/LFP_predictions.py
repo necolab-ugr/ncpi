@@ -60,6 +60,9 @@ fr = np.zeros((len(np.unique(ages)), n_samples))
 # Change to folder simulation
 os.chdir('../simulation')
 
+# Remove the folder with simulation data
+os.system(f'rm -rf LIF_simulations')
+
 for i in range(len(np.unique(ages))):
     for j in range(n_samples):
         print(f'\nSimulating age {np.unique(ages)[i]}, sample {j}')
@@ -68,24 +71,25 @@ for i in range(len(np.unique(ages))):
         sim = LIF_simulation.LIF_simulation(params=sim_params[:, i, j])
         try:
             sim.simulate(n_threads=64)
+
+            # Find the folder with simulation data
+            folder = [f for f in os.listdir('LIF_simulations') if f != 'H_YX'][0]
+
+            # Load firing rates
+            lif_mean_nu_X = pickle.load(open(f'LIF_simulations/{folder}/lif_mean_nu_X', 'rb'))
+
+            # Load parameters of the network model
+            LIF_params = pickle.load(open(f'LIF_simulations/{folder}/LIF_params', 'rb'))
+
+            # Compute firing rate of the excitatory neuron population
+            fr[i,j] = lif_mean_nu_X['E'] / LIF_params['N_X'][0]
+
+            # Remove the folder with simulation data
+            os.system(f'rm -rf LIF_simulations/{folder}')
+
         except:
             print('Simulation failed')
             continue
-
-        # Find the folder with simulation data
-        folder = [f for f in os.listdir('LIF_simulations') if f != 'H_YX'][0]
-
-        # Load firing rates
-        lif_mean_nu_X = pickle.load(open(f'LIF_simulations/{folder}/lif_mean_nu_X', 'rb'))
-
-        # Load parameters of the network model
-        LIF_params = pickle.load(open(f'LIF_simulations/{folder}/LIF_params', 'rb'))
-
-        # Compute firing rate of the excitatory neuron population
-        fr[i,j] = lif_mean_nu_X['E'] / LIF_params['N_X'][0]
-
-        # Remove the folder with simulation data
-        os.system(f'rm -r LIF_simulations/{folder}')
 
 # Change to folder figures
 os.chdir('../figures')
