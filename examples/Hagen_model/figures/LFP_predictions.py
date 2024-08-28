@@ -44,17 +44,15 @@ for param in range(4):
 
             # Check within_quartiles is not empty
             if len(within_quartiles) > 0:
-                samples = np.random.choice(predictions_EI[idx, param][within_quartiles],
-                                           size=n_samples, replace=False)
-                # Find the indices of the samples in the predictions
-                idx_samples = np.where(np.isin(predictions_EI[idx, param], samples))[0]
+                # Randomly sample n_samples from within_quartiles
+                idx_samples = within_quartiles[np.random.randint(0, len(within_quartiles), n_samples)]
                 # E/I
                 if param == 0:
                     for j in range(4):
                         sim_params[j, i, :] = predictions_all[idx, j][idx_samples]
                 # tau_syn_exc, tau_syn_inh, J_syn_ext
                 else:
-                    sim_params[param+3, i, :] = samples
+                    sim_params[param+3, i, :] = predictions_EI[idx, param][idx_samples]
 
 # Firing rates
 fr = np.zeros((len(np.unique(ages)), n_samples))
