@@ -1,3 +1,8 @@
-LIF_network_params = {
-    'test': 0
-}
+# Simulation time
+tstop = 12000.0
+
+# Number of threads for the LIF network model simulations
+local_num_threads = 8
+
+# Simulation time step
+dt=2 ** -4

@@ -1,3 +1,2 @@
-LIF_network_params = {
-    'test': 0
-}
+# Transient time
+transient = 2000
