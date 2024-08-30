@@ -248,6 +248,7 @@ class Inference:
             # Loop over each set of hyperparameters
             best_score = np.inf
             best_config = None
+            best_fits = None
             for params in param_grid:
                 print(f'\n\n--> Hyperparameters: {params}')
 
@@ -256,6 +257,7 @@ class Inference:
 
                 # Loop over each repeat and fold
                 mean_scores = []
+                fits = []
                 for repeat_idx, (train_index, test_index) in enumerate(rkf.split(self.features)):
                     # Print info of repeat and fold
                     print('\n') if self.model[1] == 'sbi' else None
@@ -272,6 +274,7 @@ class Inference:
 
                         # Fit the model
                         model.fit(X_train, Y_train)
+                        fits.append(model)
 
                         # Predict the parameters
                         Y_pred = model.predict(X_test)
@@ -298,6 +301,7 @@ class Inference:
 
                         # Train the neural density estimator
                         density_estimator = model.train()
+                        fits.append([model, density_estimator])
 
                         # Build the posterior
                         posterior = model.build_posterior(density_estimator)
@@ -317,35 +321,44 @@ class Inference:
                 if np.mean(mean_scores) < best_score:
                     best_score = np.mean(mean_scores)
                     best_config = params
+                    best_fits = fits
 
             # Update the model with the best hyperparameters
             if best_config is not None:
+                # if self.model[1] == 'sklearn':
+                #     model.set_params(**best_config)
+                # if self.model[1] == 'sbi':
+                #     model = self.initialize_sbi(best_config)
+
                 if self.model[1] == 'sklearn':
-                    model.set_params(**best_config)
+                    model = best_fits
                 if self.model[1] == 'sbi':
-                    model = self.initialize_sbi(best_config)
+                    model = [best_fits[i][0] for i in range(len(best_fits))]
+                    density_estimator = [best_fits[i][1] for i in range(len(best_fits))]
+
                 # print best hyperparameters
                 print(f'\n\n--> Best hyperparameters: {best_config}\n')
             else:
                 raise ValueError('\nNo best hyperparameters found.\n')
 
         # Fit the model using all the data
-        if self.model[1] == 'sklearn':
-            model.fit(self.features, self.theta)
+        else:
+            if self.model[1] == 'sklearn':
+                model.fit(self.features, self.theta)
 
-        if self.model[1] == 'sbi':
-            # Ensure theta is a 2D array
-            if self.theta.ndim == 1:
-                self.theta = self.theta.reshape(-1, 1)
+            if self.model[1] == 'sbi':
+                # Ensure theta is a 2D array
+                if self.theta.ndim == 1:
+                    self.theta = self.theta.reshape(-1, 1)
 
-            # Append simulations
-            model.append_simulations(
-                torch.from_numpy(self.theta.astype(np.float32)),
-                torch.from_numpy(self.features.astype(np.float32))
-            )
+                # Append simulations
+                model.append_simulations(
+                    torch.from_numpy(self.theta.astype(np.float32)),
+                    torch.from_numpy(self.features.astype(np.float32))
+                )
 
-            # Train the neural density estimator
-            density_estimator = model.train()
+                # Train the neural density estimator
+                density_estimator = model.train()
 
         # Save the best model and the StandardScaler
         if not os.path.exists('data'):
@@ -388,7 +401,10 @@ class Inference:
             with open('data/density_estimator.pkl', 'rb') as file:
                 density_estimator = pickle.load(file)
                 # Build the posterior
-                posterior = model.build_posterior(density_estimator)
+                if type(density_estimator) is list:
+                    posterior = [model[i].build_posterior(density_estimator[i]) for i in range(len(density_estimator))]
+                else:
+                    posterior = model.build_posterior(density_estimator)
 
         # Assert that features is a numpy array
         if type(features) is not np.ndarray:
@@ -407,14 +423,21 @@ class Inference:
             if np.all(np.isfinite(feat)):
                 # Predict the parameters
                 if self.model[1] == 'sklearn':
-                    pred = model.predict(feat)
+                    if type(model) is list:
+                        pred = np.mean([m.predict(feat) for m in model], axis=0)
+                    else:
+                        pred = model.predict(feat)
                 if self.model[1] == 'sbi':
                     # Sample the posterior
                     x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
-                    posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
-
-                    # Compute the mean of the posterior samples
-                    pred = np.mean(posterior_samples.numpy(), axis=0)
+                    if type(posterior) is list:
+                        posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in posterior]
+                        # Compute the mean of the posterior samples
+                        pred = np.mean([np.mean(post.numpy(), axis=0) for post in posterior_samples], axis=0)
+                    else:
+                        posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
+                        # Compute the mean of the posterior samples
+                        pred = np.mean(posterior_samples.numpy(), axis=0)
 
                 predictions.append(pred[0])
             else:

@@ -175,7 +175,7 @@ if __name__ == "__main__":
     X = load_simulation_data(os.path.join(sim_file_path, 'sim_X'))
     end_time = time.time()
     print(f'Samples loaded: {len(theta["data"])}')
-    print(f'Done in {end_time - start_time} s')
+    print(f'Done in {(end_time - start_time)/60.} min')
 
     # # Randomly subsample the simulation data
     # idx = np.random.choice(len(theta['data']), 100000, replace=False)
@@ -222,14 +222,14 @@ if __name__ == "__main__":
     emp_data = load_empirical_data(emp_data_path)
     print(f'\nFiles loaded: {len(emp_data["LFP"])}')
     end_time = time.time()
-    print(f'Done in {end_time - start_time} s')
+    print(f'Done in {(end_time - start_time)/60.} min')
 
     # Compute features from empirical data
     print('\n--- Computing features from empirical data.')
     start_time = time.time()
     emp_data = compute_features(emp_data, chunk_size=5., method='catch22')
     end_time = time.time()
-    print(f'Done in {end_time - start_time} s')
+    print(f'Done in {(end_time - start_time)/60.} min')
 
     # Create the Inference object, add the simulation data and train the model
     print('\n--- Training the regression model.')
@@ -239,16 +239,16 @@ if __name__ == "__main__":
                    'verbose': True}
     inference = ccpi.Inference(model=model, hyperparams=hyperparams)
     inference.add_simulation_data(X, theta['data'])
-    inference.train(param_grid=None)
+    inference.train(param_grid=[hyperparams],n_splits=10, n_repeats=5)
     end_time = time.time()
-    print(f'Done in {end_time - start_time} s')
+    print(f'Done in {(end_time - start_time)/60.} min')
 
     # Compute predictions from the empirical data
     print('\n--- Computing predictions from empirical data.')
     start_time = time.time()
     emp_data = compute_predictions(inference, emp_data)
     end_time = time.time()
-    print(f'Done in {end_time - start_time} s')
+    print(f'Done in {(end_time - start_time)/60.} min')
 
     # Save the data including predictions of all parameters
     if not os.path.exists('data'):
