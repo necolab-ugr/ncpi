@@ -10,7 +10,7 @@ import torch
 from sbi.utils import posterior_nn
 
 
-class Inference(object):
+class Inference:
     """
     Class for inferring cortical circuit parameters from features of field potential recordings.
 
