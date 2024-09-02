@@ -38,7 +38,8 @@ def process_batch(ldir):
 
             # Dismiss CDMs that are constant over time
             if np.std(cdm_sum) > 10 ** (-10):
-                # Remove the first 500 samples containing the transient response
+                # Remove the first 500 samples containing the transient response (not really necessary as some
+                # transient time is already removed when computing the CDMs)
                 cdm_sum = cdm_sum[500:]
                 # Normalization
                 CDM_data.append((cdm_sum - np.mean(cdm_sum)) / np.std(cdm_sum))
