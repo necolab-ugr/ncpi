@@ -3,7 +3,9 @@ import subprocess
 import pandas as pd
 import os
 import numpy as np
+from scipy.signal import welch
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
 def install(module_name):
@@ -66,7 +68,49 @@ def catch22(sample):
     return features['values']
 
 def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9):
-    pass
+
+    debug=True
+    # Dynamically import the fooof module
+    from fooof import FOOOF
+
+    # Estimate power spectral density using Welch’s method
+    fxx, Pxx = welch(sample, fs)
+    f1 = np.where(fxx >= fmin)[0][0]
+    f2 = np.where(fxx >= fmax)[0][0]
+
+    # Fit the power spectrum using FOOOF
+    fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
+               min_peak_height=fooof_setup['min_peak_height'],
+               max_n_peaks=fooof_setup['max_n_peaks'],
+               aperiodic_mode='fixed',
+               peak_width_limits=fooof_setup['peak_width_limits'])
+    fm.fit(fxx[f1:f2], Pxx[f1:f2])
+
+    # Discard fits with negative exponents
+    if fm.aperiodic_params_[-1] <= 0.:
+        fm.r_squared_ = 0.
+    # Discard nan r_squared
+    if np.isnan(fm.r_squared_):
+        fm.r_squared_ = 0.
+
+    # Print parameters and plot the fit
+    if debug:
+        print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
+        print('fm.peak_params_ = ', fm.peak_params_)
+        print('fm.r_squared_ = ', fm.r_squared_)
+
+        fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
+
+        plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
+                 f'peak_params = {fm.peak_params_}\n'
+                 f'r_squared = {fm.r_squared_}', fontsize=12)
+        plt.show()
+
+    if fm.r_squared_ < r_squared_th:
+        return (np.full_like(fm.aperiodic_params_, np.nan),
+                np.full_like(fm.peak_params_, np.nan), fm.r_squared_)
+    else:
+        return fm.aperiodic_params_, fm.peak_params_, fm.r_squared_
 
 def fEI(samples,fs,fEI_folder):
     pass
@@ -76,7 +120,7 @@ class Features:
     Class for computing features from electrophysiological data recordings.
     """
 
-    def __init__(self, method='catch22'):
+    def __init__(self, method='catch22', params=None):
         """
         Constructor method.
 
@@ -84,16 +128,24 @@ class Features:
         ----------
         method: str
             Method to compute features. Default is 'catch22'.
+        params: dict
+            Dictionary containing the parameters for the feature computation.
         """
-        self.method = method
 
         # Assert that the method is a string
-        if not isinstance(self.method, str):
+        if not isinstance(method, str):
             raise ValueError("The method must be a string.")
 
         # Check if the method is valid
-        if self.method not in ['catch22']:
-            raise ValueError("Invalid method. Please use 'catch22'.")
+        if method not in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+            raise ValueError("Invalid method. Please use 'catch22', 'power_spectrum_parameterization' or 'fEI'.")
+
+        # Check if params is a dictionary
+        if not isinstance(params, dict):
+            raise ValueError("params must be a dictionary.")
+
+        self.method = method
+        self.params = params
 
 
     def compute_features(self, data):
@@ -133,6 +185,13 @@ class Features:
                 sample = (sample - np.mean(sample)) / np.std(sample)
                 if self.method == 'catch22':
                     features.append(catch22(sample))
+                elif self.method == 'power_spectrum_parameterization':
+                    features.append(power_spectrum_parameterization(sample,
+                                                                    self.params['fs'],
+                                                                    self.params['fmin'],
+                                                                    self.params['fmax'],
+                                                                    self.params['fooof_setup'],
+                                                                    self.params['r_squared_th']))
             return batch_index,features
 
         # Split the data into batches using the number of available CPUs
