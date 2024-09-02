@@ -65,6 +65,11 @@ def catch22(sample):
 
     return features['values']
 
+def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9):
+    pass
+
+def fEI(samples,fs,fEI_folder):
+    pass
 
 class Features:
     """
