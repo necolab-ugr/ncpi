@@ -266,7 +266,7 @@ class Features:
             raise ValueError("Invalid method. Please use 'catch22', 'power_spectrum_parameterization' or 'fEI'.")
 
         # Check if params is a dictionary
-        if not isinstance(params, dict):
+        if not isinstance(params, dict) and params is not None:
             raise ValueError("params must be a dictionary.")
 
         self.method = method
