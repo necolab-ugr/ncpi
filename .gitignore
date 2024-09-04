@@ -1,0 +1,8 @@
+# Ignore build artifacts
+build/
+
+# Ignore egg-info directory
+*.egg-info/
+
+# Ignore Python cache files
+__pycache__/
