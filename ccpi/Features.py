@@ -3,7 +3,9 @@ import subprocess
 import pandas as pd
 import os
 import numpy as np
+from scipy.signal import welch, hilbert, butter, filtfilt
 from tqdm import tqdm
+import matplotlib.pyplot as plt
 
 
 def install(module_name):
@@ -65,13 +67,185 @@ def catch22(sample):
 
     return features['values']
 
+def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9):
+    """
+    Function to compute the power spectrum parameterization of a time-series sample using the FOOOF algorithm.
+
+    Parameters
+    ----------
+    sample: np.array
+        Times-series sample.
+    fs: float
+        Sampling frequency.
+    fmin: float
+        Minimum frequency for the power spectrum.
+    fmax: float
+        Maximum frequency for the power spectrum.
+    fooof_setup: dict
+        Dictionary containing the parameters for the FOOOF algorithm.
+            - peak_threshold: float
+            - min_peak_height: float
+            - max_n_peaks: int
+            - peak_width_limits: tuple
+    r_squared_th: float
+        Threshold for the r_squared value. Default is 0.9.
+
+    Returns
+    -------
+    features: np.array
+        Array with the aperiodic and peak parameters.
+    """
+
+    debug=False
+
+    # Dynamically import the fooof module
+    # from fooof import FOOOF
+    FOOOF = getattr(module('fooof'), 'FOOOF')
+
+    # Estimate power spectral density using Welch’s method
+    fxx, Pxx = welch(sample, fs)
+    f1 = np.where(fxx >= fmin)[0][0]
+    f2 = np.where(fxx >= fmax)[0][0]
+
+    # Fit the power spectrum using FOOOF
+    fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
+               min_peak_height=fooof_setup['min_peak_height'],
+               max_n_peaks=fooof_setup['max_n_peaks'],
+               aperiodic_mode='fixed',
+               peak_width_limits=fooof_setup['peak_width_limits'])
+    fm.fit(fxx[f1:f2], Pxx[f1:f2])
+
+    # Discard fits with negative exponents
+    if fm.aperiodic_params_[-1] <= 0.:
+        fm.r_squared_ = 0.
+    # Discard nan r_squared
+    if np.isnan(fm.r_squared_):
+        fm.r_squared_ = 0.
+
+    # Print parameters and plot the fit
+    if debug:
+        print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
+        print('fm.peak_params_ = ', fm.peak_params_)
+        print('fm.r_squared_ = ', fm.r_squared_)
+
+        fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
+
+        plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
+                 f'peak_params = {fm.peak_params_}\n'
+                 f'r_squared = {fm.r_squared_}', fontsize=12)
+        plt.show()
+
+    # Concatenate the aperiodic and peak parameters
+    if fm.peak_params_ is None:
+        features = fm.aperiodic_params_
+    else:
+        features = np.concatenate((fm.aperiodic_params_, fm.peak_params_.flatten()))
+
+    if fm.r_squared_ < r_squared_th:
+        return np.full_like(features, np.nan)
+    else:
+        return features
+
+def bandpass(sample, fmin, fmax, fs):
+    """
+    Function to bandpass filter a time-series sample.
+
+    Parameters
+    ----------
+    sample: np.array
+        Times-series sample.
+    fmin: float
+        Minimum frequency for the bandpass filter.
+    fmax: float
+        Maximum frequency for the bandpass filter.
+    fs: int
+        Sampling frequency.
+
+    Returns
+    -------
+    sample_bandpassed: np.array
+        Bandpassed sample.
+    """
+
+    # Compute the bandpass filter
+    b, a = butter(4, [fmin/(fs/2), fmax/(fs/2)], 'band')
+    sample_bandpassed = filtfilt(b, a, sample)
+
+    return sample_bandpassed
+
+
+def fEI(samples,fs,fmin,fmax,fEI_folder):
+    """
+    Function to compute the fEI from a list of time-series samples.
+
+    Parameters
+    ----------
+    samples: list
+        List of time-series samples.
+    fs: float
+        Sampling frequency.
+    fmin: float
+        Minimum frequency for the bandpass filter.
+    fmax: float
+        Maximum frequency for the bandpass filter.
+    fEI_folder: str
+        Path to the folder containing the fEI function.
+
+    Returns
+    -------
+    features: list
+        List of fEI features.
+    """
+
+    debug = False
+
+    # Compute the amplitude envelope of the signals
+    envelopes = []
+    for sample in samples:
+        # Bandpass the signal
+        sample_alpha = bandpass(sample, fmin, fmax, fs)
+        # Compute the amplitude envelope using the Hilbert transform
+        amplitude_envelope = np.abs(hilbert(sample_alpha))
+        envelopes.append(amplitude_envelope)
+
+    # Start the matlab engine
+    matlab_engine = module('matlab.engine')
+    eng = matlab_engine.start_matlab()
+
+    # Import matlab
+    matlab = module('matlab')
+
+    # Add the folder containing the fEI function to the Matlab path
+    eng.addpath(fEI_folder)
+
+    features = []
+    for i, envelope in enumerate(envelopes):
+        # Compute fEI
+        eng.workspace['aux'] = matlab.double(list(envelope))
+        eng.eval(f'signal = zeros({len(envelope)},1);', nargout=0)
+        eng.eval(f'signal(:,1) = aux;', nargout=0)
+        eng.eval(f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelope) / 10)},0.8);',
+                 nargout=0)
+        fEI = eng.workspace['EI']
+        features.append(fEI)
+
+        # Plot the amplitude envelope over the original signal
+        if debug:
+            plt.figure()
+            plt.plot(bandpass(samples[i], fmin, fmax, fs))
+            plt.plot(envelope)
+            plt.title(f'fEI = {fEI}')
+            plt.show()
+
+    return features
+
 
 class Features:
     """
     Class for computing features from electrophysiological data recordings.
     """
 
-    def __init__(self, method='catch22'):
+    def __init__(self, method='catch22', params=None):
         """
         Constructor method.
 
@@ -79,16 +253,24 @@ class Features:
         ----------
         method: str
             Method to compute features. Default is 'catch22'.
+        params: dict
+            Dictionary containing the parameters for the feature computation.
         """
-        self.method = method
 
         # Assert that the method is a string
-        if not isinstance(self.method, str):
+        if not isinstance(method, str):
             raise ValueError("The method must be a string.")
 
         # Check if the method is valid
-        if self.method not in ['catch22']:
-            raise ValueError("Invalid method. Please use 'catch22'.")
+        if method not in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+            raise ValueError("Invalid method. Please use 'catch22', 'power_spectrum_parameterization' or 'fEI'.")
+
+        # Check if params is a dictionary
+        if not isinstance(params, dict) and params is not None:
+            raise ValueError("params must be a dictionary.")
+
+        self.method = method
+        self.params = params
 
 
     def compute_features(self, data):
@@ -122,12 +304,31 @@ class Features:
             """
 
             batch_index, batch = batch_tuple
+            # Normalize the batch
+            batch = [(sample - np.mean(sample)) / np.std(sample) for sample in batch]
             features = []
-            for sample in batch:
-                # Normalize the sample
-                sample = (sample - np.mean(sample)) / np.std(sample)
-                if self.method == 'catch22':
-                    features.append(catch22(sample))
+
+            # Compute features of each sample in the batch
+            if self.method != 'fEI':
+                for sample in batch:
+                    if self.method == 'catch22':
+                        features.append(catch22(sample))
+                    elif self.method == 'power_spectrum_parameterization':
+                        features.append(power_spectrum_parameterization(sample,
+                                                                        self.params['fs'],
+                                                                        self.params['fmin'],
+                                                                        self.params['fmax'],
+                                                                        self.params['fooof_setup'],
+                                                                        self.params['r_squared_th']))
+
+            # Compute the fEI for the whole batch to avoid starting the Matlab engine multiple times
+            else:
+                features = fEI(batch,
+                               self.params['fs'],
+                               self.params['fmin'],
+                               self.params['fmax'],
+                               self.params['fEI_folder'])
+
             return batch_index,features
 
         # Split the data into batches using the number of available CPUs
