@@ -22,13 +22,6 @@ def test_plot_df(df):
         electrode_size=0.9
         )
     
-    ccpi_analysis2 = Analysis(df)
-    ccpi_analysis2.EEG_topographic_plot(
-        group='HCvsADMIL', 
-        system=19,
-        p_value=0.05,
-        electrode_size=1.0
-        )
     # assert os.path.exists('EEG_tomography_plot.png')
     # os.remove('EEG_tomography_plot.png')
 

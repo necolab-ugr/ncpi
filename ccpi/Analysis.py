@@ -343,9 +343,7 @@ class Analysis:
 
             if system == 19:
                 del koord_dict['Oz']
-                koord = list(koord_dict.values())
-            elif system == 20:
-                koord = list(koord_dict.values())
+            koord = list(koord_dict.values())
 
             # External fake electrodes for completing interpolation
             for xx in np.linspace(pos-radius,pos+radius,50):
