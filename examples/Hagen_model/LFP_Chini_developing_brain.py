@@ -87,7 +87,7 @@ def load_empirical_data(folder_path):
     return emp_data
 
 
-def compute_features(data, chunk_size=5., method='catch22'):
+def compute_features(data, chunk_size=5., method='catch22', params=None):
     '''
     Compute features from the LFP data.
 
@@ -99,6 +99,8 @@ def compute_features(data, chunk_size=5., method='catch22'):
         Size of the chunks (epochs) in seconds.
     method : str
         Method used to compute the features.
+    params : dict
+        Dictionary containing the parameters of the method used to compute the features.
 
     Returns
     -------
@@ -129,7 +131,7 @@ def compute_features(data, chunk_size=5., method='catch22'):
     df.fs = data['fs'][0]
 
     # Compute features
-    features = ccpi.Features(method=method)
+    features = ccpi.Features(method=method, params=params)
     df = features.compute_features(df)
 
     return df
@@ -168,125 +170,125 @@ if __name__ == "__main__":
     sim_file_path = config['simulation_features_path']
     emp_data_path = config['LFP_development_data_path']
 
-    # Load parameters of the model (theta) and features from simulation data (X)
-    print('\n--- Loading simulation data.')
-    start_time = time.time()
-    theta = load_simulation_data(os.path.join(sim_file_path, 'sim_theta'))
-    X = load_simulation_data(os.path.join(sim_file_path, 'sim_X'))
-    end_time = time.time()
-    print(f'Samples loaded: {len(theta["data"])}')
-    print(f'Done in {(end_time - start_time)/60.} min')
+    # Iterate over the methods used to compute the features
+    for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+        print(f'\n\n--- Method: {method}')
+        # Load parameters of the model (theta) and features from simulation data (X)
+        print('\n--- Loading simulation data.')
+        start_time = time.time()
+        theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
+        X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
+        end_time = time.time()
+        print(f'Samples loaded: {len(theta["data"])}')
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-    # # Randomly subsample the simulation data
-    # idx = np.random.choice(len(theta['data']), 100000, replace=False)
-    # X = X[idx]
-    # theta['data'] = theta['data'][idx]
+        # # Randomly subsample the simulation data
+        # idx = np.random.choice(len(theta['data']), 10000, replace=False)
+        # X = X[idx]
+        # theta['data'] = theta['data'][idx]
 
-    # # Plot some statistics of the simulation data
-    # plt.figure(dpi = 300)
-    # plt.rc('font', size=8)
-    # plt.rc('font', family='Arial')
-    #
-    # for param in range(7):
-    #     print(f'Parameter {theta["parameters"][param]}')
-    #     plt.subplot(2,4,param+1)
-    #     ax = sns.histplot(theta['data'][:,param], kde=True, bins=50, color='blue')
-    #     ax.set_title(f'Parameter {theta["parameters"][param]}')
-    #     ax.set_xlabel('')
-    #     ax.set_ylabel('')
-    #     plt.tight_layout()
-    #
-    # plt.figure(figsize=(15, 15))
-    # plt.rc('font', size=8)
-    # plt.rc('font', family='Arial')
-    #
-    # # Iterate over pairs of columns in theta['data']
-    # for i in range(7):
-    #     for j in range(i + 1, 7):
-    #         print(f'Parameter {theta["parameters"][i]} vs Parameter {theta["parameters"][j]}')
-    #         plt.subplot(7, 7, i * 7 + j + 1)
-    #         hist, xedges, yedges = np.histogram2d(theta['data'][:, i], theta['data'][:, j], bins=50)
-    #         plt.imshow(hist.T, origin='lower', interpolation='bilinear', cmap='viridis', aspect='auto',
-    #                    extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
-    #         plt.colorbar()
-    #         plt.xlabel(f'{theta["parameters"][i]}')
-    #         plt.ylabel(f'{theta["parameters"][j]}')
-    #         plt.title(f'{theta["parameters"][i]} vs {theta["parameters"][j]}')
-    #         plt.tight_layout()
-    #
-    # plt.show()
+        # Load empirical data
+        print('\n--- Loading empirical data.')
+        start_time = time.time()
+        emp_data = load_empirical_data(emp_data_path)
+        print(f'\nFiles loaded: {len(emp_data["LFP"])}')
+        end_time = time.time()
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-    # Load empirical data
-    print('\n--- Loading empirical data.')
-    start_time = time.time()
-    emp_data = load_empirical_data(emp_data_path)
-    print(f'\nFiles loaded: {len(emp_data["LFP"])}')
-    end_time = time.time()
-    print(f'Done in {(end_time - start_time)/60.} min')
+        # Compute features from empirical data
+        print('\n--- Computing features from empirical data.')
+        start_time = time.time()
+        chunk_size = 5.
+        if method == 'catch22':
+            emp_data = compute_features(emp_data, chunk_size=chunk_size, method='catch22')
+        elif method == 'power_spectrum_parameterization':
+            # Parameters of the fooof algorithm
+            fooof_setup_emp = {'peak_threshold': 1.,
+                               'min_peak_height': 0.,
+                               'max_n_peaks': 2,
+                               'peak_width_limits': (10., 50.)}
+            emp_data = compute_features(emp_data, chunk_size=chunk_size,
+                                        method='power_spectrum_parameterization',
+                                        params={'fs': emp_data.fs,
+                                                'fmin': 5.,
+                                                'fmax': 50.,
+                                                'fooof_setup': fooof_setup_emp,
+                                                'r_squared_th':0.8})
+            # Keep only the aperiodic exponent
+            emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
+        elif method == 'fEI':
+            emp_data = compute_features(emp_data, chunk_size=chunk_size,
+                                        method='fEI',
+                                        params={'fs': emp_data.fs,
+                                                'fmin': 8.,
+                                                'fmax': 12.,
+                                                'fEI_folder': '../../../ccpi/Matlab'})
 
-    # Compute features from empirical data
-    print('\n--- Computing features from empirical data.')
-    start_time = time.time()
-    emp_data = compute_features(emp_data, chunk_size=5., method='catch22')
-    end_time = time.time()
-    print(f'Done in {(end_time - start_time)/60.} min')
+        end_time = time.time()
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-    # Create the Inference object, add the simulation data and train the model
-    print('\n--- Training the regression model.')
-    start_time = time.time()
-    model = 'MLPRegressor'
-    hyperparams = {'hidden_layer_sizes': (50,50), 'max_iter': 1000, 'tol': 1e-4, 'n_iter_no_change': 20,
-                   'verbose': True}
-    inference = ccpi.Inference(model=model, hyperparams=hyperparams)
-    inference.add_simulation_data(X, theta['data'])
-    inference.train(param_grid=[hyperparams],n_splits=10, n_repeats=5)
-    end_time = time.time()
-    print(f'Done in {(end_time - start_time)/60.} min')
+        # Create the Inference object, add the simulation data and train the model
+        print('\n--- Training the regression model.')
+        start_time = time.time()
+        model = 'MLPRegressor'
+        hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
+                       {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
+                       {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
+                       {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
+                       {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
+                       {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True}]
+        inference = ccpi.Inference(model=model)
+        inference.add_simulation_data(X, theta['data'])
+        inference.train(param_grid=hyperparams,n_splits=5, n_repeats=2)
+        end_time = time.time()
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-    # Compute predictions from the empirical data
-    print('\n--- Computing predictions from empirical data.')
-    start_time = time.time()
-    emp_data = compute_predictions(inference, emp_data)
-    end_time = time.time()
-    print(f'Done in {(end_time - start_time)/60.} min')
+        # Compute predictions from the empirical data
+        print('\n--- Computing predictions from empirical data.')
+        start_time = time.time()
+        emp_data = compute_predictions(inference, emp_data)
+        end_time = time.time()
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-    # Save the data including predictions of all parameters
-    if not os.path.exists('data'):
-        os.makedirs('data')
-    emp_data.to_pickle('data/emp_data_all.pkl')
+        # Save the data including predictions of all parameters
+        if not os.path.exists('data'):
+            os.makedirs('data')
+        if not os.path.exists(os.path.join('data', method)):
+            os.makedirs(os.path.join('data', method))
+        emp_data.to_pickle(os.path.join('data', method, 'emp_data_all.pkl'))
 
-    # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
-    E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
-    others = emp_data['Predictions'].apply(lambda x: x[4:])
-    emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
-                                               np.array(others.tolist())), axis=1)).tolist()
+        # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
+        E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
+        others = emp_data['Predictions'].apply(lambda x: x[4:])
+        emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
+                                                   np.array(others.tolist())), axis=1)).tolist()
 
-    # Save the data including predictions of (E/I)_net
-    emp_data.to_pickle('data/emp_data_reduced.pkl')
+        # Save the data including predictions of (E/I)_net
+        emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
 
-    # Plot predictions as a function of age
-    plt.figure(dpi = 300)
-    plt.rc('font', size=8)
-    plt.rc('font', family='Arial')
-    titles = [r'$(E/I)_{net}$', r'$\tau_{exc}^{syn}$', r'$\tau_{inh}^{syn}$', r'$J_{ext}^{syn}$']
+        # Plot predictions as a function of age
+        plt.figure(dpi = 300)
+        plt.rc('font', size=8)
+        plt.rc('font', family='Arial')
+        titles = [r'$(E/I)_{net}$', r'$\tau_{exc}^{syn}$', r'$\tau_{inh}^{syn}$', r'$J_{ext}^{syn}$']
 
-    for param in range(4):
-        plt.subplot(1,4,param+1)
-        param_pd = pd.DataFrame({'Group': emp_data['Group'],
-                                 'Predictions': emp_data['Predictions'].apply(lambda x: x[param])})
-        ax = sns.boxplot(x='Group', y='Predictions', data=param_pd, showfliers=False,
-                         palette='Set2', legend=False, hue='Group')
-        ax.set_title(titles[param])
-        if param == 0:
-            ax.set_ylabel('Predictions')
-        else:
-            ax.set_ylabel('')
-        ax.set_xlabel('Postnatal days')
-        ax.set_xticks(np.arange(0, len(np.unique(emp_data['Group'])), 2))
-        ax.set_xticklabels([f'P{str(i)}' for i in np.unique(emp_data['Group'])[::2]])
-        plt.tight_layout()
+        for param in range(4):
+            plt.subplot(1,4,param+1)
+            param_pd = pd.DataFrame({'Group': emp_data['Group'],
+                                     'Predictions': emp_data['Predictions'].apply(lambda x: x[param])})
+            ax = sns.boxplot(x='Group', y='Predictions', data=param_pd, showfliers=False,
+                             palette='Set2', legend=False, hue='Group')
+            ax.set_title(titles[param])
+            if param == 0:
+                ax.set_ylabel('Predictions')
+            else:
+                ax.set_ylabel('')
+            ax.set_xlabel('Postnatal days')
+            ax.set_xticks(np.arange(0, len(np.unique(emp_data['Group'])), 2))
+            ax.set_xticklabels([f'P{str(i)}' for i in np.unique(emp_data['Group'])[::2]])
+            plt.tight_layout()
 
-    # Save the plot
-    if not os.path.exists('figures'):
-        os.makedirs('figures')
-    plt.savefig('figures/predictions.png')
+        # Save the plot
+        if not os.path.exists('figures'):
+            os.makedirs('figures')
+        plt.savefig(f'figures/predictions_{method}.png')

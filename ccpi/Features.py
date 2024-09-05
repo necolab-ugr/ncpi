@@ -333,6 +333,7 @@ class Features:
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
+        # (for fEI, we would need to increase the batch size because each Matlab engine consumes a lot of memory...)
         batch_size = len(data['Data']) // (num_cpus*10) # 10 is a factor to update the progress bar more frequently
         if batch_size == 0:
             batch_size = 1
