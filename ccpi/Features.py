@@ -115,44 +115,52 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
             f1 = fxx[0]
             f2 = fxx[-1]
 
-        # Fit the power spectrum using FOOOF
-        fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
-                   min_peak_height=fooof_setup['min_peak_height'],
-                   max_n_peaks=fooof_setup['max_n_peaks'],
-                   aperiodic_mode='fixed',
-                   peak_width_limits=fooof_setup['peak_width_limits'])
-        fm.fit(fxx[f1:f2], Pxx[f1:f2])
+        # Ensure the input data has no 0s
+        if not np.any(Pxx == 0):
+            # Fit the power spectrum using FOOOF
+            fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
+                       min_peak_height=fooof_setup['min_peak_height'],
+                       max_n_peaks=fooof_setup['max_n_peaks'],
+                       aperiodic_mode='fixed',
+                       peak_width_limits=fooof_setup['peak_width_limits'])
+            try:
+                fm.fit(fxx[f1:f2], Pxx[f1:f2])
+            except:
+                print('Error fitting the power spectrum.')
+                return np.full(2, np.nan)
 
-        # Discard fits with negative exponents
-        if fm.aperiodic_params_[-1] <= 0.:
-            fm.r_squared_ = 0.
-        # Discard nan r_squared
-        if np.isnan(fm.r_squared_):
-            fm.r_squared_ = 0.
+            # Discard fits with negative exponents
+            if fm.aperiodic_params_[-1] <= 0.:
+                fm.r_squared_ = 0.
+            # Discard nan r_squared
+            if np.isnan(fm.r_squared_):
+                fm.r_squared_ = 0.
 
-        # Print parameters and plot the fit
-        if debug:
-            print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
-            print('fm.peak_params_ = ', fm.peak_params_)
-            print('fm.r_squared_ = ', fm.r_squared_)
+            # Print parameters and plot the fit
+            if debug:
+                print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
+                print('fm.peak_params_ = ', fm.peak_params_)
+                print('fm.r_squared_ = ', fm.r_squared_)
 
-            fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
+                fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
 
-            plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
-                     f'peak_params = {fm.peak_params_}\n'
-                     f'r_squared = {fm.r_squared_}', fontsize=12)
-            plt.show()
+                plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
+                         f'peak_params = {fm.peak_params_}\n'
+                         f'r_squared = {fm.r_squared_}', fontsize=12)
+                plt.show()
 
-        # Concatenate the aperiodic and peak parameters
-        if fm.peak_params_ is None:
-            features = fm.aperiodic_params_
+            # Concatenate the aperiodic and peak parameters
+            if fm.peak_params_ is None:
+                features = fm.aperiodic_params_
+            else:
+                features = np.concatenate((fm.aperiodic_params_, fm.peak_params_.flatten()))
+
+            if fm.r_squared_ < r_squared_th:
+                return np.full_like(features, np.nan)
+            else:
+                return features
         else:
-            features = np.concatenate((fm.aperiodic_params_, fm.peak_params_.flatten()))
-
-        if fm.r_squared_ < r_squared_th:
-            return np.full_like(features, np.nan)
-        else:
-            return features
+            return np.full(2, np.nan)
     else:
         return np.full(2, np.nan)
 
