@@ -124,6 +124,10 @@ class Inference:
         features = np.stack(features)
         parameters = np.stack(parameters)
 
+        # Reshape features if your data has a single feature
+        if features.ndim == 1:
+            features = features.reshape(-1, 1)
+
         # Add features and parameters to training data
         self.features = features
         self.theta = parameters

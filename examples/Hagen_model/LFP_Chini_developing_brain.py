@@ -46,6 +46,7 @@ def load_simulation_data(file_path):
                 print(f'Shape of {key}: {data[key].shape}')
             else:
                 print(f'{key}: {data[key]}')
+
     # Check if the data is a ndarray and print its shape
     elif isinstance(data, np.ndarray):
         print(f'Shape of data: {data.shape}')
@@ -116,10 +117,11 @@ def compute_features(data, chunk_size=5., method='catch22', params=None):
     group = []
     for i in range(len(data['LFP'])):
         for e,j in enumerate(range(0, len(data['LFP'][i]), chunk_size)):
-            chunked_data.append(data['LFP'][i][j:j+chunk_size])
-            ID.append(i)
-            epoch.append(e)
-            group.append(data['age'][i])
+            if len(data['LFP'][i][j:j+chunk_size]) == chunk_size:
+                chunked_data.append(data['LFP'][i][j:j+chunk_size])
+                ID.append(i)
+                epoch.append(e)
+                group.append(data['age'][i])
 
     # Create the Pandas DataFrame
     df = pd.DataFrame({'ID': ID,
@@ -209,7 +211,7 @@ if __name__ == "__main__":
                                'peak_width_limits': (10., 50.)}
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='power_spectrum_parameterization',
-                                        params={'fs': emp_data.fs,
+                                        params={'fs': emp_data['fs'][0],
                                                 'fmin': 5.,
                                                 'fmax': 50.,
                                                 'fooof_setup': fooof_setup_emp,
@@ -219,7 +221,7 @@ if __name__ == "__main__":
         elif method == 'fEI':
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='fEI',
-                                        params={'fs': emp_data.fs,
+                                        params={'fs': emp_data['fs'][0],
                                                 'fmin': 8.,
                                                 'fmax': 12.,
                                                 'fEI_folder': '../../../ccpi/Matlab'})
@@ -231,12 +233,12 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
         model = 'MLPRegressor'
-        hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
-                       {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
-                       {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
-                       {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
-                       {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True},
-                       {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5,'verbose': True}]
+        hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5}]
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
         inference.train(param_grid=hyperparams,n_splits=5, n_repeats=2)

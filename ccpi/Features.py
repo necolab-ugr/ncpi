@@ -102,49 +102,59 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
     # from fooof import FOOOF
     FOOOF = getattr(module('fooof'), 'FOOOF')
 
-    # Estimate power spectral density using Welch’s method
-    fxx, Pxx = welch(sample, fs)
-    f1 = np.where(fxx >= fmin)[0][0]
-    f2 = np.where(fxx >= fmax)[0][0]
+    # Check that the length of the sample is at least 2 seconds
+    if len(sample) >= 2 * fs:
+        # Estimate power spectral density using Welch’s method
+        fxx, Pxx = welch(sample, fs, nperseg=int(fs))
 
-    # Fit the power spectrum using FOOOF
-    fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
-               min_peak_height=fooof_setup['min_peak_height'],
-               max_n_peaks=fooof_setup['max_n_peaks'],
-               aperiodic_mode='fixed',
-               peak_width_limits=fooof_setup['peak_width_limits'])
-    fm.fit(fxx[f1:f2], Pxx[f1:f2])
+        if fmin >= fxx[0] and fmax <= fxx[-1]:
+            f1 = np.where(fxx >= fmin)[0][0]
+            f2 = np.where(fxx >= fmax)[0][0]
+        else:
+            print('Warning: fmin and fmax are out of the frequency range of the power spectrum.')
+            f1 = fxx[0]
+            f2 = fxx[-1]
 
-    # Discard fits with negative exponents
-    if fm.aperiodic_params_[-1] <= 0.:
-        fm.r_squared_ = 0.
-    # Discard nan r_squared
-    if np.isnan(fm.r_squared_):
-        fm.r_squared_ = 0.
+        # Fit the power spectrum using FOOOF
+        fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
+                   min_peak_height=fooof_setup['min_peak_height'],
+                   max_n_peaks=fooof_setup['max_n_peaks'],
+                   aperiodic_mode='fixed',
+                   peak_width_limits=fooof_setup['peak_width_limits'])
+        fm.fit(fxx[f1:f2], Pxx[f1:f2])
 
-    # Print parameters and plot the fit
-    if debug:
-        print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
-        print('fm.peak_params_ = ', fm.peak_params_)
-        print('fm.r_squared_ = ', fm.r_squared_)
+        # Discard fits with negative exponents
+        if fm.aperiodic_params_[-1] <= 0.:
+            fm.r_squared_ = 0.
+        # Discard nan r_squared
+        if np.isnan(fm.r_squared_):
+            fm.r_squared_ = 0.
 
-        fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
+        # Print parameters and plot the fit
+        if debug:
+            print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
+            print('fm.peak_params_ = ', fm.peak_params_)
+            print('fm.r_squared_ = ', fm.r_squared_)
 
-        plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
-                 f'peak_params = {fm.peak_params_}\n'
-                 f'r_squared = {fm.r_squared_}', fontsize=12)
-        plt.show()
+            fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
 
-    # Concatenate the aperiodic and peak parameters
-    if fm.peak_params_ is None:
-        features = fm.aperiodic_params_
+            plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
+                     f'peak_params = {fm.peak_params_}\n'
+                     f'r_squared = {fm.r_squared_}', fontsize=12)
+            plt.show()
+
+        # Concatenate the aperiodic and peak parameters
+        if fm.peak_params_ is None:
+            features = fm.aperiodic_params_
+        else:
+            features = np.concatenate((fm.aperiodic_params_, fm.peak_params_.flatten()))
+
+        if fm.r_squared_ < r_squared_th:
+            return np.full_like(features, np.nan)
+        else:
+            return features
     else:
-        features = np.concatenate((fm.aperiodic_params_, fm.peak_params_.flatten()))
-
-    if fm.r_squared_ < r_squared_th:
-        return np.full_like(features, np.nan)
-    else:
-        return features
+        return np.full(2, np.nan)
 
 def bandpass(sample, fmin, fmax, fs):
     """
