@@ -224,7 +224,7 @@ if __name__ == "__main__":
                                         params={'fs': emp_data['fs'][0],
                                                 'fmin': 8.,
                                                 'fmax': 12.,
-                                                'fEI_folder': '../../../ccpi/Matlab'})
+                                                'fEI_folder': '../../ccpi/Matlab'})
 
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
