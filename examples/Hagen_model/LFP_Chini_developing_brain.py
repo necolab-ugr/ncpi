@@ -223,9 +223,8 @@ if __name__ == "__main__":
                                         method='fEI',
                                         params={'fs': emp_data['fs'][0],
                                                 'fmin': 8.,
-                                                'fmax': 12.,
+                                                'fmax': 30.,
                                                 'fEI_folder': '../../ccpi/Matlab'})
-
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
 
@@ -242,6 +241,23 @@ if __name__ == "__main__":
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
         inference.train(param_grid=hyperparams,n_splits=5, n_repeats=2)
+
+        # Create folder to save results
+        if not os.path.exists('data'):
+            os.makedirs('data')
+        if not os.path.exists(os.path.join('data', method)):
+            os.makedirs(os.path.join('data', method))
+
+        # Save the best model and the StandardScaler
+        pickle.dump(pickle.load(open('data/model.pkl','rb')),
+                    open(os.path.join('data', method,'model'),'wb'))
+        pickle.dump(pickle.load(open('data/scaler.pkl','rb')),
+                    open(os.path.join('data', method,'scaler'),'wb'))
+        # Save density estimator
+        if model == 'SNPE':
+            pickle.dump(pickle.load(open('data/density_estimator.pkl', 'rb')),
+                        open(os.path.join('data', method, 'density_estimator'), 'wb'))
+
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
 
@@ -253,10 +269,6 @@ if __name__ == "__main__":
         print(f'Done in {(end_time - start_time)/60.} min')
 
         # Save the data including predictions of all parameters
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        if not os.path.exists(os.path.join('data', method)):
-            os.makedirs(os.path.join('data', method))
         emp_data.to_pickle(os.path.join('data', method, 'emp_data_all.pkl'))
 
         # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net

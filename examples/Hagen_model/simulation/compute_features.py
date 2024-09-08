@@ -70,7 +70,7 @@ if __name__ == '__main__':
                         features = ccpi.Features(method='fEI',
                                                  params={'fs': df.fs,
                                                          'fmin': 8.,
-                                                         'fmax': 12.,
+                                                         'fmax': 30.,
                                                          'fEI_folder': '../../../ccpi/Matlab'})
 
                     df = features.compute_features(df)
