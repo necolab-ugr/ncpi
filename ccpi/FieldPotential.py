@@ -147,7 +147,7 @@ class FieldPotential:
 
                 # make kernel predictions
                 self.H_YX['{}:{}'.format(Y, X)] = kernel.get_kernel(
-                    probes=[gauss_cyl_potential, current_dipole_moment],
+                    probes=probes,
                     Vrest=Vrest, dt=dt, X=X, t_X=t_X, tau=params.tau,
                     g_eff=params.MC_params['g_eff'],
                 )
