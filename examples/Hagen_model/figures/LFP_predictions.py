@@ -40,7 +40,7 @@ def cohen_d(x, y):
 compute_firing_rate = True
 
 # Number of samples to draw from the predictions for computing the firing rates
-n_samples = 1
+n_samples = 10
 sim_params = {}
 firing_rates = {}
 
@@ -139,7 +139,7 @@ for method in ['catch22','power_spectrum_parameterization', 'fEI']:
                 transient = KernelParams.transient
 
                 # Mean firing rate of excitatory cells
-                rate = (times['E'].size / (tstop - transient)) * 1000
+                rate = ((times['E'].size / (tstop - transient)) * 1000) / LIF_params['N_X'][0]
                 firing_rates[method][i, sample] = rate
 
 
