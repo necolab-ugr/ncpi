@@ -278,7 +278,7 @@ ax.set_ylabel('Normalized power')
 # Compute features and predictions
 pred_data = [{} for trial in range(trials)]
 for trial in range(trials):
-    for method in ['catch22', 'power_spectrum_parameterization', 'power_spectrum_parameterization']:
+    for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
         print(f'Computing features and predictions for {method} and trial {trial+1}/{trials}')
         # Create a Pandas DataFrame for computing features
         df = pd.DataFrame({'ID': np.arange(3),
@@ -345,7 +345,7 @@ for row in range(2):
     for col in range(2):
         ax = fig.add_axes([0.45 + col * 0.2, 0.1 + row * 0.15, 0.15, 0.1])
 
-        for i,method in enumerate(['catch22', 'power_spectrum_parameterization','power_spectrum_parameterization']):
+        for i,method in enumerate(['catch22', 'power_spectrum_parameterization','fEI']):
             predictions = np.array([pred_data[trial][method]['Predictions'].tolist() for trial in range(trials)])
             if row == 1 and col == 0:
                 preds = (predictions[:,:,0] / predictions[:,:,2]) / (predictions[:,:,1] / predictions[:,:,3])
@@ -378,7 +378,7 @@ for row in range(2):
 ax = fig.add_axes([0.82, 0.2, 0.15, 0.15])
 ax.axis('off')
 labels = [r'$catch22$',r'$1/f$'+' '+r'$slope$',r'$fE/I$']
-for i,method in enumerate(['catch22', 'power_spectrum_parameterization','power_spectrum_parameterization']):
+for i,method in enumerate(['catch22', 'power_spectrum_parameterization','fEI']):
     ax.plot([0], [0], color=colors[i], label=labels[i])
 ax.legend(loc='upper left', fontsize=8, labelspacing=0.2)
 
