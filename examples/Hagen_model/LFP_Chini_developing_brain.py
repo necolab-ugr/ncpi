@@ -205,7 +205,7 @@ if __name__ == "__main__":
             emp_data = compute_features(emp_data, chunk_size=chunk_size, method='catch22')
         elif method == 'power_spectrum_parameterization':
             # Parameters of the fooof algorithm
-            fooof_setup_emp = {'peak_threshold': 1.,
+            fooof_setup_emp = {'peak_threshold': 2.,
                                'min_peak_height': 0.,
                                'max_n_peaks': 2,
                                'peak_width_limits': (10., 50.)}
@@ -213,7 +213,7 @@ if __name__ == "__main__":
                                         method='power_spectrum_parameterization',
                                         params={'fs': emp_data['fs'][0],
                                                 'fmin': 5.,
-                                                'fmax': 50.,
+                                                'fmax': 49.,
                                                 'fooof_setup': fooof_setup_emp,
                                                 'r_squared_th':0.8})
             # Keep only the aperiodic exponent
@@ -222,8 +222,8 @@ if __name__ == "__main__":
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='fEI',
                                         params={'fs': emp_data['fs'][0],
-                                                'fmin': 8.,
-                                                'fmax': 30.,
+                                                'fmin': 30.,
+                                                'fmax': 49.,
                                                 'fEI_folder': '../../ccpi/Matlab'})
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
@@ -231,16 +231,21 @@ if __name__ == "__main__":
         # Create the Inference object, add the simulation data and train the model
         print('\n--- Training the regression model.')
         start_time = time.time()
+
         model = 'MLPRegressor'
-        hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-2, 'n_iter_no_change': 5}]
+        hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+                       {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+                       {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+                       {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+                       {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+                       {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4}]
+
+        # model = 'Ridge'
+        # hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
+
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
-        inference.train(param_grid=hyperparams,n_splits=5, n_repeats=2)
+        inference.train(param_grid=hyperparams,n_splits=10, n_repeats=5)
 
         # Create folder to save results
         if not os.path.exists('data'):

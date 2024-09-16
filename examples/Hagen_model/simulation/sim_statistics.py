@@ -47,19 +47,17 @@ def load_simulation_data(file_path):
 
 if __name__ == "__main__":
     # Load the configuration file that stores all file paths used in the script
-    with open('config.json', 'r') as config_file:
+    with open('../config.json', 'r') as config_file:
         config = json.load(config_file)
     sim_file_path = config['simulation_features_path']
-    emp_data_path = config['LFP_development_data_path']
 
-    # Iterate over the methods used to compute the features
-    for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+    # Analyze parameters of the simulation data
+    for method in ['catch22']:
         print(f'\n\n--- Method: {method}')
-        # Load parameters of the model (theta) and features from simulation data (X)
+        # Load parameters of the model (theta)
         print('\n--- Loading simulation data.')
         start_time = time.time()
         theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
-        X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
         end_time = time.time()
         print(f'Samples loaded: {len(theta["data"])}')
         print(f'Done in {(end_time - start_time)/60.} min')
@@ -69,6 +67,7 @@ if __name__ == "__main__":
         plt.rc('font', size=8)
         plt.rc('font', family='Arial')
 
+        # 1D histograms
         for param in range(7):
             print(f'Parameter {theta["parameters"][param]}')
             plt.subplot(2,4,param+1)
@@ -82,7 +81,7 @@ if __name__ == "__main__":
         plt.rc('font', size=8)
         plt.rc('font', family='Arial')
 
-        # Iterate over pairs of columns in theta['data']
+        # 2D histograms
         for i in range(7):
             for j in range(i + 1, 7):
                 print(f'Parameter {theta["parameters"][i]} vs Parameter {theta["parameters"][j]}')

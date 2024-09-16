@@ -44,17 +44,28 @@ n_samples = 10
 sim_params = {}
 firing_rates = {}
 
+# Methods to plot
+all_methods = ['catch22','power_spectrum_parameterization', 'fEI']
+# all_methods = ['catch22_subset','power_spectrum_parameterization', 'fEI']
+# all_methods = ['dfa', 'rs_range', 'high_fluct']
+
 # Load data
 predictions_EI = {}
 predictions_all = {}
 ages = {}
-for method in ['catch22','power_spectrum_parameterization', 'fEI']:
+for method in all_methods:
     try:
         data_EI = np.load(os.path.join('../data',method,'emp_data_reduced.pkl'), allow_pickle=True)
         data_all = np.load(os.path.join('../data',method,'emp_data_all.pkl'), allow_pickle=True)
         predictions_EI[method] = np.array(data_EI['Predictions'].tolist())
         predictions_all[method] = np.array(data_all['Predictions'].tolist())
         ages[method] = np.array(data_EI['Group'].tolist())
+
+        # Pick only ages >= 4
+        predictions_EI[method] = predictions_EI[method][ages[method] >= 4, :]
+        predictions_all[method] = predictions_all[method][ages[method] >= 4, :]
+        ages[method] = ages[method][ages[method] >= 4]
+
     except:
         predictions_EI[method] = []
         predictions_all[method] = []
@@ -95,7 +106,7 @@ for method in ['catch22','power_spectrum_parameterization', 'fEI']:
     for i, age in enumerate(np.unique(ages[method])):
         for sample in range(n_samples):
             if compute_firing_rate:
-                print(f'Computing firing rate for {method} at age {age} and sample {sample}')
+                print(f'\nComputing firing rate for {method} at age {age} and sample {sample}')
                 # Parameters of the model
                 J_EE = sim_params[method][0, i, sample]
                 J_IE = sim_params[method][1, i, sample]
@@ -139,6 +150,7 @@ for method in ['catch22','power_spectrum_parameterization', 'fEI']:
                 transient = KernelParams.transient
 
                 # Mean firing rate of excitatory cells
+                times['E'] = times['E'][times['E'] >= transient]
                 rate = ((times['E'].size / (tstop - transient)) * 1000) / LIF_params['N_X'][0]
                 firing_rates[method][i, sample] = rate
 
@@ -161,11 +173,11 @@ for row in range(3):
     for col in range(5):
         ax = fig.add_axes([0.08 + col * 0.19, 0.68 - row * 0.29, 0.14, 0.24])
         if row == 0:
-            method = 'catch22'
+            method = all_methods[0]
         elif row == 1:
-            method = 'power_spectrum_parameterization'
+            method = all_methods[1]
         else:
-            method = 'fEI'
+            method = all_methods[2]
 
         # Plot parameter predictions and firing rates as a function of age
         try:
@@ -242,10 +254,10 @@ for row in range(3):
                             f'                                     d = {d:.2f}', ha='center',
                             va='center', color='black', fontsize=3)
 
-                    # Plot confidence interval
-                    ax.text((group1 + group2) / 3, y_max + (y_max-y_min) * 0.015,
-                            f'CI = {upper-lower:.5f}',
-                            ha='center', va='center', color='black', fontsize=3)
+                    # # Plot confidence interval
+                    # ax.text((group1 + group2) / 3, y_max + (y_max-y_min) * 0.015,
+                    #         f'CI = {upper-lower:.5f}',
+                    #         ha='center', va='center', color='black', fontsize=3)
 
         except:
             pass
@@ -265,13 +277,21 @@ for row in range(3):
 
         # Y-axis labels
         if col == 0:
-            if row == 0:
+            if method == 'catch22':
                 ax.set_ylabel(r'$catch22$')
-            elif row == 1:
+            elif method == 'catch22_subset':
+                ax.set_ylabel(r'$catch22$ (subset)')
+            elif method == 'dfa':
+                ax.set_ylabel(r'dfa')
+            elif method == 'rs_range':
+                ax.set_ylabel(r'$rs\_range$')
+            elif method == 'high_fluct':
+                ax.set_ylabel(r'$high\_fluct$')
+            elif method == 'power_spectrum_parameterization':
                 ax.set_ylabel(r'$1/f$'+' '+r'$slope$')
-            else:
+            elif method == 'fEI':
                 ax.set_ylabel(r'$fE/I$')
 
 # Save the figure
-# plt.savefig('LFP_predictions.png', bbox_inches='tight')
-plt.show()
+plt.savefig('LFP_predictions.png', bbox_inches='tight')
+# plt.show()
