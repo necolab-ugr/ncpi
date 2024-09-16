@@ -1,4 +1,5 @@
 import importlib
+import signal as sgnl
 import subprocess
 import pandas as pd
 import os
@@ -105,7 +106,7 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
     # Check that the length of the sample is at least 2 seconds
     if len(sample) >= 2 * fs:
         # Estimate power spectral density using Welch’s method
-        fxx, Pxx = welch(sample, fs, nperseg=int(fs))
+        fxx, Pxx = welch(sample, fs, nperseg=int(0.2*fs))
 
         if fmin >= fxx[0] and fmax <= fxx[-1]:
             f1 = np.where(fxx >= fmin)[0][0]
@@ -224,38 +225,84 @@ def fEI(samples,fs,fmin,fmax,fEI_folder):
         sample_alpha = bandpass(sample, fmin, fmax, fs)
         # Compute the amplitude envelope using the Hilbert transform
         amplitude_envelope = np.abs(hilbert(sample_alpha))
-        envelopes.append(amplitude_envelope)
+        envelopes.append(list(amplitude_envelope))
 
     # Start the matlab engine
     matlab_engine = module('matlab.engine')
-    eng = matlab_engine.start_matlab()
+    try:
+        eng = matlab_engine.start_matlab()
 
-    # Import matlab
-    matlab = module('matlab')
+        # # Start a parallel pool with the number of available physical cores
+        # num_cpus = os.cpu_count()/2
+        # eng.parpool(num_cpus)
 
-    # Add the folder containing the fEI function to the Matlab path
-    eng.addpath(fEI_folder)
+        # Import matlab
+        matlab = module('matlab')
 
-    features = []
-    for i, envelope in enumerate(envelopes):
-        # Compute fEI
-        eng.workspace['aux'] = matlab.double(list(envelope))
-        eng.eval(f'signal = zeros({len(envelope)},1);', nargout=0)
-        eng.eval(f'signal(:,1) = aux;', nargout=0)
-        eng.eval(f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelope) / 10)},0.8);',
-                 nargout=0)
-        fEI = eng.workspace['EI']
-        features.append(fEI)
+        # Add the folder containing the fEI function to the Matlab path
+        eng.addpath(fEI_folder)
 
-        # Plot the amplitude envelope over the original signal
-        if debug:
-            plt.figure()
-            plt.plot(bandpass(samples[i], fmin, fmax, fs))
-            plt.plot(envelope)
-            plt.title(f'fEI = {fEI}')
-            plt.show()
+        features = []
+        for i, envelope in enumerate(envelopes):
+            # Compute fEI
+            try:
+                eng.workspace['aux'] = matlab.double(envelope)
+                eng.eval(f'signal = zeros({len(envelope)},1);', nargout=0)
+                eng.eval(f'signal(:,1) = aux;', nargout=0)
+                eng.eval(f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelope) / 10)},0.8);',
+                         nargout=0)
+                fEI = eng.workspace['EI']
+            except:
+                fEI = np.nan
+            features.append(fEI)
+
+            # Plot the amplitude envelope over the original signal
+            if debug:
+                plt.figure()
+                plt.plot(bandpass(samples[i], fmin, fmax, fs))
+                plt.plot(envelope)
+                plt.title(f'fEI = {fEI}')
+                plt.show()
+
+    finally:
+        # Stop the MATLAB engine
+        eng.quit()
+        # Delete the engine object
+        del eng
 
     return features
+
+
+    #     # Compute fEI for each sample
+    #     eng.workspace['envelopes'] = matlab.double(envelopes)
+    #     eng.eval(f'all_EI = zeros({len(envelopes)},1);', nargout=0)
+    #     eng.eval(f'for i = 1:{len(envelopes)}; '
+    #              f'aux = envelopes(i,:); '
+    #              f'signal = aux\'; '
+    #              f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelopes[0]) / 10)},0.8); '
+    #              f'all_EI(i) = EI; end', nargout=0)
+    #     all_EI = np.array(eng.workspace['all_EI'])
+    #     features = [all_EI[i][0] for i in range(len(all_EI))]
+    #
+    #     # Plot the amplitude envelope over the original signal
+    #     if debug:
+    #         for i, envelope in enumerate(envelopes):
+    #             plt.figure()
+    #             plt.plot(bandpass(samples[i], fmin, fmax, fs))
+    #             plt.plot(envelope)
+    #             plt.title(f'fEI = {features[i]}')
+    #             plt.show()
+    #
+    #     # Stop the MATLAB engine
+    #     eng.quit()
+    #     # Delete the engine object
+    #     del eng
+    #
+    # except:
+    #     print('Error computing fEI.')
+    #     features = [np.nan for _ in range(len(samples))]
+    #
+    # return features
 
 
 class Features:
@@ -351,12 +398,12 @@ class Features:
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
-        # We need to increase the batch size for fEI because each Matlab engine consumes a lot of memory
         if self.method == 'fEI':
-            factor = 1
+            factor = 0.5
         else:
-            factor = 10
-        batch_size = len(data['Data']) // (num_cpus*factor) # 10 is a factor to update the progress bar more frequently
+            factor = 10 # 10 is a factor to update the progress bar more frequently
+
+        batch_size = len(data['Data']) // int(num_cpus*factor)
         if batch_size == 0:
             batch_size = 1
         batches = [(i, data['Data'][i:i + batch_size]) for i in range(0, len(data['Data']), batch_size)]

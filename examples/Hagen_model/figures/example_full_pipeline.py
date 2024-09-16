@@ -42,10 +42,10 @@ def get_spike_rate(times, transient, dt, tstop):
     return bins, hist.astype(float)
 
 # Debug
-compute_new_sim = True
+compute_new_sim = False
 
-# Number of repetitions of the each simulation
-trials = 5
+# Number of repetitions of each simulation
+trials = 2
 
 # Configurations of parameters to simulate
 # best_fit = [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 29.89]
@@ -125,6 +125,9 @@ for trial in range(trials):
             # Transient period
             from analysis_params import KernelParams
             transient = KernelParams.transient
+            for X in P_X:
+                gids[X] = gids[X][times[X] >= transient]
+                times[X] = times[X][times[X] >= transient]
 
             # Compute the kernel
             print('Computing the kernel...')
@@ -188,8 +191,8 @@ for col in range(3):
     for i,X in enumerate(P_X):
         t = spikes[0][col][0][X] # pick the first trial
         gi = spikes[0][col][1][X]
-        gi = gi[t >= transient]
-        t = t[t >= transient]
+        # gi = gi[t >= transient]
+        # t = t[t >= transient]
 
         # Spikes
         ii = (t >= T[0]) & (t <= T[1])
@@ -275,110 +278,148 @@ ax.legend(loc='lower left', fontsize=8, labelspacing=0.2)
 ax.set_xlabel('Frequency (Hz)')
 ax.set_ylabel('Normalized power')
 
-# Compute features and predictions
-pred_data = [{} for trial in range(trials)]
+# Collect the CDMs
+all_CDMs = []
+IDs = []
+epochs = []
 for trial in range(trials):
-    for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
-        print(f'Computing features and predictions for {method} and trial {trial+1}/{trials}')
-        # Create a Pandas DataFrame for computing features
-        df = pd.DataFrame({'ID': np.arange(3),
-                           'Group': np.arange(3),
-                           'Epoch': np.zeros(3),
-                           'Sensor': np.zeros(3),  # dummy sensor
-                           'Data': [CDMs[trial][col]['EE'] + CDMs[trial][col]['EI'] +
-                                    CDMs[trial][col]['IE'] + CDMs[trial][col]['II'] for col in range(3)]})
-        df.Recording = 'LFP'
-        df.fs = 1000. / (10. * dt)
+    for k,params in enumerate(confs):
+        all_CDMs.append(CDMs[trial][k]['EE'] + CDMs[trial][k]['EI'] + CDMs[trial][k]['IE'] + CDMs[trial][k]['II'])
+        IDs.append(k)
+        epochs.append(trial)
 
-        # Create a Features object
-        if method == 'catch22':
-            features = ccpi.Features(method=method)
-        elif method == 'power_spectrum_parameterization':
-            # Parameters of the fooof algorithm
-            fooof_setup_sim = {'peak_threshold': 1.,
-                               'min_peak_height': 0.,
-                               'max_n_peaks': 2,
-                               'peak_width_limits': (10., 50.)}
-            features = ccpi.Features(method='power_spectrum_parameterization',
-                                     params={'fs': df.fs,
-                                             'fmin': 5.,
-                                             'fmax': 200.,
-                                             'fooof_setup': fooof_setup_sim,
-                                             'r_squared_th': 0.9})
-        elif method == 'fEI':
-            features = ccpi.Features(method='fEI',
-                                     params={'fs': df.fs,
-                                             'fmin': 8.,
-                                             'fmax': 30.,
-                                             'fEI_folder': '../../../ccpi/Matlab'})
-        # Compute features
+# Compute features and predictions
+predictions = {}
+all_methods = ['catch22', 'catch22_subset', 'dfa', 'rs_range', 'high_fluct', 'power_spectrum_parameterization','fEI']
+for method in all_methods:
+    print(f'\n\n--- Method: {method}')
+
+    # Create a fake Pandas DataFrame (only Data and fs are relevant)
+    df = pd.DataFrame({'ID': IDs,
+                       'Group': IDs,
+                       'Epoch': epochs,
+                       'Sensor': np.zeros(len(IDs)),  # dummy sensor
+                       'Data': all_CDMs})
+    df.Recording = 'LFP'
+    df.fs = 1000. / (10. * dt)
+
+    # Features
+    if method == 'catch22' or method == 'catch22_subset' or method ==  'dfa' or method == 'rs_range' or method == 'high_fluct':
+        features = ccpi.Features(method='catch22')
+    elif method == 'power_spectrum_parameterization':
+        # Parameters of the fooof algorithm
+        fooof_setup_sim = {'peak_threshold': 2.,
+                           'min_peak_height': 0.,
+                           'max_n_peaks': 2,
+                           'peak_width_limits': (10., 50.)}
+        features = ccpi.Features(method='power_spectrum_parameterization',
+                                 params={'fs': df.fs,
+                                         'fmin': 5.,
+                                         'fmax': 150.,
+                                         'fooof_setup': fooof_setup_sim,
+                                         'r_squared_th': 0.8})
+    elif method == 'fEI':
+        features = ccpi.Features(method='fEI',
+                                 params={'fs': df.fs,
+                                         'fmin': 30.,
+                                         'fmax': 150.,
+                                         'fEI_folder': '../../../ccpi/Matlab'})
+
+    try:
         df = features.compute_features(df)
+    except:
+        print(f'Error computing features for {method}.')
+        df['Features'] = np.ones((len(df), 22 if method == 'catch22' else 1))
 
-        # Keep only the aperiodic exponent
-        if method == 'power_spectrum_parameterization':
-            df['Features'] = df['Features'].apply(lambda x: x[1])
+    # Subsets of catch22 features
+    if method == 'catch22_subset':
+        df['Features'] = [[df['Features'].apply(lambda x: x[i])[_] for i in [6,18,19]] for _ in range(len(df))]
+    if method == 'dfa':
+        df['Features'] = df['Features'].apply(lambda x: x[19])
+    if method == 'rs_range':
+        df['Features'] = df['Features'].apply(lambda x: x[18])
+    if method == 'high_fluct':
+        df['Features'] = df['Features'].apply(lambda x: x[6])
 
-        # Transfer prediction model and scaler to the data folder
-        pickle.dump(pickle.load(open(os.path.join('../data', method, 'model'), 'rb')),
-                    open('data/model.pkl', 'wb'))
-        pickle.dump(pickle.load(open(os.path.join('../data', method, 'scaler'), 'rb')),
-                    open('data/scaler.pkl', 'wb'))
+    # Keep only the aperiodic exponent
+    if method == 'power_spectrum_parameterization':
+        df['Features'] = df['Features'].apply(lambda x: x[1])
 
-        # Create the Inference object
-        model = 'MLPRegressor'
+    # Load the regression model and scaler
+    try:
+        model = pickle.load(open(os.path.join('../data', method,'model'),'rb'))
+        scaler = pickle.load(open(os.path.join('../data', method,'scaler'),'rb'))
+
+        # Transfer model and scaler to the data directory
+        if not os.path.exists('data'):
+            os.makedirs('data')
+        with open('data/model.pkl', 'wb') as file:
+            pickle.dump(model, file)
+        with open('data/scaler.pkl', 'wb') as file:
+            pickle.dump(scaler, file)
+
+        # Compute predictions
+        model = 'Ridge'
         inference = ccpi.Inference(model=model)
-
-        # Predict the parameters from the features of the empirical data
-        predictions = inference.predict(np.array(df['Features'].tolist()))
-
-        # Append the predictions to the DataFrame
-        pd_preds = pd.DataFrame({'Predictions': predictions})
-        df = pd.concat([df, pd_preds], axis=1)
-
-        # Append the predictions to the list
-        pred_data[trial][method] = df
+        predictions[method] = np.array(inference.predict(np.array(df['Features'].tolist())))
+    except:
+        print(f'Error loading model and scaler for {method}.')
+        predictions[method] = np.ones((len(df),7))
 
 # Plot predictions
-confs = np.array(confs)
-colors = ['powderblue', 'salmon', 'blueviolet']
+colors = ['powderblue', 'salmon', 'blueviolet', 'limegreen', 'gold', 'darkorange', 'orchid']
 for row in range(2):
     for col in range(2):
-        ax = fig.add_axes([0.45 + col * 0.2, 0.1 + row * 0.15, 0.15, 0.1])
+        ax = fig.add_axes([0.45 + col * 0.2, 0.09 + row * 0.15, 0.15, 0.1])
 
-        for i,method in enumerate(['catch22', 'power_spectrum_parameterization','fEI']):
-            predictions = np.array([pred_data[trial][method]['Predictions'].tolist() for trial in range(trials)])
-            if row == 1 and col == 0:
-                preds = (predictions[:,:,0] / predictions[:,:,2]) / (predictions[:,:,1] / predictions[:,:,3])
-                ax.set_title(r'$E/I$')
-            elif row == 1 and col == 1:
-                preds = predictions[:,:,4]
-                ax.set_title(r'$\tau_{syn}^{exc}$ (ms)')
-            elif row == 0 and col == 0:
-                preds = predictions[:,:,5]
+        for method in all_methods:
+            if row == 0 and col == 0:
+                preds = predictions[method][:,5]
                 ax.set_title(r'$\tau_{syn}^{inh}$ (ms)')
             elif row == 0 and col == 1:
-                preds = predictions[:,:,6]
+                preds = predictions[method][:,6]
                 ax.set_title(r'$J_{syn}^{ext}$ (nA)')
-
-            # Plot predicted values
-            ax.plot(np.mean(preds, axis = 0), color=colors[i])
-            # Plot standard deviation
-            ax.fill_between(np.arange(3), np.mean(preds, axis = 0) - np.std(preds, axis = 0),
-                            np.mean(preds, axis = 0) + np.std(preds, axis = 0), color=colors[i], alpha=0.3)
-
-            if row == 0:
-                ax.set_xticks([0, 1, 2])
-                ax.set_xticklabels([r'$J_{syn}^{ext}$ = %s nA' % confs[ii][6] for ii in range(3)], rotation=25,
-                                   fontsize=8)
+            elif row == 1 and col == 0:
+                preds = ((predictions[method][:,0]/predictions[method][:,2]) /
+                         (predictions[method][:,1]/predictions[method][:,3]))
+                ax.set_title(r'$E/I$')
             else:
-                ax.set_xticks([])
-                ax.set_xticklabels([])
+                preds = predictions[method][:,4]
+                ax.set_title(r'$\tau_{syn}^{exc}$ (ms)')
+
+            preds_plot = np.zeros((trials,len(confs)))
+            for k, params in enumerate(confs):
+                ii = np.where(np.array(IDs) == k)[0]
+                preds_plot[:,k] = preds[ii]
+
+            # Plot mean predictions
+            ax.plot(np.mean(preds_plot,axis=0), color=colors[all_methods.index(method)])
+
+            # Plot standard deviation
+            ax.fill_between(range(len(confs)),
+                            np.mean(preds_plot,axis=0) - np.std(preds_plot,axis=0),
+                            np.mean(preds_plot,axis=0) + np.std(preds_plot,axis=0),
+                            color=colors[all_methods.index(method)], alpha=0.2)
+
+        # Labels
+        if row == 0:
+            ax.set_xticks(range(len(confs)))
+            ax.set_xticklabels([r'$J_{syn}^{ext}$ = %s nA' % confs[k][6] for k in range(len(confs))],
+                               rotation=20, fontsize=8)
+        else:
+            ax.set_xticks([])
 
 # Create a fake legend
-ax = fig.add_axes([0.82, 0.2, 0.15, 0.15])
+ax = fig.add_axes([0.8, 0.2, 0.15, 0.15])
 ax.axis('off')
-labels = [r'$catch22$',r'$1/f$'+' '+r'$slope$',r'$fE/I$']
-for i,method in enumerate(['catch22', 'power_spectrum_parameterization','fEI']):
+labels = [r'$catch22$ (all)',
+          r'$catch22$ (subset)',
+          r'dfa',
+          r'$rs\_range$',
+          r'$high\_fluct$',
+          r'$1/f$'+' '+r'$slope$',
+          r'$fE/I$']
+for i,method in enumerate(all_methods):
     ax.plot([0], [0], color=colors[i], label=labels[i])
 ax.legend(loc='upper left', fontsize=8, labelspacing=0.2)
 
@@ -389,4 +430,6 @@ ax.text(0.01, 0.97, 'A', fontsize=12, fontweight='bold')
 ax.text(0.01, 0.37, 'B', fontsize=12, fontweight='bold')
 ax.text(0.4, 0.37, 'C', fontsize=12, fontweight='bold')
 
+# Save the figure
+# plt.savefig('example_full_pipeline.png', bbox_inches='tight')
 plt.show()

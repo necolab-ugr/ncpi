@@ -3,6 +3,8 @@ import sys
 import json
 import pickle
 import shutil
+from xml.sax.handler import all_features
+
 import numpy as np
 import pandas as pd
 
@@ -40,44 +42,60 @@ if __name__ == '__main__':
 
                 # CDM data
                 if file[:3] == 'CDM':
-                    CDM = pickle.load(open(os.path.join(sim_file_path,file),'rb'))
+                    CDM_data = pickle.load(open(os.path.join(sim_file_path,file),'rb'))
 
-                    # Create a fake Pandas DataFrame (only Data and fs are relevant)
-                    df = pd.DataFrame({'ID': np.zeros(len(CDM)),
-                                       'Group': np.arange(len(CDM)),
-                                       'Epoch': np.zeros(len(CDM)),
-                                       'Sensor': np.zeros(len(CDM)),
-                                       'Data': list(CDM)})
-                    df.Recording = 'CDM'
-                    df.fs = 1000. / 0.625 # samples/s
+                    if method == 'fEI':
+                        # Split the CDM data into 20 chunks
+                        all_CDM = np.array_split(CDM_data, 20)
+                        del CDM_data
+                    else:
+                        all_CDM = [CDM_data]
 
-                    # Compute features
-                    if method == 'catch22':
-                        features = ccpi.Features(method='catch22')
-                    elif method == 'power_spectrum_parameterization':
-                        # Parameters of the fooof algorithm
-                        fooof_setup_sim = {'peak_threshold': 1.,
-                                           'min_peak_height': 0.,
-                                           'max_n_peaks': 2,
-                                           'peak_width_limits': (10., 50.)}
-                        features = ccpi.Features(method='power_spectrum_parameterization',
-                                                 params={'fs': df.fs,
-                                                         'fmin': 5.,
-                                                         'fmax': 200.,
-                                                         'fooof_setup': fooof_setup_sim,
-                                                         'r_squared_th':0.9})
-                    elif method == 'fEI':
-                        features = ccpi.Features(method='fEI',
-                                                 params={'fs': df.fs,
-                                                         'fmin': 8.,
-                                                         'fmax': 30.,
-                                                         'fEI_folder': '../../../ccpi/Matlab'})
+                    all_features = []
+                    for i, CDM in enumerate(all_CDM):
+                        print(f'Chunk {i+1}/{len(all_CDM)}')
+                        # Create a fake Pandas DataFrame (only Data and fs are relevant)
+                        df = pd.DataFrame({'ID': np.zeros(len(CDM)),
+                                           'Group': np.arange(len(CDM)),
+                                           'Epoch': np.zeros(len(CDM)),
+                                           'Sensor': np.zeros(len(CDM)),
+                                           'Data': list(CDM)})
+                        df.Recording = 'CDM'
+                        df.fs = 1000. / 0.625 # samples/s
 
-                    df = features.compute_features(df)
+                        # Compute features
+                        if method == 'catch22':
+                            features = ccpi.Features(method='catch22')
+                        elif method == 'power_spectrum_parameterization':
+                            # Parameters of the fooof algorithm
+                            fooof_setup_sim = {'peak_threshold': 2.,
+                                               'min_peak_height': 0.,
+                                               'max_n_peaks': 2,
+                                               'peak_width_limits': (10., 50.)}
+                            features = ccpi.Features(method='power_spectrum_parameterization',
+                                                     params={'fs': df.fs,
+                                                             'fmin': 5.,
+                                                             'fmax': 150.,
+                                                             'fooof_setup': fooof_setup_sim,
+                                                             'r_squared_th':0.8})
+                        elif method == 'fEI':
+                            features = ccpi.Features(method='fEI',
+                                                     params={'fs': df.fs,
+                                                             'fmin': 30.,
+                                                             'fmax': 150.,
+                                                             'fEI_folder': '../../../ccpi/Matlab'})
 
-                    # Keep only the aperiodic exponent
-                    if method == 'power_spectrum_parameterization':
-                        df['Features'] = df['Features'].apply(lambda x: x[1])
+                        df = features.compute_features(df)
+
+                        # Keep only the aperiodic exponent
+                        if method == 'power_spectrum_parameterization':
+                            df['Features'] = df['Features'].apply(lambda x: x[1])
+
+                        # Append the feature dataframes to a list
+                        all_features.append(df)
+
+                    # Concatenate the dataframes
+                    df = pd.concat(all_features, ignore_index=True)
 
                     # Save the features to a file
                     pickle.dump(np.array(df['Features'].tolist()),
@@ -85,7 +103,10 @@ if __name__ == '__main__':
                                                   'sim_X_'+file.split('_')[-1]), 'wb'))
 
                     # clear memory
-                    del CDM, df, features
+                    if method == 'fEI':
+                        del all_CDM, df, all_features
+                    else:
+                        del all_CDM, CDM_data, df, all_features
 
                 # Theta data
                 elif file[:5] == 'theta':
@@ -102,13 +123,13 @@ if __name__ == '__main__':
             parameters = []
 
             ldir = os.listdir(os.path.join(features_path, method, 'tmp'))
-            for file in ldir:
-                data = pickle.load(open(os.path.join(features_path, method, 'tmp', file), 'rb'))
-                if file[:5] == 'sim_X':
-                    X.append(data)
-                elif file[:9] == 'sim_theta':
-                    theta.append(data['data'])
-                    parameters.append(data['parameters'])
+            num_files = len(ldir)/2
+            for ii in range(int(num_files)):
+                data_X = pickle.load(open(os.path.join(features_path, method, 'tmp','sim_X_'+str(ii)), 'rb'))
+                data_theta = pickle.load(open(os.path.join(features_path, method, 'tmp','sim_theta_'+str(ii)), 'rb'))
+                X.append(data_X)
+                theta.append(data_theta['data'])
+                parameters.append(data_theta['parameters'])
 
             # Save the features and parameters to files
             pickle.dump(np.concatenate(X), open(os.path.join(features_path, method, 'sim_X'), 'wb'))
