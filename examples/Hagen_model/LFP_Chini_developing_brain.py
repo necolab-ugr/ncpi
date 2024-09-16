@@ -173,16 +173,33 @@ if __name__ == "__main__":
     emp_data_path = config['LFP_development_data_path']
 
     # Iterate over the methods used to compute the features
-    for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+    all_methods = ['catch22', 'catch22_subset', 'dfa', 'rs_range', 'high_fluct', 'power_spectrum_parameterization',
+                   'fEI']
+    for method in all_methods:
         print(f'\n\n--- Method: {method}')
         # Load parameters of the model (theta) and features from simulation data (X)
         print('\n--- Loading simulation data.')
         start_time = time.time()
-        theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
-        X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
+        if (method == 'catch22' or method == 'catch22_subset' or method == 'dfa' or method == 'rs_range' or
+                method == 'high_fluct'):
+            folder = 'catch22'
+        else:
+            folder = method
+        theta = load_simulation_data(os.path.join(sim_file_path, folder, 'sim_theta'))
+        X = load_simulation_data(os.path.join(sim_file_path, folder, 'sim_X'))
         end_time = time.time()
         print(f'Samples loaded: {len(theta["data"])}')
         print(f'Done in {(end_time - start_time)/60.} min')
+
+        # Select features from the catch22 feature set
+        if method == 'catch22_subset':
+            X = X[:, [6, 18, 19]]
+        elif method == 'dfa':
+            X = X[:, 19]
+        elif method == 'rs_range':
+            X = X[:, 18]
+        elif method == 'high_fluct':
+            X = X[:, 6]
 
         # # Randomly subsample the simulation data
         # idx = np.random.choice(len(theta['data']), 10000, replace=False)
@@ -201,8 +218,21 @@ if __name__ == "__main__":
         print('\n--- Computing features from empirical data.')
         start_time = time.time()
         chunk_size = 5.
-        if method == 'catch22':
+        if (method == 'catch22' or method == 'catch22_subset' or method == 'dfa' or method == 'rs_range' or
+                method == 'high_fluct'):
             emp_data = compute_features(emp_data, chunk_size=chunk_size, method='catch22')
+
+            # Subsets of catch22 features
+            if method == 'catch22_subset':
+                emp_data['Features'] = [[emp_data['Features'].apply(lambda x: x[i])[_] for i in [6, 18, 19]] for _ in
+                                  range(len(emp_data))]
+            if method == 'dfa':
+                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[19])
+            if method == 'rs_range':
+                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[18])
+            if method == 'high_fluct':
+                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[6])
+
         elif method == 'power_spectrum_parameterization':
             # Parameters of the fooof algorithm
             fooof_setup_emp = {'peak_threshold': 2.,
@@ -232,16 +262,16 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
 
-        model = 'MLPRegressor'
-        hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-                       {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-                       {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-                       {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-                       {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-                       {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4}]
+        # model = 'MLPRegressor'
+        # hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+        #                {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+        #                {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+        #                {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+        #                {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
+        #                {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4}]
 
-        # model = 'Ridge'
-        # hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
+        model = 'Ridge'
+        hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
