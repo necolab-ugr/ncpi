@@ -224,8 +224,12 @@ if __name__ == "__main__":
 
             # Subsets of catch22 features
             if method == 'catch22_subset':
-                emp_data['Features'] = [[emp_data['Features'].apply(lambda x: x[i])[_] for i in [6, 18, 19]] for _ in
-                                  range(len(emp_data))]
+                new_features = []
+                for jj in range(len(emp_data)):
+                    # print(f'\r Arranging the catch22 subset. Progress: {jj+1} of {len(emp_data)}', end='', flush=True)
+                    new_features.append([emp_data['Features'][jj][i] for i in [6, 18, 19]])
+                emp_data['Features'] = new_features
+
             if method == 'dfa':
                 emp_data['Features'] = emp_data['Features'].apply(lambda x: x[19])
             if method == 'rs_range':
