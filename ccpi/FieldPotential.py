@@ -181,7 +181,7 @@ class FieldPotential:
 
     def compute_EEG(self, CDM, location=None):
         """
-        Compute EEG from the current dipole moment using the self.nyheadModel.
+        Compute EEG from the current dipole moment using the NYHeadModel.
 
         Parameters
         ----------
