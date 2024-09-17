@@ -60,12 +60,7 @@ if __name__ == '__main__':
                             for i, EEG in enumerate(EEGs):
                                 all_data[i].append(EEG)
                     else:
-                        if method == 'fEI':
-                            # Split the CDM data into 10 chunks
-                            all_data = np.array_split(CDM_data, 10)
-                            del CDM_data
-                        else:
-                            all_data = [CDM_data]
+                        all_data = [CDM_data]
 
                     all_features = []
                     for i, data_chunk in enumerate(all_data):
@@ -117,8 +112,7 @@ if __name__ == '__main__':
                                         open(os.path.join(features_path, method, 'tmp',
                                                           'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
                     else:
-                        # Concatenate the dataframes
-                        df = pd.concat(all_features, ignore_index=True)
+                        df = all_features[0]
 
                         # Save the features to a file
                         pickle.dump(np.array(df['Features'].tolist()),

@@ -399,9 +399,9 @@ class Features:
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
         if self.method == 'fEI':
-            factor = 0.5
+            factor = 0.1 # less chunks than available CPUs
         else:
-            factor = 10 # 10 is a factor to update the progress bar more frequently
+            factor = 10 # more chunks than available CPUs (10 is a factor to update the progress bar more frequently)
 
         batch_size = len(data['Data']) // int(num_cpus*factor)
         if batch_size == 0:
