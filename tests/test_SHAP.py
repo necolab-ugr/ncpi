@@ -6,7 +6,6 @@ import numpy as np
 import shap
 from matplotlib import pyplot as plt
 
-
 def load_simulation_data(file_path):
     """
     Load simulation data from a file.
@@ -110,19 +109,21 @@ if __name__ == '__main__':
     if type(model) is list:
         all_SHAP_values = {'JEE': [], 'JIE': [], 'JEI': [], 'JII': [], 'tau_exc': [], 'tau_inh': [], 'J_ext': []}
         for i,m in enumerate(model):
-            print(f'Model {i+1} of {len(model)}')
+            print(f'\nModel {i+1} of {len(model)}')
 
             # Explain the model's predictions using SHAP
             if reg == 'Ridge':
                 explainer = shap.Explainer(m, feats)
             elif reg == 'MLPRegressor':
                 explainer = shap.PermutationExplainer(m, feats)
+            print('Explaining the model...')
             shap_values = explainer(feats)
 
             # Transform to absolute values
             shap_values.values = np.abs(shap_values.values)
 
             # Store the SHAP values
+            print(f'Storing SHAP values for model {i+1}...')
             if i == 0:
                 all_SHAP_values['JEE'] = shap_values[:, :, 0]
                 all_SHAP_values['JIE'] = shap_values[:, :, 1]
@@ -139,6 +140,9 @@ if __name__ == '__main__':
                 all_SHAP_values['tau_exc'] += shap_values[:, :, 4]
                 all_SHAP_values['tau_inh'] += shap_values[:, :, 5]
                 all_SHAP_values['J_ext'] += shap_values[:, :, 6]
+
+            # Release memory
+            del shap_values
 
     else:
         print('Error: The model is not a list.')
