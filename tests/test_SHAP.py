@@ -1,7 +1,7 @@
 import json
 import os
 import pickle
-
+import gc
 import numpy as np
 import shap
 from matplotlib import pyplot as plt
@@ -80,9 +80,9 @@ if __name__ == '__main__':
     print('Loading simulation data...')
     X = load_simulation_data(os.path.join(sim_file_path, 'catch22', 'sim_X'))
 
-    # # Randomly subsample the simulation data
-    # idx = np.random.choice(len(X), 1000, replace=False)
-    # X = X[idx]
+    # Randomly subsample the simulation data
+    idx = np.random.choice(len(X), 500000, replace=False)
+    X = X[idx]
 
     # Load the machine learning model and scaler
     reg = 'Ridge'
@@ -142,7 +142,8 @@ if __name__ == '__main__':
                 all_SHAP_values['J_ext'] += shap_values[:, :, 6]
 
             # Release memory
-            del shap_values
+            del shap_values, explainer
+            gc.collect()
 
     else:
         print('Error: The model is not a list.')
@@ -207,5 +208,5 @@ if __name__ == '__main__':
             for text_obj in ax.texts:
                 text_obj.set_fontsize(6)
 
-    # plt.savefig('SHAP_values.png')
-    plt.show()
+    plt.savefig('SHAP_values.png')
+    # plt.show()
