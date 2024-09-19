@@ -115,7 +115,7 @@ if __name__ == '__main__':
             if reg == 'Ridge':
                 explainer = shap.Explainer(m, feats)
             elif reg == 'MLPRegressor':
-                explainer = shap.PermutationExplainer(m, feats)
+                explainer = shap.PermutationExplainer(m.predict, feats)
             print('Explaining the model...')
             shap_values = explainer(feats)
 
