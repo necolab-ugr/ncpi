@@ -119,39 +119,44 @@ if __name__ == '__main__':
                 explainer = shap.PermutationExplainer(m, feats)
             shap_values = explainer(feats)
 
-            # Append the SHAP values to the dictionary
-            all_SHAP_values['JEE'].append(shap_values[:,:,0])
-            all_SHAP_values['JIE'].append(shap_values[:,:,1])
-            all_SHAP_values['JEI'].append(shap_values[:,:,2])
-            all_SHAP_values['JII'].append(shap_values[:,:,3])
-            all_SHAP_values['tau_exc'].append(shap_values[:,:,4])
-            all_SHAP_values['tau_inh'].append(shap_values[:,:,5])
-            all_SHAP_values['J_ext'].append(shap_values[:,:,6])
+            # Transform to absolute values
+            shap_values.values = np.abs(shap_values.values)
+
+            # Store the SHAP values
+            if i == 0:
+                all_SHAP_values['JEE'] = shap_values[:, :, 0]
+                all_SHAP_values['JIE'] = shap_values[:, :, 1]
+                all_SHAP_values['JEI'] = shap_values[:, :, 2]
+                all_SHAP_values['JII'] = shap_values[:, :, 3]
+                all_SHAP_values['tau_exc'] = shap_values[:, :, 4]
+                all_SHAP_values['tau_inh'] = shap_values[:, :, 5]
+                all_SHAP_values['J_ext'] = shap_values[:, :, 6]
+            else:
+                all_SHAP_values['JEE'] += shap_values[:, :, 0]
+                all_SHAP_values['JIE'] += shap_values[:, :, 1]
+                all_SHAP_values['JEI'] += shap_values[:, :, 2]
+                all_SHAP_values['JII'] += shap_values[:, :, 3]
+                all_SHAP_values['tau_exc'] += shap_values[:, :, 4]
+                all_SHAP_values['tau_inh'] += shap_values[:, :, 5]
+                all_SHAP_values['J_ext'] += shap_values[:, :, 6]
+
     else:
         print('Error: The model is not a list.')
         exit()
 
     # Compute the average SHAP values
     for key in all_SHAP_values.keys():
-        for i in range(len(all_SHAP_values[key])):
-            # Feature names
-            all_SHAP_values[key][i].feature_names = features_ID
-            # Transform to absolute values
-            all_SHAP_values[key][i].values = np.abs(all_SHAP_values[key][i].values)
-            if i == 0:
-                avg_SHAP_values = all_SHAP_values[key][i]
-            else:
-                avg_SHAP_values += all_SHAP_values[key][i]
-        avg_SHAP_values /= len(all_SHAP_values[key])
-        all_SHAP_values[key] = avg_SHAP_values
+        all_SHAP_values[key] /= len(model)
+        # Feature names
+        all_SHAP_values[key].feature_names = features_ID
 
     # Plot the SHAP values
     print('Plotting SHAP values...')
-    fig = plt.figure(figsize=(8, 6.5), dpi=300)
+    fig = plt.figure(figsize=(8, 6), dpi=300)
     plt.rcParams.update({'font.size': 8, 'font.family': 'Arial'})
     for row in range(4):
         for col in range(2):
-            ax = fig.add_axes([0.19 + col * 0.5, 0.77 - row * 0.24, 0.25, 0.19])
+            ax = fig.add_axes([0.17 + col * 0.5, 0.77 - row * 0.24, 0.28, 0.19])
             if row == 0 and col == 0:
                 shap.plots.bar(all_SHAP_values['JEE'], max_display=15, show=False)
                 ax.set_title(r'$J_{EE}$')
@@ -198,5 +203,5 @@ if __name__ == '__main__':
             for text_obj in ax.texts:
                 text_obj.set_fontsize(6)
 
-    plt.savefig('SHAP_values.png')
-    # plt.show()
+    # plt.savefig('SHAP_values.png')
+    plt.show()
