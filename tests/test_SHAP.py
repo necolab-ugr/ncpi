@@ -5,6 +5,12 @@ import gc
 import numpy as np
 import shap
 from matplotlib import pyplot as plt
+from mpi4py import MPI
+
+# MPI setup
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
 
 def load_simulation_data(file_path):
     """
@@ -80,17 +86,17 @@ if __name__ == '__main__':
     print('Loading simulation data...')
     X = load_simulation_data(os.path.join(sim_file_path, 'catch22', 'sim_X'))
 
-    # Randomly subsample the simulation data
-    idx = np.random.choice(len(X), 500000, replace=False)
-    X = X[idx]
+    # # Randomly subsample the simulation data
+    # idx = np.random.choice(len(X), 1000, replace=False)
+    # X = X[idx]
 
     # Load the machine learning model and scaler
-    reg = 'Ridge'
-    # reg = 'MLPRegressor'
     with open('data/model', 'rb') as file:
         model = pickle.load(file)
     with open('data/scaler', 'rb') as file:
         scaler = pickle.load(file)
+    reg = model[0].__class__.__name__
+    print(f'Loaded {reg} model and scaler')
 
     # # Randomly subsample the machine learning model
     # if type(model) is list:
@@ -99,6 +105,12 @@ if __name__ == '__main__':
     # else:
     #     print('Error: The model is not a list.')
     #     exit()
+
+    # Split the data among MPI ranks
+    n_samples_per_rank = len(model)//size
+    start = rank * n_samples_per_rank
+    end = start + n_samples_per_rank
+    model = model[start:end]
 
     # Scale the features
     print('Scaling the features...')
@@ -109,7 +121,7 @@ if __name__ == '__main__':
     if type(model) is list:
         all_SHAP_values = {'JEE': [], 'JIE': [], 'JEI': [], 'JII': [], 'tau_exc': [], 'tau_inh': [], 'J_ext': []}
         for i,m in enumerate(model):
-            print(f'\nModel {i+1} of {len(model)}')
+            print(f'\n Rank {rank} - Model {i+1}')
 
             # Explain the model's predictions using SHAP
             if reg == 'Ridge':
@@ -149,64 +161,75 @@ if __name__ == '__main__':
         print('Error: The model is not a list.')
         exit()
 
-    # Compute the average SHAP values
-    for key in all_SHAP_values.keys():
-        all_SHAP_values[key] /= len(model)
-        # Feature names
-        all_SHAP_values[key].feature_names = features_ID
+    # Gather the SHAP values from all ranks
+    all_SHAP_values = comm.gather(all_SHAP_values, root=0)
 
-    # Plot the SHAP values
-    print('Plotting SHAP values...')
-    fig = plt.figure(figsize=(8, 6), dpi=300)
-    plt.rcParams.update({'font.size': 8, 'font.family': 'Arial'})
-    for row in range(4):
-        for col in range(2):
-            ax = fig.add_axes([0.17 + col * 0.5, 0.77 - row * 0.24, 0.28, 0.19])
-            if row == 0 and col == 0:
-                shap.plots.bar(all_SHAP_values['JEE'], max_display=15, show=False)
-                ax.set_title(r'$J_{EE}$')
-            elif row == 0 and col == 1:
-                shap.plots.bar(all_SHAP_values['JIE'], max_display=15, show=False)
-                ax.set_title(r'$J_{IE}$')
-            elif row == 1 and col == 0:
-                shap.plots.bar(all_SHAP_values['JEI'], max_display=15, show=False)
-                ax.set_title(r'$J_{EI}$')
-            elif row == 1 and col == 1:
-                shap.plots.bar(all_SHAP_values['JII'], max_display=15, show=False)
-                ax.set_title(r'$J_{II}$')
-            elif row == 2 and col == 0:
-                shap.plots.bar(all_SHAP_values['tau_exc'], max_display=15, show=False)
-                ax.set_title(r'$\tau_{syn}^{exc}$ (ms)')
-            elif row == 2 and col == 1:
-                shap.plots.bar(all_SHAP_values['tau_inh'], max_display=15, show=False)
-                ax.set_title(r'$\tau_{syn}^{inh}$ (ms)')
-            elif row == 3 and col == 0:
-                shap.plots.bar(all_SHAP_values['J_ext'], max_display=15, show=False)
-                ax.set_title(r'$J_{syn}^{ext}$ (nA)')
-            else:
-                # Plot the sum of the SHAP values
-                shap.plots.bar(all_SHAP_values['JEE']/np.max(all_SHAP_values['JEE'].values)+
-                               all_SHAP_values['JEI']/np.max(all_SHAP_values['JEI'].values)+
-                               all_SHAP_values['JIE']/np.max(all_SHAP_values['JIE'].values)+
-                               all_SHAP_values['JII']/np.max(all_SHAP_values['JII'].values)+
-                               all_SHAP_values['tau_exc']/np.max(all_SHAP_values['tau_exc'].values)+
-                               all_SHAP_values['tau_inh']/np.max(all_SHAP_values['tau_inh'].values)+
-                               all_SHAP_values['J_ext']/np.max(all_SHAP_values['J_ext'].values),
-                               max_display=15, show=False)
-                ax.set_title('Sum of SHAP values')
+    # Sum the SHAP values from all ranks
+    if rank == 0:
+        for i in range(size):
+            for key in all_SHAP_values[i].keys():
+                all_SHAP_values[0][key] += all_SHAP_values[i][key]
+        all_SHAP_values = all_SHAP_values[0]
 
-            # Change the font size of the axis labels
-            ax.tick_params(axis='x', labelsize=6)
-            ax.tick_params(axis='y', labelsize=6)
-            if row == 3:
-                ax.set_xlabel('SHAP values', fontsize=8)
-            else:
-                ax.set_xlabel('')
-            ax.set_xticks([])
+        # Compute the average SHAP values
+        for key in all_SHAP_values.keys():
+            all_SHAP_values[key] /= size
+            # Feature names
+            all_SHAP_values[key].feature_names = features_ID
 
-            # Change font size of text
-            for text_obj in ax.texts:
-                text_obj.set_fontsize(6)
 
-    plt.savefig('SHAP_values.png')
-    # plt.show()
+        # Plot the SHAP values
+        print('Plotting SHAP values...')
+        fig = plt.figure(figsize=(8, 6), dpi=300)
+        plt.rcParams.update({'font.size': 8, 'font.family': 'Arial'})
+        for row in range(4):
+            for col in range(2):
+                ax = fig.add_axes([0.17 + col * 0.5, 0.77 - row * 0.24, 0.28, 0.19])
+                if row == 0 and col == 0:
+                    shap.plots.bar(all_SHAP_values['JEE'], max_display=15, show=False)
+                    ax.set_title(r'$J_{EE}$')
+                elif row == 0 and col == 1:
+                    shap.plots.bar(all_SHAP_values['JIE'], max_display=15, show=False)
+                    ax.set_title(r'$J_{IE}$')
+                elif row == 1 and col == 0:
+                    shap.plots.bar(all_SHAP_values['JEI'], max_display=15, show=False)
+                    ax.set_title(r'$J_{EI}$')
+                elif row == 1 and col == 1:
+                    shap.plots.bar(all_SHAP_values['JII'], max_display=15, show=False)
+                    ax.set_title(r'$J_{II}$')
+                elif row == 2 and col == 0:
+                    shap.plots.bar(all_SHAP_values['tau_exc'], max_display=15, show=False)
+                    ax.set_title(r'$\tau_{syn}^{exc}$ (ms)')
+                elif row == 2 and col == 1:
+                    shap.plots.bar(all_SHAP_values['tau_inh'], max_display=15, show=False)
+                    ax.set_title(r'$\tau_{syn}^{inh}$ (ms)')
+                elif row == 3 and col == 0:
+                    shap.plots.bar(all_SHAP_values['J_ext'], max_display=15, show=False)
+                    ax.set_title(r'$J_{syn}^{ext}$ (nA)')
+                else:
+                    # Plot the sum of the SHAP values
+                    shap.plots.bar(all_SHAP_values['JEE']/np.max(all_SHAP_values['JEE'].values)+
+                                   all_SHAP_values['JEI']/np.max(all_SHAP_values['JEI'].values)+
+                                   all_SHAP_values['JIE']/np.max(all_SHAP_values['JIE'].values)+
+                                   all_SHAP_values['JII']/np.max(all_SHAP_values['JII'].values)+
+                                   all_SHAP_values['tau_exc']/np.max(all_SHAP_values['tau_exc'].values)+
+                                   all_SHAP_values['tau_inh']/np.max(all_SHAP_values['tau_inh'].values)+
+                                   all_SHAP_values['J_ext']/np.max(all_SHAP_values['J_ext'].values),
+                                   max_display=15, show=False)
+                    ax.set_title('Sum of SHAP values')
+
+                # Change the font size of the axis labels
+                ax.tick_params(axis='x', labelsize=6)
+                ax.tick_params(axis='y', labelsize=6)
+                if row == 3:
+                    ax.set_xlabel('SHAP values', fontsize=8)
+                else:
+                    ax.set_xlabel('')
+                ax.set_xticks([])
+
+                # Change font size of text
+                for text_obj in ax.texts:
+                    text_obj.set_fontsize(6)
+
+        plt.savefig('SHAP_values.png')
+        # plt.show()
