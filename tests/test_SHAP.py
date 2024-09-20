@@ -86,9 +86,10 @@ if __name__ == '__main__':
     print('Loading simulation data...')
     X = load_simulation_data(os.path.join(sim_file_path, 'catch22', 'sim_X'))
 
-    # # Randomly subsample the simulation data
-    # idx = np.random.choice(len(X), 1000, replace=False)
-    # X = X[idx]
+    # Randomly subsample the simulation data
+    np.random.seed(42)
+    idx = np.random.choice(len(X), 200000, replace=False)
+    X = X[idx]
 
     # Load the machine learning model and scaler
     with open('data/model', 'rb') as file:
@@ -161,15 +162,19 @@ if __name__ == '__main__':
         print('Error: The model is not a list.')
         exit()
 
+    # Convert SHAP values to numpy arrays
+    for key in all_SHAP_values.keys():
+        all_SHAP_values[key] = np.array(all_SHAP_values[key])
+
     # Gather the SHAP values from all ranks
-    all_SHAP_values = comm.gather(all_SHAP_values, root=0)
+    gathered_SHAP_values = comm.gather(all_SHAP_values, root=0)
 
     # Sum the SHAP values from all ranks
     if rank == 0:
-        for i in range(size):
-            for key in all_SHAP_values[i].keys():
-                all_SHAP_values[0][key] += all_SHAP_values[i][key]
-        all_SHAP_values = all_SHAP_values[0]
+        for i in range(1, size):
+            for key in gathered_SHAP_values[0].keys():
+                gathered_SHAP_values[0][key] += gathered_SHAP_values[i][key]
+        all_SHAP_values = gathered_SHAP_values[0]
 
         # Compute the average SHAP values
         for key in all_SHAP_values.keys():
