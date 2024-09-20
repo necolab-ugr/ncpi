@@ -88,7 +88,7 @@ if __name__ == '__main__':
 
     # Randomly subsample the simulation data
     np.random.seed(42)
-    idx = np.random.choice(len(X), 200000, replace=False)
+    idx = np.random.choice(len(X), 1000000, replace=False)
     X = X[idx]
 
     # Load the machine learning model and scaler
@@ -96,7 +96,10 @@ if __name__ == '__main__':
         model = pickle.load(file)
     with open('data/scaler', 'rb') as file:
         scaler = pickle.load(file)
-    reg = model[0].__class__.__name__
+    if type(model) is list:
+        reg = model[0].__class__.__name__
+    else:
+        reg = model.__class__.__name__
     print(f'Loaded {reg} model and scaler')
 
     # # Randomly subsample the machine learning model
@@ -133,7 +136,7 @@ if __name__ == '__main__':
             shap_values = explainer(feats)
 
             # Transform to absolute values
-            shap_values.values = np.abs(shap_values.values)
+            # shap_values.values = np.abs(shap_values.values)
 
             # Store the SHAP values
             print(f'Storing SHAP values for model {i+1}...')
@@ -162,26 +165,34 @@ if __name__ == '__main__':
         print('Error: The model is not a list.')
         exit()
 
-    # Convert SHAP values to numpy arrays
+    # Compute the average SHAP values of the rank
     for key in all_SHAP_values.keys():
-        all_SHAP_values[key] = np.array(all_SHAP_values[key])
+        all_SHAP_values[key] /= len(model)
 
     # Gather the SHAP values from all ranks
-    gathered_SHAP_values = comm.gather(all_SHAP_values, root=0)
+    gathered_SHAP_values = all_SHAP_values.copy()
+    for key in gathered_SHAP_values.keys():
+        gathered_SHAP_values[key].values = comm.gather(all_SHAP_values[key].values, root=0)
+        gathered_SHAP_values[key].base_values = comm.gather(all_SHAP_values[key].base_values, root=0)
+        gathered_SHAP_values[key].data = comm.gather(all_SHAP_values[key].data, root=0)
+    # gathered_SHAP_values = comm.gather(all_SHAP_values, root=0)
 
-    # Sum the SHAP values from all ranks
     if rank == 0:
+        # Sum the SHAP values from all ranks
         for i in range(1, size):
-            for key in gathered_SHAP_values[0].keys():
-                gathered_SHAP_values[0][key] += gathered_SHAP_values[i][key]
-        all_SHAP_values = gathered_SHAP_values[0]
+            for key in gathered_SHAP_values.keys():
+                gathered_SHAP_values[key].values[0] += gathered_SHAP_values[key].values[i]
+                gathered_SHAP_values[key].base_values[0] += gathered_SHAP_values[key].base_values[i]
+                gathered_SHAP_values[key].data[0] += gathered_SHAP_values[key].data[i]
 
         # Compute the average SHAP values
-        for key in all_SHAP_values.keys():
-            all_SHAP_values[key] /= size
+        for key in gathered_SHAP_values.keys():
+            all_SHAP_values[key].values = gathered_SHAP_values[key].values[0] / size
+            all_SHAP_values[key].base_values = gathered_SHAP_values[key].base_values[0] / size
+            all_SHAP_values[key].data = gathered_SHAP_values[key].data[0] / size
+
             # Feature names
             all_SHAP_values[key].feature_names = features_ID
-
 
         # Plot the SHAP values
         print('Plotting SHAP values...')
