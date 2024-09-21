@@ -10,9 +10,40 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from ccpi import catch22
+
 # ccpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ccpi
+
+# Names of catch22 features
+try:
+    import pycatch22
+    catch22_names = pycatch22.catch22_all([0])['names']
+except:
+    catch22_names = ['DN_HistogramMode_5',
+                     'DN_HistogramMode_10',
+                     'CO_f1ecac',
+                     'CO_FirstMin_ac',
+                     'CO_HistogramAMI_even_2_5',
+                     'CO_trev_1_num',
+                     'MD_hrv_classic_pnn40',
+                     'SB_BinaryStats_mean_longstretch1',
+                     'SB_TransitionMatrix_3ac_sumdiagcov',
+                     'PD_PeriodicityWang_th0_01',
+                     'CO_Embed2_Dist_tau_d_expfit_meandiff',
+                     'IN_AutoMutualInfoStats_40_gaussian_fmmi',
+                     'FC_LocalSimple_mean1_tauresrat',
+                     'DN_OutlierInclude_p_001_mdrmd',
+                     'DN_OutlierInclude_n_001_mdrmd',
+                     'SP_Summaries_welch_rect_area_5_1',
+                     'SB_BinaryStats_diff_longstretch0',
+                     'SB_MotifThree_quantile_hh',
+                     'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+                     'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
+                     'SP_Summaries_welch_rect_centroid',
+                     'FC_LocalSimple_mean3_stderr']
+
 
 def load_simulation_data(file_path):
     """
@@ -33,24 +64,25 @@ def load_simulation_data(file_path):
         with open(file_path, 'rb') as file:
             data = pickle.load(file)
             print(f'Loaded file: {file_path}')
+
+        # Check if the data is a dictionary
+        if isinstance(data, dict):
+            print(f'The file contains a dictionary. {data.keys()}')
+            # Print info about each key in the dictionary
+            for key in data.keys():
+                if isinstance(data[key], np.ndarray):
+                    print(f'Shape of {key}: {data[key].shape}')
+                else:
+                    print(f'{key}: {data[key]}')
+
+        # Check if the data is a ndarray and print its shape
+        elif isinstance(data, np.ndarray):
+            print(f'Shape of data: {data.shape}')
+        print('')
+
     except Exception as e:
         print(f'Error loading file: {file_path}')
         print(e)
-
-    # Check if the data is a dictionary
-    if isinstance(data, dict):
-        print(f'The file contains a dictionary. {data.keys()}')
-        # Print info about each key in the dictionary
-        for key in data.keys():
-            if isinstance(data[key], np.ndarray):
-                print(f'Shape of {key}: {data[key].shape}')
-            else:
-                print(f'{key}: {data[key]}')
-
-    # Check if the data is a ndarray and print its shape
-    elif isinstance(data, np.ndarray):
-        print(f'Shape of data: {data.shape}')
-    print('')
 
     return data
 
@@ -172,16 +204,21 @@ if __name__ == "__main__":
     sim_file_path = config['simulation_features_path']
     emp_data_path = config['LFP_development_data_path']
 
+    # Define a catch22 feature subset
+    catch22_subset = ['SP_Summaries_welch_rect_area_5_1',
+                      'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+                      'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1']
+    catch22_subset_idx = [catch22_names.index(f) for f in catch22_subset]
+
+
     # Iterate over the methods used to compute the features
-    all_methods = ['catch22', 'catch22_subset', 'dfa', 'rs_range', 'high_fluct', 'power_spectrum_parameterization',
-                   'fEI']
+    all_methods = [catch22_subset[0], 'catch22_subset']
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
         # Load parameters of the model (theta) and features from simulation data (X)
         print('\n--- Loading simulation data.')
         start_time = time.time()
-        if (method == 'catch22' or method == 'catch22_subset' or method == 'dfa' or method == 'rs_range' or
-                method == 'high_fluct'):
+        if method == 'catch22' or method == 'catch22_subset' or method in catch22_names:
             folder = 'catch22'
         else:
             folder = method
@@ -193,13 +230,9 @@ if __name__ == "__main__":
 
         # Select features from the catch22 feature set
         if method == 'catch22_subset':
-            X = X[:, [6, 18, 19]]
-        elif method == 'dfa':
-            X = X[:, 19]
-        elif method == 'rs_range':
-            X = X[:, 18]
-        elif method == 'high_fluct':
-            X = X[:, 6]
+            X = X[:, catch22_subset_idx]
+        elif method in catch22_names:
+            X = X[:, catch22_names.index(method)]
 
         # # Randomly subsample the simulation data
         # idx = np.random.choice(len(theta['data']), 10000, replace=False)
@@ -218,8 +251,7 @@ if __name__ == "__main__":
         print('\n--- Computing features from empirical data.')
         start_time = time.time()
         chunk_size = 5.
-        if (method == 'catch22' or method == 'catch22_subset' or method == 'dfa' or method == 'rs_range' or
-                method == 'high_fluct'):
+        if method == 'catch22' or method == 'catch22_subset' or method in catch22_names:
             emp_data = compute_features(emp_data, chunk_size=chunk_size, method='catch22')
 
             # Subsets of catch22 features
@@ -227,15 +259,11 @@ if __name__ == "__main__":
                 new_features = []
                 for jj in range(len(emp_data)):
                     # print(f'\r Arranging the catch22 subset. Progress: {jj+1} of {len(emp_data)}', end='', flush=True)
-                    new_features.append([emp_data['Features'][jj][i] for i in [6, 18, 19]])
+                    new_features.append([emp_data['Features'][jj][i] for i in catch22_subset_idx])
                 emp_data['Features'] = new_features
 
-            if method == 'dfa':
-                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[19])
-            if method == 'rs_range':
-                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[18])
-            if method == 'high_fluct':
-                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[6])
+            if method in catch22_names:
+                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[catch22_names.index(method)])
 
         elif method == 'power_spectrum_parameterization':
             # Parameters of the fooof algorithm

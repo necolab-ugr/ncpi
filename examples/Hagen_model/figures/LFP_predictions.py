@@ -45,9 +45,8 @@ sim_params = {}
 firing_rates = {}
 
 # Methods to plot
-all_methods = ['catch22','power_spectrum_parameterization', 'fEI']
-# all_methods = ['catch22_subset','power_spectrum_parameterization', 'fEI']
-# all_methods = ['dfa', 'rs_range', 'high_fluct']
+# all_methods = ['catch22','power_spectrum_parameterization', 'fEI']
+all_methods = ['catch22_subset']
 
 # Load data
 predictions_EI = {}
@@ -175,9 +174,15 @@ for row in range(3):
         if row == 0:
             method = all_methods[0]
         elif row == 1:
-            method = all_methods[1]
+            try:
+                method = all_methods[1]
+            except:
+                method = all_methods[0]
         else:
-            method = all_methods[2]
+            try:
+                method = all_methods[2]
+            except:
+                method = all_methods[0]
 
         # Plot parameter predictions and firing rates as a function of age
         try:
@@ -277,20 +282,21 @@ for row in range(3):
 
         # Y-axis labels
         if col == 0:
-            if method == 'catch22':
-                ax.set_ylabel(r'$catch22$')
-            elif method == 'catch22_subset':
-                ax.set_ylabel(r'$catch22$ (subset)')
-            elif method == 'dfa':
-                ax.set_ylabel(r'dfa')
-            elif method == 'rs_range':
-                ax.set_ylabel(r'$rs\_range$')
-            elif method == 'high_fluct':
-                ax.set_ylabel(r'$high\_fluct$')
-            elif method == 'power_spectrum_parameterization':
-                ax.set_ylabel(r'$1/f$'+' '+r'$slope$')
-            elif method == 'fEI':
-                ax.set_ylabel(r'$fE/I$')
+            ax.set_ylabel(method)
+            # if method == 'catch22':
+            #     ax.set_ylabel(r'$catch22$')
+            # elif method == 'catch22_subset':
+            #     ax.set_ylabel(r'$catch22$ (subset)')
+            # elif method == 'dfa':
+            #     ax.set_ylabel(r'dfa')
+            # elif method == 'rs_range':
+            #     ax.set_ylabel(r'$rs\_range$')
+            # elif method == 'high_fluct':
+            #     ax.set_ylabel(r'$high\_fluct$')
+            # elif method == 'power_spectrum_parameterization':
+            #     ax.set_ylabel(r'$1/f$'+' '+r'$slope$')
+            # elif method == 'fEI':
+            #     ax.set_ylabel(r'$fE/I$')
 
 # Save the figure
 plt.savefig('LFP_predictions.png', bbox_inches='tight')
