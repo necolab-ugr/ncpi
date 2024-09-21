@@ -6,11 +6,16 @@ import numpy as np
 import shap
 from matplotlib import pyplot as plt
 from mpi4py import MPI
+from joblib import Parallel, delayed
 
 # MPI setup
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
+
+# Function to calculate SHAP values for a single row
+def compute_shap(explainer, row):
+    return explainer(np.array([row]))
 
 def load_simulation_data(file_path):
     """
@@ -88,7 +93,7 @@ if __name__ == '__main__':
 
     # Randomly subsample the simulation data
     np.random.seed(42)
-    idx = np.random.choice(len(X), 1000000, replace=False)
+    idx = np.random.choice(len(X), 200000, replace=False)
     X = X[idx]
 
     # Load the machine learning model and scaler
@@ -133,7 +138,18 @@ if __name__ == '__main__':
             elif reg == 'MLPRegressor':
                 explainer = shap.PermutationExplainer(m.predict, feats)
             print('Explaining the model...')
-            shap_values = explainer(feats)
+            # shap_values = explainer(feats)
+
+            # Parallel SHAP value computation
+            shap_values = Parallel(n_jobs=-1)(delayed(compute_shap)(explainer, row) for row in feats)
+            for j in range(len(shap_values)):
+                shap_values[0].values = np.concatenate((shap_values[0].values, shap_values[j].values),
+                                                       axis=0)
+                shap_values[0].base_values = np.concatenate((shap_values[0].base_values, shap_values[j].base_values),
+                                                            axis=0)
+                shap_values[0].data = np.concatenate((shap_values[0].data, shap_values[j].data),
+                                                     axis=0)
+            shap_values = shap_values[0]
 
             # Transform to absolute values
             # shap_values.values = np.abs(shap_values.values)
