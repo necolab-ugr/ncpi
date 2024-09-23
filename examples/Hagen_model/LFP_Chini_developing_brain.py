@@ -282,8 +282,8 @@ if __name__ == "__main__":
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='fEI',
                                         params={'fs': emp_data['fs'][0],
-                                                'fmin': 30.,
-                                                'fmax': 49.,
+                                                'fmin': 8.,
+                                                'fmax': 12.,
                                                 'fEI_folder': '../../ccpi/Matlab'})
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
@@ -295,10 +295,8 @@ if __name__ == "__main__":
         # model = 'MLPRegressor'
         # hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
         #                {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-        #                {'hidden_layer_sizes': (100,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
         #                {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-        #                {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4},
-        #                {'hidden_layer_sizes': (100,100), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4}]
+        #                {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 4}]
 
         model = 'Ridge'
         hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]

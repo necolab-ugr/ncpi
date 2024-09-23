@@ -3,8 +3,6 @@ import sys
 import json
 import pickle
 import shutil
-from xml.sax.handler import all_features
-
 import numpy as np
 import pandas as pd
 
@@ -13,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ccpi
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
-compute_EEG = True
+compute_EEG = False
 
 if __name__ == '__main__':
     # Path to the folder containing the processed data
@@ -60,7 +58,8 @@ if __name__ == '__main__':
                             for i, EEG in enumerate(EEGs):
                                 all_data[i].append(EEG)
                     else:
-                        all_data = [CDM_data]
+                        # Split CDM data into 10 chunks
+                        all_data = np.array_split(CDM_data, 10)
 
                     all_features = []
                     for i, data_chunk in enumerate(all_data):
@@ -92,8 +91,8 @@ if __name__ == '__main__':
                         elif method == 'fEI':
                             features = ccpi.Features(method='fEI',
                                                      params={'fs': df.fs,
-                                                             'fmin': 30.,
-                                                             'fmax': 150.,
+                                                             'fmin': 8.,
+                                                             'fmax': 12.,
                                                              'fEI_folder': '../../../ccpi/Matlab'})
 
                         df = features.compute_features(df)
@@ -120,10 +119,7 @@ if __name__ == '__main__':
                                                       'sim_X_'+file.split('_')[-1]), 'wb'))
 
                     # clear memory
-                    if method == 'fEI':
-                        del all_data, df, all_features
-                    else:
-                        del all_data, CDM_data, df, all_features
+                    del all_data, CDM_data, df, all_features
 
                 # Theta data
                 elif file[:5] == 'theta':
