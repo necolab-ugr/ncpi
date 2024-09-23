@@ -10,8 +10,6 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from ccpi import catch22
-
 # ccpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ccpi
