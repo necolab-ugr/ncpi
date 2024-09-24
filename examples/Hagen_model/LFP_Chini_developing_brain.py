@@ -291,11 +291,11 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
 
-        # model = 'MLPRegressor'
-        # hyperparams = [{'hidden_layer_sizes': (25,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                {'hidden_layer_sizes': (50,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                {'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+        model = 'MLPRegressor'
+        hyperparams = [{'hidden_layer_sizes': (10,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (20,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (10,10), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                       {'hidden_layer_sizes': (20,20), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
         # model = 'SNPE'
         # hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5, 'num_transforms':1}},
@@ -303,8 +303,8 @@ if __name__ == "__main__":
         #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5, 'num_transforms':2}},
         #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10, 'num_transforms':2}}]
 
-        model = 'Ridge'
-        hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
+        # model = 'Ridge'
+        # hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
