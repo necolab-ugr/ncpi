@@ -2,7 +2,6 @@ import os
 import sys
 import pickle
 import json
-
 import pandas as pd
 import scipy
 import numpy as np
@@ -203,13 +202,12 @@ if __name__ == "__main__":
     emp_data_path = config['LFP_development_data_path']
 
     # Define a catch22 feature subset
-    catch22_subset = ['MD_hrv_classic_pnn40',
-                      'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1']
+    catch22_subset = ['SP_Summaries_welch_rect_centroid',
+                      'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1']
     catch22_subset_idx = [catch22_names.index(f) for f in catch22_subset]
 
-
     # Iterate over the methods used to compute the features
-    all_methods = ['catch22_subset','catch22','power_spectrum_parameterization','fEI']
+    all_methods = ['catch22','power_spectrum_parameterization']
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
         # Load parameters of the model (theta) and features from simulation data (X)
@@ -247,7 +245,7 @@ if __name__ == "__main__":
         # Compute features from empirical data
         print('\n--- Computing features from empirical data.')
         start_time = time.time()
-        chunk_size = 5.
+        chunk_size = 5
         if method == 'catch22' or method == 'catch22_subset' or method in catch22_names:
             emp_data = compute_features(emp_data, chunk_size=chunk_size, method='catch22')
 
@@ -264,25 +262,25 @@ if __name__ == "__main__":
 
         elif method == 'power_spectrum_parameterization':
             # Parameters of the fooof algorithm
-            fooof_setup_emp = {'peak_threshold': 2.,
+            fooof_setup_emp = {'peak_threshold': 1.,
                                'min_peak_height': 0.,
-                               'max_n_peaks': 2,
+                               'max_n_peaks': 5,
                                'peak_width_limits': (10., 50.)}
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='power_spectrum_parameterization',
                                         params={'fs': emp_data['fs'][0],
                                                 'fmin': 5.,
-                                                'fmax': 49.,
+                                                'fmax': 45.,
                                                 'fooof_setup': fooof_setup_emp,
-                                                'r_squared_th':0.8})
+                                                'r_squared_th':0.9})
             # Keep only the aperiodic exponent
             emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
         elif method == 'fEI':
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='fEI',
                                         params={'fs': emp_data['fs'][0],
-                                                'fmin': 8.,
-                                                'fmax': 12.,
+                                                'fmin': 5.,
+                                                'fmax': 49.,
                                                 'fEI_folder': '../../ccpi/Matlab'})
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
@@ -292,23 +290,24 @@ if __name__ == "__main__":
         start_time = time.time()
 
         model = 'MLPRegressor'
-        hyperparams = [{'hidden_layer_sizes': (10,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (20,), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (10,10), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                       {'hidden_layer_sizes': (20,20), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+        if method == 'catch22':
+            hyperparams = [{'hidden_layer_sizes': (10,10), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (20,20), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+        else:
+            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
         # model = 'SNPE'
-        # hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5, 'num_transforms':1}},
-        #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10, 'num_transforms':1}},
+        # hyperparams = [
         #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5, 'num_transforms':2}},
         #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10, 'num_transforms':2}}]
 
-        # model = 'Ridge'
-        # hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
+        #model = 'Ridge'
+        #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
-        inference.train(param_grid=hyperparams,n_splits=10, n_repeats=5)
+        inference.train(param_grid=hyperparams,n_splits=10, n_repeats=10)
 
         # Create folder to save results
         if not os.path.exists('data'):

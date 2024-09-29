@@ -5,6 +5,34 @@ import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 
+# Names of catch22 features
+try:
+    import pycatch22
+    catch22_names = pycatch22.catch22_all([0])['names']
+except:
+    catch22_names = ['DN_HistogramMode_5',
+                     'DN_HistogramMode_10',
+                     'CO_f1ecac',
+                     'CO_FirstMin_ac',
+                     'CO_HistogramAMI_even_2_5',
+                     'CO_trev_1_num',
+                     'MD_hrv_classic_pnn40',
+                     'SB_BinaryStats_mean_longstretch1',
+                     'SB_TransitionMatrix_3ac_sumdiagcov',
+                     'PD_PeriodicityWang_th0_01',
+                     'CO_Embed2_Dist_tau_d_expfit_meandiff',
+                     'IN_AutoMutualInfoStats_40_gaussian_fmmi',
+                     'FC_LocalSimple_mean1_tauresrat',
+                     'DN_OutlierInclude_p_001_mdrmd',
+                     'DN_OutlierInclude_n_001_mdrmd',
+                     'SP_Summaries_welch_rect_area_5_1',
+                     'SB_BinaryStats_diff_longstretch0',
+                     'SB_MotifThree_quantile_hh',
+                     'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+                     'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
+                     'SP_Summaries_welch_rect_centroid',
+                     'FC_LocalSimple_mean3_stderr']
+
 def load_simulation_data(file_path):
     """
     Load simulation data from a file.
@@ -24,24 +52,25 @@ def load_simulation_data(file_path):
         with open(file_path, 'rb') as file:
             data = pickle.load(file)
             print(f'Loaded file: {file_path}')
+
+        # Check if the data is a dictionary
+        if isinstance(data, dict):
+            print(f'The file contains a dictionary. {data.keys()}')
+            # Print info about each key in the dictionary
+            for key in data.keys():
+                if isinstance(data[key], np.ndarray):
+                    print(f'Shape of {key}: {data[key].shape}')
+                else:
+                    print(f'{key}: {data[key]}')
+
+        # Check if the data is a ndarray and print its shape
+        elif isinstance(data, np.ndarray):
+            print(f'Shape of data: {data.shape}')
+        print('')
+
     except Exception as e:
         print(f'Error loading file: {file_path}')
         print(e)
-
-    # Check if the data is a dictionary
-    if isinstance(data, dict):
-        print(f'The file contains a dictionary. {data.keys()}')
-        # Print info about each key in the dictionary
-        for key in data.keys():
-            if isinstance(data[key], np.ndarray):
-                print(f'Shape of {key}: {data[key].shape}')
-            else:
-                print(f'{key}: {data[key]}')
-
-    # Check if the data is a ndarray and print its shape
-    elif isinstance(data, np.ndarray):
-        print(f'Shape of data: {data.shape}')
-    print('')
 
     return data
 
@@ -54,13 +83,12 @@ emp_data_path = config['LFP_development_data_path']
 # Dictionaries to store the features and parameters
 features = {}
 parameters = {'catch22':{},
-              'power_spectrum_parameterization':{},
-              'fEI':{}}
+              'power_spectrum_parameterization':{}}
 emp = {}
 ages = {}
 
 # Iterate over the methods used to compute the features
-for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+for method in ['catch22', 'power_spectrum_parameterization']:
     print(f'\n\n--- Method: {method}')
     try:
         # Load simulation data
@@ -68,6 +96,13 @@ for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
         theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
         X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
         print(f'Samples loaded: {len(theta["data"])}')
+    except:
+        print(f'Error loading data for {method}.')
+        # Fake data
+        theta = {'data': np.ones((10,7))}
+        X = np.zeros((10,22)) if method == 'catch22' else np.zeros((10, 1))
+
+    try:
         # Load empirical data
         data_EI = np.load(os.path.join('../data', method, 'emp_data_reduced.pkl'), allow_pickle=True)
         ages[method] = np.array(data_EI['Group'].tolist())
@@ -75,12 +110,10 @@ for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
         data_EI = data_EI[data_EI['Group'] >= 4]
         ages[method] = ages[method][ages[method] >= 4]
     except:
-        print(f'Error loading data for {method}.')
+        print(f'Error loading empirical data for {method}.')
         # Fake data
-        theta = {'data': np.ones((10,7))}
-        X = np.zeros((10,22)) if method == 'catch22' else np.zeros((10, 1))
         data_EI = pd.DataFrame({'Features': [X[i] for i in range(10)]})
-        ages = np.arange(10)
+        ages[method] = np.arange(20)
 
     # Remove nan features from simulation data
     if X.ndim == 1:
@@ -107,18 +140,18 @@ for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
 
     # Collect features
     if method == 'catch22':
-        features['dfa'] = X[:, 19]
-        features['rs_range'] = X[:, 18]
-        features['high_fluct'] = X[:, 6]
-        emp['dfa'] = np.array(data_EI['Features'].apply(lambda x: x[19]).tolist())
-        emp['rs_range'] = np.array(data_EI['Features'].apply(lambda x: x[18]).tolist())
-        emp['high_fluct'] = np.array(data_EI['Features'].apply(lambda x: x[6]).tolist())
+        features['dfa'] = X[:, catch22_names.index('SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1')]
+        features['rs_range'] = X[:, catch22_names.index('SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1')]
+        features['high_fluct'] = X[:, catch22_names.index('MD_hrv_classic_pnn40')]
+        emp['dfa'] = np.array(data_EI['Features'].apply(
+            lambda x: x[catch22_names.index('SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1')]).tolist())
+        emp['rs_range'] = np.array(data_EI['Features'].apply(
+            lambda x: x[catch22_names.index('SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1')]).tolist())
+        emp['high_fluct'] = np.array(data_EI['Features'].apply(
+            lambda x: x[catch22_names.index('MD_hrv_classic_pnn40')]).tolist())
     elif method == 'power_spectrum_parameterization':
         features['slope'] = X
         emp['slope'] = np.array(data_EI['Features'].tolist())
-    elif method == 'fEI':
-        features['fEI'] = X
-        emp['fEI'] = np.array(data_EI['Features'].tolist())
 
 # Create a figure and set its properties
 fig = plt.figure(figsize=(7.5, 4.5), dpi=300)
@@ -130,16 +163,16 @@ plt.rc('ytick', labelsize=8)
 param_labels = [r'$E/I$', r'$\tau_{syn}^{exc}$ (ms)', r'$\tau_{syn}^{inh}$ (ms)',
           r'$J_{syn}^{ext}$ (nA)', 'LFP data']
 
-# Define 5 colormaps for simulation data
-cmaps = ['Blues', 'Greens', 'Reds', 'Purples', 'YlOrBr']
+# Define 4 colormaps for simulation data
+cmaps = ['Blues', 'Greens', 'Reds', 'Purples']
 
 # Define a colormap for empirical data
 cmap = plt.colormaps['viridis']
 
 # Plots
-for row in range(5):
+for row in range(4):
     for col in range(5):
-        ax = fig.add_axes([0.1 + col * 0.18, 0.83 - row * 0.18, 0.13, 0.13])
+        ax = fig.add_axes([0.09 + col * 0.19, 0.76 - row * 0.21, 0.14, 0.19])
 
         # Get the keys for the parameters and features
         if row == 0:
@@ -151,12 +184,9 @@ for row in range(5):
         elif row == 2:
             feat = 'high_fluct'
             method = 'catch22'
-        elif row == 3:
+        else:
             feat = 'slope'
             method = 'power_spectrum_parameterization'
-        else:
-            feat = 'fEI'
-            method = 'fEI'
 
         if col == 0:
             param = 'E_I'
@@ -179,12 +209,12 @@ for row in range(5):
                 # Constraints for the bins
                 if col == 0:
                     minp = 0.1
-                    maxp = 15.0
+                    maxp = 12.0
                 elif col == 1:
                     minp = 0.1
                     maxp = 2.0
                 elif col == 2:
-                    minp = 0.1
+                    minp = 1.
                     maxp = 8.0
                 elif col == 3:
                     minp = 10.
@@ -228,38 +258,38 @@ for row in range(5):
                 pass
 
         # Labels
-        if col < 4:
-            ax.set_xticks(np.arange(0,len(bins) - 1,3))
-            ax.set_xticklabels(['%.2f' % ((bins[jj] + bins[jj + 1]) / 2) for jj in np.arange(0,len(bins) - 1,3)],
-                               fontsize = 6)
-
-        if col < 4 and row == 4:
+        if col < 4 and row == 3:
+            step = 4 if col == 0 else 2
+            ax.set_xticks(np.arange(0,len(bins) - 1,step))
+            ax.set_xticklabels(['%.2f' % ((bins[jj] + bins[jj + 1]) / 2) for jj in np.arange(0,len(bins) - 1,step)],
+                               fontsize = 8)
             ax.set_xlabel(param_labels[col])
 
-        if col == 4:
+        else:
+            ax.set_xticks([])
+            ax.set_xticklabels([])
+
+        if col == 4 and row == 3:
             # X-axis labels
             try:
                 ax.set_xticks(np.unique(ages[method])[::2])
-                ax.set_xticklabels([f'{str(i)}' for i in np.unique(ages[method])[::2]])
+                ax.set_xticklabels([f'{str(i)}' for i in np.unique(ages[method])[::2]],fontsize = 8)
             except:
                 pass
 
-        if col == 4 and row == 4:
             ax.set_xlabel('Postnatal days')
 
         if col == 0:
-            ax.yaxis.set_label_coords(-0.5, 0.5)
+            ax.yaxis.set_label_coords(-0.35, 0.5)
             if row == 0:
-                ax.set_ylabel(r'dfa')
+                ax.set_ylabel(r'$dfa$')
             elif row == 1:
-                ax.set_ylabel(r'$rs\_range$')
+                ax.set_ylabel(r'$rs\ range$')
             elif row == 2:
-                ax.set_ylabel(r'$high\_fluct$')
-            elif row == 3:
-                ax.set_ylabel(r'$1/f$' + ' ' + r'$slope$')
+                ax.set_ylabel(r'$high\ fluct.$')
             else:
-                ax.set_ylabel(r'$fE/I$')
+                ax.set_ylabel(r'$1/f$' + ' ' + r'$slope$')
 
 # Save the figure
-plt.savefig('features.png', bbox_inches='tight')
-#plt.show()
+# plt.savefig('features.png', bbox_inches='tight')
+plt.show()

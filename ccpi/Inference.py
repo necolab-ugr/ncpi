@@ -84,6 +84,11 @@ class Inference:
         self.features = []
         self.theta = []
 
+        # Set the number of threads used by PyTorch
+        if model == 'SNPE':
+            torch_threads = int(os.cpu_count()/2)
+            torch.set_num_threads(torch_threads)
+
     def add_simulation_data(self, features, parameters):
         """
         Method to add features and parameters to the training data.

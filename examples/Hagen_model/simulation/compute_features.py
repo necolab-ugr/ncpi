@@ -26,7 +26,7 @@ if __name__ == '__main__':
     if compute_EEG:
         potential = ccpi.FieldPotential()
 
-    for method in ['catch22', 'power_spectrum_parameterization', 'fEI']:
+    for method in ['catch22', 'power_spectrum_parameterization']:
         # Check if the features have already been computed
         if os.path.isfile(os.path.join(features_path, method, 'sim_X')):
             print(f'Features have already been computed for the method {method}.')
@@ -58,8 +58,8 @@ if __name__ == '__main__':
                             for i, EEG in enumerate(EEGs):
                                 all_data[i].append(EEG)
                     else:
-                        # Split CDM data into 10 chunks
-                        all_data = np.array_split(CDM_data, 10)
+                        # Split CDM data into 2 chunks
+                        all_data = np.array_split(CDM_data, 2)
 
                     all_features = []
                     for i, data_chunk in enumerate(all_data):
@@ -78,21 +78,21 @@ if __name__ == '__main__':
                             features = ccpi.Features(method='catch22')
                         elif method == 'power_spectrum_parameterization':
                             # Parameters of the fooof algorithm
-                            fooof_setup_sim = {'peak_threshold': 2.,
+                            fooof_setup_sim = {'peak_threshold': 1.,
                                                'min_peak_height': 0.,
-                                               'max_n_peaks': 2,
+                                               'max_n_peaks': 5,
                                                'peak_width_limits': (10., 50.)}
                             features = ccpi.Features(method='power_spectrum_parameterization',
                                                      params={'fs': df.fs,
                                                              'fmin': 5.,
-                                                             'fmax': 150.,
+                                                             'fmax': 200.,
                                                              'fooof_setup': fooof_setup_sim,
-                                                             'r_squared_th':0.8})
+                                                             'r_squared_th':0.9})
                         elif method == 'fEI':
                             features = ccpi.Features(method='fEI',
                                                      params={'fs': df.fs,
-                                                             'fmin': 8.,
-                                                             'fmax': 12.,
+                                                             'fmin': 5.,
+                                                             'fmax': 150.,
                                                              'fEI_folder': '../../../ccpi/Matlab'})
 
                         df = features.compute_features(df)
@@ -111,7 +111,7 @@ if __name__ == '__main__':
                                         open(os.path.join(features_path, method, 'tmp',
                                                           'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
                     else:
-                        df = all_features[0]
+                        df = pd.concat(all_features)
 
                         # Save the features to a file
                         pickle.dump(np.array(df['Features'].tolist()),

@@ -4,6 +4,7 @@ import os
 import pickle
 
 import pandas as pd
+import seaborn as sns
 import scipy.signal as ss
 import numpy as np
 from matplotlib import pyplot as plt
@@ -14,6 +15,34 @@ import ccpi
 
 # Parameters of LIF model simulations
 sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
+
+# Names of catch22 features
+try:
+    import pycatch22
+    catch22_names = pycatch22.catch22_all([0])['names']
+except:
+    catch22_names = ['DN_HistogramMode_5',
+                     'DN_HistogramMode_10',
+                     'CO_f1ecac',
+                     'CO_FirstMin_ac',
+                     'CO_HistogramAMI_even_2_5',
+                     'CO_trev_1_num',
+                     'MD_hrv_classic_pnn40',
+                     'SB_BinaryStats_mean_longstretch1',
+                     'SB_TransitionMatrix_3ac_sumdiagcov',
+                     'PD_PeriodicityWang_th0_01',
+                     'CO_Embed2_Dist_tau_d_expfit_meandiff',
+                     'IN_AutoMutualInfoStats_40_gaussian_fmmi',
+                     'FC_LocalSimple_mean1_tauresrat',
+                     'DN_OutlierInclude_p_001_mdrmd',
+                     'DN_OutlierInclude_n_001_mdrmd',
+                     'SP_Summaries_welch_rect_area_5_1',
+                     'SB_BinaryStats_diff_longstretch0',
+                     'SB_MotifThree_quantile_hh',
+                     'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+                     'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
+                     'SP_Summaries_welch_rect_centroid',
+                     'FC_LocalSimple_mean3_stderr']
 
 def get_spike_rate(times, transient, dt, tstop):
     """
@@ -176,7 +205,7 @@ for trial in range(trials):
 
 
 # Create a figure and set its properties
-fig = plt.figure(figsize=(7., 6.), dpi=300)
+fig = plt.figure(figsize=(7.5, 6.), dpi=300)
 plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
 plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
@@ -229,7 +258,7 @@ for col in range(3):
 
     if col == 0:
         ax.legend(loc=1)
-        ax.set_ylabel(r'$\nu_X$ (spikes/$\Delta t$)')
+        ax.set_ylabel(r'$\nu_X$ (spik./$\Delta t$)')
         ax.yaxis.set_label_coords(-0.22, 0.5)
 
     ax.axis('tight')
@@ -247,7 +276,7 @@ for col in range(3):
 
     if col == 0:
         ax.set_ylabel(r'CDM ($P_z$)')
-        ax.yaxis.set_label_coords(-0.12, 0.5)
+        ax.yaxis.set_label_coords(-0.22, 0.5)
     ax.set_yticks([])
     ax.set_xlabel('t (ms)')
     ax.axis('tight')
@@ -288,9 +317,9 @@ for trial in range(trials):
         IDs.append(k)
         epochs.append(trial)
 
-# Compute features and predictions
-predictions = {}
-all_methods = ['catch22', 'catch22_subset', 'dfa', 'rs_range', 'high_fluct', 'power_spectrum_parameterization','fEI']
+# Compute features
+all_features = {}
+all_methods = ['catch22', 'power_spectrum_parameterization']
 for method in all_methods:
     print(f'\n\n--- Method: {method}')
 
@@ -303,125 +332,79 @@ for method in all_methods:
     df.Recording = 'LFP'
     df.fs = 1000. / (10. * dt)
 
-    # Features
-    if method == 'catch22' or method == 'catch22_subset' or method ==  'dfa' or method == 'rs_range' or method == 'high_fluct':
+    # Compute features
+    if method == 'catch22':
         features = ccpi.Features(method='catch22')
     elif method == 'power_spectrum_parameterization':
         # Parameters of the fooof algorithm
-        fooof_setup_sim = {'peak_threshold': 2.,
+        fooof_setup_sim = {'peak_threshold': 1.,
                            'min_peak_height': 0.,
-                           'max_n_peaks': 2,
+                           'max_n_peaks': 5,
                            'peak_width_limits': (10., 50.)}
         features = ccpi.Features(method='power_spectrum_parameterization',
                                  params={'fs': df.fs,
                                          'fmin': 5.,
-                                         'fmax': 150.,
+                                         'fmax': 200.,
                                          'fooof_setup': fooof_setup_sim,
-                                         'r_squared_th': 0.8})
-    elif method == 'fEI':
-        features = ccpi.Features(method='fEI',
-                                 params={'fs': df.fs,
-                                         'fmin': 30.,
-                                         'fmax': 150.,
-                                         'fEI_folder': '../../../ccpi/Matlab'})
+                                         'r_squared_th': 0.9})
 
-    try:
-        df = features.compute_features(df)
-    except:
-        print(f'Error computing features for {method}.')
-        df['Features'] = np.ones((len(df), 22 if method == 'catch22' else 1))
-
-    # Subsets of catch22 features
-    if method == 'catch22_subset':
-        df['Features'] = [[df['Features'].apply(lambda x: x[i])[_] for i in [6,18,19]] for _ in range(len(df))]
-    if method == 'dfa':
-        df['Features'] = df['Features'].apply(lambda x: x[19])
-    if method == 'rs_range':
-        df['Features'] = df['Features'].apply(lambda x: x[18])
-    if method == 'high_fluct':
-        df['Features'] = df['Features'].apply(lambda x: x[6])
+    df = features.compute_features(df)
 
     # Keep only the aperiodic exponent
     if method == 'power_spectrum_parameterization':
         df['Features'] = df['Features'].apply(lambda x: x[1])
 
-    # Load the regression model and scaler
-    try:
-        model = pickle.load(open(os.path.join('../data', method,'model'),'rb'))
-        scaler = pickle.load(open(os.path.join('../data', method,'scaler'),'rb'))
+    # Append the feature dataframes to a list
+    all_features[method] = df
 
-        # Transfer model and scaler to the data directory
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        with open('data/model.pkl', 'wb') as file:
-            pickle.dump(model, file)
-        with open('data/scaler.pkl', 'wb') as file:
-            pickle.dump(scaler, file)
-
-        # Compute predictions
-        model = 'Ridge'
-        inference = ccpi.Inference(model=model)
-        predictions[method] = np.array(inference.predict(np.array(df['Features'].tolist())))
-    except:
-        print(f'Error loading model and scaler for {method}.')
-        predictions[method] = np.ones((len(df),7))
-
-# Plot predictions
-colors = ['powderblue', 'salmon', 'blueviolet', 'limegreen', 'gold', 'darkorange', 'orchid']
+# Features
+colors = ['lightcoral', 'lightblue', 'lightgreen', 'lightgrey']
 for row in range(2):
     for col in range(2):
-        ax = fig.add_axes([0.45 + col * 0.2, 0.09 + row * 0.15, 0.15, 0.1])
+        ax = fig.add_axes([0.5 + col * 0.27, 0.24 - row * 0.16, 0.18, 0.13])
 
-        for method in all_methods:
-            if row == 0 and col == 0:
-                preds = predictions[method][:,5]
-                ax.set_title(r'$\tau_{syn}^{inh}$ (ms)')
-            elif row == 0 and col == 1:
-                preds = predictions[method][:,6]
-                ax.set_title(r'$J_{syn}^{ext}$ (nA)')
-            elif row == 1 and col == 0:
-                preds = ((predictions[method][:,0]/predictions[method][:,2]) /
-                         (predictions[method][:,1]/predictions[method][:,3]))
-                ax.set_title(r'$E/I$')
-            else:
-                preds = predictions[method][:,4]
-                ax.set_title(r'$\tau_{syn}^{exc}$ (ms)')
+        if row == 0 and col == 0:
+            feats = np.array(all_features['power_spectrum_parameterization']['Features'].tolist())
+            ax.set_ylabel(r'$1/f$' + ' ' + r'$slope$')
+        if row == 0 and col == 1:
+            feats = np.array(all_features['catch22']['Features'].tolist())
+            idx = catch22_names.index('SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1')
+            feats = feats[:, idx]
+            ax.set_ylabel(r'$dfa$')
+        if row == 1 and col == 0:
+            feats = np.array(all_features['catch22']['Features'].tolist())
+            idx = catch22_names.index('SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1')
+            feats = feats[:, idx]
+            ax.set_ylabel(r'$rs\ range$')
+        if row == 1 and col == 1:
+            feats = np.array(all_features['catch22']['Features'].tolist())
+            idx = catch22_names.index('MD_hrv_classic_pnn40')
+            feats = feats[:, idx]
+            ax.set_ylabel(r'$high\ fluct.$')
 
-            preds_plot = np.zeros((trials,len(confs)))
-            for k, params in enumerate(confs):
-                ii = np.where(np.array(IDs) == k)[0]
-                preds_plot[:,k] = preds[ii]
+        # Rearrange the features
+        feats_plot = np.zeros((trials,len(confs)))
+        for conf in range(len(confs)):
+            feats_plot[:,conf] = feats[np.array(IDs) == conf]
 
-            # Plot mean predictions
-            ax.plot(np.mean(preds_plot,axis=0), color=colors[all_methods.index(method)])
+        # Plot the average values
+        ax.plot(np.arange(len(confs)), np.mean(feats_plot, axis=0), color=colors[row*2 + col])
 
-            # Plot standard deviation
-            ax.fill_between(range(len(confs)),
-                            np.mean(preds_plot,axis=0) - np.std(preds_plot,axis=0),
-                            np.mean(preds_plot,axis=0) + np.std(preds_plot,axis=0),
-                            color=colors[all_methods.index(method)], alpha=0.2)
+        # Plot the variance
+        ax.fill_between(np.arange(len(confs)), np.mean(feats_plot, axis=0) - np.std(feats_plot, axis=0),
+                        np.mean(feats_plot, axis=0) + np.std(feats_plot, axis=0), color=colors[row*2 + col],
+                        alpha=0.3)
 
         # Labels
-        if row == 0:
-            ax.set_xticks(range(len(confs)))
-            ax.set_xticklabels([r'$J_{syn}^{ext}$ = %s nA' % confs[k][6] for k in range(len(confs))],
-                               rotation=20, fontsize=8)
+        if row == 1:
+            ax.set_xlabel(r'$J_{syn}^{ext}$ (nA)')
+            ax.set_xticks(np.arange(3))
+            ax.set_xticklabels([f'{confs[i][6]}' for i in range(3)])
         else:
             ax.set_xticks([])
+            ax.set_xticklabels([])
 
-# Create a fake legend
-ax = fig.add_axes([0.8, 0.2, 0.15, 0.15])
-ax.axis('off')
-labels = [r'$catch22$ (all)',
-          r'$catch22$ (subset)',
-          r'dfa',
-          r'$rs\_range$',
-          r'$high\_fluct$',
-          r'$1/f$'+' '+r'$slope$',
-          r'$fE/I$']
-for i,method in enumerate(all_methods):
-    ax.plot([0], [0], color=colors[i], label=labels[i])
-ax.legend(loc='upper left', fontsize=8, labelspacing=0.2)
+
 
 # Plot letters
 ax = fig.add_axes([0., 0., 1., 1.])
