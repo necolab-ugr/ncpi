@@ -45,8 +45,7 @@ sim_params = {}
 firing_rates = {}
 
 # Methods to plot
-# all_methods = ['catch22','power_spectrum_parameterization', 'fEI']
-all_methods = ['catch22_subset']
+all_methods = ['catch22','power_spectrum_parameterization']
 
 # Load data
 predictions_EI = {}
@@ -153,36 +152,40 @@ for method in all_methods:
                 rate = ((times['E'].size / (tstop - transient)) * 1000) / LIF_params['N_X'][0]
                 firing_rates[method][i, sample] = rate
 
+    # Normalize firing rates to the maximum value
+    if compute_firing_rate and np.max(firing_rates[method]) > 0:
+        firing_rates[method] /= np.max(firing_rates[method])
+
+# Save firing rates to file
+if compute_firing_rate:
+    if not os.path.exists('data'):
+        os.makedirs('data')
+    with open('data/firing_rates_preds.pkl', 'wb') as f:
+        pickle.dump(firing_rates, f)
 
 # Create a figure and set its properties
-fig = plt.figure(figsize=(7.5, 4.5), dpi=300)
+fig = plt.figure(figsize=(7.5, 3.), dpi=300)
 plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
 plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
 
 # Titles for the subplots
 titles = [r'$E/I$', r'$\tau_{syn}^{exc}$ (ms)', r'$\tau_{syn}^{inh}$ (ms)',
-          r'$J_{syn}^{ext}$ (nA)', r'$fr$ (spikes/s)']
+          r'$J_{syn}^{ext}$ (nA)', r'$Norm. fr$']
+# y-axis labels
+y_labels = [r'$catch22$', r'$1/f$'+' '+r'$slope$']
 
 # Define a colormap
 cmap = plt.colormaps['viridis']
 
 # Plots
-for row in range(3):
+for row in range(2):
     for col in range(5):
-        ax = fig.add_axes([0.08 + col * 0.19, 0.68 - row * 0.29, 0.14, 0.24])
-        if row == 0:
+        ax = fig.add_axes([0.09 + col * 0.19, 0.56 - row * 0.4, 0.14, 0.35])
+        try:
+            method = all_methods[row]
+        except:
             method = all_methods[0]
-        elif row == 1:
-            try:
-                method = all_methods[1]
-            except:
-                method = all_methods[0]
-        else:
-            try:
-                method = all_methods[2]
-            except:
-                method = all_methods[0]
 
         # Plot parameter predictions and firing rates as a function of age
         try:
@@ -207,7 +210,7 @@ for row in range(3):
 
                 # Debug: plot samples selected for the firing rate over the parameter predictions
                 if 0 < col < 4:
-                    ax.scatter([age]*n_samples, sim_params[method][col+3, i, :], color='black', s=2, zorder = 3)
+                    ax.scatter([age]*n_samples, sim_params[method][col+3, i, :], color='black', s=0.5, zorder = 3)
                 elif col == 0:
                     ax.scatter([age]*n_samples, (sim_params[method][0, i, :]/sim_params[method][2, i, :]) /
                                (sim_params[method][1, i, :]/sim_params[method][3, i, :]),
@@ -230,11 +233,22 @@ for row in range(3):
             # Plot the Tukey HSD results manually for age 4
             for comparison in tukey.summary().data[1:]:
                 group1, group2, meandiff, p_adj, lower, upper, reject = comparison
-                if group1 == 4 and group2 > 4 and reject:
-                    y_max = ax.get_ylim()[1]
-                    y_min = ax.get_ylim()[0]
-                    ax.plot([group1, group2], [y_max, y_max], color='black', linewidth = 0.5)
 
+                y_max = ax.get_ylim()[1]
+                y_min = ax.get_ylim()[0]
+
+                # Compute Cohen's d effect size
+                if group1 == 4 and group2 > 4:
+                    data_group1 = df[df['age'] == group1]['value']
+                    data_group2 = df[df['age'] == group2]['value']
+                    d = cohen_d(data_group1, data_group2)
+                    ax.plot([group1, group2], [y_max, y_max], color='black', linewidth=0.5)
+                    ax.text((group1 + group2) / 2, y_max + (y_max-y_min) * 0.015,
+                            f'                                     d = {d:.2f}', ha='center',
+                            va='center', color='black', fontsize=3)
+
+                # Plot significance levels
+                if group1 == 4 and group2 > 4 and reject:
                     # Significance levels
                     if p_adj < 0.05 and p_adj >= 0.01:
                         p_value = '*'
@@ -247,17 +261,9 @@ for row in range(3):
                     else:
                         p_value = 'n.s.'
 
-                    # Compute Cohen's d effect size
-                    data_group1 = df[df['age'] == group1]['value']
-                    data_group2 = df[df['age'] == group2]['value']
-                    d = cohen_d(data_group1, data_group2)
-
-                    # Add the significance level and Cohen's d effect size to the plot
+                    # Add the significance level to the plot
                     ax.text((group1 + group2) / 2, y_max - (y_max-y_min) * 0.005, p_value, ha='center', va='center',
                             color='black', fontsize=6)
-                    ax.text((group1 + group2) / 2, y_max + (y_max-y_min) * 0.015,
-                            f'                                     d = {d:.2f}', ha='center',
-                            va='center', color='black', fontsize=3)
 
                     # # Plot confidence interval
                     # ax.text((group1 + group2) / 3, y_max + (y_max-y_min) * 0.015,
@@ -273,31 +279,24 @@ for row in range(3):
 
         # X-axis labels
         try:
-            ax.set_xticks(np.unique(ages[method])[::2])
-            ax.set_xticklabels([f'{str(i)}' for i in np.unique(ages[method])[::2]])
-            if row == 2:
+            if row == 1:
+                ax.set_xticks(np.unique(ages[method])[::2])
+                ax.set_xticklabels([f'{str(i)}' for i in np.unique(ages[method])[::2]])
                 ax.set_xlabel('Postnatal days')
+            else:
+                ax.set_xticks([])
+                ax.set_xticklabels([])
         except:
             pass
 
         # Y-axis labels
         if col == 0:
-            ax.set_ylabel(method)
-            # if method == 'catch22':
-            #     ax.set_ylabel(r'$catch22$')
-            # elif method == 'catch22_subset':
-            #     ax.set_ylabel(r'$catch22$ (subset)')
-            # elif method == 'dfa':
-            #     ax.set_ylabel(r'dfa')
-            # elif method == 'rs_range':
-            #     ax.set_ylabel(r'$rs\_range$')
-            # elif method == 'high_fluct':
-            #     ax.set_ylabel(r'$high\_fluct$')
-            # elif method == 'power_spectrum_parameterization':
-            #     ax.set_ylabel(r'$1/f$'+' '+r'$slope$')
-            # elif method == 'fEI':
-            #     ax.set_ylabel(r'$fE/I$')
+            ax.set_ylabel(y_labels[row])
+            if row == 0:
+                ax.yaxis.set_label_coords(-0.3, 0.5)
+            else:
+                ax.yaxis.set_label_coords(-0.35, 0.5)
 
 # Save the figure
-plt.savefig('LFP_predictions.png', bbox_inches='tight')
-# plt.show()
+# plt.savefig('LFP_predictions.png', bbox_inches='tight')
+plt.show()
