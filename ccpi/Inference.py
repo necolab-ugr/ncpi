@@ -1,5 +1,7 @@
+import importlib
 import os
 import pickle
+import subprocess
 import numpy as np
 from sklearn.model_selection import RepeatedKFold
 from sklearn.preprocessing import StandardScaler
@@ -8,6 +10,44 @@ from sklearn.base import RegressorMixin
 from sbi.inference import SNPE
 import torch
 from sbi.utils import posterior_nn
+from tqdm import tqdm
+
+
+def install(module_name):
+    """
+    Function to install a Python module.
+
+    Parameters
+    ----------
+    module_name: str
+        Module name.
+    """
+    subprocess.check_call(['pip', 'install', module_name])
+    print(f"The module {module_name} was installed!")
+
+
+
+def module(module_name):
+    """
+    Function to dynamically import a Python module.
+
+    Parameters
+    ----------
+    module_name: str
+        Name of the module to import.
+
+    Returns
+    -------
+    module
+        The imported module.
+    """
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError:
+        print(f"{module_name} is not installed!")
+        install(module_name)
+        module = importlib.import_module(module_name)
+    return module
 
 
 class Inference:
@@ -396,6 +436,45 @@ class Inference:
         predictions : list
             List of predictions.
         """
+
+        def process_batch(batch):
+            if self.model[1] == 'sbi':
+                feat_batch, scaler, model, posterior = batch
+            else:
+                feat_batch, scaler, model = batch
+            predictions = []
+            for feat in feat_batch:
+                # Transform the features
+                feat = scaler.transform(feat.reshape(1, -1))
+
+                # Check that feat has no NaN or Inf values
+                if np.all(np.isfinite(feat)):
+                    # Predict the parameters
+                    if self.model[1] == 'sklearn':
+                        if type(model) is list:
+                            pred = np.mean([m.predict(feat) for m in model], axis=0)
+                        else:
+                            pred = model.predict(feat)
+                    if self.model[1] == 'sbi':
+                        # Sample the posterior
+                        x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
+                        if type(posterior) is list:
+                            posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in
+                                                 posterior]
+                            # Compute the mean of the posterior samples
+                            pred = np.mean([np.mean(post.numpy(), axis=0) for post in posterior_samples], axis=0)
+                        else:
+                            posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
+                            # Compute the mean of the posterior samples
+                            pred = np.mean(posterior_samples.numpy(), axis=0)
+
+                    predictions.append(pred[0])
+                else:
+                    predictions.append([np.nan for _ in range(self.theta.shape[1])])
+
+            # Return the predictions
+            return predictions
+
         # Assert that the model has been trained
         if not os.path.exists('data/model.pkl'):
             raise ValueError('Model has not been trained.')
@@ -422,35 +501,23 @@ class Inference:
         # Stack features
         features = np.stack(features)
 
-        # Predict the parameters
-        predictions = []
-        for feat in features:
-            # Transform the features
-            feat = scaler.transform(feat.reshape(1, -1))
+        # Split the data into batches using the number of available CPUs
+        num_cpus = os.cpu_count()
+        batch_size = len(features) // num_cpus
+        batches = [features[i:i + batch_size] for i in range(0, len(features), batch_size)]
 
-            # Check that feat has no NaN or Inf values
-            if np.all(np.isfinite(feat)):
-                # Predict the parameters
-                if self.model[1] == 'sklearn':
-                    if type(model) is list:
-                        pred = np.mean([m.predict(feat) for m in model], axis=0)
-                    else:
-                        pred = model.predict(feat)
-                if self.model[1] == 'sbi':
-                    # Sample the posterior
-                    x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
-                    if type(posterior) is list:
-                        posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in posterior]
-                        # Compute the mean of the posterior samples
-                        pred = np.mean([np.mean(post.numpy(), axis=0) for post in posterior_samples], axis=0)
-                    else:
-                        posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
-                        # Compute the mean of the posterior samples
-                        pred = np.mean(posterior_samples.numpy(), axis=0)
+        # Create a ProcessingPool
+        Pool = getattr(module('pathos'), 'multiprocessing').ProcessingPool
 
-                predictions.append(pred[0])
+        # Compute the features in parallel using all available CPUs
+        with Pool(num_cpus) as pool:
+            if self.model[1] == 'sbi':
+                results = list(tqdm(pool.imap(process_batch, [(batch, scaler, model, posterior) for batch in batches]),
+                                   total=len(batches), desc="Computing predictions"))
             else:
-                predictions.append([np.nan for _ in range(self.theta.shape[1])])
+                results = list(tqdm(pool.imap(process_batch, [(batch, scaler, model) for batch in batches]),
+                                   total=len(batches), desc="Computing predictions"))
+        # Concatenate the predictions
+        predictions = np.concatenate(results)
 
-        # Return the predictions
         return predictions
