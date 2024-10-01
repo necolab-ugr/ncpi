@@ -10,9 +10,24 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class FieldPotential:
-    def __init__(self):
+    def __init__(self, kernel=True, nyhead=False):
+        """
+        Initialize the FieldPotential object.
+        Parameters
+        ----------
+        kernel: bool
+            Initialize the dictionary for storing kernels for computing the CDM or LFP.
+
+        nyhead: bool
+            Use the NYHeadModel for computing EEG.
+        """
         # Initialize dictionary for storing kernels
-        self.H_YX = dict()
+        if kernel:
+            self.H_YX = dict()
+
+        # Initialize the head model
+        if nyhead:
+            self.nyhead = NYHeadModel()
 
     def create_kernel(self, MC_folder, output_path, params, biophys, dt, tstop, electrodeParameters=None, CDM=True):
         """
@@ -33,9 +48,9 @@ class FieldPotential:
         tstop: float
             Simulation time.
         electrodeParameters: dict
-            Electrode parameters.
+            Electrode parameters. If None, no LFP is computed.
         CDM: bool
-            Compute current dipole moment.
+            Compute the current dipole moment.
 
         Returns
         -------
@@ -181,7 +196,7 @@ class FieldPotential:
 
     def compute_EEG(self, CDM, location=None):
         """
-        Compute EEG from the current dipole moment using the NYHeadModel.
+        Compute EEG from a current dipole moment using the NYHeadModel.
 
         Parameters
         ----------
@@ -201,10 +216,6 @@ class FieldPotential:
         # Reformat the CDM to be a 3DxN array, where N is the number of time points
         p = np.zeros((3, len(CDM)))
         p[2, :] = CDM
-
-        # Initialize the head model
-        if not hasattr(self, 'nyhead'):
-            self.nyhead = NYHeadModel()
 
         all_EEG = []
         # If location is provided, compute EEG at that location
@@ -309,6 +320,9 @@ class FieldPotential:
                 # Get the closest electrode idx to dipole location
                 dist, closest_elec_idx = self.nyhead.find_closest_electrode()
                 all_EEG.append(EEG[closest_elec_idx, :])
+
+            # Delete variables
+            del M, p, EEG
 
         return all_EEG
 
