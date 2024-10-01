@@ -228,7 +228,7 @@ class Inference:
         return model
 
 
-    def train(self, param_grid=None, n_splits=10, n_repeats=10):
+    def train(self, param_grid=None, n_splits=10, n_repeats=10, train_params={'learning_rate': 0.0005}):
         """
         Method to train the model.
 
@@ -241,6 +241,8 @@ class Inference:
             Number of splits for RepeatedKFold cross-validation. The default is 10.
         n_repeats : int, optional
             Number of repeats for RepeatedKFold cross-validation. The default is 10.
+        train_params : dict, optional
+            Dictionary of training parameters for SNPE.
         """
 
         # Import the sklearn model
@@ -349,7 +351,7 @@ class Inference:
                         )
 
                         # Train the neural density estimator
-                        density_estimator = model.train()
+                        density_estimator = model.train(**train_params)
                         fits.append([model, density_estimator])
 
                         # Build the posterior
@@ -407,7 +409,7 @@ class Inference:
                 )
 
                 # Train the neural density estimator
-                density_estimator = model.train()
+                density_estimator = model.train(**train_params)
 
         # Save the best model and the StandardScaler
         if not os.path.exists('data'):
@@ -438,6 +440,20 @@ class Inference:
         """
 
         def process_batch(batch):
+            """
+            Function to process a batch of features.
+
+            Parameters
+            ----------
+            batch: tuple
+                Tuple containing the batch of features, the StandardScaler and the model (and the posterior if the model
+                is SNPE).
+
+            Returns
+            -------
+            predictions: list
+                List of predictions
+            """
             if self.model[1] == 'sbi':
                 feat_batch, scaler, model, posterior = batch
             else:

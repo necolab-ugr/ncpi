@@ -289,25 +289,40 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
 
-        model = 'MLPRegressor'
-        if method == 'catch22':
-            hyperparams = [{'hidden_layer_sizes': (10,10), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (20,20), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-        else:
-            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+        # model = 'MLPRegressor'
+        # if method == 'catch22':
+        #     hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+        #                    {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+        # else:
+        #     hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+        #                    {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
-        # model = 'SNPE'
-        # hyperparams = [
-        #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5, 'num_transforms':2}},
-        #                {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10, 'num_transforms':2}}]
+        model = 'SNPE'
+        if method == 'catch22':
+            hyperparams = [
+                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5,
+                                                                 'num_transforms':2}},
+                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
+                                                                 'num_transforms':2}}]
+        else:
+            hyperparams = [
+                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
+                                                                 'num_transforms':2}},
+                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
+                                                                 'num_transforms':2}}]
 
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
         inference = ccpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
-        inference.train(param_grid=hyperparams,n_splits=10, n_repeats=10)
+        if model == 'SNPE':
+            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=10, train_params={
+                'learning_rate': 0.01,
+                'stop_after_epochs': 5,
+                'max_num_epochs': 100})
+        else:
+            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=10)
 
         # Create folder to save results
         if not os.path.exists('data'):
