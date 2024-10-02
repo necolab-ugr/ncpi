@@ -89,7 +89,8 @@ def load_empirical_data(dataset):
     return emp_data
 
 def compute_features_POCTEP(method='catch22', params=None):
-    data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SOURCES/dSPM/DK'
+    # data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SOURCES/dSPM/DK'
+    data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/RAW'
 
     # List files in the directory
     ldir = os.listdir(data_path)
@@ -110,7 +111,7 @@ def compute_features_POCTEP(method='catch22', params=None):
         # get sampling frequency
         fs = data['cfg'][0, 0]['fs'][0, 0][0, 0]
 
-        # Brain regions
+        # Electrodes (raw data)/regions (if source data)
         regions = np.arange(signal.shape[1])
 
         # 5-second epochs
