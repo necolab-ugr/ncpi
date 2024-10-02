@@ -7,7 +7,6 @@ import mne
 import pandas as pd
 import scipy
 import numpy as np
-from matplotlib import pyplot as plt
 from rpy2.robjects import pandas2ri, r
 import rpy2.robjects as ro
 
@@ -16,56 +15,66 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ccpi
 
 
-# def load_simulation_data(file_path):
-#     """
-#     Load simulation data from a file.
-#
-#     Parameters
-#     ----------
-#     file_path : str
-#         Path to the file containing the simulation data.
-#
-#     Returns
-#     -------
-#     data : ndarray
-#         Simulation data loaded from the file.
-#     """
-#
-#     try:
-#         with open(file_path, 'rb') as file:
-#             data = pickle.load(file)
-#             print(f'Loaded file: {file_path}')
-#
-#         # Check if the data is a dictionary
-#         if isinstance(data, dict):
-#             print(f'The file contains a dictionary. {data.keys()}')
-#             # Print info about each key in the dictionary
-#             for key in data.keys():
-#                 if isinstance(data[key], np.ndarray):
-#                     print(f'Shape of {key}: {data[key].shape}')
-#                 else:
-#                     print(f'{key}: {data[key]}')
-#
-#         # Check if the data is a ndarray and print its shape
-#         elif isinstance(data, np.ndarray):
-#             print(f'Shape of data: {data.shape}')
-#         print('')
-#
-#     except Exception as e:
-#         print(f'Error loading file: {file_path}')
-#         print(e)
-#
-#     return data
+def load_simulation_data(file_path):
+    """
+    Load simulation data from a file.
+
+    Parameters
+    ----------
+    file_path : str
+        Path to the file containing the simulation data.
+
+    Returns
+    -------
+    data : ndarray
+        Simulation data loaded from the file.
+    """
+
+    try:
+        with open(file_path, 'rb') as file:
+            data = pickle.load(file)
+            print(f'Loaded file: {file_path}')
+
+        # Check if the data is a dictionary
+        if isinstance(data, dict):
+            print(f'The file contains a dictionary. {data.keys()}')
+            # Print info about each key in the dictionary
+            for key in data.keys():
+                if isinstance(data[key], np.ndarray):
+                    print(f'Shape of {key}: {data[key].shape}')
+                else:
+                    print(f'{key}: {data[key]}')
+
+        # Check if the data is a ndarray and print its shape
+        elif isinstance(data, np.ndarray):
+            print(f'Shape of data: {data.shape}')
+        print('')
+
+    except Exception as e:
+        print(f'Error loading file: {file_path}')
+        print(e)
+
+    return data
 
 
 def load_empirical_data(dataset, raw = False):
     # Check if features have been already computed
-    if os.path.exists(os.path.join('data', method, f'emp_data_{dataset}.pkl')):
-        emp_data = pd.read_pickle(os.path.join('data', method, f'emp_data_{dataset}.pkl'))
-        print(f'emp_data_{dataset}.pkl loaded.')
+    compute_f = False
+    if dataset == 'POCTEP':
+        if os.path.exists(os.path.join('data', method, f'emp_data_{dataset}_{raw}.pkl')):
+            emp_data = pd.read_pickle(os.path.join('data', method, f'emp_data_{dataset}_{raw}.pkl'))
+            print(f'Loaded file: emp_data_{dataset}_{raw}.pkl')
+        else:
+            compute_f = True
+    if dataset == 'OpenNEURO':
+        if os.path.exists(os.path.join('data', method, f'emp_data_{dataset}.pkl')):
+            emp_data = pd.read_pickle(os.path.join('data', method, f'emp_data_{dataset}.pkl'))
+            print(f'Loaded file: emp_data_{dataset}.pkl')
+        else:
+            compute_f = True
 
     # Compute features from empirical data
-    else:
+    if compute_f:
         # Create folder to save features
         if not os.path.exists('data'):
             os.makedirs('data')
@@ -85,7 +94,10 @@ def load_empirical_data(dataset, raw = False):
         print(f'Done in {(end_time - start_time) / 60.} min')
 
         # Save the features
-        emp_data.to_pickle(os.path.join('data', method, f'emp_data_{dataset}.pkl'))
+        if dataset == 'POCTEP':
+            emp_data.to_pickle(os.path.join('data', method, f'emp_data_{dataset}_{raw}.pkl'))
+        else:
+            emp_data.to_pickle(os.path.join('data', method, f'emp_data_{dataset}.pkl'))
 
     return emp_data
 
@@ -212,7 +224,7 @@ def compute_features_OpenNEURO(method='catch22', params=None):
 
     return df
 
-def lmer(df, feat):
+def lmer(df, feat, elec = False):
 
     # Activate pandas2ri
     pandas2ri.activate()
@@ -227,6 +239,9 @@ def lmer(df, feat):
     library(mgcv)
     ''')
 
+    # Copy the dataframe
+    df = df.copy()
+
     # Change the name of the C group to HC
     if 'HC' not in df['Group'].unique():
         df['Group'] = df['Group'].apply(lambda x: 'HC' if x == 'C' else x)
@@ -238,12 +253,11 @@ def lmer(df, feat):
     feature = df['Features'].apply(lambda x: x[feat])
     df['Features'] = feature
 
-    # IMPORTANT: The  control group must be named ''HC''
     # Filter out 'HC' and 'MCI' from the list of unique groups
     groups = df['Group'].unique()
     groups = [group for group in groups if group != 'HC' and group != 'MCI']
 
-    # Create a list with the different group comparisons (Group0 vs Group1, Group0 vs Group2, etc.)
+    # Create a list with the different group comparisons
     groups_comp = [f'{group}vsHC' for group in groups]
 
     # Remove rows where the variable is zero
@@ -256,7 +270,7 @@ def lmer(df, feat):
         df_pair = df[(df['Group'] == 'HC') | (df['Group'] == label)]
         ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
         ro.globalenv['label'] = label
-        print(df_pair)
+        # print(df_pair)
 
         # Convert columns to factors
         r(''' 
@@ -272,12 +286,20 @@ def lmer(df, feat):
             results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
         else:
             # Fit the linear mixed-effects model
-            r('''
-            mod00 = Features ~ Group  + (1 | ID)
-            m00 <- lmer(mod00, data=df_pair)
-            print(summary(m00))
-            ''')
+            if elec == False:
+                r('''
+                mod00 = Features ~ Group  + (1 | ID)
+                m00 <- lmer(mod00, data=df_pair)
+                print(summary(m00))
+                ''')
+            else:
+                r('''
+                mod00 = Features ~ Group * Sensor + (1 | ID)
+                m00 <- lmer(mod00, data=df_pair)
+                print(summary(m00))
+                ''')
 
+            # Compute the pairwise comparisons between groups
             r('''
             emm <- suppressMessages(emmeans(m00, specs=~Group))
             res <- pairs(emm, adjust='holm')
@@ -307,133 +329,53 @@ if __name__ == "__main__":
     all_methods = ['catch22']
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
-        # # Load parameters of the model (theta) and features from simulation data (X)
-        # print('\n--- Loading simulation data.')
-        # start_time = time.time()
-        # theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
-        # X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
-        # end_time = time.time()
-        # print(f'Samples loaded: {len(theta["data"])}')
-        # print(f'Done in {(end_time - start_time)/60.} min')
 
+        # Load parameters of the model (theta) and features from simulation data (X)
+        print('\n--- Loading simulation data.')
+        start_time = time.time()
+        theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
+        X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
+        end_time = time.time()
+        print(f'Samples loaded: {len(theta["data"])}')
+        print(f'Done in {(end_time - start_time)/60.} min')
 
         # Compute features from empirical data or load them if they have been already computed
         # POCTEP dataset
-        emp_data_POCTEP = load_empirical_data('POCTEP', raw = False)
+        print('\n--- Loading empirical data.')
+        start_time = time.time()
+        emp_data_POCTEP_source = load_empirical_data('POCTEP', raw = False)
+        emp_data_POCTEP_raw = load_empirical_data('POCTEP', raw=True)
         # OpenNEURO dataset
         emp_data_OpenNeuro = load_empirical_data('OpenNEURO')
+        end_time = time.time()
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-        # Plots
-        # Create a figure and set its properties
-        fig = plt.figure(figsize=(7.5, 3.5), dpi=300)
-        plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
-
-        # Define 4 colors
-        colors_1 = ['lightgrey', 'lightcoral', 'lightblue', 'lightgreen']
-
-        # Define 3 colors
-        colors_2 = ['lightgrey', 'peachpuff', 'cornflowerblue']
-
-        for row in range(2):
-            for col in range(4):
-                ax = fig.add_axes([0.08 + col * 0.24, 0.59 - row * 0.43, 0.15, 0.33])
-
-                if row == 0 and col < 2:
-                    feat = 18
-                if row == 0 and col >= 2:
-                    feat = 8
-                if row == 1 and col < 2:
-                    feat = 4
-                if row == 1 and col >= 2:
-                    feat = 19
-
-                # DB1
-                if col % 2 == 0:
-                    groups = ['HC','ADMIL', 'ADMOD', 'ADSEV']
-                    dataset = emp_data_POCTEP
-                    colors = colors_1
-                # DB2
-                else:
-                    groups = ['C','F','A']
-                    dataset = emp_data_OpenNeuro
-                    colors = colors_2
-
-                # Boxplots
-                for i,group in enumerate(groups):
-                    emp_data_group = dataset[dataset.Group == group]
-                    feature = emp_data_group['Features'].apply(lambda x: x[feat])
-                    # Remove nan values
-                    feature = feature[~np.isnan(feature)]
-                    box = ax.boxplot(feature, positions=[i], showfliers=False,
-                                 widths=0.7, patch_artist=True, medianprops=dict(color='red', linewidth=0.8),
-                                 whiskerprops=dict(color='black', linewidth=0.5),
-                                 capprops=dict(color='black', linewidth=0.5),
-                                 boxprops=dict(linewidth=0.5))
-                    for patch in box['boxes']:
-                        patch.set_facecolor(colors[i])
-
-                # Compute the linear mixed-effects model
-                if col % 2 == 0:
-                    lmer_feat = lmer(emp_data_POCTEP, feat)
-                else:
-                    lmer_feat = lmer(emp_data_OpenNeuro, feat)
-
-                # Add p-values to the plot
-                y_max = ax.get_ylim()[1]
-                y_min = ax.get_ylim()[0]
-                delta = (y_max - y_min) * 0.2
-
-                for i, group in enumerate(groups[1:]):
-                    p_value = lmer_feat[f'{group}vsHC']['p.value']
-                    if p_value.empty:
-                        continue
-
-                    # Significance levels
-                    if p_value[0] < 0.05 and p_value[0] >= 0.01:
-                        pp = '*'
-                    elif p_value[0] < 0.01 and p_value[0] >= 0.001:
-                        pp = '**'
-                    elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
-                        pp = '***'
-                    elif p_value[0] < 0.0001:
-                        pp = '****'
+        # LMER analysis
+        print('\n--- LMER analysis.')
+        start_time = time.time()
+        lmer_feat = [{'DB1_raw': {}, 'DB1_source': {}, 'DB2': {}} for k in range(2)]
+        for ii,elec in enumerate([False, True]):
+            for DB in range(2):
+                for feat in [18, 8, 4, 19]:
+                    print(f'\n--- Feature: {feat}, DB: {DB}, Elec: {elec}')
+                    # Compute the linear mixed-effects model
+                    if DB == 0:
+                        lmer_feat_raw = lmer(emp_data_POCTEP_raw, feat, elec)
+                        lmer_feat_source = lmer(emp_data_POCTEP_source, feat, elec)
+                        lmer_feat[ii]['DB1_raw'][f'{feat}'] = lmer_feat_raw
+                        lmer_feat[ii]['DB1_source'][f'{feat}'] = lmer_feat_source
                     else:
-                        pp = 'n.s.'
+                        lmer_feat_raw = lmer(emp_data_OpenNeuro, feat, elec)
+                        lmer_feat[ii]['DB2'][f'{feat}'] = lmer_feat_raw
 
-                    if pp != 'n.s.':
-                        offset = -delta*0.1
-                    else:
-                        offset = 0
+        # Save the results
+        with open(os.path.join('data', method, 'lmer_feat.pkl'), 'wb') as file:
+            pickle.dump(lmer_feat, file)
+            print(f'lmer_feat.pkl saved.')
 
-                    ax.text(0.5*i+0.5, y_max + delta*i + delta*0.1 + offset, f'{pp}', ha='center', fontsize=8)
-                    ax.plot([0, i+1], [y_max + delta*i, y_max + delta*i], color='black', linewidth=0.5)
+        end_time = time.time()
+        print(f'Done in {(end_time - start_time)/60.} min')
 
-                # Change y-lim
-                ax.set_ylim([y_min, y_max + delta*(len(groups)-1)])
+        # Predictions
+        # To do
 
-                # x-labels
-                if row == 1:
-                    if col % 2 == 0:
-                        ax.set_xticks([0, 1, 2, 3])
-                        ax.set_xticklabels(['HC', 'ADMIL', 'ADMOD', 'ADSEV'], rotation=45, fontsize = 8)
-                    else:
-                        ax.set_xticks([0, 1, 2])
-                        ax.set_xticklabels(['HC', 'FTD', 'AD'], rotation=45, fontsize = 8)
-                else:
-                    ax.set_xticks([])
-
-                # y-labels
-                if row == 0 and col < 2:
-                    ax.set_ylabel(r'$rs\_range$')
-                if row == 0 and col >= 2:
-                    ax.set_ylabel(r'$TransVar$')
-                if row == 1 and col < 2:
-                    ax.set_ylabel(r'$ami2$')
-                if row == 1 and col >= 2:
-                    ax.set_ylabel(r'$dfa$')
-
-                # Titles
-                ax.set_title(f'DB{1 if col%2 == 0 else 2}')
-
-
-        plt.show()
