@@ -5,17 +5,18 @@ import pandas as pd
 import pickle
 from matplotlib import pyplot as plt
 
+EEG_AD_FTD_path = '/DATOS/pablomc/EEG_AD_FTD_results'
+
 if __name__ == "__main__":
     # Load features
     # POCTEP dataset
-    emp_data_POCTEP_source = pd.read_pickle(os.path.join('../data', 'catch22', 'emp_data_POCTEP_False.pkl'))
-    emp_data_POCTEP_raw = pd.read_pickle(os.path.join('../data', 'catch22', 'emp_data_POCTEP_True.pkl'))
+    emp_data_POCTEP_source = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_False.pkl'))
+    emp_data_POCTEP_raw = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_True.pkl'))
     # OpenNEURO dataset
-    emp_data_OpenNeuro = pd.read_pickle(os.path.join('../data', 'catch22', 'emp_data_OpenNeuro.pkl'))
+    emp_data_OpenNeuro = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_OpenNEURO.pkl'))
 
     # Load LMER results
-    with open(os.path.join('../data', 'catch22', 'lmer_feat.pkl'), 'wb') as file:
-        lmer_feat = pickle.load(file)
+    lmer_feat = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'catch22', 'lmer_feat.pkl'), 'rb'))
 
     # Fig. 2
     fig2 = plt.figure(figsize=(7.5, 3.5), dpi=300)
@@ -67,9 +68,9 @@ if __name__ == "__main__":
 
             # Compute the linear mixed-effects model
             if col % 2 == 0:
-                lmer_feat = lmer_feat[0]['DB1_source'][f'{feat}']
+                lmer_results = lmer_feat[0]['DB1_source'][f'{feat}']
             else:
-                lmer_feat = lmer_feat[0]['DB2'][f'{feat}']
+                lmer_results = lmer_feat[0]['DB2'][f'{feat}']
 
             # Add p-values to the plot
             y_max = ax.get_ylim()[1]
@@ -77,7 +78,7 @@ if __name__ == "__main__":
             delta = (y_max - y_min) * 0.2
 
             for i, group in enumerate(groups[1:]):
-                p_value = lmer_feat[f'{group}vsHC']['p.value']
+                p_value = lmer_results[f'{group}vsHC']['p.value']
                 if p_value.empty:
                     continue
 
@@ -129,4 +130,4 @@ if __name__ == "__main__":
             ax.set_title(f'DB{1 if col%2 == 0 else 2}')
 
 
-plt.show()
+    plt.show()
