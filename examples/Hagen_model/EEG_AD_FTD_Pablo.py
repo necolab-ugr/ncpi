@@ -207,7 +207,7 @@ def compute_features_OpenNEURO(method='catch22', params=None):
                         ID.append(folder)
                         group.append(gp)
                         epoch.append(i)
-                        sensor.append(ch_names[elec])
+                        sensor.append(elec)
                         EEG.append(ep[:, elec])
 
     # Create the Pandas DataFrame
@@ -315,7 +315,6 @@ def lmer(df, feat, elec = False):
             res <- pairs(emm, adjust='holm')
             df_res <- as.data.frame(res)
             print(df_res)
-            filtered_df <- df_res[df_res$p.value < 0.05, ]
             ''')
 
             df_res_r = ro.r['df_res']

@@ -305,14 +305,24 @@ if __name__ == "__main__":
             for elec in range(19):
                 p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
                 z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
-                if p_value < 0.01:
+                if p_value < 0.01 and np.abs(z_score) > 2.5:
                     data.append(z_score)
                 else:
                     data.append(0)
 
             # Plot EEG
             plot_simple_head_model(ax, 1, 0)
-            plot_EEG(fig3, ax, data, 1, 0, -np.max(np.abs(data)), np.max(np.abs(data)))
+            # plot_EEG(fig3, ax, data, 1, 0, -np.max(np.abs(data)), np.max(np.abs(data)))
+
+            if col < 3:
+                if row == 0:
+                    ylims = [-12,12]
+                else:
+                    ylims = [-6,6]
+            else:
+                ylims = [-6, 6]
+
+            plot_EEG(fig3, ax, data, 1, 0, ylims[0], ylims[1])
 
             # ticks
             ax.set_xticks([])
@@ -339,7 +349,7 @@ if __name__ == "__main__":
 
         for row in range(5):
             for col in range(5):
-                ax = fig.add_axes([0.05 + col * 0.19, 0.72 - row * 0.23, 0.15, 0.2])
+                ax = fig.add_axes([0.05 + col * 0.19, 0.8 - row * 0.18, 0.15, 0.15])
 
                 if col == 0:
                     group = 'ADMIL'
@@ -354,15 +364,15 @@ if __name__ == "__main__":
 
                 # Get lmer results
                 if col < 3:
-                    lmer_results = lmer_preds[param]['DB1'][all_confs[row]][param]
+                    lmer_results = lmer_preds[n_var-1]['DB1'][all_confs[row]][param]
                 else:
-                    lmer_results = lmer_preds[param]['DB2'][all_confs[row]][param]
+                    lmer_results = lmer_preds[n_var-1]['DB2'][all_confs[row]][param]
 
                 data = []
                 for elec in range(19):
                     p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
                     z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
-                    if p_value < 0.01:
+                    if p_value < 0.01 and np.abs(z_score) > 2.5:
                         data.append(z_score)
                     else:
                         data.append(0)
@@ -382,12 +392,14 @@ if __name__ == "__main__":
                 # Labels
                 if col == 0:
                     if row == 0:
-                        ax.set_ylabel(r'$rs\_range$')
+                        ax.set_ylabel(r'$catch22$')
                     if row == 1:
-                        ax.set_ylabel(r'$TransVar$')
+                        ax.set_ylabel(r'$rs\_range$')
                     if row == 2:
-                        ax.set_ylabel(r'$ami2$')
+                        ax.set_ylabel(r'$TransVar$')
                     if row == 3:
+                        ax.set_ylabel(r'$ami2$')
+                    if row == 4:
                         ax.set_ylabel(r'$dfa$')
 
 
