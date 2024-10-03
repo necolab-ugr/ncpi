@@ -478,13 +478,27 @@ if __name__ == "__main__":
 
                     # LMER analysis
                     print('\n--- LMER analysis.')
-                    # Replace the features with the predictions for the lmer analysis (this should be improved
-                    # in the future)
-                    new_data_POCTEP['Features'] = predictions_POCTEP
-                    new_data_OpenNeuro['Features'] = predictions_OpenNeuro
-                    # Compute the linear mixed-effects model
-                    lmer_preds_POCTEP = lmer(new_data_POCTEP, np.nan, True)
-                    lmer_preds_OpenNeuro = lmer(new_data_OpenNeuro, np.nan, True)
+                    lmer_preds_POCTEP = []
+                    lmer_preds_OpenNeuro = []
+                    for param in range(n_var):
+                        # E/I
+                        if param == 0:
+                            preds_POCTEP = (predictions_POCTEP[:,0]/predictions_POCTEP[:,2]) /\
+                                         (predictions_POCTEP[:, 1] / predictions_POCTEP[:, 3])
+                            preds_OpenNeuro = (predictions_OpenNeuro[:,0]/predictions_OpenNeuro[:,2]) /\
+                                            (predictions_OpenNeuro[:, 1] / predictions_OpenNeuro[:, 3])
+                        # J_ext
+                        else:
+                            preds_POCTEP = predictions_POCTEP[:,4]
+                            preds_OpenNeuro = predictions_OpenNeuro[:,4]
+
+                        # Replace the features with the predictions for the lmer analysis (this should be improved
+                        # in the future)
+                        new_data_POCTEP['Features'] = preds_POCTEP
+                        new_data_OpenNeuro['Features'] = preds_OpenNeuro
+                        # Compute the linear mixed-effects model
+                        lmer_preds_POCTEP.append(lmer(new_data_POCTEP, np.nan, True))
+                        lmer_preds_OpenNeuro.append(lmer(new_data_OpenNeuro, np.nan, True))
                     lmer_preds[n_var-1]['DB1'][conf] = lmer_preds_POCTEP
                     lmer_preds[n_var-1]['DB2'][conf] = lmer_preds_OpenNeuro
 
