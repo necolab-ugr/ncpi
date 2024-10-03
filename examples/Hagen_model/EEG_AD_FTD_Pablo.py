@@ -104,7 +104,7 @@ def load_empirical_data(dataset, raw = False):
 
 def compute_features_POCTEP(method='catch22', params=None, raw = False):
     if raw:
-        data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/RAW'
+        data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SENSORS'
     else:
         data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SOURCES/dSPM/DK'
 
