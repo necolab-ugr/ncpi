@@ -9,9 +9,9 @@ import scipy.signal as ss
 import numpy as np
 from matplotlib import pyplot as plt
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
-import ccpi
+import ncpi
 
 # Parameters of LIF model simulations
 sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
@@ -111,7 +111,7 @@ for trial in range(trials):
             LIF_params['J_ext'] = J_ext
 
             # Create a Simulation object
-            sim = ccpi.Simulation(param_folder='../simulation/params',
+            sim = ncpi.Simulation(param_folder='../simulation/params',
                                   python_folder='../simulation/python',
                                   output_folder='../simulation/output')
 
@@ -160,7 +160,7 @@ for trial in range(trials):
 
             # Compute the kernel
             print('Computing the kernel...')
-            potential = ccpi.FieldPotential()
+            potential = ncpi.FieldPotential()
             biophys = ['set_Ih_linearized_hay2011', 'make_cell_uniform']
             H_YX = potential.create_kernel(multicompartment_neuron_network_path,
                                            output_path,
@@ -334,14 +334,14 @@ for method in all_methods:
 
     # Compute features
     if method == 'catch22':
-        features = ccpi.Features(method='catch22')
+        features = ncpi.Features(method='catch22')
     elif method == 'power_spectrum_parameterization':
         # Parameters of the fooof algorithm
         fooof_setup_sim = {'peak_threshold': 1.,
                            'min_peak_height': 0.,
                            'max_n_peaks': 5,
                            'peak_width_limits': (10., 50.)}
-        features = ccpi.Features(method='power_spectrum_parameterization',
+        features = ncpi.Features(method='power_spectrum_parameterization',
                                  params={'fs': df.fs,
                                          'fmin': 5.,
                                          'fmax': 200.,

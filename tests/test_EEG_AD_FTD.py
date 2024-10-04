@@ -4,11 +4,11 @@ import os
 import sys
 import pandas as pd
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-import ccpi
+import ncpi
 
-root_path = '/home/juanmiguel/ccpi/POCTEP/'
+root_path = '/home/juanmiguel/ncpi/POCTEP/'
 data_path = os.path.join(root_path, 'processed')
 df_path = os.path.join(root_path, 'df_poctep.pkl')
 feat_path = os.path.join(root_path, 'feat_poctep.pkl')
@@ -17,7 +17,7 @@ recording_type = 'EEG'
 data_format = 'mat'
 epoch_l = 5
 
-ccpi_feat = ccpi.Features()
+ccpi_feat = ncpi.Features()
 
 # ##### Load Data and Create DataFrame #####
 
@@ -41,7 +41,7 @@ feat_data = ccpi_feat.compute_features(df_data)
 # # Calculate the mean of the 'Data' column and overwrite the 'Data' column with the mean
 # data['Data'] = data['Data'].apply(lambda x: x.mean())
 
-# ccpi_analysis = ccpi.Analysis(data)
+# ccpi_analysis = ncpi.Analysis(data)
 # ccpi_analysis.lmer()
 
 ################################

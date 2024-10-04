@@ -6,9 +6,9 @@ import shutil
 import numpy as np
 import pandas as pd
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
-import ccpi
+import ncpi
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
 compute_EEG = True
@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     # Create the FieldPotential object
     if compute_EEG:
-        potential = ccpi.FieldPotential(nyhead = True, kernel = False)
+        potential = ncpi.FieldPotential(nyhead = True, kernel = False)
 
     for method in ['catch22', 'power_spectrum_parameterization']:
         # Check if the features have already been computed
@@ -85,25 +85,25 @@ if __name__ == '__main__':
 
                             # Compute features
                             if method == 'catch22':
-                                features = ccpi.Features(method='catch22')
+                                features = ncpi.Features(method='catch22')
                             elif method == 'power_spectrum_parameterization':
                                 # Parameters of the fooof algorithm
                                 fooof_setup_sim = {'peak_threshold': 1.,
                                                    'min_peak_height': 0.,
                                                    'max_n_peaks': 5,
                                                    'peak_width_limits': (10., 50.)}
-                                features = ccpi.Features(method='power_spectrum_parameterization',
+                                features = ncpi.Features(method='power_spectrum_parameterization',
                                                          params={'fs': df.fs,
                                                                  'fmin': 5.,
                                                                  'fmax': 200.,
                                                                  'fooof_setup': fooof_setup_sim,
                                                                  'r_squared_th':0.9})
                             elif method == 'fEI':
-                                features = ccpi.Features(method='fEI',
+                                features = ncpi.Features(method='fEI',
                                                          params={'fs': df.fs,
                                                                  'fmin': 5.,
                                                                  'fmax': 150.,
-                                                                 'fEI_folder': '../../../ccpi/Matlab'})
+                                                                 'fEI_folder': '../../../ncpi/Matlab'})
 
                             df = features.compute_features(df)
 

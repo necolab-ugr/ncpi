@@ -12,9 +12,9 @@ import pandas as pd
 import seaborn as sns
 from sklearn.preprocessing import LabelEncoder
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-import ccpi
+import ncpi
 
 def cohen_d(x, y):
     """ Compute Cohen's d effect size.
@@ -119,7 +119,7 @@ if __name__ == '__main__':
 
     # Compute features
     if len(data['Data'][0]) > 100:
-        features = ccpi.Features(method='catch22')
+        features = ncpi.Features(method='catch22')
         data = features.compute_features(data)
     # If the data is already in feature format (Wine Quality Dataset), just rename the 'Data' column to 'Features'
     else:
@@ -181,7 +181,7 @@ if __name__ == '__main__':
                 hyperparams = None
 
             # Create the Inference object and add the train data
-            inference = ccpi.Inference(model=model, hyperparams=hyperparams)
+            inference = ncpi.Inference(model=model, hyperparams=hyperparams)
             inference.add_simulation_data(np.array(train_data['Features'].tolist()), parameters)
 
             # Train the model

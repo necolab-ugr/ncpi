@@ -1,13 +1,13 @@
 import os
 import sys
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
-import ccpi
+import ncpi
 
 if __name__ == "__main__":
     # Create a Simulation object
-    sim = ccpi.Simulation(param_folder='params', python_folder='python', output_folder='output')
+    sim = ncpi.Simulation(param_folder='params', python_folder='python', output_folder='output')
 
     # Run the network, simulation and analysis scripts
     sim.network('network.py', 'network_params.py')

@@ -6,9 +6,9 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
-import ccpi
+import ncpi
 
 # Parameters of LIF model simulations
 sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
@@ -124,7 +124,7 @@ for method in all_methods:
                 LIF_params['J_ext'] = J_ext
 
                 # Create a Simulation object
-                sim = ccpi.Simulation(param_folder='../simulation/params',
+                sim = ncpi.Simulation(param_folder='../simulation/params',
                                       python_folder='../simulation/python',
                                       output_folder='../simulation/output')
 

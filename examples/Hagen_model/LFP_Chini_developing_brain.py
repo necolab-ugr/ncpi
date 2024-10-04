@@ -9,9 +9,9 @@ import time
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-import ccpi
+import ncpi
 
 # Names of catch22 features
 try:
@@ -162,7 +162,7 @@ def compute_features(data, chunk_size=5., method='catch22', params=None):
     df.fs = data['fs'][0]
 
     # Compute features
-    features = ccpi.Features(method=method, params=params)
+    features = ncpi.Features(method=method, params=params)
     df = features.compute_features(df)
 
     return df
@@ -281,7 +281,7 @@ if __name__ == "__main__":
                                         params={'fs': emp_data['fs'][0],
                                                 'fmin': 5.,
                                                 'fmax': 49.,
-                                                'fEI_folder': '../../ccpi/Matlab'})
+                                                'fEI_folder': '../../ncpi/Matlab'})
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
 
@@ -314,7 +314,7 @@ if __name__ == "__main__":
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
-        inference = ccpi.Inference(model=model)
+        inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
         if model == 'SNPE':
             inference.train(param_grid=hyperparams, n_splits=10, n_repeats=10, train_params={

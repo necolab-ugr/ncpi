@@ -10,9 +10,9 @@ import numpy as np
 from rpy2.robjects import pandas2ri, r
 import rpy2.robjects as ro
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
-import ccpi
+import ncpi
 
 EEG_AD_FTD_path = '/DATOS/pablomc/EEG_AD_FTD_results'
 
@@ -156,7 +156,7 @@ def compute_features_POCTEP(method='catch22', params=None, raw = False):
     df.fs = fs
 
     # Compute features
-    features = ccpi.Features(method=method, params=params)
+    features = ncpi.Features(method=method, params=params)
     df = features.compute_features(df)
 
     return df
@@ -220,7 +220,7 @@ def compute_features_OpenNEURO(method='catch22', params=None):
     df.fs = fs
 
     # Compute features
-    features = ccpi.Features(method=method, params=params)
+    features = ncpi.Features(method=method, params=params)
     df = features.compute_features(df)
 
     return df
@@ -480,7 +480,7 @@ if __name__ == "__main__":
                     # Compute predictions from the empirical data
                     print('\n--- Computing predictions from empirical data.')
                     start_time = time.time()
-                    inference = ccpi.Inference(model=tr_model)
+                    inference = ncpi.Inference(model=tr_model)
                     # Add fake simulation data. Not sure if this is necessary
                     inference.add_simulation_data(np.zeros((len(X),22 if conf == 'catch22' else 1)),
                                                   np.zeros((len(X),3+n_var)))

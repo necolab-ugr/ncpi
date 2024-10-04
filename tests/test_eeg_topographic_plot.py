@@ -2,7 +2,7 @@ import sys
 import os
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from ccpi.Analysis import Analysis
+from ncpi.Analysis import Analysis
 
 import pandas as pd
 import numpy as np

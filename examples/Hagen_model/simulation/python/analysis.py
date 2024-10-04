@@ -7,9 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as ss
 
-# ccpi toolbox
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../../..'))
-import ccpi
+import ncpi
 
 def get_spike_rate(times, transient, dt, tstop):
     """
@@ -129,7 +129,7 @@ if __name__ == "__main__":
 
     # Compute the kernel
     print('Computing the kernel...')
-    potential = ccpi.FieldPotential()
+    potential = ncpi.FieldPotential()
     biophys = ['set_Ih_linearized_hay2011','make_cell_uniform']
     H_YX = potential.create_kernel(multicompartment_neuron_network_path,
                                    output_path,
