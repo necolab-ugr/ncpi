@@ -147,7 +147,7 @@ def plot_EEG(fig, Vax, data, radius, pos, vmin, vmax):
 if __name__ == "__main__":
     # Load features
     # POCTEP dataset
-    emp_data_POCTEP_source = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_False.pkl'))
+    # emp_data_POCTEP_source = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_False.pkl'))
     emp_data_POCTEP_raw = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_True.pkl'))
     # OpenNEURO dataset
     emp_data_OpenNeuro = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_OpenNEURO.pkl'))
@@ -182,7 +182,7 @@ if __name__ == "__main__":
             # DB1
             if col % 2 == 0:
                 groups = ['HC','ADMIL', 'ADMOD', 'ADSEV']
-                dataset = emp_data_POCTEP_source
+                dataset = emp_data_POCTEP_raw
                 colors = colors_1
             # DB2
             else:
@@ -206,7 +206,7 @@ if __name__ == "__main__":
 
             # Compute the linear mixed-effects model
             if col % 2 == 0:
-                lmer_results = lmer_feat[0]['DB1_source'][f'{feat}']
+                lmer_results = lmer_feat[0]['DB1_raw'][f'{feat}']
             else:
                 lmer_results = lmer_feat[0]['DB2'][f'{feat}']
 
