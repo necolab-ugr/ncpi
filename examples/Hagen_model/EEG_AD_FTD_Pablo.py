@@ -293,7 +293,7 @@ def lmer(df, feat, elec = False):
                 mod00 = Features ~ Group  + (1 | ID)
                 mod01 = Features ~ Group
                 m00 <- lmer(mod00, data=df_pair)
-                m01 <- lmer(mod01, data=df_pair)
+                m01 <- lm(mod01, data=df_pair)
                 print(summary(m00))
                 print(summary(m01))
                 ''')
@@ -312,12 +312,19 @@ def lmer(df, feat, elec = False):
                 print(bics)
                 index <- which.min(bics)
                 mod_sel <- all_models[index]
+                
+                if (mod_sel == 'm00') {
+                    m_sel <- lmer(mod00, data=df_pair)
+                }
+                if (mod_sel == 'm01') {
+                    m_sel <- lmer(mod01, data=df_pair)
+                }                
                 ''')
 
             # Compute the pairwise comparisons between groups
             if elec == False:
                 r('''
-                emm <- suppressMessages(emmeans(mod_sel, specs=~Group))
+                emm <- suppressMessages(emmeans(m_sel, specs=~Group))
                 ''')
             else:
                 r('''
