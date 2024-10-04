@@ -287,12 +287,15 @@ def lmer(df, feat, elec = False):
         if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
             results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
         else:
-            # Fit the linear mixed-effects model
+            # Fit the linear mixed-effects models
             if elec == False:
                 r('''
                 mod00 = Features ~ Group  + (1 | ID)
+                mod01 = Features ~ Group
                 m00 <- lmer(mod00, data=df_pair)
+                m01 <- lmer(mod01, data=df_pair)
                 print(summary(m00))
+                print(summary(m01))
                 ''')
             else:
                 r('''
@@ -301,10 +304,20 @@ def lmer(df, feat, elec = False):
                 print(summary(m00))
                 ''')
 
+            # BIC
+            if elec == False:
+                r('''
+                all_models <- c('m00', 'm01')
+                bics <- c(BIC(m00), BIC(m01))
+                print(bics)
+                index <- which.min(bics)
+                mod_sel <- all_models[index]
+                ''')
+
             # Compute the pairwise comparisons between groups
             if elec == False:
                 r('''
-                emm <- suppressMessages(emmeans(m00, specs=~Group))
+                emm <- suppressMessages(emmeans(mod_sel, specs=~Group))
                 ''')
             else:
                 r('''
