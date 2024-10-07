@@ -1,4 +1,6 @@
 import os
+import sys
+import json
 import numpy as np
 import pandas as pd
 import pickle
@@ -10,8 +12,20 @@ from matplotlib.cm import ScalarMappable
 from matplotlib import colorbar
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.lines as mlines
-# EEG_AD_FTD_path = '/DATOS/pablomc/EEG_AD_FTD_results'
-EEG_AD_FTD_path = '/home/alejandro/CCPI/DATA/features'
+
+if '__file__' not in globals():
+    __file__ = os.path.abspath('')
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
+import ncpi
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+
+config_path = os.path.join(script_dir, 'config.json')
+with open(config_path, 'r') as config_file:
+    config = json.load(config_file)
+
+EEG_AD_FTD_path = config['empirical_features_path']
 
 n_var = 2
 
@@ -21,158 +35,24 @@ all_confs = ['catch22',
             'CO_HistogramAMI_even_2_5',
             'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1']
 
-def plot_simple_head_model(ax, radius, pos):
-    '''
-    Plot a simple head model for adding results of the EEG data analysis later.
 
-    Parameters
-    ----------
-    ax: matplotlib Axes object
-    radius: float,
-        radius of the head circumference.
-    pos: float
-        Position of the head on the x-axis.
-    '''
-
-    ax.set_aspect('equal')
-
-
-    # Cabeza
-    head_circle = mpatches.Circle((pos, 0), radius+0.02, edgecolor='k', facecolor='none', linewidth=0.5)
-    ax.add_patch(head_circle)
-
-    # Orejas
-    right_ear = mpatches.FancyBboxPatch([pos + radius + radius / 20, -radius / 10],
-                                        radius / 50, radius / 5,
-                                        boxstyle=mpatches.BoxStyle("Round", pad=radius / 20),
-                                        linewidth=0.5)
-    ax.add_patch(right_ear)
-
-    left_ear = mpatches.FancyBboxPatch([pos - radius - radius / 20 - radius / 50, -radius / 10],
-                                       radius / 50, radius / 5,
-                                       boxstyle=mpatches.BoxStyle("Round", pad=radius / 20),
-                                       linewidth=0.5)
-    ax.add_patch(left_ear)
-
-    # Nariz
-    ax.plot([pos - radius / 10, pos, pos + radius / 10], 
-            [radius + 0.02, radius + radius / 10 + 0.02,0.02 + radius], 
-            'k', linewidth=0.5)
-
-def plot_EEG(fig, Vax, data, radius, pos, vmin, vmax, label=True):
-    '''
-    Plot slopes or E/I predictions on EEG electrodes (20 EEG montage) as a
-    contour plot.
-
-    Parameters
-    ----------
-    fig: matplotlib figure
-    Vax: matplotlib Axes object
-    data: list
-        Data containing slopes or E/I predictions.
-    radius: float,
-        radius of the head circumference.
-    pos: float
-        Position of the head on the x-axis.
-    vmin, vmax: float
-        Min and max values used for plotting.
-    '''
-    # Some parameters
-    N = 100             # number of points for interpolation
-    xy_center = [pos,0]   # center of the plot
-
-    # Coordinates of the EEG electrodes in the 20 montage
-    koord = [[pos-0.25*radius,0.8*radius], # "Fp1"
-            [pos+0.25*radius,0.8*radius], # "Fp2"
-            [pos-0.3*radius,0.35*radius], # "F3"
-            [pos+0.3*radius,0.35*radius], # "F4"
-            [pos-0.35*radius,0.0], # "C3"
-            [pos+0.35*radius,0.], # "C4"
-            [pos-0.3*radius,-0.4*radius], # "P3"
-            [pos+0.3*radius,-0.4*radius], # "P4"
-            [pos-0.35*radius,-0.8*radius], # "O1"
-            [pos+0.35*radius,-0.8*radius], # "O2"
-            [pos-0.6*radius,0.45*radius], # "F7"
-            [pos+0.6*radius,0.45*radius], # "F8"
-            [pos-0.8*radius,0.0], # "T3"
-            [pos+0.8*radius,0.0], # "T4"
-            [pos-0.6*radius,-0.2], # "T5"
-            [pos+0.6*radius,-0.2], # "T6"
-            [pos,0.35*radius], # "Fz"
-            [pos,0.], # "Cz"
-            [pos,-0.4*radius]] # "Pz"
-
-
-    # External fake electrodes for completing interpolation
-    for xx in np.linspace(pos-radius,pos+radius,50):
-        koord.append([xx,np.sqrt(radius**2 - (xx)**2)])
-        koord.append([xx,-np.sqrt(radius**2 - (xx)**2)])
-        data.append(0)
-        data.append(0)
-
-    # Interpolate data points
-    x,y = [],[]
-    for i in koord:
-        x.append(i[0])
-        y.append(i[1])
-    z = data
-
-    xi = np.linspace(-radius, radius, N)
-    yi = np.linspace(-radius, radius, N)
-    zi = scipy.interpolate.griddata((np.array(x), np.array(y)), z,
-                                    (xi[None,:], yi[:,None]), method='cubic')
-
-    # # set points > radius to not-a-number. They will not be plotted.
-    # # the dr/2 makes the edges a bit smoother
-    # dr = xi[1] - xi[0]
-    # for i in range(N):
-    #     for j in range(N):
-    #         r = np.sqrt((xi[i] - xy_center[0])**2 + (yi[j] - xy_center[1])**2)
-    #         if (r - dr/2) > radius:
-    #             zi[j,i] = "nan"
-
-    # Use different number of levels for the fill and the lines
-    CS = Vax.contourf(xi, yi, zi, 30, cmap = plt.cm.bwr, zorder = 1,
-                      vmin = vmin,vmax = vmax)
-    Vax.contour(xi, yi, zi, 5, colors = "grey", zorder = 2,linewidths = 0.4,
-                vmin = vmin,vmax = vmax)
-
-    # Make a color bar
-    # cbar = fig.colorbar(CS, ax=Vax)
-    divider = make_axes_locatable(Vax)
-    cax = divider.append_axes("right", size="5%", pad=0.05)
-
-    if np.sum(np.abs(data)) > 2: 
-        colorbar = fig.colorbar(ScalarMappable(norm=CS.norm, cmap=CS.cmap), cax=cax)
-        colorbar.ax.tick_params(labelsize=5)
-        if label == True:
-            colorbar.ax.xaxis.set_label_position('top')
-            bbox = colorbar.ax.get_position()
-            # print(bbox)
-            colorbar.set_label('Ratio', size=5, labelpad=0, rotation=270, va='center')
-            
-    else:
-        # Hide the colorbar if the data is not significant
-        cax.axis('off')
-
-    # Add the EEG electrode positions
-    Vax.scatter(x[:20], y[:20], marker = 'o', c = 'k', s = 0.5, zorder = 3)
 
 
 if __name__ == "__main__":
     # Load features
     # POCTEP dataset
     # emp_data_POCTEP_source = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_False.pkl'))
-    # emp_data_POCTEP_raw = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_True.pkl'))
+    emp_data_POCTEP_raw = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_True.pkl'))
     # OpenNEURO dataset
-    # emp_data_OpenNeuro = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_OpenNEURO.pkl'))
+    emp_data_OpenNeuro = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_OpenNEURO.pkl'))
 
     # Load LMER results
-    lmer_feat = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'databases', 'lmer_feat.pkl'), 'rb'))
-    lmer_preds = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'databases', 'lmer_preds.pkl'), 'rb'))
+    lmer_feat = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'catch22', 'lmer_feat.pkl'), 'rb'))
+    lmer_preds = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'catch22', 'lmer_preds.pkl'), 'rb'))
+
 
     # Fig. 2
-    # fig2 = plt.figure(figsize=(7.5, 3.5), dpi=300)
+    fig2 = plt.figure(figsize=(7.5, 3.5), dpi=300)
     plt.rcParams.update({'font.family': 'Arial'})
 
     # Define 4 colors for DB1
@@ -310,14 +190,20 @@ if __name__ == "__main__":
 
             if col == 0:
                 group = 'ADMIL'
+                group_label = 'ADMIL'
+
             if col == 1:
                 group = 'ADMOD'
+                group_label = 'ADMOD'
             if col == 2:
                 group = 'ADSEV'
+                group_label = 'ADSEV'
             if col == 3:
                 group = 'F'
+                group_label = 'FTD'
             if col == 4:
                 group = 'A'
+                group_label = 'AD'
 
             ax = fig3.add_axes([current_left, current_bottom, 0.15, 0.15], frameon=False)
             if col == 2:
@@ -339,34 +225,28 @@ if __name__ == "__main__":
                 else:
                     data.append(0)
 
-            # Plot EEG
-            plot_simple_head_model(ax, 0.6, 0)
-            # plot_EEG(fig3, ax, data, 1, 0, -np.max(np.abs(data)), np.max(np.abs(data)))
 
             if col < 3:
                 if row == 0:
-                    ylims = [-11,11]
+                    ylims = [-11.,11.]
                 if row == 1 or row == 2:
-                    ylims = [-6,6]
+                    ylims = [-6.,6.]
                 if row == 3:
                     ylims = [-3.5, 3.5]
             else:
                 if row == 0 or row == 1 or row == 3:
-                    ylims = [-6,6]
+                    ylims = [-6.,6.]
                 if row == 2:
                     ylims = [-3.5, 3.5]
 
             
-
-            plot_EEG(fig3, ax, data, 0.6, 0, ylims[0], ylims[1])
-
             # ticks
             ax.set_xticks([])
             ax.set_yticks([])
 
             # Titles
             if row == 0:
-                ax.set_title(f'{group} vs HC', fontsize=8)
+                ax.set_title(f'{group_label} vs HC', fontsize=8)
 
             # Labels
             if col == 0:
@@ -378,6 +258,19 @@ if __name__ == "__main__":
                     ax.set_ylabel(r'$TransVar$',fontsize=5)
                 if row == 3:
                     ax.set_ylabel(r'$dfa$', fontsize=5)
+            # Create a topographic plot
+
+            analysis = ncpi.Analysis(data)
+            analysis.EEG_topographic_plot(
+                group = f'{group}vsHC',
+                system = 19,
+                p_value = 0.01,
+                electrode_size = 0.6,
+                ax = ax,
+                fig=fig3,
+                vmin = ylims[0],
+                vmax = ylims[1]
+            )
         current_bottom -= height + spacing_y
     
     fig3.text(0.29, 0.95, 'DB1', ha='center', fontsize=8)
@@ -398,7 +291,7 @@ if __name__ == "__main__":
     bottom = 1 - height - 0.03
     spacing_x = 0.15
     new_spacing_x = 0.16
-    spacing_y = -0.08
+    spacing_y = -0.075
 
     max = 0
     yname = [r'$[E/I]_{net}$', r'$J_{ext}$']
@@ -410,26 +303,28 @@ if __name__ == "__main__":
         for row in order:
             current_left = left
             for col in range(5):
-
                 
                 if col == 0:
                     group = 'ADMIL'
+                    group_label = 'ADMIL'
                 if col == 1:
                     group = 'ADMOD'
+                    group_label = 'ADMOD'
                 if col == 2:
                     group = 'ADSEV'
+                    group_label = 'ADSEV'
                 if col == 3:
                     group = 'F'
+                    group_label = 'FTD'
                 if col == 4:
                     group = 'A'
-                
+                    group_label = 'AD'
                 
                 ax = fig.add_axes([current_left, current_bottom, 0.15, 0.15], frameon=False)
                 if col == 2:
                     current_left += width + new_spacing_x
                 else:
                     current_left += width + spacing_x
-                # ax = fig.add_axes([0.05 + col * 0.19, 0.75 - row * 0.18, 0.15, 0.15])
 
 
                 # Get lmer results
@@ -447,13 +342,10 @@ if __name__ == "__main__":
                     else:
                         data.append(0)
                 range_max = np.max(np.abs(data))
-                ylims = [-6, 6]
+                ylims = [-6., 6.]
                 if row == 1 and col == 0:
                     vmin = -4.720872348422581
                     vmax = 4.720872348422581
-                # Plot EEG
-                plot_simple_head_model(ax, 0.6, 0)
-                plot_EEG(fig, ax, data, 0.6, 0, ylims[0], ylims[1])
 
                 # ticks
                 ax.set_xticks([])
@@ -461,7 +353,7 @@ if __name__ == "__main__":
 
                 # Titles
                 if row == 1:
-                    ax.set_title(f'{group} vs HC', fontsize=8)
+                    ax.set_title(f'{group_label} vs HC', fontsize=8)
 
                 # Labels
                 if col == 0:
@@ -475,6 +367,17 @@ if __name__ == "__main__":
                         ax.set_ylabel(f'{yname[param]}'r'($ami2$)', fontsize=5)
                     if row == 4:
                         ax.set_ylabel(f'{yname[param]}'r'($dfa$)', fontsize=5)
+                analysis = ncpi.Analysis(data)
+                analysis.EEG_topographic_plot(
+                    group = f'{group}vsHC',
+                    system = 19,
+                    p_value = 0.01,
+                    electrode_size = 0.6,
+                    ax = ax,
+                    fig=fig3,
+                    vmin = ylims[0],
+                    vmax = ylims[1]
+                )
             current_bottom -= height + spacing_y
 
         fig.text(0.29, 0.95, 'DB1', ha='center', fontsize=8)
