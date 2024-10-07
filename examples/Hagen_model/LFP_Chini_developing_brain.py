@@ -300,16 +300,16 @@ if __name__ == "__main__":
         model = 'SNPE'
         if method == 'catch22':
             hyperparams = [
-                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5,
-                                                                 'num_transforms':2}},
-                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
-                                                                 'num_transforms':2}}]
+                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
+                                                                 'num_transforms':1}},
+                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':8,
+                                                                 'num_transforms':1}}]
         else:
             hyperparams = [
                            {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-                                                                 'num_transforms':2}},
+                                                                 'num_transforms':1}},
                            {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
-                                                                 'num_transforms':2}}]
+                                                                 'num_transforms':1}}]
 
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
@@ -318,7 +318,7 @@ if __name__ == "__main__":
         inference.add_simulation_data(X, theta['data'])
         if model == 'SNPE':
             inference.train(param_grid=hyperparams, n_splits=10, n_repeats=10, train_params={
-                'learning_rate': 0.01,
+                'learning_rate': 0.1,
                 'stop_after_epochs': 5,
                 'max_num_epochs': 100})
         else:
