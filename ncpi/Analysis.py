@@ -18,14 +18,17 @@ class Analysis:
 
         Parameters
         ----------
-        data: pd.DataFrame
+        data: pd.DataFrame or np.ndarray
             Input data to be analyzed.
+            data can be a np.ndarray just for the EEG_topographic_plot method.
         **kwargs: Additional keyword arguments
             Any additional parameters for the analysis.
         """
         self.data = data
         self.kwargs = kwargs
 
+        if not isinstance(data, (pd.DataFrame, list, np.ndarray)):
+            raise TypeError('The data parameter must be a pandas DataFrame, a list or a numpy ndarray.')
     def lmer(self):
 
         # Activate pandas2ri to enable conversion between pandas DataFrames and R
@@ -182,9 +185,9 @@ class Analysis:
 
             print(df_label)
 
-            # Asigna un superíndice a df_label
+            # Assign a superscript to df_label
             df_label.index = pd.MultiIndex.from_product([[label_comp], df_label.index])
-            # Concatena df_label a multi_df
+            # Concatenate df_label to multi_df
             multi_df = pd.concat([multi_df, df_label])
             print(multi_df)
 
@@ -222,7 +225,12 @@ class Analysis:
             'radius': 0.6,
             'pos': 0.0,
             'electrode_size': 0.9,
-            'label': True
+            'label': True,
+            'ax': None,
+            'fig': None,
+            'vmin': None,
+            'vmax': None,
+            'sensors': None
         }
 
         for key in kwargs.keys():
@@ -235,6 +243,11 @@ class Analysis:
         pos = kwargs.get('pos', default_parameters['pos'])
         electrode_size = kwargs.get('electrode_size', default_parameters['electrode_size'])
         label = kwargs.get('label', default_parameters['label'])
+        ax = kwargs.get('ax', default_parameters['ax'])
+        fig = kwargs.get('fig', default_parameters['fig'])
+        vmin = kwargs.get('vmin', default_parameters['vmin'])
+        vmax = kwargs.get('vmax', default_parameters['vmax'])
+        sensors = kwargs.get('sensors', default_parameters['sensors'])
 
         if not isinstance(group, str):
             raise ValueError('The group parameter must be a string.')
@@ -252,7 +265,16 @@ class Analysis:
             raise ValueError('The label parameter must be a boolean.')
         if not isinstance(p_value, float) or not (0.0 <= p_value <= 1.0):
             raise ValueError('The p_value parameter must be a float between 0 and 1.')
-                
+        if not isinstance(ax, plt.Axes):
+            raise ValueError('The ax parameter must be a matplotlib Axes object.')
+        if not isinstance(fig, plt.Figure):
+            raise ValueError('The fig parameter must be a matplotlib Figure object.')
+        if not isinstance(vmin, float):
+            raise ValueError('The vmin parameter must be a float.')
+        if not isinstance(vmax, float):
+            raise ValueError('The vmax parameter must be a float.')
+        
+              
         def plot_simple_head_feature(ax, radius=0.6, pos=0):
             '''
             Plot a simple head feature for adding results of the EEG data analysis later.
@@ -279,16 +301,20 @@ class Analysis:
             # Ears
             right_ear = mpatches.FancyBboxPatch([pos + radius + radius / 20, -radius / 10],
                                                 radius / 50, radius / 5,
-                                                boxstyle=mpatches.BoxStyle("Round", pad=radius / 20))
+                                                boxstyle=mpatches.BoxStyle("Round", pad=radius / 20),
+                                                linewidth=0.5)
             ax.add_patch(right_ear)
 
             left_ear = mpatches.FancyBboxPatch([pos - radius - radius / 20 - radius / 50, -radius / 10],
                                             radius / 50, radius / 5,
-                                            boxstyle=mpatches.BoxStyle("Round", pad=radius / 20))
+                                            boxstyle=mpatches.BoxStyle("Round", pad=radius / 20),
+                                            linewidth=0.5)
             ax.add_patch(left_ear)
 
             # Nose
-            ax.plot([pos - radius / 10, pos, pos + radius / 10], [radius + 0.02, radius + radius / 10 + 0.02,0.02 + radius], 'k')
+            ax.plot([pos - radius / 10, pos, pos + radius / 10], 
+                    [radius + 0.02, radius + radius / 10 + 0.02,0.02 + radius], 
+                    'k', linewidth=0.5)
 
         def plot_EEG(fig, Vax, data, radius, pos, vmin, vmax, label, electrode_size):
             '''
@@ -340,10 +366,15 @@ class Analysis:
                 'Pz': [pos, -0.4 * radius],
                 'Oz': [pos, -0.8 * radius]
             }
-
+            
             if system == 19:
                 del koord_dict['Oz']
-            koord = list(koord_dict.values())
+                koord = list(koord_dict.values())
+            else:
+                koord_keys = list(koord_dict.keys())
+                available_sensors = [sensor for sensor in sensors if sensor in koord_keys]
+                koord_sensors = [sensor for sensor in koord_keys if sensor in available_sensors]
+                koord = [koord_dict[sensor] for sensor in koord_sensors]
 
             # External fake electrodes for completing interpolation
             for xx in np.linspace(pos-radius,pos+radius,50):
@@ -378,37 +409,30 @@ class Analysis:
 
             if np.sum(np.abs(data)) > 2: 
                 colorbar = fig.colorbar(ScalarMappable(norm=CS.norm, cmap=CS.cmap), cax=cax)
-                colorbar.ax.tick_params(labelsize=8)
+                colorbar.ax.tick_params(labelsize=5)
                 if label == True:
-                    colorbar.ax.xaxis.set_label_position('top')
-                    bbox = colorbar.ax.get_position()
-                    print(bbox)
-                    colorbar.set_label('Ratio', size=8, labelpad=0, rotation=0, va='center')
+                    colorbar.ax.xaxis.set_label_position('bottom')
+                    # bbox = colorbar.ax.get_position()
+                    # print(bbox)
+                    colorbar.set_label('z-ratio', size=5, labelpad=-15, rotation=0, y=0.)
                     
             else:
                 # Hide the colorbar if the data is not significant
                 cax.axis('off')
 
-
             # Add the EEG electrode positions
-            print(len(koord))
             Vax.scatter(x[:system], y[:system], marker = 'o', c = 'k', s = electrode_size, zorder = 3)
         
-        results = self.data['Ratio'].where((self.data['Group'] == group) & (self.data['p.value'] < p_value))
-        
-        data = results.fillna(0.0).tolist()
 
-        max_Ratio = self.data[self.data['Group'] == group]['Ratio'].max()
-
-        vmin = -max_Ratio
-        vmax = max_Ratio
-
-        
-
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111)
-        print("Aqui")
+        if type(self.data) == list or type(self.data) == np.ndarray:
+            results = self.data
+        else:
+            if 'p.value' in self.data.columns:
+                results = self.data['Ratio'].where((self.data['Group'] == group) & (self.data['p.value'] < p_value)).to_list()
+            else:
+                results = self.data['Ratio'].where(self.data['Group'] == group).to_list()
+     
         plot_simple_head_feature(ax, radius, pos)
 
-        plot_EEG(fig, ax, data, radius, pos, vmin, vmax, label, electrode_size)
+        plot_EEG(fig, ax, results, radius, pos, vmin, vmax, label, electrode_size)
 
