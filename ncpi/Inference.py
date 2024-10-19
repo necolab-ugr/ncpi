@@ -519,7 +519,10 @@ class Inference:
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
-        batch_size = len(features) // num_cpus
+        if self.model == 'sbi':
+            batch_size = len(features) # to avoid memory issues
+        else:
+            batch_size = len(features) // num_cpus
         batches = [features[i:i + batch_size] for i in range(0, len(features), batch_size)]
 
         # Create a ProcessingPool
@@ -536,4 +539,4 @@ class Inference:
         # Concatenate the predictions
         predictions = np.concatenate(results)
 
-        return predictions
+        return list(predictions)
