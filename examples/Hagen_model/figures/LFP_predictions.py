@@ -4,7 +4,8 @@ import sys
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from statsmodels.stats.multicomp import pairwise_tukeyhsd
+from rpy2.robjects import pandas2ri, r
+import rpy2.robjects as ro
 
 # ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
@@ -13,34 +14,113 @@ import ncpi
 # Parameters of LIF model simulations
 sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
 
-def cohen_d(x, y):
-    """ Compute Cohen's d effect size.
+def lmer(df):
+    # Activate pandas2ri
+    pandas2ri.activate()
 
-    Compute Cohen's d effect size for two independent samples.
+    # Load R libraries directly in R
+    r('''
+    library(dplyr)
+    library(lme4)
+    library(emmeans)
+    library(ggplot2)
+    library(repr)
+    library(mgcv)
+    ''')
 
-    Parameters
-    ----------
-    x : array-like
-        First sample.
-    y : array-like
-        Second sample.
+    # Copy the dataframe
+    df = df.copy()
 
-    Returns
-    -------
-    d : float
-        Cohen's d effect size.
-    """
+    # The age=4 group is considered as the control group
+    df['Group'] = df['Group'].apply(lambda x: 'HC' if x == 4 else str(x))
 
-    nx = len(x)
-    ny = len(y)
-    dof = nx + ny - 2
-    return (np.mean(x) - np.mean(y)) / np.sqrt(((nx-1)*np.var(x) + (ny-1)*np.var(y)) / dof)
+    # Remove the 'Data' and 'Features' columns
+    df = df.drop(columns=['Data', 'Features'])
+
+    # Filter out 'HC' from the list of unique groups
+    groups = df['Group'].unique()
+    groups = [group for group in groups if group != 'HC']
+
+    # Create a list with the different group comparisons
+    groups_comp = [f'{group}vsHC' for group in groups]
+
+    # Remove rows where the variable is zero
+    df = df[df['Predictions'] != 0]
+
+    results = {}
+    for label, label_comp in zip(groups, groups_comp):
+        print(f'\n\n--- Group: {label}')
+        # Filter DataFrame to obtain the desired groups
+        df_pair = df[(df['Group'] == 'HC') | (df['Group'] == label)]
+        ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
+        ro.globalenv['label'] = label
+        # print(df_pair)
+
+        # Convert columns to factors
+        r(''' 
+        df_pair$ID = as.factor(df_pair$ID)
+        df_pair$Group = factor(df_pair$Group, levels = c(label, 'HC'))
+        df_pair$Epoch = as.factor(df_pair$Epoch)
+        df_pair$Sensor = as.factor(df_pair$Sensor)
+        print(table(df_pair$Group))
+        ''')
+
+        # if table in R is empty for any group, skip the analysis
+        if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
+            results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
+        else:
+            # Fit the linear models
+            r('''
+            mod00 = Predictions ~ Group  + (1 | ID)
+            mod01 = Predictions ~ Group
+            m00 <- lmer(mod00, data=df_pair)
+            m01 <- lm(mod01, data=df_pair)
+            print(summary(m00))
+            print(summary(m01))
+            ''')
+
+            # BIC
+            r('''
+            all_models <- c('m00', 'm01')
+            bics <- c(BIC(m00), BIC(m01))
+            print(bics)
+            index <- which.min(bics)
+            mod_sel <- all_models[index]
+
+            if (mod_sel == 'm00') {
+                m_sel <- lmer(mod00, data=df_pair)
+            }
+            if (mod_sel == 'm01') {
+                m_sel <- lmer(mod01, data=df_pair)
+            }                
+            ''')
+
+            # Compute the pairwise comparisons between groups
+            r('''
+            emm <- suppressMessages(emmeans(m_sel, specs=~Group))
+            ''')
+
+            r('''
+            res <- pairs(emm, adjust='holm')
+            df_res <- as.data.frame(res)
+            print(df_res)
+            ''')
+
+            df_res_r = ro.r['df_res']
+
+            # Convert the R DataFrame to a pandas DataFrame
+            with (pandas2ri.converter + pandas2ri.converter).context():
+                df_res_pd = pandas2ri.conversion.get_conversion().rpy2py(df_res_r)
+
+            results[label_comp] = df_res_pd
+
+    return results
 
 # Debug
 compute_firing_rate = True
 
 # Number of samples to draw from the predictions for computing the firing rates
-n_samples = 10
+n_samples = 30
 sim_params = {}
 firing_rates = {}
 
@@ -164,7 +244,7 @@ if compute_firing_rate:
         pickle.dump(firing_rates, f)
 
 # Create a figure and set its properties
-fig = plt.figure(figsize=(7.5, 3.), dpi=300)
+fig = plt.figure(figsize=(7.5, 4.), dpi=300)
 plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
 plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
@@ -181,7 +261,7 @@ cmap = plt.colormaps['viridis']
 # Plots
 for row in range(2):
     for col in range(5):
-        ax = fig.add_axes([0.09 + col * 0.19, 0.56 - row * 0.4, 0.14, 0.35])
+        ax = fig.add_axes([0.09 + col * 0.19, 0.52 - row * 0.42, 0.14, 0.4])
         try:
             method = all_methods[row]
         except:
@@ -216,59 +296,53 @@ for row in range(2):
                                (sim_params[method][1, i, :]/sim_params[method][3, i, :]),
                                color='black', s=2, zorder = 3)
 
-            # Statistical analysis
+            # LMER analysis
+            print('\n--- LMER analysis.')
+            data_EI = np.load(os.path.join('../data', method, 'emp_data_reduced.pkl'), allow_pickle=True)
+            # Pick only ages >= 4
+            data_EI = data_EI[data_EI['Group'] >= 4]
+
+            # Insert correct predictions for the lmer analysis (this should be improved in the future)
             if col < 4:
-                data_analyse = predictions_EI[method][:, col]
-                data_analyse = data_analyse[~np.isnan(data_analyse)]
-                ages_analyse = ages[method][~np.isnan(predictions_EI[method][:, col])]
+                data_EI['Predictions'] = predictions_EI[method][:, col]
             else:
-                data_analyse = firing_rates[method].flatten()
-                ages_analyse = np.repeat(np.unique(ages[method]), n_samples)
+                data_EI['Predictions'] = firing_rates[method].flatten()
+            lmer_res = lmer(data_EI)
 
-            data = {'value': data_analyse, 'age': ages_analyse}
-            df = pd.DataFrame(data)
+            # Add p-values to the plot
+            y_max = ax.get_ylim()[1]
+            y_min = ax.get_ylim()[0]
+            delta = (y_max - y_min) * 0.1
 
-            # Post-hoc test
-            tukey = pairwise_tukeyhsd(endog=df['value'], groups=df['age'], alpha=0.05)
-            # Plot the Tukey HSD results manually for age 4
-            for comparison in tukey.summary().data[1:]:
-                group1, group2, meandiff, p_adj, lower, upper, reject = comparison
+            groups = ['5', '6', '7', '8', '9', '10', '11', '12']
+            for i, group in enumerate(groups):
+                p_value = lmer_res[f'{group}vsHC']['p.value']
+                if p_value.empty:
+                    continue
 
-                y_max = ax.get_ylim()[1]
-                y_min = ax.get_ylim()[0]
+                # Significance levels
+                if p_value[0] < 0.05 and p_value[0] >= 0.01:
+                    pp = '*'
+                elif p_value[0] < 0.01 and p_value[0] >= 0.001:
+                    pp = '**'
+                elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
+                    pp = '***'
+                elif p_value[0] < 0.0001:
+                    pp = '****'
+                else:
+                    pp = 'n.s.'
 
-                # Compute Cohen's d effect size
-                if group1 == 4 and group2 > 4:
-                    data_group1 = df[df['age'] == group1]['value']
-                    data_group2 = df[df['age'] == group2]['value']
-                    d = cohen_d(data_group1, data_group2)
-                    ax.plot([group1, group2], [y_max, y_max], color='black', linewidth=0.5)
-                    ax.text((group1 + group2) / 2, y_max + (y_max-y_min) * 0.015,
-                            f'                                     d = {d:.2f}', ha='center',
-                            va='center', color='black', fontsize=3)
+                if pp != 'n.s.':
+                    offset = -delta*0.2
+                else:
+                    offset = 0
 
-                # Plot significance levels
-                if group1 == 4 and group2 > 4 and reject:
-                    # Significance levels
-                    if p_adj < 0.05 and p_adj >= 0.01:
-                        p_value = '*'
-                    elif p_adj < 0.01 and p_adj >= 0.001:
-                        p_value = '**'
-                    elif p_adj < 0.001 and p_adj >= 0.0001:
-                        p_value = '***'
-                    elif p_adj < 0.0001:
-                        p_value = '****'
-                    else:
-                        p_value = 'n.s.'
+                ax.text(0.5*i+4.5, y_max + delta*i + delta*0.1 + offset, f'{pp}', ha='center',
+                        fontsize=8 if pp != 'n.s.' else 7)
+                ax.plot([4, 5+i], [y_max + delta*i, y_max + delta*i], color='black', linewidth=0.5)
 
-                    # Add the significance level to the plot
-                    ax.text((group1 + group2) / 2, y_max - (y_max-y_min) * 0.005, p_value, ha='center', va='center',
-                            color='black', fontsize=6)
-
-                    # # Plot confidence interval
-                    # ax.text((group1 + group2) / 3, y_max + (y_max-y_min) * 0.015,
-                    #         f'CI = {upper-lower:.5f}',
-                    #         ha='center', va='center', color='black', fontsize=3)
+            # Change y-lim
+            ax.set_ylim([y_min, y_max + delta*(len(groups))])
 
         except:
             pass
@@ -298,5 +372,5 @@ for row in range(2):
                 ax.yaxis.set_label_coords(-0.35, 0.5)
 
 # Save the figure
-# plt.savefig('LFP_predictions.png', bbox_inches='tight')
-plt.show()
+plt.savefig('LFP_predictions.png', bbox_inches='tight')
+# plt.show()
