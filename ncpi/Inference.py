@@ -455,9 +455,9 @@ class Inference:
                 List of predictions
             """
             if self.model[1] == 'sbi':
-                feat_batch, scaler, model, posterior = batch
+                batch_index, feat_batch, scaler, model, posterior = batch
             else:
-                feat_batch, scaler, model = batch
+                batch_index, feat_batch, scaler, model = batch
             predictions = []
             for feat in feat_batch:
                 # Transform the features
@@ -489,7 +489,7 @@ class Inference:
                     predictions.append([np.nan for _ in range(self.theta.shape[1])])
 
             # Return the predictions
-            return predictions
+            return batch_index, predictions
 
         # Assert that the model has been trained
         if not os.path.exists('data/model.pkl'):
@@ -523,7 +523,9 @@ class Inference:
             batch_size = len(features) # to avoid memory issues
         else:
             batch_size = len(features) // num_cpus
-        batches = [features[i:i + batch_size] for i in range(0, len(features), batch_size)]
+        if batch_size == 0:
+            batch_size = 1
+        batches = [(i, features[i:i + batch_size]) for i in range(0, len(features), batch_size)]
 
         # Create a ProcessingPool
         Pool = getattr(module('pathos'), 'multiprocessing').ProcessingPool
@@ -531,12 +533,14 @@ class Inference:
         # Compute the features in parallel using all available CPUs
         with Pool(num_cpus) as pool:
             if self.model[1] == 'sbi':
-                results = list(tqdm(pool.imap(process_batch, [(batch, scaler, model, posterior) for batch in batches]),
+                results = list(tqdm(pool.imap(process_batch, [(ii,batch, scaler, model, posterior) for ii,batch in batches]),
                                    total=len(batches), desc="Computing predictions"))
             else:
-                results = list(tqdm(pool.imap(process_batch, [(batch, scaler, model) for batch in batches]),
+                results = list(tqdm(pool.imap(process_batch, [(ii,batch, scaler, model) for ii,batch in batches]),
                                    total=len(batches), desc="Computing predictions"))
-        # Concatenate the predictions
-        predictions = np.concatenate(results)
 
-        return list(predictions)
+        # Sort the predictions based on the original index
+        results.sort(key=lambda x: x[0])
+        predictions = [pred for _, batch_preds in results for pred in batch_preds]
+
+        return predictions
