@@ -91,7 +91,7 @@ def lmer(df):
                 m_sel <- lmer(mod00, data=df_pair)
             }
             if (mod_sel == 'm01') {
-                m_sel <- lmer(mod01, data=df_pair)
+                m_sel <- lm(mod01, data=df_pair)
             }                
             ''')
 
@@ -119,15 +119,20 @@ def lmer(df):
 # Debug
 compute_firing_rate = True
 
+# Random seed for numpy
+np.random.seed(0)
+
 # Number of samples to draw from the predictions for computing the firing rates
-n_samples = 30
+n_samples = 20
 sim_params = {}
+IDs = {}
 firing_rates = {}
 
 # Methods to plot
 all_methods = ['catch22','power_spectrum_parameterization']
 
 # Load data
+all_IDs = {}
 predictions_EI = {}
 predictions_all = {}
 ages = {}
@@ -135,55 +140,60 @@ for method in all_methods:
     try:
         data_EI = np.load(os.path.join('../data',method,'emp_data_reduced.pkl'), allow_pickle=True)
         data_all = np.load(os.path.join('../data',method,'emp_data_all.pkl'), allow_pickle=True)
+        all_IDs[method] = np.array(data_all['ID'].tolist())
         predictions_EI[method] = np.array(data_EI['Predictions'].tolist())
         predictions_all[method] = np.array(data_all['Predictions'].tolist())
         ages[method] = np.array(data_EI['Group'].tolist())
 
         # Pick only ages >= 4
+        all_IDs[method] = all_IDs[method][ages[method] >= 4]
         predictions_EI[method] = predictions_EI[method][ages[method] >= 4, :]
         predictions_all[method] = predictions_all[method][ages[method] >= 4, :]
         ages[method] = ages[method][ages[method] >= 4]
 
     except:
+        all_IDs[method] = []
         predictions_EI[method] = []
         predictions_all[method] = []
         ages[method] = []
 
     # Sample parameters for computing the firing rate
-    sim_params[method] = np.zeros((7, len(np.unique(ages[method])), n_samples))
-    for param in range(4):
+    if compute_firing_rate:
+        sim_params[method] = np.zeros((7, len(np.unique(ages[method])), n_samples))
+        IDs[method] = np.zeros((len(np.unique(ages[method])), n_samples))
+        for param in range(4):
+            for i, age in enumerate(np.unique(ages[method])):
+                idx = np.where(ages[method] == age)[0]
+                data_IDs = all_IDs[method][idx]
+                data_EI = predictions_EI[method][idx, param]
+                data_EI = data_EI[~np.isnan(data_EI)]
+
+                # Randomly sample some predictions within the first and third quartile
+                q1, q3 = np.percentile(data_EI, [25, 75])
+
+                # Check if the quartiles are not NaN
+                if not np.isnan(q1) and not np.isnan(q3):
+                    within_quartiles = np.where((data_EI >= q1) & (data_EI <= q3))[0]
+
+                    # Check within_quartiles is not empty
+                    if len(within_quartiles) > 0:
+                        # Randomly sample n_samples from within_quartiles
+                        idx_samples = within_quartiles[np.random.randint(0, len(within_quartiles), n_samples)]
+                        IDs[method][i, :] = data_IDs[idx_samples]
+                        # E/I
+                        if param == 0:
+                            for j in range(4):
+                                data_all = predictions_all[method][idx, j]
+                                data_all = data_all[~np.isnan(data_all)]
+                                sim_params[method][j, i, :] = data_all[idx_samples]
+                        # tau_syn_exc, tau_syn_inh, J_syn_ext
+                        else:
+                            sim_params[method][param+3, i, :] = data_EI[idx_samples]
+
+        # Firing rates
+        firing_rates[method] = np.zeros((len(np.unique(ages[method])), n_samples))
         for i, age in enumerate(np.unique(ages[method])):
-            idx = np.where(ages[method] == age)[0]
-            data_EI = predictions_EI[method][idx, param]
-            data_EI = data_EI[~np.isnan(data_EI)]
-
-            # Randomly sample some predictions within the first and third quartile
-            q1, q3 = np.percentile(data_EI, [25, 75])
-
-            # Check if the quartiles are not NaN
-            if not np.isnan(q1) and not np.isnan(q3):
-                within_quartiles = np.where((data_EI >= q1) & (data_EI <= q3))[0]
-
-                # Check within_quartiles is not empty
-                if len(within_quartiles) > 0:
-                    # Randomly sample n_samples from within_quartiles
-                    idx_samples = within_quartiles[np.random.randint(0, len(within_quartiles), n_samples)]
-                    # E/I
-                    if param == 0:
-                        for j in range(4):
-                            data_all = predictions_all[method][idx, j]
-                            data_all = data_all[~np.isnan(data_all)]
-                            sim_params[method][j, i, :] = data_all[idx_samples]
-                    # tau_syn_exc, tau_syn_inh, J_syn_ext
-                    else:
-                        sim_params[method][param+3, i, :] = data_EI[idx_samples]
-
-    # Firing rates
-    firing_rates[method] = np.zeros((len(np.unique(ages[method])), n_samples))
-
-    for i, age in enumerate(np.unique(ages[method])):
-        for sample in range(n_samples):
-            if compute_firing_rate:
+            for sample in range(n_samples):
                 print(f'\nComputing firing rate for {method} at age {age} and sample {sample}')
                 # Parameters of the model
                 J_EE = sim_params[method][0, i, sample]
@@ -232,9 +242,9 @@ for method in all_methods:
                 rate = ((times['E'].size / (tstop - transient)) * 1000) / LIF_params['N_X'][0]
                 firing_rates[method][i, sample] = rate
 
-    # Normalize firing rates to the maximum value
-    if compute_firing_rate and np.max(firing_rates[method]) > 0:
-        firing_rates[method] /= np.max(firing_rates[method])
+        # Normalize firing rates to the maximum value
+        if np.max(firing_rates[method]) > 0:
+            firing_rates[method] /= np.max(firing_rates[method])
 
 # Save firing rates to file
 if compute_firing_rate:
@@ -242,6 +252,13 @@ if compute_firing_rate:
         os.makedirs('data')
     with open('data/firing_rates_preds.pkl', 'wb') as f:
         pickle.dump(firing_rates, f)
+    with open('data/IDs.pkl', 'wb') as f:
+        pickle.dump(IDs, f)
+else:
+    with open('data/firing_rates_preds.pkl', 'rb') as f:
+        firing_rates = pickle.load(f)
+    with open('data/IDs.pkl', 'rb') as f:
+        IDs = pickle.load(f)
 
 # Create a figure and set its properties
 fig = plt.figure(figsize=(7.5, 4.), dpi=300)
@@ -288,13 +305,14 @@ for row in range(2):
                 for patch in box['boxes']:
                     patch.set_facecolor(cmap(i / len(np.unique(ages[method]))))
 
-                # Debug: plot samples selected for the firing rate over the parameter predictions
-                if 0 < col < 4:
-                    ax.scatter([age]*n_samples, sim_params[method][col+3, i, :], color='black', s=0.5, zorder = 3)
-                elif col == 0:
-                    ax.scatter([age]*n_samples, (sim_params[method][0, i, :]/sim_params[method][2, i, :]) /
-                               (sim_params[method][1, i, :]/sim_params[method][3, i, :]),
-                               color='black', s=2, zorder = 3)
+                # # Debug: plot samples selected for the firing rate over the parameter predictions
+                # if compute_firing_rate:
+                #     if 0 < col < 4:
+                #         ax.scatter([age]*n_samples, sim_params[method][col+3, i, :], color='black', s=0.5, zorder = 3)
+                #     elif col == 0:
+                #         ax.scatter([age]*n_samples, (sim_params[method][0, i, :]/sim_params[method][2, i, :]) /
+                #                    (sim_params[method][1, i, :]/sim_params[method][3, i, :]),
+                #                    color='black', s=2, zorder = 3)
 
             # LMER analysis
             print('\n--- LMER analysis.')
@@ -306,7 +324,16 @@ for row in range(2):
             if col < 4:
                 data_EI['Predictions'] = predictions_EI[method][:, col]
             else:
-                data_EI['Predictions'] = firing_rates[method].flatten()
+                # Create a DataFrame with the firing rates
+                data_fr = {'Group': np.repeat(np.unique(ages[method]), n_samples),
+                           'ID': IDs[method].flatten(),
+                           'Predictions': firing_rates[method].flatten(),
+                           # unused columns
+                           'Data': np.zeros(firing_rates[method].size),
+                           'Epoch': np.arange(firing_rates[method].size),
+                           'Sensor': np.zeros(firing_rates[method].size),
+                           'Features': np.zeros(firing_rates[method].size)}
+                data_EI = pd.DataFrame(data_fr)
             lmer_res = lmer(data_EI)
 
             # Add p-values to the plot
@@ -369,7 +396,7 @@ for row in range(2):
             if row == 0:
                 ax.yaxis.set_label_coords(-0.3, 0.5)
             else:
-                ax.yaxis.set_label_coords(-0.35, 0.5)
+                ax.yaxis.set_label_coords(-0.3, 0.5)
 
 # Save the figure
 plt.savefig('LFP_predictions.png', bbox_inches='tight')

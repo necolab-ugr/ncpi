@@ -317,7 +317,7 @@ def lmer(df, feat, elec = False):
                     m_sel <- lmer(mod00, data=df_pair)
                 }
                 if (mod_sel == 'm01') {
-                    m_sel <- lmer(mod01, data=df_pair)
+                    m_sel <- lm(mod01, data=df_pair)
                 }                
                 ''')
 
