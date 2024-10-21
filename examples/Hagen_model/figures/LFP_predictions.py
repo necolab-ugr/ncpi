@@ -123,7 +123,7 @@ compute_firing_rate = True
 np.random.seed(0)
 
 # Number of samples to draw from the predictions for computing the firing rates
-n_samples = 20
+n_samples = 50
 sim_params = {}
 IDs = {}
 firing_rates = {}

@@ -73,8 +73,11 @@ def get_spike_rate(times, transient, dt, tstop):
 # Debug
 compute_new_sim = False
 
+# Random seed for numpy
+np.random.seed(0)
+
 # Number of repetitions of each simulation
-trials = 2
+trials = 6
 
 # Configurations of parameters to simulate
 # best_fit = [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 29.89]
@@ -285,8 +288,10 @@ for col in range(3):
     y_max = np.max(CDM[ii])
     y_min = np.min(CDM[ii])
     scale = (y_max - y_min) / 5
-    ax.plot([T[0], T[0]], [y_min + scale, y_min], 'k')
-    ax.text(T[0] + 1, y_min + scale/2., r'$2^{%s}nAcm$' % np.round(np.log2(scale*10**(-4))), fontsize=8)
+    ax.plot([T[0] if col < 2 else T[0] + 50,T[0] if col < 2 else T[0] + 50],
+             [y_min + scale, y_min], 'k')
+    ax.text(T[0] + 1 if col < 2 else T[0] + 51,
+            y_min + scale/4., r'$2^{%s}nAcm$' % np.round(np.log2(scale*10**(-4))), fontsize=8)
 
 # Power spectra
 ax = fig.add_axes([0.1, 0.07, 0.27, 0.3])
@@ -294,7 +299,7 @@ colors = ['C0', 'C1', 'C2']
 for col in range(3):
     CDM = [CDMs[trial][col]['EE'] + CDMs[trial][col]['EI'] +
            CDMs[trial][col]['IE'] + CDMs[trial][col]['II'] for trial in range(trials)]
-    f, Pxx = ss.welch(CDM, fs=1000./(10.*dt), nperseg=250)
+    f, Pxx = ss.welch(CDM, fs=1000./(10.*dt))
     # Trial-averaged power spectrum
     Pxx = np.mean(Pxx, axis=0)
     # Normalize the power spectrum
@@ -414,5 +419,5 @@ ax.text(0.01, 0.37, 'B', fontsize=12, fontweight='bold')
 ax.text(0.4, 0.37, 'C', fontsize=12, fontweight='bold')
 
 # Save the figure
-# plt.savefig('example_full_pipeline.png', bbox_inches='tight')
-plt.show()
+plt.savefig('example_full_pipeline.png', bbox_inches='tight')
+# plt.show()
