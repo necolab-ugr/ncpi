@@ -362,7 +362,7 @@ for row in range(2):
                 if pp != 'n.s.':
                     offset = -delta*0.2
                 else:
-                    offset = 0
+                    offset = delta*0.05
 
                 ax.text(0.5*i+4.5, y_max + delta*i + delta*0.1 + offset, f'{pp}', ha='center',
                         fontsize=8 if pp != 'n.s.' else 7)
