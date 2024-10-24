@@ -3,6 +3,7 @@ import os
 import pickle
 import subprocess
 import numpy as np
+import random
 from sklearn.model_selection import RepeatedKFold
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils import all_estimators
@@ -320,6 +321,8 @@ class Inference:
                     Y_train, Y_test = self.theta[train_index], self.theta[test_index]
 
                     if self.model[1] == 'sklearn':
+                        # Set the random state for reproducibility
+                        params['random_state'] = repeat_idx // n_splits + 1
                         # Update parameters
                         model.set_params(**params)
 
@@ -337,6 +340,10 @@ class Inference:
                         mean_scores.append(mse)
 
                     if self.model[1] == 'sbi':
+                        # Set the seeds for reproducibility
+                        torch.manual_seed(repeat_idx // n_splits + 1)
+                        random.seed(repeat_idx // n_splits + 1)
+
                         # Re-initialize the SNPE object with the new configuration
                         model = self.initialize_sbi(params)
 
