@@ -120,10 +120,10 @@ def lmer(df):
 compute_firing_rate = True
 
 # Random seed for numpy
-np.random.seed(0)
+np.random.seed(1)
 
 # Number of samples to draw from the predictions for computing the firing rates
-n_samples = 50
+n_samples = 100
 sim_params = {}
 IDs = {}
 firing_rates = {}
@@ -400,4 +400,4 @@ for row in range(2):
 
 # Save the figure
 plt.savefig('LFP_predictions.png', bbox_inches='tight')
-# plt.show()
+#plt.show()
