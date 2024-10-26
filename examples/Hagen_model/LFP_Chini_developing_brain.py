@@ -289,27 +289,27 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
 
-        # model = 'MLPRegressor'
-        # if method == 'catch22':
-        #     hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                    {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-        # else:
-        #     hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                    {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-
-        model = 'SNPE'
+        model = 'MLPRegressor'
         if method == 'catch22':
-            hyperparams = [
-                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
-                                                                 'num_transforms':1}},
-                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':8,
-                                                                 'num_transforms':1}}]
+            hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
         else:
-            hyperparams = [
-                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-                                                                 'num_transforms':1}},
-                           {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
-                                                                 'num_transforms':1}}]
+            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+
+        # model = 'SNPE'
+        # if method == 'catch22':
+        #     hyperparams = [
+        #                    {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
+        #                                                          'num_transforms':1}},
+        #                    {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':8,
+        #                                                          'num_transforms':1}}]
+        # else:
+        #     hyperparams = [
+        #                    {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
+        #                                                          'num_transforms':1}},
+        #                    {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
+        #                                                          'num_transforms':1}}]
 
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]

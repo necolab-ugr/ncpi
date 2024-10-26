@@ -304,8 +304,8 @@ class Inference:
             for params in param_grid:
                 print(f'\n\n--> Hyperparameters: {params}')
 
-                # Initialize RepeatedKFold
-                rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats)
+                # Initialize RepeatedKFold (added random_state for reproducibility)
+                rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
 
                 # Loop over each repeat and fold
                 mean_scores = []
