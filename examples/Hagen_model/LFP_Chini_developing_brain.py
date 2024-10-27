@@ -294,8 +294,8 @@ if __name__ == "__main__":
             hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
                            {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
         else:
-            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+            hyperparams = [{'hidden_layer_sizes': (5,5), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (10,10), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
         # model = 'SNPE'
         # if method == 'catch22':
