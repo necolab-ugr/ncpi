@@ -120,10 +120,10 @@ def lmer(df):
 compute_firing_rate = True
 
 # Random seed for numpy
-np.random.seed(1)
+np.random.seed(0)
 
 # Number of samples to draw from the predictions for computing the firing rates
-n_samples = 100
+n_samples = 50
 sim_params = {}
 IDs = {}
 firing_rates = {}
@@ -341,7 +341,8 @@ for row in range(2):
             y_min = ax.get_ylim()[0]
             delta = (y_max - y_min) * 0.1
 
-            groups = ['5', '6', '7', '8', '9', '10', '11', '12']
+            # groups = ['5', '6', '7', '8', '9', '10', '11', '12']
+            groups = ['8', '9', '10', '11', '12']
             for i, group in enumerate(groups):
                 p_value = lmer_res[f'{group}vsHC']['p.value']
                 if p_value.empty:
@@ -364,9 +365,10 @@ for row in range(2):
                 else:
                     offset = delta*0.05
 
-                ax.text(0.5*i+4.5, y_max + delta*i + delta*0.1 + offset, f'{pp}', ha='center',
-                        fontsize=8 if pp != 'n.s.' else 7)
-                ax.plot([4, 5+i], [y_max + delta*i, y_max + delta*i], color='black', linewidth=0.5)
+                ax.text((int(groups[i]) - 4)/2. + 4, y_max + delta*i + delta*0.1 + offset,
+                        f'{pp}', ha='center', fontsize=8 if pp != 'n.s.' else 7)
+                ax.plot([4, int(groups[0])+i], [y_max + delta*i, y_max + delta*i], color='black',
+                        linewidth=0.5)
 
             # Change y-lim
             ax.set_ylim([y_min, y_max + delta*(len(groups))])
@@ -400,4 +402,4 @@ for row in range(2):
 
 # Save the figure
 plt.savefig('LFP_predictions.png', bbox_inches='tight')
-#plt.show()
+# plt.show()

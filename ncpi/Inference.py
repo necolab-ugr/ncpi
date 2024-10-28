@@ -305,7 +305,7 @@ class Inference:
                 print(f'\n\n--> Hyperparameters: {params}')
 
                 # Initialize RepeatedKFold (added random_state for reproducibility)
-                rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=1)
+                rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
 
                 # Loop over each repeat and fold
                 mean_scores = []
@@ -322,7 +322,7 @@ class Inference:
 
                     if self.model[1] == 'sklearn':
                         # Set the random state for reproducibility
-                        params['random_state'] = repeat_idx // n_splits + 1
+                        params['random_state'] = repeat_idx // n_splits
                         # Update parameters
                         model.set_params(**params)
 
@@ -341,8 +341,8 @@ class Inference:
 
                     if self.model[1] == 'sbi':
                         # Set the seeds for reproducibility
-                        torch.manual_seed(repeat_idx // n_splits + 1)
-                        random.seed(repeat_idx // n_splits + 1)
+                        torch.manual_seed(repeat_idx // n_splits)
+                        random.seed(repeat_idx // n_splits)
 
                         # Re-initialize the SNPE object with the new configuration
                         model = self.initialize_sbi(params)

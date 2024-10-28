@@ -317,12 +317,12 @@ if __name__ == "__main__":
         inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
         if model == 'SNPE':
-            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=10, train_params={
+            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=20, train_params={
                 'learning_rate': 0.1,
                 'stop_after_epochs': 5,
                 'max_num_epochs': 100})
         else:
-            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=10)
+            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
 
         # Create folder to save results
         if not os.path.exists('data'):
