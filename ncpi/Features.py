@@ -106,7 +106,7 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
     # Check that the length of the sample is at least 2 seconds
     if len(sample) >= 2 * fs:
         # Estimate power spectral density using Welch’s method
-        fxx, Pxx = welch(sample, fs, nperseg=int(0.2*fs))
+        fxx, Pxx = welch(sample, fs, nperseg=int(0.5*fs))
 
         if fmin >= fxx[0] and fmax <= fxx[-1]:
             f1 = np.where(fxx >= fmin)[0][0]
