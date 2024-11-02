@@ -478,6 +478,7 @@ class Inference:
                             pred = np.mean([m.predict(feat) for m in model], axis=0)
                         else:
                             pred = model.predict(feat)
+                        predictions.append(pred[0])
                     if self.model[1] == 'sbi':
                         # Sample the posterior
                         x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
@@ -490,8 +491,8 @@ class Inference:
                             posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
                             # Compute the mean of the posterior samples
                             pred = np.mean(posterior_samples.numpy(), axis=0)
+                        predictions.append(pred)
 
-                    predictions.append(pred[0])
                 else:
                     predictions.append([np.nan for _ in range(self.theta.shape[1])])
 
@@ -526,7 +527,7 @@ class Inference:
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
-        if self.model == 'sbi':
+        if self.model[1] == 'sbi':
             batch_size = len(features) # to avoid memory issues
         else:
             batch_size = len(features) // num_cpus
