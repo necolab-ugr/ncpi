@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
-compute_EEG = True
+compute_EEG = False
 
 if __name__ == '__main__':
     # Path to the folder containing the processed data
@@ -26,7 +26,7 @@ if __name__ == '__main__':
     if compute_EEG:
         potential = ncpi.FieldPotential(nyhead = True, kernel = False)
 
-    for method in ['catch22', 'power_spectrum_parameterization']:
+    for method in ['catch22', 'power_spectrum_parameterization_1','power_spectrum_parameterization_2']:
         # Check if the features have already been computed
         folder = 'EEG' if compute_EEG else ''
         if os.path.isfile(os.path.join(features_path, method, folder, 'sim_X')):
@@ -86,7 +86,7 @@ if __name__ == '__main__':
                             # Compute features
                             if method == 'catch22':
                                 features = ncpi.Features(method='catch22')
-                            elif method == 'power_spectrum_parameterization':
+                            elif method == 'power_spectrum_parameterization_1' or method == 'power_spectrum_parameterization_2':
                                 # Parameters of the fooof algorithm
                                 fooof_setup_sim = {'peak_threshold': 1.,
                                                    'min_peak_height': 0.,
@@ -108,8 +108,11 @@ if __name__ == '__main__':
                             df = features.compute_features(df)
 
                             # Keep only the aperiodic exponent
-                            if method == 'power_spectrum_parameterization':
+                            if method == 'power_spectrum_parameterization_1':
                                 df['Features'] = df['Features'].apply(lambda x: x[1])
+                            # Keep aperiodic exponent, peak frequency, peak power, knee frequency, and mean power
+                            if method == 'power_spectrum_parameterization_2':
+                                df['Features'] = df['Features'].apply(lambda x: x[[1, 2, 3, 6, 11]])
 
                             # Append the feature dataframes to a list
                             all_features.append(df)

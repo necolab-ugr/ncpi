@@ -68,7 +68,7 @@ def catch22(sample):
 
     return features['values']
 
-def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9):
+def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9, freq_range = [30., 200.]):
     """
     Function to compute the power spectrum parameterization of a time-series sample using the FOOOF algorithm.
 
@@ -79,9 +79,9 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
     fs: float
         Sampling frequency.
     fmin: float
-        Minimum frequency for the power spectrum.
+        Minimum frequency for the power spectrum fit.
     fmax: float
-        Maximum frequency for the power spectrum.
+        Maximum frequency for the power spectrum fit.
     fooof_setup: dict
         Dictionary containing the parameters for the FOOOF algorithm.
             - peak_threshold: float
@@ -90,11 +90,18 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
             - peak_width_limits: tuple
     r_squared_th: float
         Threshold for the r_squared value. Default is 0.9.
+    freq_range: list
+        Frequency range for the search of the peak parameters. Default is [30., 200.].
 
     Returns
     -------
     features: np.array
-        Array with the aperiodic and peak parameters.
+        Array with the aperiodic and peak parameters:
+        features[0:2] = aperiodic_params_fixed
+        features[2:5] = peak_params_fixed
+        features[5:8] = aperiodic_params_knee
+        features[8:11] = peak_params_knee
+        features[11] = mean power
     """
 
     debug=False
@@ -102,6 +109,7 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
     # Dynamically import the fooof module
     # from fooof import FOOOF
     FOOOF = getattr(module('fooof'), 'FOOOF')
+    features = np.full(12, np.nan)
 
     # Check that the length of the sample is at least 2 seconds
     if len(sample) >= 2 * fs:
@@ -118,52 +126,69 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
 
         # Ensure the input data has no 0s
         if not np.any(Pxx == 0):
-            # Fit the power spectrum using FOOOF
-            fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
-                       min_peak_height=fooof_setup['min_peak_height'],
-                       max_n_peaks=fooof_setup['max_n_peaks'],
-                       aperiodic_mode='fixed',
-                       peak_width_limits=fooof_setup['peak_width_limits'])
-            try:
-                fm.fit(fxx[f1:f2], Pxx[f1:f2])
-            except:
-                print('Error fitting the power spectrum.')
-                return np.full(2, np.nan)
+            # Fit the power spectrum using FOOOF for both aperiodic modes (fixed and knee)
+            for ii,aperiodic_mode in enumerate(['fixed', 'knee']):
+                fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
+                           min_peak_height=fooof_setup['min_peak_height'],
+                           max_n_peaks=fooof_setup['max_n_peaks'],
+                           aperiodic_mode=aperiodic_mode,
+                           peak_width_limits=fooof_setup['peak_width_limits'])
+                try:
+                    fm.fit(fxx[f1:f2], Pxx[f1:f2])
+                except:
+                    print('Error fitting the power spectrum.')
+                    return np.full(2, np.nan)
 
-            # Discard fits with negative exponents
-            if fm.aperiodic_params_[-1] <= 0.:
-                fm.r_squared_ = 0.
-            # Discard nan r_squared
-            if np.isnan(fm.r_squared_):
-                fm.r_squared_ = 0.
+                # Discard fits with negative exponents
+                if fm.aperiodic_params_[-1] <= 0.:
+                    fm.r_squared_ = 0.
+                # Discard nan r_squared
+                if np.isnan(fm.r_squared_):
+                    fm.r_squared_ = 0.
 
-            # Print parameters and plot the fit
-            if debug:
-                print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
-                print('fm.peak_params_ = ', fm.peak_params_)
-                print('fm.r_squared_ = ', fm.r_squared_)
+                # Print parameters and plot the fit
+                if debug:
+                    print('fm.aperiodic_params_ = ', fm.aperiodic_params_)
+                    print('fm.peak_params_ = ', fm.peak_params_)
+                    print('fm.r_squared_ = ', fm.r_squared_)
 
-                fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
+                    fm.plot(plot_peaks='shade', peak_kwargs={'color' : 'green'})
 
-                plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
-                         f'peak_params = {fm.peak_params_}\n'
-                         f'r_squared = {fm.r_squared_}', fontsize=12)
-                plt.show()
+                    plt.title(f'aperiodic_params = {fm.aperiodic_params_}\n'
+                             f'peak_params = {fm.peak_params_}\n'
+                             f'r_squared = {fm.r_squared_}', fontsize=12)
+                    plt.show()
 
-            # Concatenate the aperiodic and peak parameters
-            if fm.peak_params_ is None:
-                features = fm.aperiodic_params_
-            else:
-                features = np.concatenate((fm.aperiodic_params_, fm.peak_params_.flatten()))
+                # Collect the aperiodic and peak parameters
+                if fm.r_squared_ >= r_squared_th:
+                    if ii == 0:
+                        features[0:2] = fm.aperiodic_params_
+                    else:
+                        features[5:8] = fm.aperiodic_params_
 
-            if fm.r_squared_ < r_squared_th:
-                return np.full_like(features, np.nan)
-            else:
-                return features
-        else:
-            return np.full(2, np.nan)
-    else:
-        return np.full(2, np.nan)
+                    if fm.peak_params_ is not None:
+                        # Find peaks within the frequency range
+                        pos_freq = np.where((fm.peak_params_[:, 0] >= freq_range[0]) &
+                                            (fm.peak_params_[:, 0] <= freq_range[1]))[0]
+                        # spectral shapes that have an oscillatory peak
+                        if len(pos_freq) > 0:
+                            peak_params = fm.peak_params_[pos_freq, :]
+
+                            # Find the peak with the maximum power
+                            pos_max = np.argmax(peak_params[:, 1])
+                            peak_freq = peak_params[pos_max, 0]
+                            peak_power = peak_params[pos_max, 1]
+                            peak_BW = peak_params[pos_max, 2]
+
+                            if ii == 0:
+                                features[2:5] = [peak_freq, peak_power, peak_BW]
+                            else:
+                                features[8:11] = [peak_freq, peak_power, peak_BW]
+
+            # Collect mean power
+            features[11] = np.mean(Pxx[f1:f2])
+
+    return features
 
 def bandpass(sample, fmin, fmax, fs):
     """

@@ -207,7 +207,7 @@ if __name__ == "__main__":
     catch22_subset_idx = [catch22_names.index(f) for f in catch22_subset]
 
     # Iterate over the methods used to compute the features
-    all_methods = ['catch22','power_spectrum_parameterization']
+    all_methods = ['catch22','power_spectrum_parameterization_1','power_spectrum_parameterization_2']
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
         # Load parameters of the model (theta) and features from simulation data (X)
@@ -260,7 +260,7 @@ if __name__ == "__main__":
             if method in catch22_names:
                 emp_data['Features'] = emp_data['Features'].apply(lambda x: x[catch22_names.index(method)])
 
-        elif method == 'power_spectrum_parameterization':
+        elif method == 'power_spectrum_parameterization_1' or method == 'power_spectrum_parameterization_2':
             # Parameters of the fooof algorithm
             fooof_setup_emp = {'peak_threshold': 1.,
                                'min_peak_height': 0.,
@@ -273,8 +273,14 @@ if __name__ == "__main__":
                                                 'fmax': 45.,
                                                 'fooof_setup': fooof_setup_emp,
                                                 'r_squared_th':0.9})
+
             # Keep only the aperiodic exponent
-            emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
+            if method == 'power_spectrum_parameterization_1':
+                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
+            # Keep aperiodic exponent, peak frequency, peak power, knee frequency, and mean power
+            if method == 'power_spectrum_parameterization_2':
+                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[[1,2,3,6,11]])
+
         elif method == 'fEI':
             emp_data = compute_features(emp_data, chunk_size=chunk_size,
                                         method='fEI',
@@ -290,7 +296,7 @@ if __name__ == "__main__":
         start_time = time.time()
 
         # model = 'MLPRegressor'
-        # if method == 'catch22':
+        # if method == 'catch22' or 'power_spectrum_parameterization_2':
         #     hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
         #                    {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
         # else:
@@ -298,7 +304,7 @@ if __name__ == "__main__":
         #                    {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
         model = 'SNPE'
-        if method == 'catch22':
+        if method == 'catch22' or 'power_spectrum_parameterization_2':
             hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':50,
                                                                  'num_transforms':2}}
         else:
