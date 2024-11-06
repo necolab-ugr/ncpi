@@ -6,6 +6,8 @@ import pandas as pd
 import scipy
 import numpy as np
 import time
+import random
+import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
@@ -295,21 +297,25 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
 
-        model = 'MLPRegressor'
-        if method == 'catch22':
-            hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-        else:
-            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-
-        # model = 'SNPE'
+        # model = 'MLPRegressor'
         # if method == 'catch22':
-        #     hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5,
-        #                                                          'num_transforms':2}}
+        #     hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+        #                    {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
         # else:
-        #     hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-        #                                                          'num_transforms':2}}
+        #     hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+        #                    {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+
+        model = 'SNPE'
+        # Set the seeds for reproducibility
+        torch.manual_seed(0)
+        random.seed(0)
+
+        if method == 'catch22':
+            hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5,
+                                                                 'num_transforms':2}}
+        else:
+            hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
+                                                                 'num_transforms':2}}
 
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
