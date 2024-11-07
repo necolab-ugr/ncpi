@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class FieldPotential:
-    def __init__(self, kernel=True, nyhead=False):
+    def __init__(self, kernel=True, nyhead=False, CDM_shape=15500):
         """
         Initialize the FieldPotential object.
         Parameters
@@ -20,6 +20,9 @@ class FieldPotential:
 
         nyhead: bool
             Use the NYHeadModel for computing EEG.
+
+        CDM_shape: int
+            Number of time points in the CDM.
         """
         # Initialize dictionary for storing kernels
         if kernel:
@@ -28,6 +31,9 @@ class FieldPotential:
         # Initialize the head model
         if nyhead:
             self.nyhead = NYHeadModel()
+            # Allocate memory for the transformation matrix and EEG
+            self.M = np.zeros((231,3))
+            self.EEG = np.zeros((231,CDM_shape))
 
     def create_kernel(self, MC_folder, output_path, params, biophys, dt, tstop, electrodeParameters=None, CDM=True):
         """
@@ -217,28 +223,28 @@ class FieldPotential:
         p = np.zeros((3, len(CDM)))
         p[2, :] = CDM
 
-        all_EEG = []
         # If location is provided, compute EEG at that location
         if location is not None:
             # Set the dipole location
             self.nyhead.set_dipole_pos(location)
 
             # Get the transformation matrix
-            M = self.nyhead.get_transformation_matrix()
+            self.M = self.nyhead.get_transformation_matrix()
 
             # Rotate current dipole moment to be oriented along the normal vector of cortex
             p = self.nyhead.rotate_dipole_to_surface_normal(p)
 
             # Compute EEG
-            EEG = M @ p  # (mV)
+            self.EEG = self.M @ p  # (mV)
 
             # Get the closest electrode idx to dipole location
             dist, closest_elec_idx = self.nyhead.find_closest_electrode()
-            all_EEG.append(EEG[closest_elec_idx, :])
+            all_EEG = self.EEG[closest_elec_idx, :]
 
         # If location is not provided, place the dipole at the different locations of the 10-20 EEG setup. We assume
         # that each dipole is working independently, i.e., the EEG at each electrode is computed separately.
         else:
+            all_EEG = np.zeros((20,self.EEG.shape[1]))
             locations = [np.array([-25, 65, 0]), # Fp1
                         np.array([25, 65, 0]),  # Fp2
                         np.array([-50, 36, -10]), # F7
@@ -304,25 +310,25 @@ class FieldPotential:
 
                 plt.show()
 
-            for location in locations:
+            for ii,location in enumerate(locations):
                 # Set the dipole location
                 self.nyhead.set_dipole_pos(location)
 
                 # Get the transformation matrix
-                M = self.nyhead.get_transformation_matrix()
+                self.M = self.nyhead.get_transformation_matrix()
 
                 # Rotate current dipole moment to be oriented along the normal vector of cortex
                 p = self.nyhead.rotate_dipole_to_surface_normal(p)
 
                 # Compute EEG
-                EEG = M @ p  # (mV)
+                self.EEG = self.M @ p  # (mV)
 
                 # Get the closest electrode idx to dipole location
                 dist, closest_elec_idx = self.nyhead.find_closest_electrode()
-                all_EEG.append(EEG[closest_elec_idx, :])
+                all_EEG[ii,:] = self.EEG[closest_elec_idx, :]
 
             # Delete variables
-            del M, p, EEG
+            # del p, dist, closest_elec_idx
 
         return all_EEG
 

@@ -11,7 +11,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
-compute_EEG = False
+compute_EEG = True
 
 if __name__ == '__main__':
     # Path to the folder containing the processed data
@@ -49,6 +49,8 @@ if __name__ == '__main__':
                 # CDM data
                 if file[:3] == 'CDM':
                     CDM_data = pickle.load(open(os.path.join(sim_file_path,file),'rb'))
+                    # TO REMOVE!
+                    # CDM_data = CDM_data[:10,:]
 
                     # Split CDM data into 10 chunks when computing EEGs to avoid memory issues
                     if compute_EEG:
@@ -57,29 +59,28 @@ if __name__ == '__main__':
                         all_CDM_data = [CDM_data]
 
                     all_features = []
-                    for j, CDM_data in enumerate(all_CDM_data):
+                    for ii, data_chunk_1 in enumerate(all_CDM_data):
+                        print(f'Computing features for CDM data chunk {ii+1}/{len(all_CDM_data)}')
+
+                        # Computation of EEGs
                         if compute_EEG:
-                            all_data = np.zeros((20,len(CDM_data),len(CDM_data[0])))
-                            for sample,CDM in enumerate(CDM_data):
-                                # print progress
-                                print(f'Computing EEGs: {sample}/{len(CDM_data)}', end='\r')
-                                EEGs = potential.compute_EEG(CDM)
-                                for i, EEG in enumerate(EEGs):
-                                    all_data[i,sample,:] = EEG
-                                del EEGs
-                            all_data = all_data.tolist()
+                            all_data = []
+                            for k,CDM_data in enumerate(data_chunk_1):
+                                print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
+                                EEGs = potential.compute_EEG(CDM_data)
+                                all_data.append(EEGs)
                         else:
-                            all_data = [CDM_data]
+                            all_data = [data_chunk_1]
 
                         # Get the features for each chunk
-                        for i, data_chunk in enumerate(all_data):
-                            print(f'Chunk {i+1}/{len(all_data)} of CDM_data {j+1}/{len(all_CDM_data)}')
+                        for jj, data_chunk_2 in enumerate(all_data):
+                            print(f'Chunk {jj+1}/{len(all_data)} of CDM_data {ii+1}/{len(all_CDM_data)}')
                             # Create a fake Pandas DataFrame (only Data and fs are relevant)
-                            df = pd.DataFrame({'ID': np.zeros(len(data_chunk)),
-                                               'Group': np.arange(len(data_chunk)),
-                                               'Epoch': np.zeros(len(data_chunk)),
-                                               'Sensor': np.zeros(len(data_chunk)),
-                                               'Data': list(data_chunk)})
+                            df = pd.DataFrame({'ID': np.zeros(len(data_chunk_2)),
+                                               'Group': np.arange(len(data_chunk_2)),
+                                               'Epoch': np.zeros(len(data_chunk_2)),
+                                               'Sensor': np.zeros(len(data_chunk_2)),
+                                               'Data': list(data_chunk_2)})
                             df.Recording = 'EEG' if compute_EEG else 'CDM'
                             df.fs = 1000. / 0.625 # samples/s
 
@@ -119,15 +120,16 @@ if __name__ == '__main__':
 
                     if compute_EEG:
                         for i in range(20):
-                            df = pd.concat([all_features[j*20+i] for j in range(len(all_CDM_data))])
+                            elec_data = []
+                            for j in range(len(all_features)):
+                                elec_data.append(all_features[j]['Features'][i])
 
-                            # Save the features to a file
-                            pickle.dump(np.array(df['Features'].tolist()),
-                                        open(os.path.join(features_path, method, 'tmp',
-                                                          'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
+                                # Save the features to a file
+                                pickle.dump(np.array(elec_data),open(os.path.join(features_path, method, 'tmp',
+                                                              'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
 
                     else:
-                        df = pd.concat(all_features)
+                        df = all_features[0]
 
                         # Save the features to a file
                         pickle.dump(np.array(df['Features'].tolist()),
