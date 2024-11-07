@@ -64,11 +64,11 @@ if __name__ == '__main__':
 
                         # Computation of EEGs
                         if compute_EEG:
-                            all_data = []
+                            all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
                             for k,CDM_data in enumerate(data_chunk_1):
                                 print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
                                 EEGs = potential.compute_EEG(CDM_data)
-                                all_data.append(EEGs)
+                                all_data[k,:,:] = EEGs
                         else:
                             all_data = [data_chunk_1]
 
@@ -117,6 +117,9 @@ if __name__ == '__main__':
 
                             # Append the feature dataframes to a list
                             all_features.append(df)
+
+                        # Clear memory
+                        del all_data
 
                     if compute_EEG:
                         for i in range(20):
