@@ -306,24 +306,25 @@ if __name__ == "__main__":
         #                    {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
         model = 'SNPE'
-        # Set the seeds for reproducibility
-        torch.manual_seed(0)
-        random.seed(0)
+        # # Set the seeds for reproducibility
+        # torch.manual_seed(0)
+        # random.seed(0)
 
         if method == 'catch22':
-            hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':5,
-                                                                 'num_transforms':2}}
+            hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
+                                                                 'num_transforms':2}}]
         else:
-            hyperparams = {'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-                                                                 'num_transforms':2}}
+            hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':4,
+                                                                 'num_transforms':2}}]
 
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
-        if model == 'SNPE':
-            inference = ncpi.Inference(model=model, hyperparams=hyperparams)
-        else:
-            inference = ncpi.Inference(model=model)
+        # if model == 'SNPE':
+        #     inference = ncpi.Inference(model=model, hyperparams=hyperparams)
+        # else:
+        #     inference = ncpi.Inference(model=model)
+        inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
 
         if model == 'SNPE':
@@ -331,7 +332,8 @@ if __name__ == "__main__":
             #     'learning_rate': 1e-1,
             #     'stop_after_epochs': 5,
             #     'max_num_epochs': 100})
-            inference.train(param_grid=None)
+            # inference.train(param_grid=None)
+            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=5)
         else:
             inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
 
