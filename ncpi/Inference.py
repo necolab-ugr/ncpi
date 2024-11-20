@@ -341,8 +341,8 @@ class Inference:
 
                     if self.model[1] == 'sbi':
                         # Set the seeds for reproducibility
-                        torch.manual_seed(repeat_idx // n_splits)
-                        random.seed(repeat_idx // n_splits)
+                        torch.manual_seed(repeat_idx)
+                        random.seed(repeat_idx)
 
                         # Re-initialize the SNPE object with the new configuration
                         model = self.initialize_sbi(params)

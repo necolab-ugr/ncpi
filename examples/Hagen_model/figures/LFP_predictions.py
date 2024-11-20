@@ -129,7 +129,7 @@ IDs = {}
 firing_rates = {}
 
 # Methods to plot
-all_methods = ['catch22','power_spectrum_parameterization']
+all_methods = ['catch22','power_spectrum_parameterization_1']
 
 # Load data
 all_IDs = {}
@@ -243,8 +243,9 @@ for method in all_methods:
                 firing_rates[method][i, sample] = rate
 
         # Normalize firing rates to the maximum value
-        if np.max(firing_rates[method]) > 0:
-            firing_rates[method] /= np.max(firing_rates[method])
+        if len(firing_rates[method]) > 0:
+            if np.max(firing_rates[method]) > 0:
+                firing_rates[method] /= np.max(firing_rates[method])
 
 # Save firing rates to file
 if compute_firing_rate:
