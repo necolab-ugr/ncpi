@@ -64,7 +64,7 @@ if __name__ == '__main__':
                         if compute_EEG:
                             # Check if the features have already been computed
                             if os.path.isfile(os.path.join(os.path.join(features_path, method, 'tmp', 'all_features',
-                                                                        file.split('_')[-1], ii))) == False:
+                                                                        file.split('_')[-1], str(ii)))) == False:
                                 all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
                                 for k,CDM_data in enumerate(data_chunk_1):
                                     print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
@@ -125,7 +125,7 @@ if __name__ == '__main__':
                         # Save the features to a tmp file
                         if compute_EEG:
                             pickle.dump(all_features, open(os.path.join(features_path, method, 'tmp', 'all_features',
-                                                                        file.split('_')[-1], ii), 'wb'))
+                                                                        file.split('_')[-1], str(ii)), 'wb'))
 
                         # Clear memory
                         del all_data
