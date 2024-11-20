@@ -49,8 +49,6 @@ if __name__ == '__main__':
                 # CDM data
                 if file[:3] == 'CDM':
                     CDM_data = pickle.load(open(os.path.join(sim_file_path,file),'rb'))
-                    # TO REMOVE!
-                    # CDM_data = CDM_data[:10,:]
 
                     # Split CDM data into 10 chunks when computing EEGs to avoid memory issues
                     if compute_EEG:
@@ -64,11 +62,17 @@ if __name__ == '__main__':
 
                         # Computation of EEGs
                         if compute_EEG:
-                            all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
-                            for k,CDM_data in enumerate(data_chunk_1):
-                                print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
-                                EEGs = potential.compute_EEG(CDM_data)
-                                all_data[k,:,:] = EEGs
+                            # Check if the features have already been computed
+                            if os.path.isfile(os.path.join(os.path.join(features_path, method, 'tmp', 'all_features',
+                                                                        file.split('_')[-1], ii))) == False:
+                                all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
+                                for k,CDM_data in enumerate(data_chunk_1):
+                                    print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
+                                    EEGs = potential.compute_EEG(CDM_data)
+                                    all_data[k,:,:] = EEGs
+                            else:
+                                print(f'Features have already been computed for CDM data chunk {ii+1}/{len(all_CDM_data)}')
+                                continue
                         else:
                             all_data = [data_chunk_1]
 
@@ -118,16 +122,28 @@ if __name__ == '__main__':
                             # Append the feature dataframes to a list
                             all_features.append(df)
 
+                        # Save the features to a tmp file
+                        if compute_EEG:
+                            pickle.dump(all_features, open(os.path.join(features_path, method, 'tmp', 'all_features',
+                                                                        file.split('_')[-1], ii), 'wb'))
+
                         # Clear memory
                         del all_data
 
                     if compute_EEG:
+                        # Merge the features into a single list
+                        all_features = []
+                        for ii in range(len(all_CDM_data)):
+                            feats = pickle.load(open(os.path.join(features_path, method, 'tmp', 'all_features',
+                                                                       file.split('_')[-1], ii), 'rb'))
+                            all_features.extend(feats)
+
+                        # Save the features to a file
                         for i in range(20):
                             elec_data = []
                             for j in range(len(all_features)):
                                 elec_data.append(all_features[j]['Features'][i])
 
-                                # Save the features to a file
                                 pickle.dump(np.array(elec_data),open(os.path.join(features_path, method, 'tmp',
                                                               'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
 
