@@ -58,13 +58,12 @@ if __name__ == '__main__':
 
                     all_features = []
                     for ii, data_chunk_1 in enumerate(all_CDM_data):
-                        print(f'Computing features for CDM data chunk {ii+1}/{len(all_CDM_data)}')
-
                         # Computation of EEGs
                         if compute_EEG:
                             # Check if the features have already been computed
-                            if os.path.isfile(os.path.join(os.path.join(features_path, method, 'tmp',
-                                                                        'all_features_' + file.split('_')[-1] + '_' + str(ii)))) == False:
+                            if os.path.isfile(os.path.join(features_path, method, 'tmp',
+                                                           'all_features_' + file.split('_')[-1] + '_' + str(ii))) == False:
+                                print(f'Computing EEGs for CDM data chunk {ii+1}/{len(all_CDM_data)}')
                                 all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
                                 for k,CDM_data in enumerate(data_chunk_1):
                                     # print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
@@ -125,7 +124,7 @@ if __name__ == '__main__':
                         # Save the features to a tmp file
                         if compute_EEG:
                             pickle.dump(all_features, open(os.path.join(features_path, method, 'tmp',
-                                                                        'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'wb'))
+                                                           'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'wb'))
 
                         # Clear memory
                         del all_data
@@ -135,7 +134,7 @@ if __name__ == '__main__':
                         all_features = []
                         for ii in range(len(all_CDM_data)):
                             feats = pickle.load(open(os.path.join(features_path, method, 'tmp',
-                                                                  'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'rb'))
+                                                           'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'rb'))
                             all_features.extend(feats)
 
                         # Save the features to a file
