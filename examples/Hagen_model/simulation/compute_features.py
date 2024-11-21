@@ -63,11 +63,11 @@ if __name__ == '__main__':
                         # Computation of EEGs
                         if compute_EEG:
                             # Check if the features have already been computed
-                            if os.path.isfile(os.path.join(os.path.join(features_path, method, 'tmp', 'all_features',
-                                                                        file.split('_')[-1], str(ii)))) == False:
+                            if os.path.isfile(os.path.join(os.path.join(features_path, method, 'tmp',
+                                                                        'all_features_' + file.split('_')[-1] + '_' + str(ii)))) == False:
                                 all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
                                 for k,CDM_data in enumerate(data_chunk_1):
-                                    print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
+                                    # print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
                                     EEGs = potential.compute_EEG(CDM_data)
                                     all_data[k,:,:] = EEGs
                             else:
@@ -124,8 +124,8 @@ if __name__ == '__main__':
 
                         # Save the features to a tmp file
                         if compute_EEG:
-                            pickle.dump(all_features, open(os.path.join(features_path, method, 'tmp', 'all_features',
-                                                                        file.split('_')[-1], str(ii)), 'wb'))
+                            pickle.dump(all_features, open(os.path.join(features_path, method, 'tmp',
+                                                                        'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'wb'))
 
                         # Clear memory
                         del all_data
@@ -134,8 +134,8 @@ if __name__ == '__main__':
                         # Merge the features into a single list
                         all_features = []
                         for ii in range(len(all_CDM_data)):
-                            feats = pickle.load(open(os.path.join(features_path, method, 'tmp', 'all_features',
-                                                                       file.split('_')[-1], ii), 'rb'))
+                            feats = pickle.load(open(os.path.join(features_path, method, 'tmp',
+                                                                  'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'rb'))
                             all_features.extend(feats)
 
                         # Save the features to a file
