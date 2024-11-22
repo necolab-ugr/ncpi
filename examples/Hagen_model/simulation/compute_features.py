@@ -125,6 +125,8 @@ if __name__ == '__main__':
                         if compute_EEG:
                             pickle.dump(all_features, open(os.path.join(features_path, method, 'tmp',
                                                            'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'wb'))
+                            # Kill the process to clear memory and start again
+                            os._exit(0)
 
                         # Clear memory
                         del all_data
