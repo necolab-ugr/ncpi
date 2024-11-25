@@ -58,6 +58,7 @@ if __name__ == '__main__':
 
                     all_features = []
                     for ii, data_chunk_1 in enumerate(all_CDM_data):
+                        print(f'Computing features for CDM data chunk {ii+1}/{len(all_CDM_data)}')
                         # Computation of EEGs
                         if compute_EEG:
                             # Check if the features have already been computed
@@ -77,7 +78,7 @@ if __name__ == '__main__':
 
                         # Get the features for each chunk
                         for jj, data_chunk_2 in enumerate(all_data):
-                            print(f'Chunk {jj+1}/{len(all_data)} of CDM_data {ii+1}/{len(all_CDM_data)}')
+                            # print(f'Chunk {jj+1}/{len(all_data)} of CDM_data {ii+1}/{len(all_CDM_data)}')
                             # Create a fake Pandas DataFrame (only Data and fs are relevant)
                             df = pd.DataFrame({'ID': np.zeros(len(data_chunk_2)),
                                                'Group': np.arange(len(data_chunk_2)),
@@ -119,7 +120,7 @@ if __name__ == '__main__':
                                 df['Features'] = df['Features'].apply(lambda x: x[[1, 2, 3, 6, 11]])
 
                             # Append the feature dataframes to a list
-                            all_features.append(df)
+                            all_features.append(df['Features'].tolist())
 
                         # Save the features to a tmp file
                         if compute_EEG:
@@ -127,9 +128,6 @@ if __name__ == '__main__':
                                                            'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'wb'))
                             # Kill the process to clear memory and start again
                             os._exit(0)
-
-                        # Clear memory
-                        del all_data
 
                     if compute_EEG:
                         # Merge the features into a single list
@@ -139,11 +137,16 @@ if __name__ == '__main__':
                                                            'all_features_' + file.split('_')[-1] + '_' + str(ii)), 'rb'))
                             all_features.extend(feats)
 
+                        # Remove feature files
+                        for ii in range(len(all_CDM_data)):
+                            os.remove(os.path.join(features_path, method, 'tmp',
+                                                           'all_features_' + file.split('_')[-1] + '_' + str(ii)))
+
                         # Save the features to a file
                         for i in range(20):
                             elec_data = []
                             for j in range(len(all_features)):
-                                elec_data.append(all_features[j]['Features'][i])
+                                elec_data.append(all_features[j][i])
 
                                 pickle.dump(np.array(elec_data),open(os.path.join(features_path, method, 'tmp',
                                                               'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
@@ -152,7 +155,7 @@ if __name__ == '__main__':
                         df = all_features[0]
 
                         # Save the features to a file
-                        pickle.dump(np.array(df['Features'].tolist()),
+                        pickle.dump(np.array(df),
                                     open(os.path.join(features_path, method, 'tmp',
                                                       'sim_X_'+file.split('_')[-1]), 'wb'))
 
