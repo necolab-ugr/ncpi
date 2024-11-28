@@ -262,7 +262,7 @@ else:
         IDs = pickle.load(f)
 
 # Create a figure and set its properties
-fig = plt.figure(figsize=(7.5, 4.), dpi=300)
+fig = plt.figure(figsize=(7.5, 4.5), dpi=300)
 plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
 plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
@@ -276,10 +276,17 @@ y_labels = [r'$catch22$', r'$1/f$'+' '+r'$slope$']
 # Define a colormap
 cmap = plt.colormaps['viridis']
 
+# Add rectangles to each row
+for row in range(2):
+    ax = fig.add_axes([0.01, 0.53 - row * 0.52, 0.98, 0.45 if row == 0 else 0.52])
+    ax.add_patch(plt.Rectangle((0, 0), 1, 1, color='red' if row == 0 else 'blue', alpha=0.1))
+    ax.set_xticks([])
+    ax.set_yticks([])
+
 # Plots
 for row in range(2):
     for col in range(5):
-        ax = fig.add_axes([0.09 + col * 0.19, 0.52 - row * 0.42, 0.14, 0.4])
+        ax = fig.add_axes([0.08 + col * 0.19, 0.55 - row * 0.45, 0.14, 0.37])
         try:
             method = all_methods[row]
         except:
@@ -404,8 +411,7 @@ for row in range(2):
             pass
 
         # Titles
-        if row == 0:
-            ax.set_title(titles[col])
+        ax.set_title(titles[col])
 
         # X-axis labels
         try:
@@ -421,11 +427,17 @@ for row in range(2):
 
         # Y-axis labels
         if col == 0:
-            ax.set_ylabel(y_labels[row])
+            ax.set_ylabel(y_labels[row], color = 'red' if row == 0 else 'blue', alpha = 0.5)
             if row == 0:
                 ax.yaxis.set_label_coords(-0.3, 0.5)
             else:
                 ax.yaxis.set_label_coords(-0.3, 0.5)
+
+# Plot letters
+ax = fig.add_axes([0., 0., 1., 1.])
+ax.axis('off')
+ax.text(0.015, 0.945, 'A', fontsize=12, fontweight='bold')
+ax.text(0.015, 0.495, 'B', fontsize=12, fontweight='bold')
 
 # Save the figure
 plt.savefig('LFP_predictions.png', bbox_inches='tight')
