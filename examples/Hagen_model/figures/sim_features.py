@@ -315,8 +315,12 @@ for row in range(4):
                     bin_features.extend([features[feat][pos]])
                     group.extend([jj for _ in range(len(pos))])
 
+                    # Clip the data between the 5 % and 95 % quantiles
+                    q1, q3 = np.percentile(features[feat][pos], [5, 95])
+                    clipped_data = features[feat][pos][(features[feat][pos] >= q1) & (features[feat][pos] <= q3)]
+
                     # Violin plot
-                    violin = ax.violinplot(features[feat][pos], positions=[jj], widths=0.9, showextrema=False)
+                    violin = ax.violinplot(clipped_data, positions=[jj], widths=0.9, showextrema=False)
 
                     for pc in violin['bodies']:
                         pc.set_facecolor(plt.get_cmap(cmaps[row])(jj / (len(bins) - 1)))

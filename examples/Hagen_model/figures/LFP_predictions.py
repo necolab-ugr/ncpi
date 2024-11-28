@@ -117,7 +117,7 @@ def lmer(df):
     return results
 
 # Debug
-compute_firing_rate = True
+compute_firing_rate = False
 
 # Random seed for numpy
 np.random.seed(0)
@@ -297,14 +297,40 @@ for row in range(2):
                 # Remove NaNs
                 data_plot = data_plot[~np.isnan(data_plot)]
 
+                # # Boxplot
+                # box = ax.boxplot(data_plot, positions=[age], showfliers=False,
+                #                  widths=0.9, patch_artist=True, medianprops=dict(color='red', linewidth=0.8),
+                #                  whiskerprops=dict(color='black', linewidth=0.5),
+                #                  capprops=dict(color='black', linewidth=0.5),
+                #                  boxprops=dict(linewidth=0.5))
+                # for patch in box['boxes']:
+                #     patch.set_facecolor(cmap(i / len(np.unique(ages[method]))))
+
+                # Clip the data between the 5 % and 95 % quantiles
+                q1, q3 = np.percentile(data_plot, [5, 95])
+                clipped_data = data_plot[(data_plot >= q1) & (data_plot <= q3)]
+
+                # Violin plot
+                violin = ax.violinplot(clipped_data, positions=[age], widths=0.9, showextrema=False)
+
+                for pc in violin['bodies']:
+                    pc.set_facecolor(cmap(i / len(np.unique(ages[method]))))
+                    pc.set_edgecolor('black')
+                    pc.set_alpha(0.8)
+                    pc.set_linewidth(0.2)
+
+                # violin['cmedians'].set_linewidth(0.6)
+                # violin['cmedians'].set_color('red')
+
                 # Boxplot
                 box = ax.boxplot(data_plot, positions=[age], showfliers=False,
-                                 widths=0.9, patch_artist=True, medianprops=dict(color='red', linewidth=0.8),
+                                 widths=0.5, patch_artist=True, medianprops=dict(color='red', linewidth=0.8),
                                  whiskerprops=dict(color='black', linewidth=0.5),
                                  capprops=dict(color='black', linewidth=0.5),
-                                 boxprops=dict(linewidth=0.5))
+                                 boxprops=dict(linewidth=0.5, facecolor=(0, 0, 0, 0)))
+
                 for patch in box['boxes']:
-                    patch.set_facecolor(cmap(i / len(np.unique(ages[method]))))
+                    patch.set_linewidth(0.2)
 
                 # # Debug: plot samples selected for the firing rate over the parameter predictions
                 # if compute_firing_rate:
