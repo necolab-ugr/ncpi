@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 # from rpy2.robjects import pandas2ri, r
 # import rpy2.robjects as ro
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
 from matplotlib import pyplot as plt
 
 # def lm(df):
@@ -334,6 +336,33 @@ for row in range(4):
 
                     for patch in box['boxes']:
                         patch.set_linewidth(0.2)
+
+                # Eta squared
+                print(f'\n--- Eta squared for {feat} and {param}.')
+                # Create the dataframe
+                df = pd.DataFrame({'Feature': np.concatenate(bin_features),
+                                   'Group': np.array(group)})
+
+                # Perform ANOVA
+                model = ols('Feature ~ C(Group)', data=df).fit()
+                anova_table = sm.stats.anova_lm(model, typ=2)
+
+                # Compute eta squared
+                ss_between = anova_table['sum_sq']['C(Group)']  # Sum of squares for the groups
+                ss_total = anova_table['sum_sq'].sum()  # Total sum of squares
+                eta_squared = ss_between / ss_total
+                print(f"Eta squared: {eta_squared}")
+
+                # Plot eta squared
+                y_max = ax.get_ylim()[1]
+                y_min = ax.get_ylim()[0]
+                delta = (y_max - y_min) * 0.1
+                ax.text((len(np.unique(group))-1)/2., y_max + delta/4.,
+                        f'$\eta^2$ = {eta_squared:.3f}' if eta_squared > 0.001 else f'$\eta^2$ < 0.001',
+                        ha='center', fontsize=8, color = 'black' if eta_squared >= .06 else 'red')
+
+                # Change y-lim
+                ax.set_ylim([y_min, y_max + 2 * delta])
 
                 # # LM analysis
                 # print('\n--- LM analysis.')
