@@ -52,7 +52,13 @@ if __name__ == '__main__':
 
                     # Split CDM data into 10 chunks when computing EEGs to avoid memory issues
                     if compute_EEG:
-                        all_CDM_data = np.array_split(CDM_data,10)
+                        # Check if the features have already been computed for this file
+                        if os.path.isfile(os.path.join(features_path, method, 'tmp',
+                                                       'sim_X_'+file.split('_')[-1]+'_0')) == False:
+                            all_CDM_data = np.array_split(CDM_data, 10)
+                        else:
+                            print(f'Features have already been computed for CDM data {file.split("_")[-1]}.')
+                            continue
                     else:
                         all_CDM_data = [CDM_data]
 
@@ -61,7 +67,7 @@ if __name__ == '__main__':
                         print(f'Computing features for CDM data chunk {ii+1}/{len(all_CDM_data)}')
                         # Computation of EEGs
                         if compute_EEG:
-                            # Check if the features have already been computed
+                            # Check if the features have already been computed for this chunk
                             if os.path.isfile(os.path.join(features_path, method, 'tmp',
                                                            'all_features_' + file.split('_')[-1] + '_' + str(ii))) == False:
                                 print(f'Computing EEGs for CDM data chunk {ii+1}/{len(all_CDM_data)}')
@@ -144,13 +150,16 @@ if __name__ == '__main__':
                                                            'all_features_' + file.split('_')[-1] + '_' + str(ii)))
 
                         # Save the features to a file
+                        print('\nSaving EEG features to files.')
                         for i in range(20):
                             elec_data = []
                             for j in range(len(all_features)):
                                 elec_data.append(all_features[j][i])
 
-                                pickle.dump(np.array(elec_data),open(os.path.join(features_path, method, 'tmp',
-                                                              'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
+                            pickle.dump(np.array(elec_data),open(os.path.join(features_path, method, 'tmp',
+                                                          'sim_X_'+file.split('_')[-1]+'_'+str(i)), 'wb'))
+                        # Kill the process
+                        os._exit(0)
 
                     else:
                         df = all_features[0]
