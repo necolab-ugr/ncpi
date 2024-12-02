@@ -55,7 +55,10 @@ if __name__ == '__main__':
                         # Check if the features have already been computed for this file
                         if os.path.isfile(os.path.join(features_path, method, 'tmp',
                                                        'sim_X_'+file.split('_')[-1]+'_0')) == False:
-                            all_CDM_data = np.array_split(CDM_data, 10)
+                            if len(CDM_data) > 10:
+                                all_CDM_data = np.array_split(CDM_data, 10)
+                            else:
+                                all_CDM_data = [CDM_data]
                         else:
                             print(f'Features have already been computed for CDM data {file.split("_")[-1]}.')
                             continue
