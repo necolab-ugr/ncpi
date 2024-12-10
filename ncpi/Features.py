@@ -1,6 +1,8 @@
 import importlib
 import signal as sgnl
 import subprocess
+
+import h5py
 import pandas as pd
 import os
 import numpy as np
@@ -330,6 +332,114 @@ def fEI(samples,fs,fmin,fmax,fEI_folder):
     # return features
 
 
+def hctsa(samples,hctsa_folder,workers = 32):
+    """
+    Compute hctsa features.
+
+    Parameters
+    ----------
+    samples: ndarray/list of shape (n_samples, times-series length)
+        A set of samples of time-series data.
+    hctsa_folder: str
+        Folder where hctsa is installed.
+    workers: int
+        Number of MATLAB workers of the parallel pool.
+
+    Returns
+    -------
+    feats: list of shape (n_samples, n_features)
+        hctsa features.
+
+    Debugging
+    ---------
+    This function has been debugged by approximating results shown
+    in https://github.com/benfulcher/hctsaTutorial_BonnEEG.
+    """
+
+    # Import module
+    try:
+        import matlab.engine
+    # We assume that Matlab and hctsa are installed
+    except ImportError:
+        print("MATLAB Engine is not installed!")
+        install('matlabengine')
+        import matlab.engine
+
+    feats = []
+
+    # Remove hctsa file
+    if os.path.isfile(os.path.join(hctsa_folder,'HCTSA.mat')):
+        os.remove(os.path.join(hctsa_folder,'HCTSA.mat'))
+
+    # start Matlab engine
+    print("\n--> Starting Matlab engine ...")
+    eng = matlab.engine.start_matlab()
+
+    # Change to hctsa folder
+    eng.cd(hctsa_folder)
+
+    # Startup hctsa script
+    print("\n--> hctsa startup ...")
+    st = eng.startup(nargout=0)
+    print(st)
+
+    # Check if samples is a list and convert it to a numpy array
+    if isinstance(samples,list):
+        samples = np.array(samples)
+
+    # Create the input variables in Matlab
+    eng.eval(f'timeSeriesData = cell(1,{samples.shape[0]});',nargout = 0)
+    eng.eval(f'labels = cell(1,{samples.shape[0]});',nargout = 0)
+    eng.eval(f'keywords = cell(1,{samples.shape[0]});',nargout = 0)
+
+    # Transfer time-series data to Matlab workspace
+    for s in range(samples.shape[0]):
+        eng.workspace['aux'] = matlab.double(list(samples[s]))
+        eng.eval('timeSeriesData{1,%s} = aux;' % (s+1),nargout = 0)
+
+    # Fill in the other 2 Matlab structures with the index of the sample
+    for s in range(samples.shape[0]):
+        eng.eval('labels{1,%s} = \'%s\';' % (str(s+1),str(s+1)),nargout = 0)
+        eng.eval('keywords{1,%s} = \'%s\';' % (str(s+1),str(s+1)),nargout = 0)
+
+    # Save variables into a mat file
+    eng.eval('save INP_ccpi_ts.mat timeSeriesData labels keywords;',nargout = 0)
+
+    # Load mat file
+    eng.eval('load INP_ccpi_ts.mat;',nargout = 0)
+
+    # Initialize an hctsa calculation
+    print("\n--> hctsa TS_Init ...")
+    eng.TS_Init('INP_ccpi_ts.mat',
+                'hctsa',
+                matlab.logical([False,False,False]),
+                nargout = 0)
+
+    # Open a parallel pool of a specific size
+    if workers > 1:
+        eng.parpool(workers)
+
+    # Compute features
+    print("\n--> hctsa TS_Compute ...")
+    # eng.TS_Compute(matlab.logical([True]),nargout = 0)
+    eng.eval('TS_Compute(true);',nargout = 0)
+
+    # Load hctsa file
+    f = h5py.File(os.path.join(hctsa_folder,'HCTSA.mat'),'r')
+    TS_DataMat = np.array(f.get('TS_DataMat'))
+    # TS_Quality = np.array(f.get('TS_Quality'))
+
+    # Create the array of features to return
+    print(f'\n--> Formatting {TS_DataMat.shape[0]} features...')
+    for s in range(samples.shape[0]):
+        feats.append(list(TS_DataMat[:,s]))
+
+    # Stop Matlab engine
+    print("\n--> Stopping Matlab engine ...")
+    eng.quit()
+
+    return feats
+
 class Features:
     """
     Class for computing features from electrophysiological data recordings.
@@ -363,7 +473,7 @@ class Features:
         self.params = params
 
 
-    def compute_features(self, data):
+    def compute_features(self, data, hctsa_folder = None):
         """
         Function to compute features from the data.
 
@@ -371,6 +481,8 @@ class Features:
         ----------
         data: pd.DataFrame
             DataFrame containing the data. The time-series samples must be in the 'Data' column.
+        hctsa_folder: str
+            Folder where hctsa is installed.
 
         Returns
         -------
@@ -399,7 +511,7 @@ class Features:
             features = []
 
             # Compute features of each sample in the batch
-            if self.method != 'fEI':
+            if self.method != 'fEI' and self.method != 'hctsa':
                 for sample in batch:
                     if self.method == 'catch22':
                         features.append(catch22(sample))
@@ -411,20 +523,23 @@ class Features:
                                                                         self.params['fooof_setup'],
                                                                         self.params['r_squared_th']))
 
-            # Compute the fEI for the whole batch to avoid starting the Matlab engine multiple times
+            # Compute fEI/hctsa for the whole batch to avoid starting the Matlab engine multiple times
             else:
-                features = fEI(batch,
-                               self.params['fs'],
-                               self.params['fmin'],
-                               self.params['fmax'],
-                               self.params['fEI_folder'])
+                if self.method == 'fEI':
+                    features = fEI(batch,
+                                   self.params['fs'],
+                                   self.params['fmin'],
+                                   self.params['fmax'],
+                                   self.params['fEI_folder'])
+                elif self.method == 'hctsa':
+                    features = hctsa(batch,hctsa_folder)
 
             return batch_index,features
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
-        if self.method == 'fEI':
-            factor = 0.5 # decrease this factor to avoid memory issues
+        if self.method == 'fEI' or self.method == 'hctsa':
+            factor = 0.5 # decrease this factor to avoid memory issues with MATLAB engine
         else:
             factor = 10 # more chunks than available CPUs (10 is a factor to update the progress bar more frequently)
 
@@ -448,116 +563,3 @@ class Features:
         pd_feat = pd.DataFrame({'Features': features})
         data = pd.concat([data, pd_feat], axis=1)
         return data
-
-    def create_df(self, data, epoch_l_samp, df_pat, group, ID):
-
-        '''
-        Create epochs of the data and save them in a dataframe containing all data.
-
-        Parameters
-        ----------
-        data: np.array
-            Time-series data.
-        epoch_l_samp: int
-            Length of the epoch in samples.
-
-        Returns
-        -------
-        dataframe
-
-        '''
-        n_channels = data.shape[1]
-        n_epochs = len(data) // epoch_l_samp
-
-        for i in range(n_channels):
-            data_epochs = []
-            for l in range(n_epochs):
-                data_epochs.append(data[l * epoch_l_samp: (l + 1) * epoch_l_samp, i])
-
-            df_new = pd.DataFrame({
-                'ID': [ID] * n_epochs,
-                'Group': [group] * n_epochs,
-                'Epoch': np.arange(n_epochs),
-                'Sensor': [i] * n_epochs,
-                'Data': data_epochs
-            })
-
-            df_pat = pd.concat([df_pat, df_new], ignore_index=True)
-
-        return df_pat
-
-    def load_data(self, data_path, recording_type, data_format, epoch_l):
-
-        '''
-        Create a dataframe with the following columns:
-            - ID (subject/animal ID).
-            - Epoch (epoch number).
-            - Group (e.g. HC/AD in neuroimaging, P2/P4... in development, Control/Opto in optogenetics).
-            - Sensor (electrode number for EEG, ROI for MEG and, perhaps, 0 for LFP that only has 1 electrode normally).
-            - Data (time-series data).
-
-            and the following attributes:
-            - fs (sampling frequency).
-            - Recording (type of recording: LFP, EEG, MEG...).
-
-        Parameters
-        ----------
-        data_path: str
-            Path to the folder containing the data. One archive per patient with shape (n_samples, n_channels).
-        recording_type: str
-            Type of data to be loaded. Options: 'EEG', 'LFP', 'MEG'.
-        data_format: str
-            Format of the data. Options: 'mat', 'csv', 'txt', 'set'.
-                - .mat structure: {'data': np.array, 'fs': int, 'group': string}
-        epoch_l: int
-            Length of the epoch in seconds.
-
-        Returns
-        -------
-        dataframe
-
-        '''
-
-        ''' 
-
-        TO DO: 
-
-        - Check that a .set can be read with mne.io.read_raw_eeglab
-        - Add to the .mat that we read the variable fs to automate the creation of epochs based on this.
-        For now we assume that it is 500 Hz.
-        - Implement the reading of OpenNeuro and LFP databases.
-
-        '''
-
-        # Initialize an empty DataFrame
-        df = pd.DataFrame(columns=['ID', 'Group', 'Epoch', 'Sensor', 'Data'])
-        fs = 500
-
-        if data_format == 'mat':
-
-            loadmat = module('scipy.io').loadmat
-
-            file_list = [f for f in os.listdir(data_path) if f.endswith('.mat')]
-            # Load the data
-            data_tot = []
-            ID = 0
-
-            for file_name in file_list:
-                ts = {'data': [], 'group': []}
-                print(f"Loading file: {file_name}")
-                file_full_path = os.path.join(data_path, file_name)
-                mat_data = loadmat(file_full_path)
-                # Dictionary with the data
-                ts['data'] = mat_data['data'][0][0]['signal']
-                print(f"Data loaded for patient {file_name}")
-                ts['group'] = mat_data['group']
-                epoch_l_samp = epoch_l * fs
-                # print(type(df))  # Should print <class 'pandas.core.frame.DataFrame'>
-                df = self.create_df(ts['data'], epoch_l_samp, df, ts['group'], ID)
-                # print(df)
-                ID += 1
-
-            df.Recording = recording_type
-            df.fs = fs
-
-        return df
