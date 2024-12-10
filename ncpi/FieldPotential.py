@@ -9,6 +9,30 @@ from lfpykit.eegmegcalc import NYHeadModel
 import numpy as np
 import matplotlib.pyplot as plt
 
+def roll_with_zeros(arr, shift):
+    """
+    Roll an array with zeros.
+    Parameters
+    ----------
+    arr: np.array
+        Array to be rolled.
+    shift: int
+        Number of positions to shift the array.
+    Returns
+    -------
+    result: np.array
+        Shifted array.
+
+    """
+    result = np.zeros_like(arr)
+    if shift > 0:
+        result[shift:] = arr[:-shift]
+    elif shift < 0:
+        result[:shift] = arr[-shift:]
+    else:
+        result[:] = arr
+    return result
+
 class FieldPotential:
     def __init__(self, kernel=True, nyhead=False, CDM_shape=15500):
         """
@@ -331,6 +355,79 @@ class FieldPotential:
             # del p, dist, closest_elec_idx
 
         return all_EEG
+
+
+    def compute_proxy(self, method, sim_data, sim_step):
+        """
+        Compute a proxy for the extracellular signal by combining variables directly measured from network simulations.
+        Warning: not tested yet!
+
+        Parameters
+        ----------
+        method: str
+            Method to compute the proxy. Options are:
+            - 'FR': firing rate averaged over all neurons in the population.
+            - 'AMPA': sum of AMPA currents.
+            - 'GABA': sum of GABA currents.
+            - 'Vm': sum of membrane potentials.
+            - 'I': sum of synaptic currents.
+            - 'I_abs': sum of their absolute values.
+            - 'LRWS': LFP reference weighted sum.
+            - 'ERWS1': EEG reference weighted sum 1 (non-causal)
+            - 'ERWS2': EEG reference weighted sum 2 (non-causal)
+
+        sim_data: dict
+            Dictionary containing the simulation data. The keys are 'FR', 'AMPA', 'GABA', 'Vm', 'nu_ext'. Each key
+            contains a 2D array with the data for each neuron in the population.
+
+        sim_step: float
+            Simulation time step in ms.
+
+        Returns
+        -------
+        proxy: np.array
+            Proxy for the extracellular signal.
+        """
+
+        if method == 'FR':
+            proxy = np.mean(sim_data['FR'], axis = 0)
+        elif method == 'AMPA':
+            proxy = np.sum(sim_data['AMPA'], axis = 0)
+        elif method == 'GABA':
+            proxy = -np.sum(sim_data['GABA'], axis = 0)
+        elif method == 'Vm':
+            proxy = np.sum(sim_data['Vm'], axis = 0)
+        elif method == 'I':
+            proxy = np.sum(sim_data['AMPA'] + sim_data['GABA'], axis = 0)
+        elif method == 'I_abs':
+            proxy = np.sum(np.abs(sim_data['AMPA']) + np.abs(sim_data['GABA']), axis = 0)
+        elif method == 'LRWS':
+            delay = int(6.0 / sim_step)
+            AMPA_delayed = np.array([roll_with_zeros(sim_data['AMPA'][i],delay) for i in range(sim_data['AMPA'].shape[0])])
+            proxy = np.sum(AMPA_delayed - 1.65 * sim_data['GABA'], axis=0)
+        elif method == 'ERWS1':
+            AMPA_delay = -int(0.9 / sim_step)
+            GABA_delay = int(2.3 / sim_step)
+            AMPA_delayed = np.array([roll_with_zeros(sim_data['AMPA'][i],
+                                                     AMPA_delay) for i in range(sim_data['AMPA'].shape[0])])
+            GABA_delayed = np.array([roll_with_zeros(sim_data['GABA'][i],
+                                                     GABA_delay) for i in range(sim_data['GABA'].shape[0])])
+            proxy = np.sum(AMPA_delayed - 0.3 * GABA_delayed, axis=0)
+        elif method == 'ERWS2':
+            coeff = [-0.6,  0.1, -0.4, -1.9,  0.6,  3.0 ,  1.4,  1.7,  0.2]
+            AMPA_delay = int(coeff[0] * np.power(sim_data['nu_ext'], -coeff[1]) + coeff[2])
+            GABA_delay = int(coeff[3] * np.power(sim_data['nu_ext'], -coeff[4]) + coeff[5])
+            alpha = coeff[6] * np.power(sim_data['nu_ext'], -coeff[7]) + coeff[8]
+            AMPA_delayed = np.array([roll_with_zeros(sim_data['AMPA'][i],
+                                                     AMPA_delay) for i in range(sim_data['AMPA'].shape[0])])
+            GABA_delayed = np.array([roll_with_zeros(sim_data['GABA'][i],
+                                                     GABA_delay) for i in range(sim_data['GABA'].shape[0])])
+            proxy = np.sum(AMPA_delayed - alpha * GABA_delayed, axis=0)
+        else:
+            raise ValueError(f"Method {method} not recognized.")
+
+        return proxy
+
 
     """
     The following methods for setting up the neuron model were downloaded from the LFPykernels repository: 
