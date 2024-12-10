@@ -24,7 +24,7 @@ if __name__ == '__main__':
 
     # Create the FieldPotential object
     if compute_EEG:
-        potential = ncpi.FieldPotential(nyhead = True, kernel = False)
+        potential = ncpi.FieldPotential(kernel=False, nyhead=True, MEEG ='EEG')
 
     for method in ['catch22', 'power_spectrum_parameterization_1','power_spectrum_parameterization_2']:
         # Check if the features have already been computed
@@ -77,7 +77,7 @@ if __name__ == '__main__':
                                 all_data = np.zeros((len(data_chunk_1), 20, len(data_chunk_1[0])))
                                 for k,CDM_data in enumerate(data_chunk_1):
                                     # print(f'EEG {k+1}/{len(data_chunk_1)}', end='\r')
-                                    EEGs = potential.compute_EEG(CDM_data)
+                                    EEGs = potential.compute_MEEG(CDM_data)
                                     all_data[k,:,:] = EEGs
                             else:
                                 print(f'Features have already been computed for CDM data chunk {ii+1}/{len(all_CDM_data)}')

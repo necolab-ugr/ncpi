@@ -5,6 +5,7 @@ import neuron
 from lfpykernels import KernelApprox,\
                         GaussCylinderPotential,\
                         KernelApproxCurrentDipoleMoment
+from LFPy import InfiniteHomogeneousVolCondMEG as IHVCMEG
 from lfpykit.eegmegcalc import NYHeadModel
 import numpy as np
 import matplotlib.pyplot as plt
@@ -34,7 +35,7 @@ def roll_with_zeros(arr, shift):
     return result
 
 class FieldPotential:
-    def __init__(self, kernel=True, nyhead=False, CDM_shape=15500):
+    def __init__(self, kernel=True, nyhead=False, MEEG=None, CDM_shape=15500):
         """
         Initialize the FieldPotential object.
         Parameters
@@ -44,6 +45,11 @@ class FieldPotential:
 
         nyhead: bool
             Use the NYHeadModel for computing EEG.
+
+        MEEG: str
+            Prepare data structures for computing EEG or MEG signals. Options are:
+                'EEG': Compute EEG.
+                'MEG': Compute MEG.
 
         CDM_shape: int
             Number of time points in the CDM.
@@ -55,9 +61,14 @@ class FieldPotential:
         # Initialize the head model
         if nyhead:
             self.nyhead = NYHeadModel()
-            # Allocate memory for the transformation matrix and EEG
+
+        # Allocate memory for the transformation matrix and MEEG
+        if MEEG == 'EEG':
             self.M = np.zeros((231,3))
-            self.EEG = np.zeros((231,CDM_shape))
+            self.MEEG = np.zeros((231,CDM_shape))
+        elif MEEG == 'MEG':
+            self.M = np.zeros((1,3,3))
+            self.MEEG = np.zeros((1,3,CDM_shape))
 
     def create_kernel(self, MC_folder, output_path, params, biophys, dt, tstop, electrodeParameters=None, CDM=True):
         """
@@ -224,9 +235,13 @@ class FieldPotential:
 
         return self.H_YX
 
-    def compute_EEG(self, CDM, location=None):
+    def compute_MEEG(self, CDM, location=None, cMEG = False):
         """
-        Compute EEG from a current dipole moment using the NYHeadModel.
+        Compute EEG/MEG from a current dipole moment using the NYHeadModel (EEG) or a homogeneous, isotropic, linear
+        volume conductor model (MEG).
+
+        Warning: The MEG calculation has not yet been tested and is currently limited to use with a single
+        sensor location.
 
         Parameters
         ----------
@@ -234,11 +249,13 @@ class FieldPotential:
             Current dipole moment
         location: np.array
             Location of the dipole moment
+        cMEG: bool
+            Compute MEG instead of EEG.
 
         Returns
         -------
-        all_EEG: list of np.array
-            EEG at the electrode locations
+        all_MEEG: list of np.array
+            MEEG at the electrode/sensor locations
         """
 
         debug = False
@@ -247,28 +264,41 @@ class FieldPotential:
         p = np.zeros((3, len(CDM)))
         p[2, :] = CDM
 
-        # If location is provided, compute EEG at that location
+        # If location is provided, compute MEEG at that location
         if location is not None:
-            # Set the dipole location
-            self.nyhead.set_dipole_pos(location)
+            if cMEG == False:
+                # Set the dipole location
+                self.nyhead.set_dipole_pos(location)
 
-            # Get the transformation matrix
-            self.M = self.nyhead.get_transformation_matrix()
+                # Get the transformation matrix
+                self.M = self.nyhead.get_transformation_matrix()
 
-            # Rotate current dipole moment to be oriented along the normal vector of cortex
-            p = self.nyhead.rotate_dipole_to_surface_normal(p)
+                # Rotate current dipole moment to be oriented along the normal vector of cortex
+                p = self.nyhead.rotate_dipole_to_surface_normal(p)
 
-            # Compute EEG
-            self.EEG = self.M @ p  # (mV)
+                # Compute EEG
+                self.MEEG = self.M @ p  # (mV)
 
-            # Get the closest electrode idx to dipole location
-            dist, closest_elec_idx = self.nyhead.find_closest_electrode()
-            all_EEG = self.EEG[closest_elec_idx, :]
+                # Get the closest electrode idx to dipole location
+                dist, closest_elec_idx = self.nyhead.find_closest_electrode()
+                all_MEEG = self.MEEG[closest_elec_idx, :]
+
+            # Warning: this code snippet has not been tested yet!
+            else:
+                # Instantiate MEG object
+                meg = IHVCMEG(location)
+
+                # Get the transformation matrix
+                self.M = meg.get_transformation_matrix(location)
+
+                # Compute the magnetic signal in a single sensor location
+                self.MEEG = self.M @ p
+                all_MEEG = self.MEEG[0]
 
         # If location is not provided, place the dipole at the different locations of the 10-20 EEG setup. We assume
         # that each dipole is working independently, i.e., the EEG at each electrode is computed separately.
-        else:
-            all_EEG = np.zeros((20,self.EEG.shape[1]))
+        elif location is None and cMEG == False:
+            all_MEEG = np.zeros((20,self.MEEG.shape[1]))
             locations = [np.array([-25, 65, 0]), # Fp1
                         np.array([25, 65, 0]),  # Fp2
                         np.array([-50, 36, -10]), # F7
@@ -345,16 +375,20 @@ class FieldPotential:
                 p = self.nyhead.rotate_dipole_to_surface_normal(p)
 
                 # Compute EEG
-                self.EEG = self.M @ p  # (mV)
+                self.MEEG = self.M @ p  # (mV)
 
                 # Get the closest electrode idx to dipole location
                 dist, closest_elec_idx = self.nyhead.find_closest_electrode()
-                all_EEG[ii,:] = self.EEG[closest_elec_idx, :]
+                all_MEEG[ii,:] = self.MEEG[closest_elec_idx, :]
 
             # Delete variables
             # del p, dist, closest_elec_idx
 
-        return all_EEG
+        else:
+            raise ValueError("Configuration (location/cMEG) not recognized.")
+
+
+        return all_MEEG
 
 
     def compute_proxy(self, method, sim_data, sim_step):
