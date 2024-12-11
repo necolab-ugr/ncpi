@@ -1,6 +1,5 @@
 """
-Initialization of ncpi, a python module for neural circuit parameter
-inference (ncpi) from electrophysiological recordings.
+Initialization file for the ncpi package.
 """
 
 from .Inference import *
