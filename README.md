@@ -1,4 +1,7 @@
-# ncpi
+<p align="center">
+  <img src="img/ncpi_logo.png" alt="ncpi logo" width="200">
+</p>
+
 This repository provides a Python library, Neural Circuit Parameter Inference (ncpi), designed for inferring neural circuit parameters from electrophysiological data.
 
 First results obtained using this library have been published in [1]. Additionally, we are preparing another paper to showcase the comprehensive capabilities of the ncpi library. In the coming months, we plan to refine the code further and provide tutorials and examples to enhance usability.
