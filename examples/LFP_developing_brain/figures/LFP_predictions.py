@@ -12,7 +12,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Parameters of LIF model simulations
-sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../Hagen_model/simulation/params'))
 
 def lmer(df):
     # Activate pandas2ri
@@ -214,23 +214,23 @@ for method in all_methods:
                 LIF_params['J_ext'] = J_ext
 
                 # Create a Simulation object
-                sim = ncpi.Simulation(param_folder='../simulation/params',
-                                      python_folder='../simulation/python',
-                                      output_folder='../simulation/output')
+                sim = ncpi.Simulation(param_folder='../../Hagen_model/simulation/params',
+                                      python_folder='../../Hagen_model/simulation/python',
+                                      output_folder='../../Hagen_model/simulation/output')
 
                 # Save parameters to a pickle file
-                with open(os.path.join('../simulation/output', 'network.pkl'), 'wb') as f:
+                with open(os.path.join('../../Hagen_model/simulation/output', 'network.pkl'), 'wb') as f:
                     pickle.dump(LIF_params, f)
 
                 # Run the simulation
                 sim.simulate('simulation.py', 'simulation_params.py')
 
                 # Load spike times
-                with open(os.path.join('../simulation/output', 'times.pkl'), 'rb') as f:
+                with open(os.path.join('../../Hagen_model/simulation/output', 'times.pkl'), 'rb') as f:
                     times = pickle.load(f)
 
                 # Load tstop
-                with open(os.path.join('../simulation/output', 'tstop.pkl'), 'rb') as f:
+                with open(os.path.join('../../Hagen_model/simulation/output', 'tstop.pkl'), 'rb') as f:
                     tstop = pickle.load(f)
 
                 # Transient period
