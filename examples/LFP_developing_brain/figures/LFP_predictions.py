@@ -262,7 +262,7 @@ else:
         IDs = pickle.load(f)
 
 # Create a figure and set its properties
-fig = plt.figure(figsize=(7.5, 4.5), dpi=300)
+fig = plt.figure(figsize=(7.5, 5), dpi=300)
 plt.rcParams.update({'font.size': 10, 'font.family': 'Arial'})
 plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
@@ -286,7 +286,7 @@ for row in range(2):
 # Plots
 for row in range(2):
     for col in range(5):
-        ax = fig.add_axes([0.08 + col * 0.19, 0.55 - row * 0.45, 0.14, 0.37])
+        ax = fig.add_axes([0.08 + col * 0.19, 0.55 - row * 0.45, 0.14, 0.32])
         try:
             method = all_methods[row]
         except:
@@ -425,19 +425,23 @@ for row in range(2):
         except:
             pass
 
-        # Y-axis labels
-        if col == 0:
-            ax.set_ylabel(y_labels[row], color = 'red' if row == 0 else 'blue', alpha = 0.5)
-            if row == 0:
-                ax.yaxis.set_label_coords(-0.3, 0.5)
-            else:
-                ax.yaxis.set_label_coords(-0.3, 0.5)
+        # # Y-axis labels
+        # if col == 0:
+        #     ax.set_ylabel(y_labels[row], color = 'red' if row == 0 else 'blue', alpha = 0.5)
+        #     if row == 0:
+        #         ax.yaxis.set_label_coords(-0.3, 0.5)
+        #     else:
+        #         ax.yaxis.set_label_coords(-0.3, 0.5)
 
 # Plot letters
 ax = fig.add_axes([0., 0., 1., 1.])
 ax.axis('off')
 ax.text(0.015, 0.945, 'A', fontsize=12, fontweight='bold')
 ax.text(0.015, 0.495, 'B', fontsize=12, fontweight='bold')
+
+# Titles
+ax.text(0.5, 0.94, y_labels[0], color = 'red', alpha = 0.5, fontsize = 10, ha='center')
+ax.text(0.5, 0.49, y_labels[1], color = 'blue', alpha = 0.5, fontsize = 10, ha='center')
 
 # Save the figure
 plt.savefig('LFP_predictions.png', bbox_inches='tight')
