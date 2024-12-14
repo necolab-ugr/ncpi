@@ -1,12 +1,9 @@
-import pygments
-from pygments import lexers
-from pygments import formatters
-from PIL import Image
-from io import BytesIO
-import textwrap
+import subprocess
+import os
+from pdf2image import convert_from_path
 
-# The Python code snippet
-code = '''
+# Python code to be included in the LaTeX document
+code = """
 import ncpi
 
 # Build the LIF network model and simulate it
@@ -26,7 +23,7 @@ H_YX = potential.create_kernel(MC_model_folder,
                                tstop, 
                                electrodeParameters, 
                                CDM=True)
-                               
+
 # Compute the CDMs
 probe = 'KernelApproxCurrentDipoleMoment'
 kernel = H_YX[f'{X}:{Y}'][probe][2, :] # z-axis
@@ -46,53 +43,65 @@ inference.add_simulation_data(sim_df['Features'],
 inference.train(param_grid=hyperparams,
                 n_splits=10,
                 n_repeats=1) 
-                
+
 # Predict the cortical circuit parameters
 predictions = inference.predict(emp_df['Features'])
 
 # Perform the LMER analysis
 analysis = ncpi.Analysis()
-analysis.lmer(predictions)                                                 
-'''
+analysis.lmer(predictions)
+"""
 
-# Wrap the code to 80 characters
-wrapped_code = "\n".join(textwrap.fill(line, width=60) for line in code.splitlines())
+# Create a LaTeX document
+latex_code = f"""
+\\documentclass{{article}}
+\\usepackage{{minted}}
+\\usepackage{{geometry}}
 
-# Use the Python lexer for syntax highlighting
-lexer = lexers.get_lexer_by_name('python')
+% Set page dimensions to match the image size
+\\geometry{{papersize={{3.5in,6.5in}}, margin=0.1in}}
 
-# Create a formatter that will generate the image
-formatter = formatters.ImageFormatter(
-    font_name='Courier New',
-    font_size=28,
-    line_numbers=False,
-    background_color = 'white',
-    text_color = 'black',
-    image_pad=5,
-    line_pad=2,
-    syntax_highlighting_style='monokai'
-)
+\\begin{{document}}
 
-# Generate the highlighted code as an image
-image_data = pygments.highlight(wrapped_code, lexer, formatter)
+\\begin{{minted}}[fontsize=\\footnotesize, breaklines]{{python}}
+{code}
+\\end{{minted}}
 
-# Load the image from the binary data
-image = Image.open(BytesIO(image_data))
+\\end{{document}}
+"""
 
-# Set desired dimensions in inches
-desired_width_in = 6  # Width in inches
-desired_height_in = 8  # Height in inches
-dpi = 300  # Desired DPI
+# Write the LaTeX code to a file
+with open("code_document.tex", "w") as tex_file:
+    tex_file.write(latex_code)
 
-# Calculate dimensions in pixels
-desired_width_px = int(desired_width_in * dpi)
-desired_height_px = int(desired_height_in * dpi)
+# Compile the LaTeX file to PDF
+try:
+    subprocess.run(
+        ["pdflatex", "-shell-escape", "code_document.tex"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    print("PDF generated successfully.")
+except subprocess.CalledProcessError as e:
+    print(f"Error during PDF generation: {e.stderr.decode()}")
 
-# Resize the image to the desired dimensions
-resized_image = image.resize((desired_width_px, desired_height_px), Image.LANCZOS)
+# Convert PDF to High-Resolution Image
+pdf_file = "code_document.pdf"
+output_image_prefix = "output_image"
+try:
+    # Convert PDF to images
+    images = convert_from_path(pdf_file, dpi=300)
+    for i, image in enumerate(images):
+        image_path = f"{output_image_prefix}_page_{i + 1}.png"
+        image.save(image_path, "PNG")
+        print(f"Saved high-resolution image: {image_path}")
+except Exception as e:
+    print(f"Error during PDF-to-image conversion: {e}")
 
-# Save the resized image
-resized_image.save("Fig2.png", dpi=(dpi, dpi))
-
-# Optionally, display the resized image
-resized_image.show()
+# Step 4: Cleanup intermediate files (optional)
+for ext in [".aux", ".log", ".out", ".tex"]:
+    try:
+        os.remove(f"code_document{ext}")
+    except FileNotFoundError:
+        pass
