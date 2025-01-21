@@ -7,6 +7,7 @@ import mne
 import pandas as pd
 import scipy
 import numpy as np
+import shutil
 from rpy2.robjects import pandas2ri, r
 import rpy2.robjects as ro
 
@@ -15,6 +16,99 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ncpi
 
 EEG_AD_FTD_path = '/DATOS/pablomc/EEG_AD_FTD_results'
+
+databases = ['POCTEP', 'OpenNEURO']
+
+all_methods = [
+    'catch22',
+    'power_spectrum_parameterization_1', 
+    # 'CO_HistogramAMI_even_2_5',
+    # 'SB_TransitionMatrix_3ac_sumdiagcov',
+    # 'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+    # 'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
+]
+
+print('Default parameters:')
+print('---------------------------------------------------------------------------')
+print('Inference method: EEG')
+print('Number of variables (n_var): 4')
+print('Aperiodic component interval (if aperiodic component is desired): 5., 45.')
+print('---------------------------------------------------------------------------')
+
+
+default = input('\n--Use default parameters? (y/n): ')
+
+if default == 'y':
+    inference_method = 'EEG'
+    n_var = 4
+    models_path = f'/DATOS/pablomc/ML_models/EEG/{n_var}_var'
+    fmin, fmax = 5., 45.
+
+if default == 'n':
+
+    inference_method = input(f'\nUse CDM o EEG models? (cdm/eeg): ')
+
+    if inference_method == 'EEG' or inference_method == 'eeg':
+        n_var = input('Number of variables (2 or 4): ')
+        models_path = f'/DATOS/pablomc/ML_models/EEG/{n_var}_var'
+
+    if inference_method == 'CDM' or inference_method == 'cdm':
+        n_var = 4
+        models_path = f'/DATOS/pablomc/ML_models/{n_var}_var/MLP'
+
+
+    if 'power_spectrum_parameterization_1' in all_methods:
+        interval = input(f'\nIntroduce the interval to compute the aperiodic component separated by comas (fmin, fmax): ')
+
+        fmin, fmax = map(float, interval.split(","))
+
+
+
+catch22_names = [
+    'DN_HistogramMode_5',
+    'DN_HistogramMode_10',
+    'CO_f1ecac',
+    'CO_FirstMin_ac',
+    'CO_HistogramAMI_even_2_5',
+    'CO_trev_1_num',
+    'MD_hrv_classic_pnn40',
+    'SB_BinaryStats_mean_longstretch1',
+    'SB_TransitionMatrix_3ac_sumdiagcov',
+    'PD_PeriodicityWang_th0_01',
+    'CO_Embed2_Dist_tau_d_expfit_meandiff',
+    'IN_AutoMutualInfoStats_40_gaussian_fmmi',
+    'FC_LocalSimple_mean1_tauresrat',
+    'DN_OutlierInclude_p_001_mdrmd',
+    'DN_OutlierInclude_n_001_mdrmd',
+    'SP_Summaries_welch_rect_area_5_1',
+    'SB_BinaryStats_diff_longstretch0',
+    'SB_MotifThree_quantile_hh',
+    'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+    'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
+    'SP_Summaries_welch_rect_centroid',
+    'FC_LocalSimple_mean3_stderr'
+]
+
+def load_empirical_data(dataset, method, raw=False):
+
+    print(f'Loading {dataset} data...')
+
+    if dataset=='POCTEP':
+        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}_{raw}.pkl')):
+            emp_data = pd.read_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}_{raw}.pkl'))
+            print(f'Loaded file: emp_data_{dataset}_{raw}.pkl')
+
+        else:
+            emp_data = create_POCTEP_dataframe(raw=False)
+
+    if dataset == 'OpenNEURO':
+        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}.pkl')):
+            emp_data = pd.read_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}.pkl'))
+            print(f'Loaded file: emp_data_{dataset}.pkl')
+        else:
+            emp_data = create_OpenNEURO_dataframe()
+
+    return emp_data
 
 def load_simulation_data(file_path):
     """
@@ -58,51 +152,7 @@ def load_simulation_data(file_path):
     return data
 
 
-def load_empirical_data(dataset, raw = False):
-    # Check if features have been already computed
-    compute_f = False
-    if dataset == 'POCTEP':
-        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}_{raw}.pkl')):
-            emp_data = pd.read_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}_{raw}.pkl'))
-            print(f'Loaded file: emp_data_{dataset}_{raw}.pkl')
-        else:
-            compute_f = True
-    if dataset == 'OpenNEURO':
-        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}.pkl')):
-            emp_data = pd.read_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}.pkl'))
-            print(f'Loaded file: emp_data_{dataset}.pkl')
-        else:
-            compute_f = True
-
-    # Compute features from empirical data
-    if compute_f:
-        # Create folder to save features
-        if not os.path.exists(EEG_AD_FTD_path):
-            os.makedirs(EEG_AD_FTD_path)
-        if not os.path.exists(os.path.join(EEG_AD_FTD_path, method)):
-            os.makedirs(os.path.join(EEG_AD_FTD_path, method))
-
-        print(f'\n--- Computing features for {dataset} data.')
-        start_time = time.time()
-        if method == 'catch22':
-            if dataset == 'POCTEP':
-                emp_data = compute_features_POCTEP(method='catch22', params=None, raw=raw)
-            elif dataset == 'OpenNEURO':
-                emp_data = compute_features_OpenNEURO(method='catch22', params=None)
-        else:
-            print(f'Error: method {method} not implemented.')
-        end_time = time.time()
-        print(f'Done in {(end_time - start_time) / 60.} min')
-
-        # Save the features
-        if dataset == 'POCTEP':
-            emp_data.to_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}_{raw}.pkl'))
-        else:
-            emp_data.to_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{dataset}.pkl'))
-
-    return emp_data
-
-def compute_features_POCTEP(method='catch22', params=None, raw = False):
+def create_POCTEP_dataframe(raw=False):
     if raw:
         data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SENSORS'
     else:
@@ -155,13 +205,9 @@ def compute_features_POCTEP(method='catch22', params=None, raw = False):
     df.Recording = 'EEG'
     df.fs = fs
 
-    # Compute features
-    features = ncpi.Features(method=method, params=params)
-    df = features.compute_features(df)
-
     return df
 
-def compute_features_OpenNEURO(method='catch22', params=None):
+def create_OpenNEURO_dataframe():
     data_path = '/DATOS/pablomc/empirical_datasets/OpenNEURO_data'
 
     # load participants file
@@ -219,11 +265,8 @@ def compute_features_OpenNEURO(method='catch22', params=None):
     df.Recording = 'EEG'
     df.fs = fs
 
-    # Compute features
-    features = ncpi.Features(method=method, params=params)
-    df = features.compute_features(df)
-
     return df
+
 
 def lmer(df, feat, elec = False):
 
@@ -346,186 +389,205 @@ def lmer(df, feat, elec = False):
             results[label_comp] = df_res_pd
 
     return results
+with open('config.json', 'r') as config_file:
+    config = json.load(config_file)
 
-def compute_predictions(inference, data):
-    """
-    Compute predictions from the empirical data.
+sim_file_path = config['simulation_features_path']
 
-    Parameters
-    ----------
-    inference : Inference
-        Inference object containing the trained model.
-    data : DataFrame
-        DataFrame containing the features of the empirical data.
-
-    Returns
-    -------
-    data : DataFrame
-        DataFrame containing the features of the empirical data and the predictions.
-    """
-
-    # Predict the parameters from the features of the empirical data
-    predictions = inference.predict(np.array(data['Features'].tolist()))
-
-    return predictions
-
-if __name__ == "__main__":
-    # Load the configuration file that stores all file paths used in the script
-    with open('config.json', 'r') as config_file:
-        config = json.load(config_file)
-    sim_file_path = config['simulation_features_path']
-
-    # Iterate over the methods used to compute the features
-    all_methods = ['catch22']
+for db in databases:
+    database_init_time = time.time()
+    print(f'\n\n### Database: {db}')
     for method in all_methods:
-        print(f'\n\n--- Method: {method}')
+        print(f'\n=== Method: {method}')
 
-        # Load parameters of the model (theta) and features from simulation data (X)
-        print('\n--- Loading simulation data.')
-        start_time = time.time()
+
+        data = load_empirical_data(db, method, False)
+
+        #######################
+        #   FEATURE SECTION   #
+        #######################
+
+        # Compute features if the DataFrame does not hat 'Features' column
+        if method == 'power_spectrum_parameterization_1':
+            fooof_setup_emp = {'peak_threshold': 1.,
+                        'min_peak_height': 0.,
+                        'max_n_peaks': 5,
+                        'peak_width_limits': (10., 50.)}
+            
+            params = {'fs': 500.,
+                'fmin': fmin,
+                'fmax': fmax,
+                'fooof_setup': fooof_setup_emp,
+                'r_squared_th':0.9}
+        else:
+            params = None
+
+        # AÑADIR QUE SI ES UNA FEATURE DE CATCH22 PONER method=='catch22'
+        if 'Features' not in data.columns:
+            feat_init_time = time.time()
+            print(f'Computing {method} features from {db}')
+            features = ncpi.Features(method, params)
+            data = features.compute_features(data)
+            feat_end_time = time.time()
+            print(f'{method} computed in {feat_end_time - feat_init_time} seconds')
+
+        ### LMER ###
+        print(f'Computing lmer for {method}...')
+
+
+        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_lmer.pkl')):
+            print(f'emp_data_{db}_{method}_lmer.pkl already computed.')
+        
+        else:
+            lmer_init_time = time.time()
+            for ii, elec in enumerate([False, True]):
+                if method in catch22_names:
+                    method_index = catch22_names.index(method)
+                    lmer_result = lmer(data, method_index, elec)
+
+                if method == 'power_spectrum_parameterization_1':
+                    lmer_result = lmer(data, np.nan, elec)
+
+
+                if elec == True:
+                    with open(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_feat_lmer_elec.pkl'), 'w') as results:
+                        pickle.dump(lmer_result, results)
+                else:
+                    with open(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_feat_lmer_noelec.pkl'), 'w') as results:
+                        pickle.dump(lmer_result, results)
+            lmer_end_time = time.time()
+            print(f'Lmer computed in {lmer_end_time - lmer_init_time} seconds')
+
+        #########################
+        #   INFERENCE SECTION   #
+        #########################
+
+        # Load simulation data
         theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
         X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
-        end_time = time.time()
+
         print(f'Samples loaded: {len(theta["data"])}')
-        print(f'Done in {(end_time - start_time)/60.} min')
 
-        # Compute features from empirical data or load them if they have been already computed
-        # POCTEP dataset
-        print('\n--- Loading empirical data.')
-        start_time = time.time()
-        emp_data_POCTEP_source = load_empirical_data('POCTEP', raw = False)
-        emp_data_POCTEP_raw = load_empirical_data('POCTEP', raw=True)
-        # OpenNEURO dataset
-        emp_data_OpenNeuro = load_empirical_data('OpenNEURO')
-        end_time = time.time()
-        print(f'All features computed/loaded in {(end_time - start_time)/60.} min')
+        inference = ncpi.Inference(model='MLPRegressor')
+        inference.add_simulation_data(
+            np.zeros((len(X), 22 if method == 'catch22' else 1)),
+            np.zeros((len(X), 3+n_var))    
+        )
 
-        # LMER analysis
-        print('\n--- LMER analysis.')
-        # Check if the results have been already computed
-        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, 'lmer_feat.pkl')):
-            print(f'lmer_feat.pkl already computed.')
+
+        # First check if the predictions have already been computed
+        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_pred.pkl')):
+            print(f'Predictions for {method} already computed.')
+            data = pd.read_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_pred.pkl'))
+            predictions = np.array(data['Predictions'].to_list())
+            
         else:
-            start_time = time.time()
-            lmer_feat = [{'DB1_raw': {}, 'DB1_source': {}, 'DB2': {}} for k in range(2)]
-            for ii,elec in enumerate([False, True]):
-                for DB in range(2):
-                    for feat in [18, 8, 4, 19]:
-                        print(f'\n--- Feature: {feat}, DB: {DB}, Elec: {elec}')
-                        # Compute the linear mixed-effects model
-                        if DB == 0:
-                            lmer_feat_raw = lmer(emp_data_POCTEP_raw, feat, elec)
-                            lmer_feat_source = lmer(emp_data_POCTEP_source, feat, elec)
-                            lmer_feat[ii]['DB1_raw'][f'{feat}'] = lmer_feat_raw
-                            lmer_feat[ii]['DB1_source'][f'{feat}'] = lmer_feat_source
-                        else:
-                            lmer_feat_raw = lmer(emp_data_OpenNeuro, feat, elec)
-                            lmer_feat[ii]['DB2'][f'{feat}'] = lmer_feat_raw
 
-            # Save the results
-            with open(os.path.join(EEG_AD_FTD_path, method, 'lmer_feat.pkl'), 'wb') as file:
-                pickle.dump(lmer_feat, file)
-                print(f'lmer_feat.pkl saved.')
+            data['Predictions'] = np.nan
 
-            end_time = time.time()
-            print(f'Done in {(end_time - start_time)/60.} min')
+            # Transfer model and scaler to the data folder is necessary everytime
+            if not os.path.exists('data'):
+                os.makedirs('data')
 
-        # Predictions
-        tr_model = 'MLPRegressor'
-        all_confs = ['SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
-                     'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
-                     'CO_HistogramAMI_even_2_5',
-                     'SB_TransitionMatrix_3ac_sumdiagcov',
-                     'catch22']
-        lmer_preds = [{'DB1': {}, 'DB2': {}} for k in range(2)]
+            predictions_init_time = time.time()
+            if inference_method == 'cdm' or inference_method == 'CDM':
+                shutil.copy(
+                    os.path.join(models_path, method, 'scaler'),
+                    os.path.join('data', 'scaler.pkl')
+                    )
+                
+                shutil.copy(
+                    os.path.join(models_path, method, 'model'),
+                    os.path.join('data', 'model.pkl')
+                    )
 
-        for n_var in [1,2]:
-            MLP_path = f'/DATOS/pablomc/MLP_models/{n_var}_var'
+                if method in catch22_names:
+                    predictions = inference.predict(
+                        np.array(data['Features'].apply(lambda x: x[catch22_names.index(method)]).to_list())
+                    )
+                elif method == 'catch22' or method == 'power_spectrum_parameterization_1':
+                    predictions = inference.predict(
+                        np.array(data['Features'].to_list())
+                    )
 
-            for conf in all_confs:
-                print(f'\n--- Configuration: {conf}, n_var: {n_var}')
+                # Store predictions in the DataFrame
+                data['Predictions'] = [list(pred) for pred in predictions]
 
-                # Check if predictions have been already computed
-                if os.path.exists(os.path.join(EEG_AD_FTD_path, method,f'preds_data_POCTEP_raw_{conf}_{n_var}.pkl')) and \
-                        os.path.exists(os.path.join(EEG_AD_FTD_path, method,f'preds_data_OpenNeuro_{conf}_{n_var}.pkl')):
-                    print(f'Predictions already computed.')
-                else:
-                    # Load the best model and the StandardScaler
-                    model = pickle.load(open(os.path.join(MLP_path, conf, 'model'), 'rb'))
-                    scaler = pickle.load(open(os.path.join(MLP_path, conf, 'scaler'), 'rb'))
+            
 
-                    # Transfer the model and scaler to the data folder
-                    if not os.path.exists('data'):
-                        os.makedirs('data')
-                    pickle.dump(model, open('data/model.pkl', 'wb'))
-                    pickle.dump(scaler, open('data/scaler.pkl', 'wb'))
+            if inference_method == 'eeg' or inference_method == 'EEG':
+                if n_var == 4:
+                    path = os.path.join(models_path)
+                if n_var == 2:
+                    path = os.path.join(models_path, method)
 
-                    # Adapt features to the regression model
-                    new_data_POCTEP = emp_data_POCTEP_raw.copy()
-                    new_data_OpenNeuro = emp_data_OpenNeuro.copy()
-                    if conf != 'catch22':
-                        if conf == 'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1':
-                            new_data_POCTEP['Features'] = new_data_POCTEP['Features'].apply(lambda x: x[18])
-                            new_data_OpenNeuro['Features'] = new_data_OpenNeuro['Features'].apply(lambda x: x[18])
-                        elif conf == 'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1':
-                            new_data_POCTEP['Features'] = new_data_POCTEP['Features'].apply(lambda x: x[19])
-                            new_data_OpenNeuro['Features'] = new_data_OpenNeuro['Features'].apply(lambda x: x[19])
-                        elif conf == 'CO_HistogramAMI_even_2_5':
-                            new_data_POCTEP['Features'] = new_data_POCTEP['Features'].apply(lambda x: x[4])
-                            new_data_OpenNeuro['Features'] = new_data_OpenNeuro['Features'].apply(lambda x: x[4])
-                        elif conf == 'SB_TransitionMatrix_3ac_sumdiagcov':
-                            new_data_POCTEP['Features'] = new_data_POCTEP['Features'].apply(lambda x: x[8])
-                            new_data_OpenNeuro['Features'] = new_data_OpenNeuro['Features'].apply(lambda x: x[8])
+                sensor_list = os.listdir(path)
 
-                    # Compute predictions from the empirical data
-                    print('\n--- Computing predictions from empirical data.')
-                    start_time = time.time()
-                    inference = ncpi.Inference(model=tr_model)
-                    # Add fake simulation data. Not sure if this is necessary
-                    inference.add_simulation_data(np.zeros((len(X),22 if conf == 'catch22' else 1)),
-                                                  np.zeros((len(X),3+n_var)))
-                    predictions_POCTEP = compute_predictions(inference, new_data_POCTEP)
-                    predictions_OpenNeuro = compute_predictions(inference, new_data_OpenNeuro)
-                    end_time = time.time()
-                    print(f'Done in {(end_time - start_time) / 60.} min')
+                for s, sensor in enumerate(sensor_list):
+                    print(f'--- Sensor: {sensor}')
 
-                    # Save the predictions
-                    pickle.dump(predictions_POCTEP, open(os.path.join(EEG_AD_FTD_path, method,
-                                                                  f'preds_data_POCTEP_raw_{conf}_{n_var}.pkl'), 'wb'))
-                    pickle.dump(predictions_OpenNeuro, open(os.path.join(EEG_AD_FTD_path, method,
-                                                                    f'preds_data_OpenNeuro_{conf}_{n_var}.pkl'), 'wb'))
+                    shutil.copy(
+                        os.path.join(path, sensor, method, 'model'),
+                        os.path.join('data', 'model.pkl')
+                    )
 
-                    # LMER analysis
-                    print('\n--- LMER analysis.')
-                    lmer_preds_POCTEP = []
-                    lmer_preds_OpenNeuro = []
-                    for param in range(n_var):
-                        # E/I
-                        if param == 0:
-                            preds_POCTEP = (predictions_POCTEP[:,0]/predictions_POCTEP[:,2]) /\
-                                         (predictions_POCTEP[:, 1] / predictions_POCTEP[:, 3])
-                            preds_OpenNeuro = (predictions_OpenNeuro[:,0]/predictions_OpenNeuro[:,2]) /\
-                                            (predictions_OpenNeuro[:, 1] / predictions_OpenNeuro[:, 3])
-                        # J_ext
-                        else:
-                            preds_POCTEP = predictions_POCTEP[:,4]
-                            preds_OpenNeuro = predictions_OpenNeuro[:,4]
+                    shutil.copy(
+                        os.path.join(path, sensor, method, 'scaler'),
+                        os.path.join('data', 'scaler.pkl')
+                    )
+                    print(data['Sensor'])
+                    sensor_df = data[data['Sensor'].isin([sensor, s])]
+                    
+                    if method in catch22_names:
+                        predictions = inference.predict(
+                            np.array(sensor_df['Features'].apply(lambda x: x[catch22_names.index(method)]).to_list())
+                        )
+                    elif method == 'catch22' or method == 'power_spectrum_parameterization_1':
+                        predictions = inference.predict(
+                            np.array(sensor_df['Features'].to_list())
+                        )
 
-                        # Replace the features with the predictions for the lmer analysis (this should be improved
-                        # in the future)
-                        new_data_POCTEP['Features'] = preds_POCTEP
-                        new_data_OpenNeuro['Features'] = preds_OpenNeuro
-                        # Compute the linear mixed-effects model
-                        lmer_preds_POCTEP.append(lmer(new_data_POCTEP, np.nan, True))
-                        lmer_preds_OpenNeuro.append(lmer(new_data_OpenNeuro, np.nan, True))
-                    lmer_preds[n_var-1]['DB1'][conf] = lmer_preds_POCTEP
-                    lmer_preds[n_var-1]['DB2'][conf] = lmer_preds_OpenNeuro
+                    sensor_df.loc[:, 'Prediction'] = [list(pred) for pred in predictions]
+                    data.update(sensor_df['Predictions'])  
 
-        # Check if the LMER results have been already computed
-        if os.path.exists(os.path.join(EEG_AD_FTD_path, method, 'lmer_preds.pkl')):
-            print(f'lmer_preds.pkl already computed.')
-        else:
-            # Save the results
-            with open(os.path.join(EEG_AD_FTD_path, method, 'lmer_preds.pkl'), 'wb') as file:
-                pickle.dump(lmer_preds, file)
-                print(f'lmer_preds.pkl saved.')
+                predictions = np.array(data['Predictions'].to_list())   
+            
+            predictions_end_time = time.time()
+            print(f'--Predictions computed in {predictions_end_time - predictions_init_time} seconds')
+
+            # Save the DataFrame with the predictions
+            data.to_pickle(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_pred.pkl'))
+
+        ### LMER ###
+        
+        lmer_dict = {}
+        lmer_init_time = time.time()
+        for i in range(n_var):
+            if i == 0:  # E/I
+                param = (predictions[:, 0] / predictions[:, 2]) /\
+                        (predictions[:, 1] / predictions[:, 3])
+                param_name = 'E/I'
+
+            if i == 1: # Jext if n_var == 2 or tau_exc if n_var == 4
+                param = predictions[:, 4]
+                param_name = 'Jext' if n_var == 2 else 'tau_exc'
+
+            if i == 2: # tau_inh            
+                param = predictions[:, 5]
+                param_name = 'tau_inh'
+
+            if i == 3: # Jext if n_var == 4
+                param = predictions[:, 6]                
+                param_name = 'Jext'    
+
+            lmer_dict[param_name] = lmer(data, np.nan, elec=True)  
+        
+        lmer_end_time = time.time()
+        print(f'--Lmer computed in {lmer_end_time - lmer_init_time} seconds')
+
+        with open(os.path.join(EEG_AD_FTD_path, method, f'emp_data_{db}_{method}_pred_lmer.pkl'), 'w') as results:
+            pickle.dump(lmer_dict, results)      
+    database_end_time = time.time()
+
+    print(f'\n\n=== Database {db} completed in {database_end_time - database_init_time} seconds')
+    
