@@ -9,7 +9,7 @@ import numpy as np
 from scipy.signal import welch, hilbert, butter, filtfilt
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-
+import pycatch22
 
 def install(module_name):
     """
@@ -63,7 +63,7 @@ def catch22(sample):
     """
 
     # Dynamically import the pycatch22 module
-    pycatch22 = module('pycatch22')
+    # pycatch22 = module('pycatch22')
 
     # Compute the catch22 features
     features = pycatch22.catch22_all(sample)
