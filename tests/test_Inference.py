@@ -74,7 +74,7 @@ def create_artificial_data(n_samples=1000, len_data=1000):
         if Group[i] == 'Control':
             kernel = np.exp(-np.arange(0, len_data+500)/10.0)
         elif Group[i] == 'Experiment':
-            kernel = np.exp(-np.arange(0, len_data+500)/14.0)
+            kernel = np.exp(-np.arange(0, len_data+500)/20.0)
         data = (np.convolve(spike_train, kernel, mode='full')[250:len_data+250] +
                 np.random.normal(0, 0.1, len_data))
         Data.append(data)
@@ -133,11 +133,11 @@ if __name__ == '__main__':
                        'MLPRegressor':
                            [{'hidden_layer_sizes': (25, 25, 25), 'max_iter': 1000, 'tol': 1e-2},
                             {'hidden_layer_sizes': (50, 50, 50), 'max_iter': 1000, 'tol': 1e-2},
-                            {'hidden_layer_sizes': (100, 100, 100), 'max_iter': 1000, 'tol': 1e-2}],
+                            {'hidden_layer_sizes': (200, 200, 200), 'max_iter': 1000, 'tol': 1e-2}],
                        'SNPE':
                            [{'prior': None, 'density_estimator': {'model': "maf", 'hidden_features': 2,
                                                                   'num_transforms': 1}},
-                            {'prior': None, 'density_estimator': {'model': "maf", 'hidden_features': 2,
+                            {'prior': None, 'density_estimator': {'model': "maf", 'hidden_features': 4,
                                                                   'num_transforms': 2}}
                             ]}
     predictions = {}
