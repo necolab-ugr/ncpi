@@ -398,8 +398,8 @@ with open('config.json', 'r') as config_file:
 sim_file_path = config['simulation_features_path']
 
 # Check if the 'results' folder to store results already exists
-if not os.path.exists(os.path.join('results')):
-    os.makedirs(os.path.join('results'))
+if not os.path.exists('results'):
+    os.makedirs('results')
 
 for db in databases:
     database_init_time = time.time()
@@ -412,10 +412,11 @@ for db in databases:
         # Load empirical data. It will create the DataFrame if it does not exist
         data = load_empirical_data(db, method, False)
 
-        # Check if 'Features' and 'Predictions' columns are in the DataFrame to skip the unnecessary computations
 
+        # Check if 'Features' and 'Predictions' columns are in the DataFrame to skip the unnecessary computations
         features_computed = True
         predictions_computed = True
+
         if 'Features' not in data.columns:
 
             # If there is no Features column, there are no predictions either
@@ -431,6 +432,7 @@ for db in databases:
             if 'Predictions' not in data.columns:
                 print(f'No predictions computed for {method}.')
                 predictions_computed = False
+
 
         #######################
         #   FEATURE SECTION   #
@@ -451,19 +453,22 @@ for db in databases:
             else:
                 params = None
 
-            # AÑADIR QUE SI ES UNA FEATURE DE CATCH22 PONER method=='catch22'
+            
         
             feat_init_time = time.time()
             print(f'Computing {method} features from {db}')
-            features = ncpi.Features(method, params)
+
+            # If one feature of the catch22 library is selected, use the catch22 library as method
+            features = ncpi.Features('catch22', params) if method in catch22_names else ncpi.Features(method, params)
+            
             data = features.compute_features(data)
             feat_end_time = time.time()
             print(f'{method} computed in {feat_end_time - feat_init_time} seconds')
 
+
         ### LMER ###
         print(f'Computing lmer for {method}...')
-
-        
+   
         lmer_init_time = time.time()
         for ii, elec in enumerate([False, True]):
             is_elec = 'elec' if elec else 'noelec'
@@ -484,7 +489,7 @@ for db in databases:
                     lmer_result = lmer(data, np.nan, elec)
 
 
-                with open(os.path.join(EEG_AD_FTD_path, method, lmer_file_name), 'w') as results:
+                with open(os.path.join('results', lmer_file_name), 'w') as results:
                     pickle.dump(lmer_result, results)
                     
         lmer_end_time = time.time()
@@ -514,6 +519,7 @@ for db in databases:
             if not os.path.exists('data'):
                 os.makedirs('data')
 
+
             predictions_init_time = time.time()
             if inference_method == 'cdm' or inference_method == 'CDM':
                 shutil.copy(
@@ -539,7 +545,6 @@ for db in databases:
                 data['Predictions'] = [list(pred) for pred in predictions]
 
             
-
             if inference_method == 'eeg' or inference_method == 'EEG':
                 if n_var == 4:
                     path = os.path.join(models_path)
@@ -583,6 +588,7 @@ for db in databases:
             # Save the DataFrame with the predictions
             data.to_pickle(os.path.join('results', file_name+'.pkl'))
 
+
         ### LMER ###
         
         lmer_dict = {}
@@ -614,7 +620,9 @@ for db in databases:
         lmer_end_time = time.time()
         print(f'--Lmer computed in {lmer_end_time - lmer_init_time} seconds')
     
+
     database_end_time = time.time()
+
 
     print(f'\n\n=== Database {db} completed in {database_end_time - database_init_time} seconds')
     
