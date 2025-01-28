@@ -19,291 +19,130 @@ if '__file__' not in globals():
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
 
-config_path = os.path.join(script_dir, 'config.json')
-with open(config_path, 'r') as config_file:
-    config = json.load(config_file)
+results_path = '../results'
 
-EEG_AD_FTD_path = config['empirical_features_path']
+def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
 
-n_var = 2
+    p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
+    z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
 
-all_confs = ['catch22',
-            'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
-            'SB_TransitionMatrix_3ac_sumdiagcov',
-            'CO_HistogramAMI_even_2_5',
-            'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1']
+    if p_value < p_value_th:
+        data_lmer.append(z_score)
+    else:
+        data_lmer.append(0)
 
-
+    return data_lmer
 
 
 if __name__ == "__main__":
-    # Load features
-    # POCTEP dataset
-    # emp_data_POCTEP_source = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_False.pkl'))
-    emp_data_POCTEP_raw = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_POCTEP_True.pkl'))
-    # OpenNEURO dataset
-    emp_data_OpenNeuro = pd.read_pickle(os.path.join(EEG_AD_FTD_path, 'catch22', 'emp_data_OpenNEURO.pkl'))
+    p_value_th = 0.01
+    print('------------------------------------------------------------------------------------------------------------------------------------------------------------------------')
+    print(f'Which figures do you want to generate?')
+    print(f'a) ncpi: A Python toolbox for neural circuit parameter inference')
+    print(f'b) A Hybrid Machine Learning and Mechanistic Modelling Approach for Probing Potential Biomarkers of Excitation/Inhibition Imbalance in Cortical Circuits in Dementia')
+    print('------------------------------------------------------------------------------------------------------------------------------------------------------------------------')
 
-    # Load LMER results
-    lmer_feat = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'catch22', 'lmer_feat.pkl'), 'rb'))
-    lmer_preds = pickle.load(open(os.path.join(EEG_AD_FTD_path, 'catch22', 'lmer_preds.pkl'), 'rb'))
+    option = input(f'a or b: ')
 
 
-    # Fig. 2
-    fig2 = plt.figure(figsize=(7.5, 3.5), dpi=300)
-    plt.rcParams.update({'font.family': 'Arial'})
+    ncols = 5 if option == 'b' else 6
+    nrows = 5
 
-    # Define 4 colors for DB1
-    colors_1 = ['lightgrey', 'lightcoral', 'lightblue', 'lightgreen']
+    left = 0.06
+    right = 0.11
 
-    # Define 3 colors for DB2
-    colors_2 = ['lightgrey', 'peachpuff', 'cornflowerblue']
+    width = (1.0 - left - right) / (6) - 0.03 if option == 'a' else (1.0 - left - right) / (6) - 0.01
+    height = 1.0 / 5 - 0.025
 
-    for row in range(2):
-        for col in range(4):
-            ax = fig2.add_axes([0.08 + col * 0.24, 0.59 - row * 0.43, 0.15, 0.33])
+    bottom = 1 - (1. / 5 + 0.07)
 
-            if row == 0 and col < 2:
-                feat = 18
-            if row == 0 and col >= 2:
-                feat = 8
-            if row == 1 and col < 2:
-                feat = 4
-            if row == 1 and col >= 2:
-                feat = 19
+    new_spacing_x = 0.08 if option == 'a' else 0.14
+    new_spacing_y = 0.05
 
-            # DB1
-            if col % 2 == 0:
-                groups = ['HC','ADMIL', 'ADMOD', 'ADSEV']
-                dataset = emp_data_POCTEP_raw
-                colors = colors_1
-            # DB2
-            else:
-                groups = ['C','F','A']
-                dataset = emp_data_OpenNeuro
-                colors = colors_2
+    spacing_x = 0.04
+    spacing_y = 0.064 if option == 'a' else 0.004
+    
 
-            # Boxplots
-            for i,group in enumerate(groups):
-                emp_data_group = dataset[dataset.Group == group]
-                feature = emp_data_group['Features'].apply(lambda x: x[feat])
-                # Remove nan values
-                feature = feature[~np.isnan(feature)]
-                box = ax.boxplot(feature, positions=[i], showfliers=False,
-                             widths=0.7, patch_artist=True, medianprops=dict(color='red', linewidth=0.8),
-                             whiskerprops=dict(color='black', linewidth=0.5),
-                             capprops=dict(color='black', linewidth=0.5),
-                             boxprops=dict(linewidth=0.5))
-                for patch in box['boxes']:
-                    patch.set_facecolor(colors[i])
+    fig1 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
+    if option == 'b':
+        fig2 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
+        fig3 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
 
-            # Compute the linear mixed-effects model
-            if col % 2 == 0:
-                lmer_results = lmer_feat[0]['DB1_raw'][f'{feat}']
-            else:
-                lmer_results = lmer_feat[0]['DB2'][f'{feat}']
 
-            # Add p-values to the plot
-            y_max = ax.get_ylim()[1]
-            y_min = ax.get_ylim()[0]
-            delta = (y_max - y_min) * 0.2
+    if option == 'b':
+        methods = [
+            'catch22',
+            'SB_TransitionMatrix_3ac_sumdiagcov',
+            'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
+            'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
+            'CO_HistogramAMI_even_2_5',
+        ]
+    if option == 'a':
+        methods = [
+            'catch22',
+            'power_spectrum_parameterization_1'
+        ]
 
-            for i, group in enumerate(groups[1:]):
-                p_value = lmer_results[f'{group}vsHC']['p.value']
-                if p_value.empty:
-                    continue
+    max = 0
 
-                # Significance levels
-                if p_value[0] < 0.05 and p_value[0] >= 0.01:
-                    pp = '*'
-                elif p_value[0] < 0.01 and p_value[0] >= 0.001:
-                    pp = '**'
-                elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
-                    pp = '***'
-                elif p_value[0] < 0.0001:
-                    pp = '****'
-                else:
-                    pp = 'n.s.'
 
-                if pp != 'n.s.':
-                    offset = -delta*0.1
-                else:
-                    offset = 0
-
-                ax.text(0.5*i+0.5, y_max + delta*i + delta*0.1 + offset, f'{pp}', ha='center', fontsize=8)
-                ax.plot([0, i+1], [y_max + delta*i, y_max + delta*i], color='black', linewidth=0.5)
-
-            # Change y-lim
-            ax.set_ylim([y_min, y_max + delta*(len(groups)-1)])
-
-            # x-labels
-            if row == 1:
-                if col % 2 == 0:
-                    ax.set_xticks([0, 1, 2, 3])
-                    ax.set_xticklabels(['HC', 'ADMIL', 'ADMOD', 'ADSEV'], rotation=45, fontsize = 8)
-                else:
-                    ax.set_xticks([0, 1, 2])
-                    ax.set_xticklabels(['HC', 'FTD', 'AD'], rotation=45, fontsize = 8)
-            else:
-                ax.set_xticks([])
-
-            # y-labels
-            if row == 0 and col < 2:
-                ax.set_ylabel(r'$rs\_range$')
-            if row == 0 and col >= 2:
-                ax.set_ylabel(r'$TransVar$')
-            if row == 1 and col < 2:
-                ax.set_ylabel(r'$ami2$')
-            if row == 1 and col >= 2:
-                ax.set_ylabel(r'$dfa$')
-
-            # Titles
-            ax.set_title(f'DB{1 if col%2 == 0 else 2}')
-    sizex = 3.5
-    sizey = 4
-    left = 0.03
-    right = 0.17
-    width = (1.0 - left - right) / (2 * 5) - 0.037  
-    height = 1.0 / 4 + 0.06
-    bottom = 1 - height 
-    spacing_x = 0.14
-    new_spacing_x = 0.16
-    spacing_y = -0.095
-
-    # # Fig. 3
-    fig3 = plt.figure(figsize=(4.5, 5), dpi=300)
     current_bottom = bottom
-    for row in range(4):
-        current_left = left
-        for col in range(5):
-
-            if row == 0:
-                feat = 18
-            if row == 1:
-                feat = 4
-            if row == 2:
-                feat = 8
-            if row == 3:
-                feat = 19
-
-            if col == 0:
-                group = 'ADMIL'
-                group_label = 'ADMIL'
-
-            if col == 1:
-                group = 'ADMOD'
-                group_label = 'ADMOD'
-            if col == 2:
-                group = 'ADSEV'
-                group_label = 'ADSEV'
-            if col == 3:
-                group = 'F'
-                group_label = 'FTD'
-            if col == 4:
-                group = 'A'
-                group_label = 'AD'
-
-            ax = fig3.add_axes([current_left, current_bottom, 0.15, 0.15], frameon=False)
-            if col == 2:
-                    current_left += width + new_spacing_x
-            else:
-                current_left += width + spacing_x
-            # Get lmer results
-            if col < 3:
-                lmer_results = lmer_feat[1]['DB1_raw'][f'{feat}']
-            else:
-                lmer_results = lmer_feat[1]['DB2'][f'{feat}']
-
-            data = []
-            for elec in range(19):
-                p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
-                z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
-                if p_value < 0.01 and np.abs(z_score) > 2.5:
-                    data.append(z_score)
-                else:
-                    data.append(0)
 
 
-            if col < 3:
-                if row == 0:
-                    ylims = [-11.,11.]
-                if row == 1 or row == 2:
-                    ylims = [-6.,6.]
-                if row == 3:
-                    ylims = [-3.5, 3.5]
-            else:
-                if row == 0 or row == 1 or row == 3:
-                    ylims = [-6.,6.]
-                if row == 2:
-                    ylims = [-3.5, 3.5]
-
-            
-            # ticks
+    if option == 'a':
+        for row in range(2):
+            ax = fig1.add_axes([0.01, 0.51 - row * 0.47, 0.98, 0.46 if row == 0 else 0.47])
+            ax.add_patch(plt.Rectangle((0, 0), 1, 1, color='red' if row == 0 else 'blue', alpha=0.1))
             ax.set_xticks([])
             ax.set_yticks([])
 
-            # Titles
-            if row == 0:
-                ax.set_title(f'{group_label} vs HC', fontsize=8)
 
-            # Labels
-            if col == 0:
+    for row in range(nrows):
+        
+        if option == 'a':
+            if row == 0 or row == 1:
+                method = 'catch22'
+            if row == 2 or row == 3:
+                method = 'power_spectrum_parameterization_1'
+            data = pd.read_pickle(f'{results_path}/POCTEP_True-{method}-4_var-eeg-elec-pred_lmer.pkl')
+
+
+
+        current_left = left
+        for col in range(ncols):
+
+            if option == 'b':
                 if row == 0:
-                    ax.set_ylabel(r'$rs\_range$', fontsize=5)
+                    method = 'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1'
                 if row == 1:
-                    ax.set_ylabel(r'$ami2$',fontsize=5)
+                    method = 'CO_HistogramAMI_even_2_5'
                 if row == 2:
-                    ax.set_ylabel(r'$TransVar$',fontsize=5)
+                    method = 'SB_TransitionMatrix_3ac_sumdiagcov'
                 if row == 3:
-                    ax.set_ylabel(r'$dfa$', fontsize=5)
-            # Create a topographic plot
+                    method = 'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1'
+                if row == 4:
+                    method = 'catch22'
 
-            analysis = ncpi.Analysis(data)
-            analysis.EEG_topographic_plot(
-                group = f'{group}vsHC',
-                system = 19,
-                p_value = 0.01,
-                electrode_size = 0.6,
-                ax = ax,
-                fig=fig3,
-                vmin = ylims[0],
-                vmax = ylims[1]
-            )
-        current_bottom -= height + spacing_y
-    
-    fig3.text(0.29, 0.95, 'DB1', ha='center', fontsize=8)
-    fig3.text(0.8, 0.95, 'DB2', ha='center', fontsize=8)
-    linepos = [0.94, 0.94]
-    line1 = mlines.Line2D([0.013, 0.57], linepos, color='black', linewidth=0.7)
-    line2 = mlines.Line2D([0.62, 0.95], linepos, color='black', linewidth=0.7)
-    fig3.add_artist(line1)
-    fig3.add_artist(line2)
-    
-    height = 1.0 / 5
-    sizex = 3.5
-    sizey = 4
-    left = 0.03
-    right = 0.17
-    width = (1.0 - left - right) / (2 * 5) - 0.037  
-    height = 1.0 / 4 
-    bottom = 1 - height - 0.03
-    spacing_x = 0.15
-    new_spacing_x = 0.16
-    spacing_y = -0.075
+                database = 'POCTEP_True' if col < 3 else 'OpenNEURO'
+                data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-cdm-elec-pred_lmer.pkl')
+                feature_data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-cdm-elec-feat_lmer.pkl') if row != 4 else None
+            
+            if option == 'a':
+                if col == 0 or col == 3:
+                    group = 'ADMIL'
+                    group_label = 'ADMIL'
 
-    max = 0
-    yname = [r'$[E/I]_{net}$', r'$J_{ext}$']
-    order = [1,3,2,4,0]
-    # Figs. 5 & 6
-    for param in range(n_var):
-        fig = plt.figure(figsize=(4.5, 5), dpi=300)
-        current_bottom = bottom
-        for row in order:
-            current_left = left
-            for col in range(5):
-                
+                if col == 1 or col == 4:
+                    group = 'ADMOD'
+                    group_label = 'ADMOD'
+
+                if col == 2 or col == 5:
+                    group = 'ADSEV'
+                    group_label = 'ADSEV'
+
+            if option == 'b':
+                # Group and group label 
                 if col == 0:
                     group = 'ADMIL'
                     group_label = 'ADMIL'
@@ -314,78 +153,237 @@ if __name__ == "__main__":
                     group = 'ADSEV'
                     group_label = 'ADSEV'
                 if col == 3:
-                    group = 'F'
-                    group_label = 'FTD'
-                if col == 4:
                     group = 'A'
                     group_label = 'AD'
+                if col == 4:
+                    group = 'F'
+                    group_label = 'FTD'
+
+            # Add ax --> [left, bottom, width, height]
+            ax1 = fig1.add_axes([current_left, current_bottom, width, height], frameon=False)
+            ax2 = fig2.add_axes([current_left, current_bottom, width, height], frameon=False) if option == 'b' else None
+            ax3 = fig3.add_axes([current_left, current_bottom, width, height], frameon=False) if option == 'b' and row != 4 else None
+
+
+
+            # Compute new left position (x spacing)
+            if (col == 2 and option == 'b') or (col == 2 and option == 'a'):
+                # More spacing for separate plots 
+                current_left += width + new_spacing_x
+            else:
+                current_left += width + spacing_x
+
+            # Disable ticks
+            ax1.set_xticks([])
+            ax1.set_yticks([])
+
+            if option == 'b':
+                ax2.set_xticks([])
+                ax2.set_yticks([])
                 
-                ax = fig.add_axes([current_left, current_bottom, 0.15, 0.15], frameon=False)
-                if col == 2:
-                    current_left += width + new_spacing_x
-                else:
-                    current_left += width + spacing_x
+                if ax3 != None:
+                    ax3.set_xticks([])
+                    ax3.set_yticks([])
+
+            # Titles 
+            if option == 'a' or (option == 'b' and row == 0):
+                ax1.set_title(f'{group_label} vs HC', fontsize=10)
+                if option == 'b':
+                    ax2.set_title(f'{group_label} vs HC', fontsize=10)
+                    ax3.set_title(f'{group_label} vs HC', fontsize=10) 
 
 
-                # Get lmer results
+            # Labels
+            if option == 'a':
                 if col < 3:
-                    lmer_results = lmer_preds[n_var-1]['DB1'][all_confs[row]][param]
-                else:
-                    lmer_results = lmer_preds[n_var-1]['DB2'][all_confs[row]][param]
+                    var = 'E/I' if row == 0 or row == 2 else 'tau_exc'
 
-                data = []
-                for elec in range(19):
-                    p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
-                    z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
-                    if p_value < 0.01:
-                        data.append(z_score)
-                    else:
-                        data.append(0)
-                range_max = np.max(np.abs(data))
-                ylims = [-6., 6.]
-                if row == 1 and col == 0:
-                    vmin = -4.720872348422581
-                    vmax = 4.720872348422581
-
-                # ticks
-                ax.set_xticks([])
-                ax.set_yticks([])
-
-                # Titles
-                if row == 1:
-                    ax.set_title(f'{group_label} vs HC', fontsize=8)
-
-                # Labels
+                if col >= 3:
+                    var = r'Jext' if row == 0 or row == 2 else 'tau_inh'
+       
+                lmer_results = data[var]
+            
+            if option == 'b':
                 if col == 0:
                     if row == 0:
-                        ax.set_ylabel(f'{yname[param]}'r'($catch22$)', fontsize=5)
+                        ax1.set_ylabel(r'$[E/I]_{net}$(rs_range)', fontsize=8)
+                        ax2.set_ylabel(r'$J_{ext}$(rs_range)', fontsize=8)
+                        ax3.set_ylabel(r'rs_range', fontsize=8) 
+
                     if row == 1:
-                        ax.set_ylabel(f'{yname[param]}'r'($rs\_range$)', fontsize=5)
+                        ax1.set_ylabel(r'$[E/I]_{net}$(ami2)', fontsize=8)
+                        ax2.set_ylabel(r'$J_{ext}$(ami2)', fontsize=8)
+                        ax3.set_ylabel(r'ami2', fontsize=8) 
+
                     if row == 2:
-                        ax.set_ylabel(f'{yname[param]}'r'($TransVar$)', fontsize=5)
+                        ax1.set_ylabel(r'$[E/I]_{net}$(TransVar)', fontsize=8)
+                        ax2.set_ylabel(r'$J_{ext}$(TransVar)', fontsize=8)    
+                        ax3.set_ylabel(r'TransVar', fontsize=8) 
+
                     if row == 3:
-                        ax.set_ylabel(f'{yname[param]}'r'($ami2$)', fontsize=5)
+                        ax1.set_ylabel(r'$[E/I]_{net}$(dfa)', fontsize=8)
+                        ax2.set_ylabel(r'$J_{ext}$(dfa)', fontsize=8)
+                        ax3.set_ylabel(r'dfa', fontsize=8) 
+
                     if row == 4:
-                        ax.set_ylabel(f'{yname[param]}'r'($dfa$)', fontsize=5)
-                analysis = ncpi.Analysis(data)
+                        ax1.set_ylabel(r'$[E/I]_{net}$(catch22)', fontsize=8)
+                        ax2.set_ylabel(r'$J_{ext}$(catch22)', fontsize=8)
+
+                lmer_results = data['E/I']
+                lmer_results_jext = data['Jext']
+                
+                
+
+            data_lmer = []
+            data_lmer_jext = []
+            data_lmer_feat = []
+            for elec in range(19):
+
+                data_lmer = append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer)
+
+                if option == 'b':
+                    data_lmer_jext = append_lmer_results(lmer_results_jext, group, elec, p_value_th, data_lmer_jext)
+                    if row != 4:
+                        data_lmer_feat = append_lmer_results(feature_data, group, elec, p_value_th, data_lmer_feat)
+
+            ylims_lmer = [-6., 6.]
+
+
+            # Create brainplot
+            analysis = ncpi.Analysis(data_lmer)
+            analysis.EEG_topographic_plot(
+                        group = f'{group}vsHC',
+                        system = 19,
+                        p_value = 0.01,
+                        electrode_size = 0.6,
+                        ax = ax1,
+                        fig=fig1,
+                        vmin = ylims_lmer[0],
+                        vmax = ylims_lmer[1],
+                        label=False
+            )
+
+            if option == 'b':
+                analysis = ncpi.Analysis(data_lmer_jext)
                 analysis.EEG_topographic_plot(
-                    group = f'{group}vsHC',
-                    system = 19,
-                    p_value = 0.01,
-                    electrode_size = 0.6,
-                    ax = ax,
-                    fig=fig3,
-                    vmin = ylims[0],
-                    vmax = ylims[1]
+                            group = f'{group}vsHC',
+                            system = 19,
+                            p_value = 0.01,
+                            electrode_size = 0.6,
+                            ax = ax2,
+                            fig=fig2,
+                            vmin = ylims_lmer[0],
+                            vmax = ylims_lmer[1],
+                            label=False
                 )
+                if row != 4:
+                    analysis = ncpi.Analysis(data_lmer_feat)
+                    analysis.EEG_topographic_plot(
+                                group = f'{group}vsHC',
+                                system = 19,
+                                p_value = 0.01,
+                                electrode_size = 0.6,
+                                ax = ax3,
+                                fig=fig3,
+                                vmin = ylims_lmer[0],
+                                vmax = ylims_lmer[1],
+                                label=False
+                    )
+
+        # Update "y" spacing
+        if row == 1 and option == 'a':
+            # More spacing for separate plots 
+            current_bottom -= height + new_spacing_y
+        else:
             current_bottom -= height + spacing_y
 
-        fig.text(0.29, 0.95, 'DB1', ha='center', fontsize=8)
-        fig.text(0.79, 0.95, 'DB2', ha='center', fontsize=8)
-        linepos = [0.94, 0.94]
-        line1 = mlines.Line2D([0.03, 0.56], linepos, color='black', linewidth=0.7)
-        line2 = mlines.Line2D([0.63, 0.93], linepos, color='black', linewidth=0.7)
-        fig.add_artist(line1)
-        fig.add_artist(line2)
 
-    plt.show()
+    fontsize = 12
+    if option == 'a':
+        fig1.text(0.46, 0.94, 'catch22', color='red', alpha=0.5, fontsize=12, fontstyle='italic')
+        fig1.text(0.46, 0.48, '1/f slope', color='blue', alpha=0.5, fontsize=12, fontstyle='italic')
+
+        fig1.text(0.015, 0.94, 'A', fontsize=12, fontweight='bold')
+        fig1.text(0.015, 0.48, 'B', fontsize=12, fontweight='bold')
+
+        fig1.text(0.24, 0.94, r'$E/I$', ha='center', fontsize=fontsize)
+        fig1.text(0.74, 0.94, r'$J_{syn}^{ext}$ (nA)', ha='center', fontsize=fontsize)
+
+        fig1.text(0.24, 0.7, r'$\tau_{syn}^{exc}$ (ms)', ha='center', fontsize=fontsize)
+        fig1.text(0.74, 0.7, r'$\tau_{syn}^{inh}$ (ms)', ha='center', fontsize=fontsize)
+
+
+        # Parameters for 1/f slope
+        fig1.text(0.24, 0.48, r'$E/I$', ha='center', fontsize=fontsize)
+        fig1.text(0.74, 0.48, r'$J_{syn}^{ext}$ (nA)', ha='center', fontsize=fontsize)
+
+        fig1.text(0.24, 0.245, r'$\tau_{syn}^{exc}$ (ms)', ha='center', fontsize=fontsize)
+        fig1.text(0.74, 0.245, r'$\tau_{syn}^{inh}$ (ms)', ha='center', fontsize=fontsize)
+
+        linepos1 = [0.925, 0.925]
+        linepos2 = [0.686, 0.686]
+
+        EI_line_c = mlines.Line2D([0.055, 0.46], linepos1, color='black', linewidth=0.5)
+        tauexc_line_c = mlines.Line2D([0.055, 0.46], linepos2, color='black', linewidth=0.5)
+
+        Jext_line_c = mlines.Line2D([0.54, 0.945], linepos1, color='black', linewidth=0.5)
+        tauinh_line_c = mlines.Line2D([0.54, 0.945], linepos2, color='black', linewidth=0.5)
+
+        # 1/f slope lines
+        linepos1 = [0.467, 0.467]
+        linepos2 = [0.23, 0.23]
+
+        EI_line_f = mlines.Line2D([0.055, 0.46], linepos1, color='black', linewidth=0.5)
+        tauexc_line_f = mlines.Line2D([0.055, 0.46], linepos2, color='black', linewidth=0.5)
+
+        Jext_line_f = mlines.Line2D([0.54, 0.945], linepos1, color='black', linewidth=0.5)
+        tauinh_line_f = mlines.Line2D([0.54, 0.945], linepos2, color='black', linewidth=0.5)
+
+        # Add catch22 lines
+        fig1.add_artist(EI_line_c)
+        fig1.add_artist(Jext_line_c)
+        fig1.add_artist(tauexc_line_c)
+        fig1.add_artist(tauinh_line_c)
+
+        # Add 1/f slope lines
+        fig1.add_artist(EI_line_f)
+        fig1.add_artist(Jext_line_f)
+        fig1.add_artist(tauexc_line_f)
+        fig1.add_artist(tauinh_line_f)
+
+        fig1.savefig('EEG-predictions-NCPI.png')
+
+    else:    
+        fig1.text(0.28, 0.94, r'DB1', ha='center', fontsize=fontsize)
+        fig1.text(0.81, 0.94, r'DB2', ha='center', fontsize=fontsize)
+
+        fig2.text(0.28, 0.94, r'DB1', ha='center', fontsize=fontsize)
+        fig2.text(0.81, 0.94, r'DB2', ha='center', fontsize=fontsize)
+
+        fig3.text(0.28, 0.94, r'DB1', ha='center', fontsize=fontsize)
+        fig3.text(0.81, 0.94, r'DB2', ha='center', fontsize=fontsize)
+
+        linepos1 = [0.935, 0.935]
+
+        DB1 = mlines.Line2D([0.056, 0.51], linepos1, color='black', linewidth=0.6)
+        DB2 = mlines.Line2D([0.68, 0.945], linepos1, color='black', linewidth=0.6)
+
+        fig1.add_artist(DB1)
+        fig1.add_artist(DB2)
+        
+        DB1 = mlines.Line2D([0.056, 0.51], linepos1, color='black', linewidth=0.6)
+        DB2 = mlines.Line2D([0.68, 0.945], linepos1, color='black', linewidth=0.6)
+        
+        fig2.add_artist(DB1)
+        fig2.add_artist(DB2)
+        
+        DB1 = mlines.Line2D([0.056, 0.51], linepos1, color='black', linewidth=0.6)
+        DB2 = mlines.Line2D([0.68, 0.945], linepos1, color='black', linewidth=0.6)
+        
+        fig3.add_artist(DB1)
+        fig3.add_artist(DB2)
+        fig3.savefig('features-CMPB.png')
+
+        fig1.savefig('EI-predictions-CMPB.png')
+        fig2.savefig('Jext-predictions-CMPB.png')
+

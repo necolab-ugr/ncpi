@@ -8,9 +8,9 @@ from scipy.signal import welch
 # from scipy.signal import welch, hilbert, butter, filtfilt
 from tqdm import tqdm
 import matplotlib.pyplot as plt
+import pycatch22
 from numpy.matlib import repmat
 from PyAstronomy.pyasl import generalizedESD
-import pycatch22
 
 
 def install(module_name):
@@ -64,7 +64,7 @@ def catch22(sample):
         Array with the catch22 features.
     """
 
-    # Dynamically import the pycatch22 module (to be done with no error)
+    # Dynamically import the pycatch22 module
     # pycatch22 = module('pycatch22')
 
     # Compute the catch22 features
