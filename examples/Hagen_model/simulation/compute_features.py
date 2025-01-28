@@ -6,12 +6,90 @@ import shutil
 import numpy as np
 import pandas as pd
 
+# fE/I libraries
+import mne
+from mne.filter import next_fast_len
+from scipy.signal import hilbert
+from joblib import Parallel, delayed
+
 # ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
-compute_EEG = True
+compute_EEG = False
+
+def get_frequency_bins(frequency_range):
+    """ Get frequency bins for the frequency range of interest. The code has been adapted from 
+    https://github.com/arthur-ervin/crosci/tree/main. This code is licensed under creative commons license CC-BY-NC 
+    https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt.
+
+    Parameters
+    ----------
+    frequency_range : array, shape (1,2)
+        The frequency range over which to create frequency bins.
+        The lower edge should be equal or more than 1 Hz, and the upper edge should be equal or less than 150 Hz.
+
+    Returns
+    -------
+    frequency_bins : list, shape (n_bins,2)
+        The lower and upper range in Hz per frequency bin.
+    """
+
+    assert frequency_range[0] >= 1.0 and frequency_range[1] <= 150.0, \
+        'The frequency range should cannot be less than 1 Hz or more than 150 Hz'
+
+    frequency_bin_delta = [1.0, 4.0]
+    frequency_range_full = [frequency_bin_delta[1], 150]
+    n_bins_full = 16
+
+    # Create logarithmically-spaced bins over the full frequency range
+    frequencies_full = np.logspace(np.log10(frequency_range_full[0]), np.log10(frequency_range_full[-1]), n_bins_full)
+    frequencies = np.append(frequency_bin_delta[0],frequencies_full)
+    # Get frequencies that fall within the frequency range of interest
+    myfrequencies = frequencies[np.where((np.round(frequencies, 4) >= frequency_range[0]) & (
+                np.round(frequencies, 4) <= frequency_range[1]))[0]]
+
+    # Get all frequency bin ranges
+    frequency_bins = [[myfrequencies[i], myfrequencies[i + 1]] for i in range(len(myfrequencies) - 1)]
+
+    n_bins = len(frequency_bins)
+
+    return frequency_bins
+
+
+def get_DFA_fitting_interval(frequency_interval):
+    """ Get a fitting interval for DFA computation. The code has been adapted from 
+    https://github.com/arthur-ervin/crosci/tree/main. This code is licensed under creative commons license CC-BY-NC 
+    https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt.
+
+    Parameters
+    ----------
+    frequency_interval : array, shape (1,2)
+        The lower and upper bound of the frequency bin in Hz for which the fitting interval will be inferred.
+        The fitting interval is where the regression line is fit for log-log coordinates of the fluctuation function vs.
+        time windows.
+
+    Returns
+    -------
+    fit_interval : array, shape (1,2)
+        The lower and upper bound of the fitting range in seconds for a frequency bin.
+    """
+
+    # Upper fitting margin in seconds
+    upper_fit = 30
+    # Default lower fitting margins in seconds per frequency bin
+    default_lower_fits = [5., 5., 5., 3.981, 3.162, 2.238, 1.412, 1.122, 0.794,
+                          0.562, 0.398, 0.281, 0.141, 0.1, 0.1, 0.1]
+
+    frequency_bins = get_frequency_bins([1, 150])
+    # Find the fitting interval. In case when frequency range is not exactly one from the defined frequency bins,
+    # it finds the fitting interval of the bin for which the lowest of the provided frequencies falls into.
+    idx_freq = np.where((np.array(frequency_bins)[:, 0] <= frequency_interval[0]))[0][-1]
+
+    fit_interval = [default_lower_fits[idx_freq],upper_fit]
+
+    return fit_interval
 
 if __name__ == '__main__':
     # Path to the folder containing the processed data
@@ -26,7 +104,7 @@ if __name__ == '__main__':
     if compute_EEG:
         potential = ncpi.FieldPotential(kernel=False, nyhead=True, MEEG ='EEG')
 
-    for method in ['catch22', 'power_spectrum_parameterization_1','power_spectrum_parameterization_2']:
+    for method in ['catch22', 'power_spectrum_parameterization_1','power_spectrum_parameterization_2','fEI']:
         # Check if the features have already been computed
         folder = 'EEG' if compute_EEG else ''
         if os.path.isfile(os.path.join(features_path, method, folder, 'sim_X')):
@@ -113,13 +191,76 @@ if __name__ == '__main__':
                                                                  'fooof_setup': fooof_setup_sim,
                                                                  'r_squared_th':0.9})
                             elif method == 'fEI':
-                                features = ncpi.Features(method='fEI',
-                                                         params={'fs': df.fs,
-                                                                 'fmin': 5.,
-                                                                 'fmax': 150.,
-                                                                 'fEI_folder': '../../../ncpi/Matlab'})
+                                # Parameters
+                                fEI_window_seconds = 5
+                                fEI_overlap = 0.8
 
-                            df = features.compute_features(df)
+                                # Frequency range for the band-pass filter
+                                frequency_bins = [[8.,12.]]
+
+                                # Get fit interval
+                                DFA_compute_interval = get_DFA_fitting_interval(frequency_bins[0])
+
+                                # Band-pass filtering
+                                print('Band-pass filtering and computing amplitude envelope...')
+                                all_envelopes = []
+                                for ss in df['Data']:
+                                    signal_matrix = np.array(ss).reshape(1,-1).astype(np.float64)
+                                    # Filter signal in the given frequency bin
+                                    filtered_signal = mne.filter.filter_data(data=signal_matrix,
+                                                                             sfreq=df.fs,
+                                                                             l_freq=frequency_bins[0][0],
+                                                                             h_freq=frequency_bins[0][1],
+                                                                             filter_length='auto',
+                                                                             l_trans_bandwidth='auto',
+                                                                             h_trans_bandwidth='auto',
+                                                                             fir_window='hamming', phase='zero',
+                                                                             fir_design="firwin", pad='reflect_limited',
+                                                                             verbose=0)
+
+                                    filtered_signal = filtered_signal[:, 1 * int(df.fs):filtered_signal.shape[1] - 1 *
+                                                                                        int(df.fs)]
+                                    # Get the amplitude envelope
+                                    n_fft = next_fast_len(signal_matrix.shape[1])
+                                    amplitude_envelope = Parallel(n_jobs=1, backend='threading', verbose=0)(
+                                        delayed(hilbert)
+                                        (filtered_signal[idx_channel, :], n_fft)
+                                        for idx_channel in range(1))
+                                    amplitude_envelope = np.abs(np.array(amplitude_envelope))
+                                    all_envelopes.append(amplitude_envelope)
+
+                                # Compute first DFA features
+                                print('Computing DFA features...')
+                                params = {'fs': df.fs,
+                                          'fit_interval': DFA_compute_interval,
+                                          'compute_interval': DFA_compute_interval,
+                                          'overlap': True,
+                                          'bad_idxes': []}
+                                df_DFA = pd.DataFrame({'Data': all_envelopes})
+                                features = ncpi.Features(method='DFA', params=params)
+                                df_DFA = features.compute_features(df_DFA)
+                                all_dfa_array = [df_DFA['Features'][k][0] for k in range(len(df_DFA['Features']))]
+
+                                # Compute fE/I for each sample
+                                print('Computing fE/I features...')
+                                all_fEI_feats = []
+                                for xx,ss in enumerate(all_envelopes):
+                                    params = {'fs': df.fs,
+                                              'window_size_sec': fEI_window_seconds,
+                                              'window_overlap': fEI_overlap,
+                                              'DFA_array': all_dfa_array[xx],
+                                              'bad_idxes': []}
+                                    df_fEI = pd.DataFrame({'Data': [ss]})
+                                    features = ncpi.Features(method='fEI', params=params)
+                                    df_fEI = features.compute_features(df_fEI)
+                                    (fEI_outliers_removed, fEI_val, num_outliers, wAmp, wDNF) = df_fEI['Features'][0]
+                                    all_fEI_feats.append(np.squeeze(fEI_outliers_removed))
+
+                                # Pass the features to the dataframe
+                                df['Features'] = all_fEI_feats
+
+                            if method != 'fEI':
+                                df = features.compute_features(df)
 
                             # Keep only the aperiodic exponent
                             if method == 'power_spectrum_parameterization_1':

@@ -1,15 +1,17 @@
 import importlib
-import signal as sgnl
 import subprocess
-
 import h5py
 import pandas as pd
 import os
 import numpy as np
-from scipy.signal import welch, hilbert, butter, filtfilt
+from scipy.signal import welch
+# from scipy.signal import welch, hilbert, butter, filtfilt
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import pycatch22
+from numpy.matlib import repmat
+from PyAstronomy.pyasl import generalizedESD
+
 
 def install(module_name):
     """
@@ -192,144 +194,420 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
 
     return features
 
-def bandpass(sample, fmin, fmax, fs):
+# def bandpass(sample, fmin, fmax, fs):
+#     """
+#     Function to bandpass filter a time-series sample.
+#
+#     Parameters
+#     ----------
+#     sample: np.array
+#         Times-series sample.
+#     fmin: float
+#         Minimum frequency for the bandpass filter.
+#     fmax: float
+#         Maximum frequency for the bandpass filter.
+#     fs: int
+#         Sampling frequency.
+#
+#     Returns
+#     -------
+#     sample_bandpassed: np.array
+#         Bandpassed sample.
+#     """
+#
+#     # Compute the bandpass filter
+#     b, a = butter(4, [fmin/(fs/2), fmax/(fs/2)], 'band')
+#     sample_bandpassed = filtfilt(b, a, sample)
+#
+#     return sample_bandpassed
+
+def _create_window_indices(length_signal, length_window, window_offset):
+
     """
-    Function to bandpass filter a time-series sample.
+    Function to create window indices for a signal.
+
+    This code includes a function from https://github.com/arthur-ervin/crosci/tree/main. This code is licensed under
+    creative commons license CC-BY-NC https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt.
 
     Parameters
     ----------
-    sample: np.array
-        Times-series sample.
-    fmin: float
-        Minimum frequency for the bandpass filter.
-    fmax: float
-        Maximum frequency for the bandpass filter.
-    fs: int
-        Sampling frequency.
+    length_signal: int
+        Length of the signal.
+    length_window: int
+        Length of the window.
+    window_offset: int
+        Offset for the window.
 
     Returns
     -------
-    sample_bandpassed: np.array
-        Bandpassed sample.
+    all_window_index: np.array
+        Array with the window indices.
     """
 
-    # Compute the bandpass filter
-    b, a = butter(4, [fmin/(fs/2), fmax/(fs/2)], 'band')
-    sample_bandpassed = filtfilt(b, a, sample)
+    window_starts = np.arange(0,length_signal-length_window,window_offset)
+    num_windows = len(window_starts)
 
-    return sample_bandpassed
+    one_window_index = np.arange(0,length_window)
+    all_window_index = repmat(one_window_index,num_windows,1).astype(int)
 
+    all_window_index = all_window_index + repmat(np.transpose(window_starts[np.newaxis,:]),1,
+                                                 length_window).astype(int)
 
-def fEI(samples,fs,fmin,fmax,fEI_folder):
+    return all_window_index
+
+def fEI(signal, sampling_frequency, window_size_sec, window_overlap, DFA_array, bad_idxes = []):
     """
-    Function to compute the fEI from a list of time-series samples.
+    Calculates fEI (on a set window size) for a signal
+
+        Steps refer to description of fEI algorithm in Figure 2D of paper:
+          Measurement of excitation inhibition ratio in autism spectrum disorder using critical brain dynamics
+          Scientific Reports (2020)
+          Hilgo Bruining*, Richard Hardstone*, Erika L. Juarez-Martinez*, Jan Sprengers*, Arthur-Ervin Avramiea,
+          Sonja Simpraga, Simon J. Houtman, Simon-Shlomo Poil5, Eva Dallares, Satu Palva, Bob Oranje, J. Matias Palva,
+          Huibert D. Mansvelder & Klaus Linkenkaer-Hansen
+          (*Joint First Author)
+
+    This code includes a function from https://github.com/arthur-ervin/crosci/tree/main. This code is licensed under
+    creative commons license CC-BY-NC https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt.
+
+    Originally created by Richard Hardstone (2020), rhardstone@gmail.com. Please note that commercial use of this
+    algorithm is protected by Patent claim (PCT/NL2019/050167) “Method of determining brain activity”,
+    with priority date 16 March 2018.
+
 
     Parameters
     ----------
-    samples: list
-        List of time-series samples.
-    fs: float
-        Sampling frequency.
-    fmin: float
-        Minimum frequency for the bandpass filter.
-    fmax: float
-        Maximum frequency for the bandpass filter.
-    fEI_folder: str
-        Path to the folder containing the fEI function.
+    signal: array, shape(n_channels,n_times)
+        amplitude envelope for all channels
+    sampling_frequency: integer
+        sampling frequency of the signal
+    window_size_sec: float
+        window size in seconds
+    window_overlap: float
+        fraction of overlap between windows (0-1)
+    DFA_array: array, shape(n_channels)
+        array of DFA values, with corresponding value for each channel, used for thresholding fEI
+    bad_idxes: array, shape(n_channels)
+        channels to ignore from computation are marked with 1, the rest with 0. can also be empty list,
+        case in which all channels are computed
 
     Returns
     -------
-    features: list
-        List of fEI features.
+    fEI_outliers_removed: array, shape(n_channels)
+        fEI values, with outliers removed
+    fEI_val: array, shape(n_channels)
+        fEI values, with outliers included
+    num_outliers: integer
+        number of detected outliers
+    wAmp: array, shape(n_channels, num_windows)
+        windowed amplitude, computed across all channels/windows
+    wDNF: array, shape(n_channels, num_windows)
+        windowed detrended normalized fluctuation, computed across all channels/windows
     """
 
-    debug = False
+    window_size = int(window_size_sec * sampling_frequency)
 
-    # Compute the amplitude envelope of the signals
-    envelopes = []
-    for sample in samples:
-        # Bandpass the signal
-        sample_alpha = bandpass(sample, fmin, fmax, fs)
-        # Compute the amplitude envelope using the Hilbert transform
-        amplitude_envelope = np.abs(hilbert(sample_alpha))
-        envelopes.append(list(amplitude_envelope))
+    num_chans = np.shape(signal)[0]
+    length_signal = np.shape(signal)[1]
 
-    # Start the matlab engine
-    matlab_engine = module('matlab.engine')
-    try:
-        eng = matlab_engine.start_matlab()
+    channels_to_ignore = [False] * num_chans
 
-        # # Start a parallel pool with the number of available physical cores
-        # num_cpus = os.cpu_count()/2
-        # eng.parpool(num_cpus)
+    for bad_idx in bad_idxes:
+       channels_to_ignore[bad_idx] = True
 
-        # Import matlab
-        matlab = module('matlab')
+    window_offset = int(np.floor(window_size * (1 - window_overlap)))
+    all_window_index = _create_window_indices(length_signal, window_size, window_offset)
+    num_windows = np.shape(all_window_index)[0]
 
-        # Add the folder containing the fEI function to the Matlab path
-        eng.addpath(fEI_folder)
+    fEI_val = np.zeros((num_chans, 1))
+    fEI_val[:] = np.NAN
+    fEI_outliers_removed = np.zeros((num_chans, 1))
+    fEI_outliers_removed[:] = np.NAN
+    num_outliers = np.zeros((num_chans, 1))
+    num_outliers[:] = np.NAN
+    wAmp = np.zeros((num_chans, num_windows))
+    wAmp[:] = np.NAN
+    wDNF = np.zeros((num_chans, num_windows))
+    wDNF[:] = np.NAN
 
-        features = []
-        for i, envelope in enumerate(envelopes):
-            # Compute fEI
-            try:
-                eng.workspace['aux'] = matlab.double(envelope)
-                eng.eval(f'signal = zeros({len(envelope)},1);', nargout=0)
-                eng.eval(f'signal(:,1) = aux;', nargout=0)
-                eng.eval(f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelope) / 10)},0.8);',
-                         nargout=0)
-                fEI = eng.workspace['EI']
-            except:
-                fEI = np.nan
-            features.append(fEI)
+    for ch_idx in range(num_chans):
+        if channels_to_ignore[ch_idx]:
+            continue
 
-            # Plot the amplitude envelope over the original signal
-            if debug:
-                plt.figure()
-                plt.plot(bandpass(samples[i], fmin, fmax, fs))
-                plt.plot(envelope)
-                plt.title(f'fEI = {fEI}')
-                plt.show()
+        original_amp = signal[ch_idx, :]
 
-    finally:
-        # Stop the MATLAB engine
-        eng.quit()
-        # Delete the engine object
-        del eng
+        if np.min(original_amp) == np.max(original_amp):
+            print('Problem computing fEI for channel idx '+str(ch_idx))
+            continue
 
-    return features
+        signal_profile = np.cumsum(original_amp - np.mean(original_amp))
+        w_original_amp = np.mean(original_amp[all_window_index], axis=1)
+
+        x_amp = repmat(np.transpose(w_original_amp[np.newaxis, :]), 1, window_size)
+        x_signal = signal_profile[all_window_index]
+        x_signal = np.divide(x_signal, x_amp)
+
+        # Calculate local trend, as the line of best fit within the time window
+        _, fluc, _, _, _ = np.polyfit(np.arange(window_size), np.transpose(x_signal), deg=1, full=True)
+        # Convert to root-mean squared error, from squared error
+        w_detrendedNormalizedFluctuations = np.sqrt(fluc / window_size)
+
+        fEI_val[ch_idx] = 1 - np.corrcoef(w_original_amp, w_detrendedNormalizedFluctuations)[0, 1]
+
+        gesd_alpha = 0.05
+        max_outliers_percentage = 0.025  # this is set to 0.025 per dimension (2-dim: wAmp and wDNF), so 0.05 is max
+        # smallest value for max number of outliers is 2 for generalizedESD
+        max_num_outliers = max(int(np.round(max_outliers_percentage * len(w_original_amp))),2)
+        outlier_indexes_wAmp = generalizedESD(w_original_amp, max_num_outliers, gesd_alpha)[1]
+        outlier_indexes_wDNF = generalizedESD(w_detrendedNormalizedFluctuations, max_num_outliers, gesd_alpha)[1]
+        outlier_union = outlier_indexes_wAmp + outlier_indexes_wDNF
+        num_outliers[ch_idx, :] = len(outlier_union)
+        not_outlier_both = np.setdiff1d(np.arange(len(w_original_amp)), np.array(outlier_union))
+        fEI_outliers_removed[ch_idx] = 1 - np.corrcoef(w_original_amp[not_outlier_both], \
+                                                        w_detrendedNormalizedFluctuations[not_outlier_both])[0, 1]
+
+        wAmp[ch_idx, :] = w_original_amp
+        wDNF[ch_idx, :] = w_detrendedNormalizedFluctuations
+
+    fEI_val[DFA_array <= 0.6] = np.nan
+    fEI_outliers_removed[DFA_array <= 0.6] = np.nan
+
+    return (fEI_outliers_removed, fEI_val, num_outliers, wAmp, wDNF)
 
 
-    #     # Compute fEI for each sample
-    #     eng.workspace['envelopes'] = matlab.double(envelopes)
-    #     eng.eval(f'all_EI = zeros({len(envelopes)},1);', nargout=0)
-    #     eng.eval(f'for i = 1:{len(envelopes)}; '
-    #              f'aux = envelopes(i,:); '
-    #              f'signal = aux\'; '
-    #              f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelopes[0]) / 10)},0.8); '
-    #              f'all_EI(i) = EI; end', nargout=0)
-    #     all_EI = np.array(eng.workspace['all_EI'])
-    #     features = [all_EI[i][0] for i in range(len(all_EI))]
-    #
-    #     # Plot the amplitude envelope over the original signal
-    #     if debug:
-    #         for i, envelope in enumerate(envelopes):
-    #             plt.figure()
-    #             plt.plot(bandpass(samples[i], fmin, fmax, fs))
-    #             plt.plot(envelope)
-    #             plt.title(f'fEI = {features[i]}')
-    #             plt.show()
-    #
-    #     # Stop the MATLAB engine
-    #     eng.quit()
-    #     # Delete the engine object
-    #     del eng
-    #
-    # except:
-    #     print('Error computing fEI.')
-    #     features = [np.nan for _ in range(len(samples))]
-    #
-    # return features
+def DFA(signal, sampling_frequency, fit_interval, compute_interval, overlap=True, bad_idxes=[]):
+    """ Calculates DFA of a signal.
+
+    This code includes a function from https://github.com/arthur-ervin/crosci/tree/main. This code is licensed under
+    creative commons license CC-BY-NC https://creativecommons.org/licenses/by-nc/4.0/legalcode.txt.
+
+    Parameters
+    ----------
+    signal: array, shape(n_channels,n_times)
+        amplitude envelope for all channels
+    sampling_frequency: integer
+        sampling frequency of the signal
+    fit_interval: list, length 2
+        interval (in seconds) over which the DFA exponent is fit. should be included in compute_interval
+    compute_interval: list, length 2
+        interval (in seconds) over which DFA is computed
+    overlap: boolean
+        if set to True, then windows are generated with an overlap of 50%
+    bad_idxes: array, shape(n_channels)
+        channels to ignore from computation are marked with 1, the rest with 0. can also be empty list,
+        case in which all channels are computed
+
+    Returns
+    -------
+    dfa_array, window_sizes, fluctuations, dfa_intercept
+    dfa_array: array, shape(n_channels)
+        DFA value for each channel
+    window_sizes: array, shape(num_windows)
+        window sizes over which the fluctuation function is computed
+    fluctuations: array, shape(num_windows)
+        fluctuation function value at each computed window size
+    dfa_intercept: array, shape(n_channels)
+        DFA intercept for each channel
+    """
+
+    num_chans, num_timepoints = np.shape(signal)
+
+    channels_to_ignore = [False] * num_chans
+    for bad_idx in bad_idxes:
+        channels_to_ignore[bad_idx] = True
+
+    length_signal = np.shape(signal)[1]
+
+    assert fit_interval[0] >= compute_interval[0] and fit_interval[1] <= compute_interval[
+        1], 'CalcInterval should be included in ComputeInterval'
+    assert compute_interval[0] >= 0.1 and compute_interval[
+        1] <= 1000, 'ComputeInterval should be between 0.1 and 1000 seconds'
+    assert compute_interval[1]/sampling_frequency <= num_timepoints, \
+        'ComputeInterval should not extend beyond the length of the signal'
+
+    # compute DFA window sizes for the given CalcInterval
+    window_sizes = np.floor(np.logspace(-1, 3, 81) * sampling_frequency).astype(
+        int)  # %logspace from 0.1 seccond (10^-1) to 1000 (10^3) seconds
+
+    # make sure there are no duplicates after rounding
+    window_sizes = np.sort(np.unique(window_sizes))
+
+    window_sizes = window_sizes[(window_sizes >= compute_interval[0] * sampling_frequency) & \
+                                (window_sizes <= compute_interval[1] * sampling_frequency)]
+
+    dfa_array = np.zeros(num_chans)
+    dfa_array[:] = np.NAN
+    dfa_intercept = np.zeros(num_chans)
+    dfa_intercept[:] = np.NAN
+    fluctuations = np.zeros((num_chans, len(window_sizes)))
+    fluctuations[:] = np.NAN
+
+    if max(window_sizes) <= num_timepoints:
+        for ch_idx in range(num_chans):
+            if channels_to_ignore[ch_idx]:
+                continue
+
+            signal_for_channel = signal[ch_idx, :]
+
+            for i_window_size in range(len(window_sizes)):
+                if overlap == True:
+                    window_overlap = 0.5
+                else:
+                    window_overlap = 0
+
+                window_size = window_sizes[i_window_size]
+                window_offset = np.floor(window_size * (1 - window_overlap))
+                all_window_index = _create_window_indices(length_signal, window_sizes[i_window_size], window_offset)
+                # First we convert the time series into a series of fluctuations y(i) around the mean.
+                demeaned_signal = signal_for_channel - np.mean(signal_for_channel)
+                # Then we integrate the above fluctuation time series ('y').
+                signal_profile = np.cumsum(demeaned_signal)
+
+                x_signal = signal_profile[all_window_index]
+
+                # Calculate local trend, as the line of best fit within the time window -> fluc is the sum of
+                # squared residuals
+                _, fluc, _, _, _ = np.polyfit(np.arange(window_size), np.transpose(x_signal), deg=1, full=True)
+
+                # Peng's formula - Convert to root-mean squared error, from squared error
+                # det_fluc = np.sqrt(np.mean(fluc / window_size))
+                # Richard's formula
+                det_fluc = np.mean(np.sqrt(fluc / window_size))
+                fluctuations[ch_idx, i_window_size] = det_fluc
+
+            # get the positions of the first and last window sizes used for fitting
+            fit_interval_first_window = np.argwhere(window_sizes >= fit_interval[0] * sampling_frequency)[0][0]
+            fit_interval_last_window = np.argwhere(window_sizes <= fit_interval[1] * sampling_frequency)[-1][0]
+
+            # take the previous to the first window size if the difference between the lower end of fitting and
+            # the previous window is no more than 1% of the lower end of fitting and if the difference between the lower
+            # end of fitting and the previous window is less than the difference between the lower end of fitting and
+            # the current first window
+            if (np.abs(window_sizes[fit_interval_first_window-1] / sampling_frequency - fit_interval[0]) <=
+                    fit_interval[0] / 100):
+                if np.abs(window_sizes[fit_interval_first_window-1] / sampling_frequency - fit_interval[0]) < \
+                    np.abs(window_sizes[fit_interval_first_window] / sampling_frequency - fit_interval[0]):
+                    fit_interval_first_window = fit_interval_first_window - 1
+
+            x = np.log10(window_sizes[fit_interval_first_window:fit_interval_last_window+1])
+            y = np.log10(fluctuations[ch_idx, fit_interval_first_window:fit_interval_last_window+1])
+            model = np.polyfit(x, y, 1)
+            dfa_intercept[ch_idx] = model[1]
+            dfa_array[ch_idx] = model[0]
+
+    return (dfa_array, window_sizes, fluctuations, dfa_intercept)
+
+###### Old Matlab code for fEI computation ######
+# def fEI(samples,fs,fmin,fmax,fEI_folder):
+#     """
+#     Function to compute the fEI from a list of time-series samples.
+#
+#     Parameters
+#     ----------
+#     samples: list
+#         List of time-series samples.
+#     fs: float
+#         Sampling frequency.
+#     fmin: float
+#         Minimum frequency for the bandpass filter.
+#     fmax: float
+#         Maximum frequency for the bandpass filter.
+#     fEI_folder: str
+#         Path to the folder containing the fEI function.
+#
+#     Returns
+#     -------
+#     features: list
+#         List of fEI features.
+#     """
+#
+#     debug = False
+#
+#     # Compute the amplitude envelope of the signals
+#     envelopes = []
+#     for sample in samples:
+#         # Bandpass the signal
+#         sample_alpha = bandpass(sample, fmin, fmax, fs)
+#         # Compute the amplitude envelope using the Hilbert transform
+#         amplitude_envelope = np.abs(hilbert(sample_alpha))
+#         envelopes.append(list(amplitude_envelope))
+#
+#     # Start the matlab engine
+#     matlab_engine = module('matlab.engine')
+#     try:
+#         eng = matlab_engine.start_matlab()
+#
+#         # # Start a parallel pool with the number of available physical cores
+#         # num_cpus = os.cpu_count()/2
+#         # eng.parpool(num_cpus)
+#
+#         # Import matlab
+#         matlab = module('matlab')
+#
+#         # Add the folder containing the fEI function to the Matlab path
+#         eng.addpath(fEI_folder)
+#
+#         features = []
+#         for i, envelope in enumerate(envelopes):
+#             # Compute fEI
+#             try:
+#                 eng.workspace['aux'] = matlab.double(envelope)
+#                 eng.eval(f'signal = zeros({len(envelope)},1);', nargout=0)
+#                 eng.eval(f'signal(:,1) = aux;', nargout=0)
+#                 eng.eval(f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelope) / 10)},0.8);',
+#                          nargout=0)
+#                 fEI = eng.workspace['EI']
+#             except:
+#                 fEI = np.nan
+#             features.append(fEI)
+#
+#             # Plot the amplitude envelope over the original signal
+#             if debug:
+#                 plt.figure()
+#                 plt.plot(bandpass(samples[i], fmin, fmax, fs))
+#                 plt.plot(envelope)
+#                 plt.title(f'fEI = {fEI}')
+#                 plt.show()
+#
+#     finally:
+#         # Stop the MATLAB engine
+#         eng.quit()
+#         # Delete the engine object
+#         del eng
+#
+#     return features
+#
+#
+#     #     # Compute fEI for each sample
+#     #     eng.workspace['envelopes'] = matlab.double(envelopes)
+#     #     eng.eval(f'all_EI = zeros({len(envelopes)},1);', nargout=0)
+#     #     eng.eval(f'for i = 1:{len(envelopes)}; '
+#     #              f'aux = envelopes(i,:); '
+#     #              f'signal = aux\'; '
+#     #              f'[EI, wAmp, wDNF] = calculateFEI(signal,{int(len(envelopes[0]) / 10)},0.8); '
+#     #              f'all_EI(i) = EI; end', nargout=0)
+#     #     all_EI = np.array(eng.workspace['all_EI'])
+#     #     features = [all_EI[i][0] for i in range(len(all_EI))]
+#     #
+#     #     # Plot the amplitude envelope over the original signal
+#     #     if debug:
+#     #         for i, envelope in enumerate(envelopes):
+#     #             plt.figure()
+#     #             plt.plot(bandpass(samples[i], fmin, fmax, fs))
+#     #             plt.plot(envelope)
+#     #             plt.title(f'fEI = {features[i]}')
+#     #             plt.show()
+#     #
+#     #     # Stop the MATLAB engine
+#     #     eng.quit()
+#     #     # Delete the engine object
+#     #     del eng
+#     #
+#     # except:
+#     #     print('Error computing fEI.')
+#     #     features = [np.nan for _ in range(len(samples))]
+#     #
+#     # return features
 
 
 def hctsa(samples,hctsa_folder,workers = 32):
@@ -462,8 +740,9 @@ class Features:
             raise ValueError("The method must be a string.")
 
         # Check if the method is valid
-        if method not in ['catch22', 'power_spectrum_parameterization', 'fEI']:
-            raise ValueError("Invalid method. Please use 'catch22', 'power_spectrum_parameterization' or 'fEI'.")
+        if method not in ['catch22', 'power_spectrum_parameterization', 'fEI', 'hctsa', 'DFA']:
+            raise ValueError("Invalid method. Please use 'catch22', 'power_spectrum_parameterization', 'fEI', 'hctsa', "
+                             "or 'DFA'.")
 
         # Check if params is a dictionary
         if not isinstance(params, dict) and params is not None:
@@ -507,11 +786,12 @@ class Features:
 
             batch_index, batch = batch_tuple
             # Normalize the batch
-            batch = [(sample - np.mean(sample)) / np.std(sample) for sample in batch]
+            if self.method != 'fEI':
+                batch = [(sample - np.mean(sample)) / np.std(sample) for sample in batch]
             features = []
 
             # Compute features of each sample in the batch
-            if self.method != 'fEI' and self.method != 'hctsa':
+            if self.method != 'hctsa':
                 for sample in batch:
                     if self.method == 'catch22':
                         features.append(catch22(sample))
@@ -522,23 +802,39 @@ class Features:
                                                                         self.params['fmax'],
                                                                         self.params['fooof_setup'],
                                                                         self.params['r_squared_th']))
+                    elif self.method == 'DFA':
+                        features.append(DFA(sample,
+                                            self.params['fs'],
+                                            self.params['fit_interval'],
+                                            self.params['compute_interval'],
+                                            self.params['overlap'],
+                                            self.params['bad_idxes']))
 
-            # Compute fEI/hctsa for the whole batch to avoid starting the Matlab engine multiple times
+                    elif self.method == 'fEI':
+                        features.append(fEI(sample,
+                                            self.params['fs'],
+                                            self.params['window_size_sec'],
+                                            self.params['window_overlap'],
+                                            self.params['DFA_array'],
+                                            self.params['bad_idxes']))
+
+            # Compute hctsa for the whole batch to avoid starting the Matlab engine multiple times
             else:
-                if self.method == 'fEI':
-                    features = fEI(batch,
-                                   self.params['fs'],
-                                   self.params['fmin'],
-                                   self.params['fmax'],
-                                   self.params['fEI_folder'])
-                elif self.method == 'hctsa':
+                # if self.method == 'fEI':
+                #     features = fEI(batch,
+                #                    self.params['fs'],
+                #                    self.params['fmin'],
+                #                    self.params['fmax'],
+                #                    self.params['fEI_folder'])
+                # elif self.method == 'hctsa':
+                if self.method == 'hctsa':
                     features = hctsa(batch,hctsa_folder)
 
             return batch_index,features
 
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
-        if self.method == 'fEI' or self.method == 'hctsa':
+        if self.method == 'hctsa':
             factor = 0.5 # decrease this factor to avoid memory issues with MATLAB engine
         else:
             factor = 10 # more chunks than available CPUs (10 is a factor to update the progress bar more frequently)
