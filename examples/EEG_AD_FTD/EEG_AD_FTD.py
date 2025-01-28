@@ -17,7 +17,10 @@ import ncpi
 
 EEG_AD_FTD_path = '/DATOS/pablomc/EEG_AD_FTD_results'
 
-databases = ['POCTEP', 'OpenNEURO']
+databases = [
+    'POCTEP', 
+    'OpenNEURO'
+    ]
 
 all_methods = [
     'catch22',
@@ -30,7 +33,7 @@ all_methods = [
 
 print('Default parameters:')
 print('---------------------------------------------------------------------------')
-print('Inference method: EEG')
+print('Inference method: CDM')
 print('Number of variables (n_var): 4')
 print('Aperiodic component interval (if aperiodic component is desired): 5., 45.')
 print('---------------------------------------------------------------------------')
@@ -39,9 +42,9 @@ print('-------------------------------------------------------------------------
 default = input('\n--Use default parameters? (y/n): ')
 
 if default == 'y':
-    inference_method = 'EEG'
+    inference_method = 'CDM'
     n_var = 4
-    models_path = f'/DATOS/pablomc/ML_models/EEG/{n_var}_var'
+    models_path = f'/DATOS/pablomc/ML_models/{n_var}_var/MLP'
     fmin, fmax = 5., 45.
 
 if default == 'n':
@@ -49,18 +52,19 @@ if default == 'n':
     inference_method = input(f'\nUse CDM o EEG models? (cdm/eeg): ')
 
     if inference_method == 'EEG' or inference_method == 'eeg':
-        n_var = input('Number of variables (2 or 4): ')
+        n_var = int(input('Number of variables (2 or 4): '))
         models_path = f'/DATOS/pablomc/ML_models/EEG/{n_var}_var'
 
     if inference_method == 'CDM' or inference_method == 'cdm':
-        n_var = 4
+        n_var = int(input('Number of variables (2 or 4): '))
         models_path = f'/DATOS/pablomc/ML_models/{n_var}_var/MLP'
 
 
     if 'power_spectrum_parameterization_1' in all_methods:
-        interval = input(f'\nIntroduce the interval to compute the aperiodic component separated by comas (fmin, fmax): ')
+        print(f'\nIntroduce the interval to compute the aperiodic component (fmin, fmax): ')
+        fmin = int(input('fmin: '))
+        fmax = int(input('fmax: '))
 
-        fmin, fmax = map(float, interval.split(","))
 
 
 
@@ -89,28 +93,31 @@ catch22_names = [
     'FC_LocalSimple_mean3_stderr'
 ]
 
-def load_empirical_data(dataset, method, raw=False):
+def load_empirical_data(dataset, method, n_var, inference_method, raw=False):
 
     print(f'Loading {dataset} data...')
 
     if dataset=='POCTEP':
-        file_name = f'{dataset}_{raw}-{method}.pkl'
-        if os.path.exists(os.path.join('results', file_name)):
-            emp_data = pd.read_pickle(os.path.join('results', file_name))
-            print(f'Loaded file: {file_name}')
+        file_name = f'{dataset}_{raw}-{method}-{n_var}_var-{inference_method}'
+        if os.path.exists(os.path.join('results', file_name+'.pkl')):
+            emp_data = pd.read_pickle(os.path.join('results', file_name+'.pkl'))
+            print(f'Loaded file: {file_name}.pkl')
 
         else:
-            emp_data = create_POCTEP_dataframe(raw=False)
+            print(f'{dataset}_{raw}-{method}-{n_var}_var-{inference_method} not found. Creating DataFrame...')
+            emp_data = create_POCTEP_dataframe(raw=raw)
 
     if dataset == 'OpenNEURO':
-        file_name = f'{dataset}-{method}.pkl'
-        if os.path.exists(os.path.join('results', file_name)):
-            emp_data = pd.read_pickle(os.path.join('results', file_name))
-            print(f'Loaded file: {file_name}')
+        file_name = f'{dataset}-{method}-{n_var}_var-{inference_method}'
+        if os.path.exists(os.path.join('results', file_name+'.pkl')):
+            emp_data = pd.read_pickle(os.path.join('results', file_name+'.pkl'))
+            print(f'Loaded file: {file_name}.pkl')
         else:
             emp_data = create_OpenNEURO_dataframe()
 
-    return emp_data
+    pd.to_pickle(emp_data, os.path.join('results', file_name+'.pkl'))
+
+    return emp_data, file_name
 
 def load_simulation_data(file_path):
     """
@@ -170,7 +177,7 @@ def create_POCTEP_dataframe(raw=False):
     EEG = []
 
     for pt,file in enumerate(ldir):
-        print(file)
+        print(f'\rProcessiing {file} - {pt + 1 }/{len(ldir)}', end="", flush=True)
 
         # load data
         data = scipy.io.loadmat(data_path + '/' + file)['data']
@@ -294,6 +301,7 @@ def lmer(df, feat, elec = False):
 
     # Remove the 'Data' column
     df = df.drop(columns=['Data'])
+    df = df.drop(columns=['Predictions'])
 
     # Select the desired feature to analyze
     if not np.isnan(feat):
@@ -398,25 +406,24 @@ with open('config.json', 'r') as config_file:
 sim_file_path = config['simulation_features_path']
 
 # Check if the 'results' folder to store results already exists
-if not os.path.exists('results'):
-    os.makedirs('results')
+if not os.path.exists(os.path.join('results')):
+    os.makedirs(os.path.join('results'))
 
 for db in databases:
+ 
     database_init_time = time.time()
     print(f'\n\n### Database: {db}')
     for method in all_methods:
         print(f'\n=== Method: {method}')
         
-        file_name = f'{db}-{method}'
 
         # Load empirical data. It will create the DataFrame if it does not exist
-        data = load_empirical_data(db, method, False)
-
-
+        data, file_name = load_empirical_data(db, method, n_var, inference_method, True)
+          
         # Check if 'Features' and 'Predictions' columns are in the DataFrame to skip the unnecessary computations
+
         features_computed = True
         predictions_computed = True
-
         if 'Features' not in data.columns:
 
             # If there is no Features column, there are no predictions either
@@ -433,42 +440,50 @@ for db in databases:
                 print(f'No predictions computed for {method}.')
                 predictions_computed = False
 
-
         #######################
         #   FEATURE SECTION   #
         #######################
         if not features_computed:
             # Compute features if the DataFrame does not hat 'Features' column
             if method == 'power_spectrum_parameterization_1':
-                fooof_setup_emp = {'peak_threshold': 1.,
-                            'min_peak_height': 0.,
-                            'max_n_peaks': 5,
-                            'peak_width_limits': (10., 50.)}
+                fooof_setup_emp = {
+                    'peak_threshold': 1.,
+                    'min_peak_height': 0.,
+                    'max_n_peaks': 5,
+                    'peak_width_limits': (10., 50.)
+                }
                 
-                params = {'fs': 500.,
+                params = {
+                    'fs': 500,
                     'fmin': fmin,
                     'fmax': fmax,
                     'fooof_setup': fooof_setup_emp,
-                    'r_squared_th':0.9}
+                    'r_squared_th':0.9
+                }
             else:
                 params = None
 
-            
-        
             feat_init_time = time.time()
             print(f'Computing {method} features from {db}')
-
-            # If one feature of the catch22 library is selected, use the catch22 library as method
-            features = ncpi.Features('catch22', params) if method in catch22_names else ncpi.Features(method, params)
             
-            data = features.compute_features(data)
+            if method in catch22_names or method == 'catch22':
+                features = ncpi.Features(method='catch22', params=params)
+                data = features.compute_features(data)
+            
+            if method == 'power_spectrum_parameterization_1':
+                features = ncpi.Features(method='power_spectrum_parameterization', params=params)
+                data = features.compute_features(data)
+                data['Features'] = data['Features'].apply(lambda x: x[1])
+            
+            data.to_pickle(os.path.join('results', file_name+'.pkl'))
+
             feat_end_time = time.time()
             print(f'{method} computed in {feat_end_time - feat_init_time} seconds')
 
 
         ### LMER ###
         print(f'Computing lmer for {method}...')
-   
+
         lmer_init_time = time.time()
         for ii, elec in enumerate([False, True]):
             is_elec = 'elec' if elec else 'noelec'
@@ -480,18 +495,27 @@ for db in databases:
                 print(f'{lmer_file_name} already computed.')
             
             else:
-            
+                
+                # Need to read feature file to do lmer 
+                data = pd.read_pickle(os.path.join('results', file_name+'.pkl'))
+                
                 if method in catch22_names:
                     method_index = catch22_names.index(method)
                     lmer_result = lmer(data, method_index, elec)
+
+                    with open(os.path.join('results', lmer_file_name), 'wb') as results_file:
+                        pickle.dump(lmer_result, results_file)
 
                 if method == 'power_spectrum_parameterization_1':
                     lmer_result = lmer(data, np.nan, elec)
 
 
-                with open(os.path.join('results', lmer_file_name), 'w') as results:
-                    pickle.dump(lmer_result, results)
-                    
+                    with open(os.path.join('results', lmer_file_name), 'wb') as results_file:
+                        pickle.dump(lmer_result, results_file)
+                
+                if method == 'catch22':
+                    print('Can not compute lmer to the whole dataset of catch22.')
+
         lmer_end_time = time.time()
         print(f'Lmer computed in {lmer_end_time - lmer_init_time} seconds')
 
@@ -499,8 +523,13 @@ for db in databases:
         #########################
         #   INFERENCE SECTION   #
         #########################
+        
 
         if not predictions_computed:
+
+            # Read feauture file if computed before
+            data = pd.read_pickle(os.path.join('results', file_name+'.pkl')) if features_computed else data
+
             # Load simulation data
             theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
             X = load_simulation_data(os.path.join(sim_file_path, method, 'sim_X'))
@@ -518,7 +547,6 @@ for db in databases:
             # Transfer model and scaler to the data folder is necessary everytime
             if not os.path.exists('data'):
                 os.makedirs('data')
-
 
             predictions_init_time = time.time()
             if inference_method == 'cdm' or inference_method == 'CDM':
@@ -540,18 +568,23 @@ for db in databases:
                     predictions = inference.predict(
                         np.array(data['Features'].to_list())
                     )
-
+                
                 # Store predictions in the DataFrame
                 data['Predictions'] = [list(pred) for pred in predictions]
 
             
+
             if inference_method == 'eeg' or inference_method == 'EEG':
                 if n_var == 4:
                     path = os.path.join(models_path)
                 if n_var == 2:
                     path = os.path.join(models_path, method)
 
-                sensor_list = os.listdir(path)
+                # List of sensors following the order of DB1
+                sensor_list = [
+                    'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
+                    'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz'
+                ]
 
                 for s, sensor in enumerate(sensor_list):
                     print(f'--- Sensor: {sensor}')
@@ -567,7 +600,7 @@ for db in databases:
                     )
                     
                     sensor_df = data[data['Sensor'].isin([sensor, s])]
-                    
+                    print(sensor_df)
                     if method in catch22_names:
                         predictions = inference.predict(
                             np.array(sensor_df['Features'].apply(lambda x: x[catch22_names.index(method)]).to_list())
@@ -577,9 +610,9 @@ for db in databases:
                             np.array(sensor_df['Features'].to_list())
                         )
 
-                    sensor_df.loc[:, 'Prediction'] = [list(pred) for pred in predictions]
+                    sensor_df['Predictions'] = [list(pred) for pred in predictions]
                     data.update(sensor_df['Predictions'])  
-
+                print(data['Predictions'])
                 predictions = np.array(data['Predictions'].to_list())   
             
             predictions_end_time = time.time()
@@ -591,38 +624,48 @@ for db in databases:
 
         ### LMER ###
         
-        lmer_dict = {}
-        lmer_init_time = time.time()
-        for i in range(n_var):
-            if i == 0:  # E/I
-                param = (predictions[:, 0] / predictions[:, 2]) /\
-                        (predictions[:, 1] / predictions[:, 3])
-                param_name = 'E/I'
+        # Check if the lmer results have already been computed
+        if os.path.exists(os.path.join('results', file_name+'-elec-pred_lmer.pkl')):
+            print(f'{file_name}-elec-pred_lmer.pkl already computed.')
 
-            if i == 1: # Jext if n_var == 2 or tau_exc if n_var == 4
-                param = predictions[:, 4]
-                param_name = 'Jext' if n_var == 2 else 'tau_exc'
+        else:
+            # Read DataFrame with predictions if computed before
+            data = pd.read_pickle(os.path.join('results', file_name+'.pkl')) if predictions_computed else data
+            predictions = np.array(data['Predictions'].to_list())
 
-            if i == 2: # tau_inh            
-                param = predictions[:, 5]
-                param_name = 'tau_inh'
+            lmer_init_time = time.time()
+            lmer_dict = {}
+            for i in range(n_var):
+                if i == 0:  # E/I
+                    param = (predictions[:, 0] / predictions[:, 2]) /\
+                            (predictions[:, 1] / predictions[:, 3])
+                    param_name = 'E/I'
 
-            if i == 3: # Jext if n_var == 4
-                param = predictions[:, 6]                
-                param_name = 'Jext'    
+                if i == 1: # Jext if n_var == 2 or tau_exc if n_var == 4
+                    param = predictions[:, 4]
+                    param_name = 'Jext' if n_var == 2 else 'tau_exc'
 
-            lmer_dict[param_name] = lmer(data, np.nan, elec=True)  
-        
+                if i == 2: # tau_inh            
+                    param = predictions[:, 5]
+                    param_name = 'tau_inh'
 
-        with open(os.path.join('results', file_name+'-elec-pred_lmer'), 'w') as results:
-            pickle.dump(lmer_dict, results)      
-        
-        lmer_end_time = time.time()
-        print(f'--Lmer computed in {lmer_end_time - lmer_init_time} seconds')
-    
+                if i == 3: # Jext if n_var == 4
+                    param = predictions[:, 6]                
+                    param_name = 'Jext'    
+
+                # lmer function uses 'Features' column 
+                data['Features'] = param
+
+                lmer_dict[param_name] = lmer(data, np.nan, elec=True)  
+            
+
+            with open(os.path.join('results', file_name+'-elec-pred_lmer.pkl'), 'wb') as results_file:
+                pickle.dump(lmer_dict, results_file)      
+            
+            lmer_end_time = time.time()
+            print(f'--Lmer computed in {lmer_end_time - lmer_init_time} seconds')
 
     database_end_time = time.time()
-
 
     print(f'\n\n=== Database {db} completed in {database_end_time - database_init_time} seconds')
     
