@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 class Analysis:
     """ This class is used to perform analysis on the data and results. """
     def __init__(self, data, **kwargs):
+        self.data = data
         print('Analysis object created.')
 
 
@@ -224,7 +225,7 @@ class Analysis:
 
             if np.sum(np.abs(data)) > 2: 
                 colorbar = fig.colorbar(ScalarMappable(norm=CS.norm, cmap=CS.cmap), cax=cax)
-                colorbar.ax.tick_params(labelsize=5)
+                colorbar.ax.tick_params(labelsize=8)
                 if label == True:
                     colorbar.ax.xaxis.set_label_position('bottom')
                     # bbox = colorbar.ax.get_position()
