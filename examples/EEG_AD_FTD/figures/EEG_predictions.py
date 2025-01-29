@@ -1,28 +1,37 @@
 import os
 import sys
-import json
-import numpy as np
 import pandas as pd
-import pickle
-import scipy
 from matplotlib import pyplot as plt
-import matplotlib.patches as mpatches
-from matplotlib.collections import PatchCollection
-from matplotlib.cm import ScalarMappable
-from matplotlib import colorbar
-from mpl_toolkits.axes_grid1 import make_axes_locatable
 import matplotlib.lines as mlines
 
-if '__file__' not in globals():
-    __file__ = os.path.abspath('')
-
+# ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
-
 
 results_path = '../results'
 
 def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
+    '''
+    Create a list with the z-scores of the linear mixed model analysis for a given group and electrode.
+
+    Parameters
+    ----------
+    lmer_results : dict
+        Dictionary with the results of the linear mixed model analysis.
+    group : str
+        Group name.
+    elec : int
+        Electrode index.
+    p_value_th : float
+        P-value threshold.
+    data_lmer : list
+        List with the z-scores of the linear mixed model analysis.
+
+    Returns
+    -------
+    data_lmer : list
+        List with the z-scores of the linear mixed model analysis.
+    '''
 
     p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
     z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
@@ -36,15 +45,19 @@ def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
 
 
 if __name__ == "__main__":
+
+    # Some parameters
     p_value_th = 0.01
-    print('------------------------------------------------------------------------------------------------------------------------------------------------------------------------')
+    inference_method = 'CDM'
+
+    print('\n---------------------------------------------------------------------------------------------------------')
     print(f'Which figures do you want to generate?')
-    print(f'a) ncpi: A Python toolbox for neural circuit parameter inference')
-    print(f'b) A Hybrid Machine Learning and Mechanistic Modelling Approach for Probing Potential Biomarkers of Excitation/Inhibition Imbalance in Cortical Circuits in Dementia')
-    print('------------------------------------------------------------------------------------------------------------------------------------------------------------------------')
+    print(f'a) Figures from the paper "ncpi: A Python toolbox for neural circuit parameter inference."')
+    print(f'b) Figures from the paper "A Hybrid Machine Learning and Mechanistic Modelling Approach for Probing '
+          f'Potential Biomarkers of Excitation/Inhibition Imbalance in Cortical Circuits in Dementia."')
+    print('---------------------------------------------------------------------------------------------------------\n')
 
     option = input(f'a or b: ')
-
 
     ncols = 5 if option == 'b' else 6
     nrows = 5
@@ -54,7 +67,6 @@ if __name__ == "__main__":
 
     width = (1.0 - left - right) / (6) - 0.03 if option == 'a' else (1.0 - left - right) / (6) - 0.01
     height = 1.0 / 5 - 0.025
-
     bottom = 1 - (1. / 5 + 0.07)
 
     new_spacing_x = 0.08 if option == 'a' else 0.14
@@ -62,13 +74,11 @@ if __name__ == "__main__":
 
     spacing_x = 0.04
     spacing_y = 0.064 if option == 'a' else 0.004
-    
 
     fig1 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
     if option == 'b':
         fig2 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
         fig3 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
-
 
     if option == 'b':
         methods = [
@@ -86,9 +96,7 @@ if __name__ == "__main__":
 
     max = 0
 
-
     current_bottom = bottom
-
 
     if option == 'a':
         for row in range(2):
@@ -97,21 +105,16 @@ if __name__ == "__main__":
             ax.set_xticks([])
             ax.set_yticks([])
 
-
     for row in range(nrows):
-        
         if option == 'a':
             if row == 0 or row == 1:
                 method = 'catch22'
             if row == 2 or row == 3:
                 method = 'power_spectrum_parameterization_1'
-            data = pd.read_pickle(f'{results_path}/POCTEP_True-{method}-4_var-eeg-elec-pred_lmer.pkl')
-
-
+            data = pd.read_pickle(f'{results_path}/POCTEP_True-{method}-4_var-{inference_method}-elec-pred_lmer.pkl')
 
         current_left = left
         for col in range(ncols):
-
             if option == 'b':
                 if row == 0:
                     method = 'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1'
@@ -125,8 +128,9 @@ if __name__ == "__main__":
                     method = 'catch22'
 
                 database = 'POCTEP_True' if col < 3 else 'OpenNEURO'
-                data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-cdm-elec-pred_lmer.pkl')
-                feature_data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-cdm-elec-feat_lmer.pkl') if row != 4 else None
+                data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-{inference_method}-elec-pred_lmer.pkl')
+                feature_data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-{inference_method}-'
+                                              f'elec-feat_lmer.pkl') if row != 4 else None
             
             if option == 'a':
                 if col == 0 or col == 3:
@@ -142,7 +146,6 @@ if __name__ == "__main__":
                     group_label = 'ADSEV'
 
             if option == 'b':
-                # Group and group label 
                 if col == 0:
                     group = 'ADMIL'
                     group_label = 'ADMIL'
@@ -162,9 +165,8 @@ if __name__ == "__main__":
             # Add ax --> [left, bottom, width, height]
             ax1 = fig1.add_axes([current_left, current_bottom, width, height], frameon=False)
             ax2 = fig2.add_axes([current_left, current_bottom, width, height], frameon=False) if option == 'b' else None
-            ax3 = fig3.add_axes([current_left, current_bottom, width, height], frameon=False) if option == 'b' and row != 4 else None
-
-
+            ax3 = fig3.add_axes([current_left, current_bottom, width, height], frameon=False) if (option == 'b'
+                                                                                                  and row != 4) else None
 
             # Compute new left position (x spacing)
             if (col == 2 and option == 'b') or (col == 2 and option == 'a'):
@@ -191,7 +193,6 @@ if __name__ == "__main__":
                 if option == 'b':
                     ax2.set_title(f'{group_label} vs HC', fontsize=10)
                     ax3.set_title(f'{group_label} vs HC', fontsize=10) 
-
 
             # Labels
             if option == 'a':
@@ -231,14 +232,11 @@ if __name__ == "__main__":
 
                 lmer_results = data['E/I']
                 lmer_results_jext = data['Jext']
-                
-                
 
             data_lmer = []
             data_lmer_jext = []
             data_lmer_feat = []
             for elec in range(19):
-
                 data_lmer = append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer)
 
                 if option == 'b':
@@ -248,13 +246,9 @@ if __name__ == "__main__":
 
             ylims_lmer = [-6., 6.]
 
-
             # Create brainplot
             analysis = ncpi.Analysis(data_lmer)
             analysis.EEG_topographic_plot(
-                        group = f'{group}vsHC',
-                        system = 19,
-                        p_value = 0.01,
                         electrode_size = 0.6,
                         ax = ax1,
                         fig=fig1,
@@ -266,9 +260,6 @@ if __name__ == "__main__":
             if option == 'b':
                 analysis = ncpi.Analysis(data_lmer_jext)
                 analysis.EEG_topographic_plot(
-                            group = f'{group}vsHC',
-                            system = 19,
-                            p_value = 0.01,
                             electrode_size = 0.6,
                             ax = ax2,
                             fig=fig2,
@@ -279,9 +270,6 @@ if __name__ == "__main__":
                 if row != 4:
                     analysis = ncpi.Analysis(data_lmer_feat)
                     analysis.EEG_topographic_plot(
-                                group = f'{group}vsHC',
-                                system = 19,
-                                p_value = 0.01,
                                 electrode_size = 0.6,
                                 ax = ax3,
                                 fig=fig3,
@@ -311,7 +299,6 @@ if __name__ == "__main__":
 
         fig1.text(0.24, 0.7, r'$\tau_{syn}^{exc}$ (ms)', ha='center', fontsize=fontsize)
         fig1.text(0.74, 0.7, r'$\tau_{syn}^{inh}$ (ms)', ha='center', fontsize=fontsize)
-
 
         # Parameters for 1/f slope
         fig1.text(0.24, 0.48, r'$E/I$', ha='center', fontsize=fontsize)
@@ -351,7 +338,7 @@ if __name__ == "__main__":
         fig1.add_artist(tauexc_line_f)
         fig1.add_artist(tauinh_line_f)
 
-        fig1.savefig('EEG-predictions-NCPI.png')
+        fig1.savefig('EEG-predictions-ncpi.png')
 
     else:    
         fig1.text(0.28, 0.94, r'DB1', ha='center', fontsize=fontsize)
@@ -382,8 +369,9 @@ if __name__ == "__main__":
         
         fig3.add_artist(DB1)
         fig3.add_artist(DB2)
-        fig3.savefig('features-CMPB.png')
+        fig3.savefig('features-Hybrid.png')
 
-        fig1.savefig('EI-predictions-CMPB.png')
-        fig2.savefig('Jext-predictions-CMPB.png')
+        fig1.savefig('EI-predictions-Hybrid.png')
+        fig2.savefig('Jext-predictions-Hybrid.png')
 
+# plt.show()

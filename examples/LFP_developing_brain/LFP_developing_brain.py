@@ -1,4 +1,5 @@
 import os
+import shutil
 import sys
 import pickle
 import json
@@ -6,14 +7,16 @@ import pandas as pd
 import scipy
 import numpy as np
 import time
-import random
-import torch
 import matplotlib.pyplot as plt
 import seaborn as sns
 
 # ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ncpi
+
+# Train new models (True) or load existing models (False)
+new_train = False
+models_path = f'/DATOS/pablomc/ML_models/4_var/MLP'
 
 # Names of catch22 features
 try:
@@ -55,39 +58,59 @@ def load_simulation_data(file_path):
 
     Returns
     -------
-    data : ndarray
-        Simulation data loaded from the file.
+    data : dict, ndarray, or None
+        Simulation data loaded from the file. Returns None if an error occurs.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the file does not exist.
+    pickle.UnpicklingError
+        If the file cannot be unpickled.
+    TypeError
+        If the loaded data is not a dictionary or ndarray.
     """
 
+    data = None  # Initialize to avoid returning an undefined variable
+
+    # Check if the file exists
+    if not os.path.isfile(file_path):
+        raise FileNotFoundError(f"The file {file_path} does not exist.")
+
     try:
+        # Load the file using pickle
         with open(file_path, 'rb') as file:
             data = pickle.load(file)
             print(f'Loaded file: {file_path}')
 
         # Check if the data is a dictionary
         if isinstance(data, dict):
-            print(f'The file contains a dictionary. {data.keys()}')
-            # Print info about each key in the dictionary
-            for key in data.keys():
-                if isinstance(data[key], np.ndarray):
-                    print(f'Shape of {key}: {data[key].shape}')
+            print(f'The file contains a dictionary. {list(data.keys())}')
+            for key, value in data.items():
+                if isinstance(value, np.ndarray):
+                    print(f'Shape of {key}: {value.shape}')
                 else:
-                    print(f'{key}: {data[key]}')
-
-        # Check if the data is a ndarray and print its shape
+                    print(f'{key}: {value}')
+        # Check if the data is an ndarray
         elif isinstance(data, np.ndarray):
             print(f'Shape of data: {data.shape}')
-        print('')
+        else:
+            raise TypeError("Loaded data is neither a dictionary nor an ndarray.")
 
-    except Exception as e:
-        print(f'Error loading file: {file_path}')
+    except (pickle.UnpicklingError, TypeError) as e:
+        print(f"Error: Unable to load the file '{file_path}'. Invalid data format.")
         print(e)
+        data = None  # Explicitly set data to None on error
+    except Exception as e:
+        print(f"An unexpected error occurred while loading the file '{file_path}'.")
+        print(e)
+        data = None
 
     return data
 
 def load_empirical_data(folder_path):
     '''
-    Load empirical data from a folder containing LFP data files.
+    Collect the LFP data from all LFP data files and merge them into a single dictionary.
 
     Parameters
     ----------
@@ -121,7 +144,7 @@ def load_empirical_data(folder_path):
 
 def compute_features(data, chunk_size=5., method='catch22', params=None):
     '''
-    Compute features from the LFP data.
+    Creates a Pandas DataFrame containing the computed features from the LFP data.
 
     Parameters
     ----------
@@ -203,13 +226,13 @@ if __name__ == "__main__":
     sim_file_path = config['simulation_features_path']
     emp_data_path = config['LFP_development_data_path']
 
-    # Define a catch22 feature subset
-    catch22_subset = ['SP_Summaries_welch_rect_centroid',
-                      'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1']
-    catch22_subset_idx = [catch22_names.index(f) for f in catch22_subset]
+    # # Define a catch22 feature subset
+    # catch22_subset = ['SP_Summaries_welch_rect_centroid',
+    #                   'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1']
+    # catch22_subset_idx = [catch22_names.index(f) for f in catch22_subset]
 
     # Iterate over the methods used to compute the features
-    all_methods = ['catch22','power_spectrum_parameterization_1','power_spectrum_parameterization_2']
+    all_methods = ['catch22','power_spectrum_parameterization_1']
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
         # Load parameters of the model (theta) and features from simulation data (X)
@@ -225,16 +248,11 @@ if __name__ == "__main__":
         print(f'Samples loaded: {len(theta["data"])}')
         print(f'Done in {(end_time - start_time)/60.} min')
 
-        # Select features from the catch22 feature set
-        if method == 'catch22_subset':
-            X = X[:, catch22_subset_idx]
-        elif method in catch22_names:
-            X = X[:, catch22_names.index(method)]
-
-        # # Randomly subsample the simulation data
-        # idx = np.random.choice(len(theta['data']), 10000, replace=False)
-        # X = X[idx]
-        # theta['data'] = theta['data'][idx]
+        # # Select features from the catch22 feature set
+        # if method == 'catch22_subset':
+        #     X = X[:, catch22_subset_idx]
+        # elif method in catch22_names:
+        #     X = X[:, catch22_names.index(method)]
 
         # Load empirical data
         print('\n--- Loading empirical data.')
@@ -251,18 +269,18 @@ if __name__ == "__main__":
         if method == 'catch22' or method == 'catch22_subset' or method in catch22_names:
             emp_data = compute_features(emp_data, chunk_size=chunk_size, method='catch22')
 
-            # Subsets of catch22 features
-            if method == 'catch22_subset':
-                new_features = []
-                for jj in range(len(emp_data)):
-                    # print(f'\r Arranging the catch22 subset. Progress: {jj+1} of {len(emp_data)}', end='', flush=True)
-                    new_features.append([emp_data['Features'][jj][i] for i in catch22_subset_idx])
-                emp_data['Features'] = new_features
+            # # Subsets of catch22 features
+            # if method == 'catch22_subset':
+            #     new_features = []
+            #     for jj in range(len(emp_data)):
+            #         # print(f'\r Arranging the catch22 subset. Progress: {jj+1} of {len(emp_data)}', end='', flush=True)
+            #         new_features.append([emp_data['Features'][jj][i] for i in catch22_subset_idx])
+            #     emp_data['Features'] = new_features
+            #
+            # if method in catch22_names:
+            #     emp_data['Features'] = emp_data['Features'].apply(lambda x: x[catch22_names.index(method)])
 
-            if method in catch22_names:
-                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[catch22_names.index(method)])
-
-        elif method == 'power_spectrum_parameterization_1' or method == 'power_spectrum_parameterization_2':
+        elif method == 'power_spectrum_parameterization_1':
             # Parameters of the fooof algorithm
             fooof_setup_emp = {'peak_threshold': 1.,
                                'min_peak_height': 0.,
@@ -276,20 +294,9 @@ if __name__ == "__main__":
                                                 'fooof_setup': fooof_setup_emp,
                                                 'r_squared_th':0.9})
 
-            # Keep only the aperiodic exponent
-            if method == 'power_spectrum_parameterization_1':
-                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
-            # Keep aperiodic exponent, peak frequency, peak power, knee frequency, and mean power
-            if method == 'power_spectrum_parameterization_2':
-                emp_data['Features'] = emp_data['Features'].apply(lambda x: x[[1,2,3,6,11]])
+            # Keep only the aperiodic exponent (1/f slope)
+            emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
 
-        elif method == 'fEI':
-            emp_data = compute_features(emp_data, chunk_size=chunk_size,
-                                        method='fEI',
-                                        params={'fs': emp_data['fs'][0],
-                                                'fmin': 5.,
-                                                'fmax': 49.,
-                                                'fEI_folder': '../../ncpi/Matlab'})
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
 
@@ -297,21 +304,21 @@ if __name__ == "__main__":
         print('\n--- Training the regression model.')
         start_time = time.time()
 
-        # model = 'MLPRegressor'
-        # if method == 'catch22':
-        #     hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                    {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-        # else:
-        #     hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-        #                    {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-
-        model = 'SNPE'
+        model = 'MLPRegressor'
         if method == 'catch22':
-            hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
-                                                                 'num_transforms':2}}]
+            hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
         else:
-            hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-                                                                 'num_transforms':2}}]
+            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+
+        # model = 'SNPE'
+        # if method == 'catch22':
+        #     hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
+        #                                                          'num_transforms':2}}]
+        # else:
+        #     hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
+        #                                                          'num_transforms':2}}]
 
         #model = 'Ridge'
         #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
@@ -319,31 +326,45 @@ if __name__ == "__main__":
         inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X, theta['data'])
 
-        if model == 'SNPE':
-            # inference.train(param_grid=None, train_params={
-            #     'learning_rate': 1e-1,
-            #     'stop_after_epochs': 5,
-            #     'max_num_epochs': 100})
-            # inference.train(param_grid=None)
-            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1)
-        else:
-            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
-
         # Create folder to save results
         if not os.path.exists('data'):
             os.makedirs('data')
         if not os.path.exists(os.path.join('data', method)):
             os.makedirs(os.path.join('data', method))
 
-        # Save the best model and the StandardScaler
-        pickle.dump(pickle.load(open('data/model.pkl','rb')),
-                    open(os.path.join('data', method,'model'),'wb'))
-        pickle.dump(pickle.load(open('data/scaler.pkl','rb')),
-                    open(os.path.join('data', method,'scaler'),'wb'))
-        # Save density estimator
-        if model == 'SNPE':
-            pickle.dump(pickle.load(open('data/density_estimator.pkl', 'rb')),
-                        open(os.path.join('data', method, 'density_estimator'), 'wb'))
+        # Train the model
+        if new_train:
+            if model == 'SNPE':
+                # inference.train(param_grid=None, train_params={
+                #     'learning_rate': 1e-1,
+                #     'stop_after_epochs': 5,
+                #     'max_num_epochs': 100})
+                # inference.train(param_grid=None)
+                inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1)
+            else:
+                inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
+
+            # Save the best model and the StandardScaler
+            pickle.dump(pickle.load(open('data/model.pkl', 'rb')),
+                        open(os.path.join('data', method, 'model'), 'wb'))
+            pickle.dump(pickle.load(open('data/scaler.pkl', 'rb')),
+                        open(os.path.join('data', method, 'scaler'), 'wb'))
+            # Save density estimator
+            if model == 'SNPE':
+                pickle.dump(pickle.load(open('data/density_estimator.pkl', 'rb')),
+                            open(os.path.join('data', method, 'density_estimator'), 'wb'))
+
+        else:
+            # Transfer model and scaler to the data folder
+            shutil.copy(
+                os.path.join(models_path, method, 'scaler'),
+                os.path.join('data', 'scaler.pkl')
+            )
+
+            shutil.copy(
+                os.path.join(models_path, method, 'model'),
+                os.path.join('data', 'model.pkl')
+            )
 
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')

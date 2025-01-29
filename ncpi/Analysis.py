@@ -1,43 +1,212 @@
-# !/usr/bin/env python
-# -*- coding: utf-8 -*-
-
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import pandas as pd
+import scipy.interpolate
+from matplotlib.cm import ScalarMappable
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+from rpy2.robjects import pandas2ri, r
+import rpy2.robjects as ro
 
 class Analysis:
-    """ This class is used to perform analysis on the data and results. """
-    def __init__(self, data, **kwargs):
+    """ The Analysis class is designed to facilitate statistical analysis and data visualization.
+
+    Parameters
+    ----------
+    data: (list, np.ndarray, pd.DataFrame)
+        Data to be analyzed.
+    """
+    def __init__(self, data):
         self.data = data
-        print('Analysis object created.')
 
 
-    def EEG_topographic_plot(self, group='AD', system=19, **kwargs):
+    def lmer(self, control_group = 'HC', data_col = 'Y', data_index = -1, sensors = False):
+
+        # Activate pandas2ri
+        pandas2ri.activate()
+
+        # Load R libraries
+        r('''
+        library(dplyr)
+        library(lme4)
+        library(emmeans)
+        library(ggplot2)
+        library(repr)
+        library(mgcv)
+        ''')
+
+        if not isinstance(self.data, pd.DataFrame):
+            raise ValueError('The data parameter must be a pandas DataFrame.')
+
+        # Copy the dataframe
+        df = self.data.copy()
+
+        # Remove all columns except 'ID', 'Group', 'Epoch', 'Sensor' and data_col
+        df = df[['ID', 'Group', 'Epoch', 'Sensor', data_col]]
+
+        # If data_index is not empty, select the element from the data_col column
+        if data_index >= 0:
+            df[data_col] = df[data_col].apply(lambda x: x[data_index])
+
+        # Filter out control_group from the list of unique groups
+        groups = df['Group'].unique()
+        groups = [group for group in groups if group != control_group]
+
+        # Create a list with the different group comparisons
+        groups_comp = [f'{group}vs{control_group}' for group in groups]
+
+        # Remove rows where the data_col is zero
+        df = df[df[data_col] != 0]
+
+        # Rename data_col column to Y
+        df.rename(columns={data_col: 'Y'}, inplace=True)
+
+        results = {}
+        for label, label_comp in zip(groups, groups_comp):
+            print(f'\n\n--- Group: {label}')
+            # Filter the DataFrame to obtain the desired groups
+            df_pair = df[(df['Group'] == control_group) | (df['Group'] == label)]
+            ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
+            ro.globalenv['label'] = label
+            ro.globalenv['control_group'] = control_group
+
+            # Convert columns to factors
+            r('''
+            df_pair$ID = as.factor(df_pair$ID)
+            df_pair$Group = factor(df_pair$Group, levels = c(label, control_group))
+            df_pair$Epoch = as.factor(df_pair$Epoch)
+            df_pair$Sensor = as.factor(df_pair$Sensor)
+            print(table(df_pair$Group))
+            ''')
+
+            # if table in R is empty for any group, skip the analysis
+            if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
+                results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
+            else:
+                # Fit the linear mixed-effects models:
+                # - mod00: full model with random intercepts for each subject
+                # - mod01: reduced model without random intercepts
+                # - mod02: full model with random intercepts for each subject and sensor
+                # - mod03: reduced model without random intercepts for each sensor
+                if sensors == False:
+                    r('''
+                    mod00 = Y ~ Group  + (1 | ID)
+                    mod01 = Y ~ Group
+                    m00 <- lmer(mod00, data=df_pair)
+                    m01 <- lm(mod01, data=df_pair)
+                    print(summary(m00))
+                    print(summary(m01))
+                    ''')
+                else:
+                    r('''
+                    mod00 = Y ~ Group * Sensor + (1 | ID)
+                    mod01 = Y ~ Group * Sensor
+                    mod02 = Y ~ Group + Sensor + (1 | ID)
+                    mod03 = Y ~ Group + Sensor
+                    m00 <- lmer(mod00, data=df_pair)
+                    m01 <- lm(mod01, data=df_pair)
+                    m02 <- lmer(mod02, data=df_pair)
+                    m03 <- lm(mod03, data=df_pair)
+                    print(summary(m00))
+                    print(summary(m01))
+                    print(summary(m02))
+                    print(summary(m03))
+                    ''')
+
+                # BIC model selection
+                r('''
+                all_models <- c('m00', 'm01')
+                bics <- c(BIC(m00), BIC(m01))
+                print(bics)
+                index <- which.min(bics)
+                mod_sel <- all_models[index]
+
+                if (mod_sel == 'm00') {
+                    m_sel <- m00
+                }
+                if (mod_sel == 'm01') {
+                    m_sel <- m01
+                }
+                ''')
+
+                # ANOVA test
+                if sensors == True:
+                    r('''
+                    if (mod_sel == 'm00') {
+                        anova_result = capture.output(anova(m02, m00))
+                        val <- strsplit(anova_result[7], " ")[[1]]
+                        val <- val[val != ""]
+                        p_value = as.numeric(val[length(val)])
+                        p_value = ifelse(is.na(p_value), 0, p_value)
+                        if (p_value >= 0.05) {
+                            m_sel <- m02
+                        }
+                    }
+                    if (mod_sel == 'm01') {
+                        anova_result = capture.output(anova(m03, m01))
+                        val <- strsplit(anova_result[7], " ")[[1]]
+                        val <- val[val != ""]
+                        p_value = as.numeric(val[length(val)])
+                        p_value = ifelse(is.na(p_value), 0, p_value)
+                        if (p_value >= 0.05) {
+                            m_sel <- m03
+                        }
+                    }
+                    ''')
+
+                # Compute the pairwise comparisons between groups
+                if sensors == False:
+                    r('''
+                    emm <- suppressMessages(emmeans(m_sel, specs=~Group))
+                    ''')
+                else:
+                    r('''
+                    emm <- suppressMessages(emmeans(m_sel, specs=~Group | Sensor))
+                    ''')
+
+                r('''
+                res <- pairs(emm, adjust='holm')
+                df_res <- as.data.frame(res)
+                print(df_res)
+                ''')
+
+                df_res_r = ro.r['df_res']
+
+                # Convert the R DataFrame to a pandas DataFrame
+                with (pandas2ri.converter + pandas2ri.converter).context():
+                    df_res_pd = pandas2ri.conversion.get_conversion().rpy2py(df_res_r)
+
+                results[label_comp] = df_res_pd
+
+        return results
+
+    def EEG_topographic_plot(self, **kwargs):
         '''
-        This function creates a topographic plot of the EEG data.
+        This function generates a topographical plot of EEG data using the 10-20 electrode placement system,
+        visualizing activity from 19 or 20 electrodes.
 
         Parameters
         ----------
-        group: (str)
-            Name of the group to plot.
-        system: (int)
-            Number of electrodes in the EEG system.
-        **kwargs: Additional keyword arguments like:
+        **kwargs: keyword arguments:
             - radius: (float)
                 Radius of the head circumference.
             - pos: (float)
                 Position of the head on the x-axis.
-            - figsize: (tuple)
-                Size of the figure.
-            - p_value: (float)
-                P-value threshold for plotting.
             - electrode_size: (float)
                 Size of the electrodes.
             - label: (bool)
                 Show the colorbar label.
+            - ax: (matplotlib Axes object)
+                Axes object to plot the data.
+            - fig: (matplotlib Figure object)
+                Figure object to plot the data.
+            - vmin: (float)
+                Min value used for plotting.
+            - vmax: (float)
+                Max value used for plotting.
         '''
+
         default_parameters = {
-            'p_value': 0.05,
-            'figsize': (8, 8),
             'radius': 0.6,
             'pos': 0.0,
             'electrode_size': 0.9,
@@ -45,16 +214,13 @@ class Analysis:
             'ax': None,
             'fig': None,
             'vmin': None,
-            'vmax': None,
-            'sensors': None
+            'vmax': None
         }
 
         for key in kwargs.keys():
             if key not in default_parameters.keys():
                 raise ValueError(f'Invalid parameter: {key}')
 
-        p_value = kwargs.get('p_value', default_parameters['p_value'])
-        figsize = kwargs.get('figsize', default_parameters['figsize'])
         radius = kwargs.get('radius', default_parameters['radius'])
         pos = kwargs.get('pos', default_parameters['pos'])
         electrode_size = kwargs.get('electrode_size', default_parameters['electrode_size'])
@@ -63,14 +229,7 @@ class Analysis:
         fig = kwargs.get('fig', default_parameters['fig'])
         vmin = kwargs.get('vmin', default_parameters['vmin'])
         vmax = kwargs.get('vmax', default_parameters['vmax'])
-        sensors = kwargs.get('sensors', default_parameters['sensors'])
 
-        if not isinstance(group, str):
-            raise ValueError('The group parameter must be a string.')
-        if not isinstance(system, int):
-            raise ValueError('The system parameter must be an integer.')
-        if not isinstance(figsize, tuple):
-            raise ValueError('The figsize parameter must be a tuple.')
         if not isinstance(radius, float):
             raise ValueError('The radius parameter must be a float.')
         if not isinstance(pos, float):
@@ -79,8 +238,6 @@ class Analysis:
             raise ValueError('The electrode_size parameter must be a float.')
         if not isinstance(label, bool):
             raise ValueError('The label parameter must be a boolean.')
-        if not isinstance(p_value, float) or not (0.0 <= p_value <= 1.0):
-            raise ValueError('The p_value parameter must be a float between 0 and 1.')
         if not isinstance(ax, plt.Axes):
             raise ValueError('The ax parameter must be a matplotlib Axes object.')
         if not isinstance(fig, plt.Figure):
@@ -89,11 +246,15 @@ class Analysis:
             raise ValueError('The vmin parameter must be a float.')
         if not isinstance(vmax, float):
             raise ValueError('The vmax parameter must be a float.')
+        if not isinstance(self.data, (list, np.ndarray)):
+            raise ValueError('The data parameter must be a list or numpy array.')
+        if len(self.data) not in [19, 20]:
+            raise ValueError('The data parameter must contain 19 or 20 elements.')
         
               
-        def plot_simple_head_feature(ax, radius=0.6, pos=0):
+        def plot_simple_head(ax, radius=0.6, pos=0):
             '''
-            Plot a simple head feature for adding results of the EEG data analysis later.
+            Plot a simple head model with ears and nose.
 
             Parameters
             ----------
@@ -103,9 +264,6 @@ class Analysis:
             pos: float
                 Position of the head on the x-axis.
             '''
-
-            import matplotlib.patches as mpatches
-            from matplotlib.collections import PatchCollection
 
             # Adjust the aspect ratio of the plot
             ax.set_aspect('equal')
@@ -132,34 +290,34 @@ class Analysis:
                     [radius + 0.02, radius + radius / 10 + 0.02,0.02 + radius], 
                     'k', linewidth=0.5)
 
-        def plot_EEG(fig, Vax, data, radius, pos, vmin, vmax, label, electrode_size):
+
+        def plot_EEG(data, radius, pos, electrode_size, label, ax, fig, vmin, vmax):
             '''
-            Plot slopes or E/I predictions on EEG electrodes (20 EEG montage) as a
-            contour plot.
+            Plot the EEG data on the head model as a topographic map.
 
             Parameters
             ----------
-            fig: matplotlib figure
-            Vax: matplotlib Axes object
-            data: list
-                Data containing slopes or E/I predictions.
-            radius: float,
-                radius of the head circumference.
+            data: list or np.ndarray of size (19,) or (20,)
+                EEG data.
+            radius: float
+                Radius of the head circumference.
             pos: float
                 Position of the head on the x-axis.
-            vmin, vmax: float
-                Min and max values used for plotting.
+            electrode_size: float
+                Size of the electrodes.
+            label: bool
+                Show the colorbar label.
+            ax: matplotlib Axes object
+                Axes object to plot the data.
+            fig: matplotlib Figure object
+                Figure object to plot the data.
+            vmin: float
+                Min value used for plotting.
+            vmax: float
+                Max value used for plotting.
             '''
 
-            import scipy.interpolate
-            from matplotlib.cm import ScalarMappable
-            from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-            # Some parameters
-            N = 100             # number of points for interpolation
-            xy_center = [pos,0]   # center of the plot
-
-            # Coordinates of the EEG electrodes in the 20 montage
+            # Coordinates of the EEG electrodes
             koord_dict = {
                 'Fp1': [pos - 0.25 * radius, 0.8 * radius],
                 'Fp2': [pos + 0.25 * radius, 0.8 * radius],
@@ -183,16 +341,14 @@ class Analysis:
                 'Oz': [pos, -0.8 * radius]
             }
             
-            if system == 19:
+            if len(data) == 19:
                 del koord_dict['Oz']
-                koord = list(koord_dict.values())
-            else:
-                koord_keys = list(koord_dict.keys())
-                available_sensors = [sensor for sensor in sensors if sensor in koord_keys]
-                koord_sensors = [sensor for sensor in koord_keys if sensor in available_sensors]
-                koord = [koord_dict[sensor] for sensor in koord_sensors]
+            koord = list(koord_dict.values())
 
-            # External fake electrodes for completing interpolation
+            # Number of points used for interpolation
+            N = 100
+
+            # External fake electrodes used for interpolation
             for xx in np.linspace(pos-radius,pos+radius,50):
                 koord.append([xx,np.sqrt(radius**2 - (xx)**2)])
                 koord.append([xx,-np.sqrt(radius**2 - (xx)**2)])
@@ -213,14 +369,14 @@ class Analysis:
 
 
             # Use different number of levels for the fill and the lines
-            CS = Vax.contourf(xi, yi, zi, 30, cmap = plt.cm.bwr, zorder = 1,
-                            vmin = vmin,vmax = vmax)
-            Vax.contour(xi, yi, zi, 5, colors = "grey", zorder = 2,linewidths = 0.4,
-                        vmin = vmin,vmax = vmax)
+            CS = ax.contourf(xi, yi, zi, 30, cmap = plt.cm.bwr, zorder = 1,
+                             vmin = vmin, vmax = vmax)
+            ax.contour(xi, yi, zi, 5, colors ="grey", zorder = 2, linewidths = 0.4,
+                       vmin = vmin, vmax = vmax)
 
             # Make a color bar
             # cbar = fig.colorbar(CS, ax=Vax)
-            divider = make_axes_locatable(Vax)
+            divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.05)
 
             if np.sum(np.abs(data)) > 2: 
@@ -237,18 +393,9 @@ class Analysis:
                 cax.axis('off')
 
             # Add the EEG electrode positions
-            Vax.scatter(x[:system], y[:system], marker = 'o', c = 'k', s = electrode_size, zorder = 3)
-        
+            ax.scatter(x[:len(koord_dict)], y[:len(koord_dict)], marker ='o', c ='k', s = electrode_size, zorder = 3)
 
-        if type(self.data) == list or type(self.data) == np.ndarray:
-            results = self.data
-        else:
-            if 'p.value' in self.data.columns:
-                results = self.data['Ratio'].where((self.data['Group'] == group) & (self.data['p.value'] < p_value)).to_list()
-            else:
-                results = self.data['Ratio'].where(self.data['Group'] == group).to_list()
-     
-        plot_simple_head_feature(ax, radius, pos)
 
-        plot_EEG(fig, ax, results, radius, pos, vmin, vmax, label, electrode_size)
+        plot_simple_head(ax, radius, pos)
+        plot_EEG(self.data, radius, pos, electrode_size, label, ax, fig, vmin, vmax)
 

@@ -4,8 +4,6 @@ import sys
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-from rpy2.robjects import pandas2ri, r
-import rpy2.robjects as ro
 
 # ncpi toolbox
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
@@ -14,109 +12,7 @@ import ncpi
 # Parameters of LIF model simulations
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../Hagen_model/simulation/params'))
 
-def lmer(df):
-    # Activate pandas2ri
-    pandas2ri.activate()
-
-    # Load R libraries directly in R
-    r('''
-    library(dplyr)
-    library(lme4)
-    library(emmeans)
-    library(ggplot2)
-    library(repr)
-    library(mgcv)
-    ''')
-
-    # Copy the dataframe
-    df = df.copy()
-
-    # The age=4 group is considered as the control group
-    df['Group'] = df['Group'].apply(lambda x: 'HC' if x == 4 else str(x))
-
-    # Remove the 'Data' and 'Features' columns
-    df = df.drop(columns=['Data', 'Features'])
-
-    # Filter out 'HC' from the list of unique groups
-    groups = df['Group'].unique()
-    groups = [group for group in groups if group != 'HC']
-
-    # Create a list with the different group comparisons
-    groups_comp = [f'{group}vsHC' for group in groups]
-
-    # Remove rows where the variable is zero
-    df = df[df['Predictions'] != 0]
-
-    results = {}
-    for label, label_comp in zip(groups, groups_comp):
-        print(f'\n\n--- Group: {label}')
-        # Filter DataFrame to obtain the desired groups
-        df_pair = df[(df['Group'] == 'HC') | (df['Group'] == label)]
-        ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
-        ro.globalenv['label'] = label
-        # print(df_pair)
-
-        # Convert columns to factors
-        r(''' 
-        df_pair$ID = as.factor(df_pair$ID)
-        df_pair$Group = factor(df_pair$Group, levels = c(label, 'HC'))
-        df_pair$Epoch = as.factor(df_pair$Epoch)
-        df_pair$Sensor = as.factor(df_pair$Sensor)
-        print(table(df_pair$Group))
-        ''')
-
-        # if table in R is empty for any group, skip the analysis
-        if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
-            results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
-        else:
-            # Fit the linear models
-            r('''
-            mod00 = Predictions ~ Group  + (1 | ID)
-            mod01 = Predictions ~ Group
-            m00 <- lmer(mod00, data=df_pair)
-            m01 <- lm(mod01, data=df_pair)
-            print(summary(m00))
-            print(summary(m01))
-            ''')
-
-            # BIC
-            r('''
-            all_models <- c('m00', 'm01')
-            bics <- c(BIC(m00), BIC(m01))
-            print(bics)
-            index <- which.min(bics)
-            mod_sel <- all_models[index]
-
-            if (mod_sel == 'm00') {
-                m_sel <- lmer(mod00, data=df_pair)
-            }
-            if (mod_sel == 'm01') {
-                m_sel <- lm(mod01, data=df_pair)
-            }                
-            ''')
-
-            # Compute the pairwise comparisons between groups
-            r('''
-            emm <- suppressMessages(emmeans(m_sel, specs=~Group))
-            ''')
-
-            r('''
-            res <- pairs(emm, adjust='holm')
-            df_res <- as.data.frame(res)
-            print(df_res)
-            ''')
-
-            df_res_r = ro.r['df_res']
-
-            # Convert the R DataFrame to a pandas DataFrame
-            with (pandas2ri.converter + pandas2ri.converter).context():
-                df_res_pd = pandas2ri.conversion.get_conversion().rpy2py(df_res_r)
-
-            results[label_comp] = df_res_pd
-
-    return results
-
-# Debug
+# Calculate new firing rates (True) or load them from file (False)
 compute_firing_rate = False
 
 # Random seed for numpy
@@ -157,7 +53,7 @@ for method in all_methods:
         predictions_all[method] = []
         ages[method] = []
 
-    # Sample parameters for computing the firing rate
+    # Parameter sampling for computing the firing rates
     if compute_firing_rate:
         sim_params[method] = np.zeros((7, len(np.unique(ages[method])), n_samples))
         IDs[method] = np.zeros((len(np.unique(ages[method])), n_samples))
@@ -349,26 +245,28 @@ for row in range(2):
                 #                    color='black', s=2, zorder = 3)
 
             # LMER analysis
-            print('\n--- LMER analysis.')
+            print('\n--- Linear mixed model analysis.')
             data_EI = np.load(os.path.join('../data', method, 'emp_data_reduced.pkl'), allow_pickle=True)
             # Pick only ages >= 4
             data_EI = data_EI[data_EI['Group'] >= 4]
 
-            # Insert correct predictions for the lmer analysis (this should be improved in the future)
+            # Create a DataFrame with the predictions
             if col < 4:
-                data_EI['Predictions'] = predictions_EI[method][:, col]
+                data_EI['Y'] = predictions_EI[method][:, col]
             else:
                 # Create a DataFrame with the firing rates
                 data_fr = {'Group': np.repeat(np.unique(ages[method]), n_samples),
                            'ID': IDs[method].flatten(),
-                           'Predictions': firing_rates[method].flatten(),
-                           # unused columns
-                           'Data': np.zeros(firing_rates[method].size),
+                           'Y': firing_rates[method].flatten(),
                            'Epoch': np.arange(firing_rates[method].size),
-                           'Sensor': np.zeros(firing_rates[method].size),
-                           'Features': np.zeros(firing_rates[method].size)}
+                           'Sensor': np.zeros(firing_rates[method].size)}
                 data_EI = pd.DataFrame(data_fr)
-            lmer_res = lmer(data_EI)
+
+            # Transform the 'Group' column to string type
+            data_EI['Group'] = data_EI['Group'].astype(str)
+
+            Analysis = ncpi.Analysis(data_EI)
+            lmer_res = Analysis.lmer(control_group='4', data_col='Y',data_index=-1, sensors=False)
 
             # Add p-values to the plot
             y_max = ax.get_ylim()[1]
@@ -378,7 +276,7 @@ for row in range(2):
             # groups = ['5', '6', '7', '8', '9', '10', '11', '12']
             groups = ['8', '9', '10', '11', '12']
             for i, group in enumerate(groups):
-                p_value = lmer_res[f'{group}vsHC']['p.value']
+                p_value = lmer_res[f'{group}vs4']['p.value']
                 if p_value.empty:
                     continue
 

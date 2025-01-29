@@ -1,8 +1,3 @@
-{
-  "simulation_raw_data_path": "/DATOS/pablomc/Hagen_model_v1",
-  "simulation_processed_data_path": "/DATOS/pablomc/data/Hagen_model_v1",
-  "simulation_features_path": "/DATOS/pablomc/data",
-  "multicompartment_neuron_network_path": "/DATOS/pablomc/multicompartment_neuron_network",
-  "LFP_development_data_path": "/DATOS/pablomc/empirical_datasets/development_EI_decorrelation/baseline/LFP",
-  "empirical_features_path": "/DATOS/pablomc/EEG_AD_FTD_results/"
+{"simulation_features_path": "/DATOS/pablomc/data",
+  "LFP_development_data_path": "/DATOS/pablomc/empirical_datasets/development_EI_decorrelation/baseline/LFP"
 }
