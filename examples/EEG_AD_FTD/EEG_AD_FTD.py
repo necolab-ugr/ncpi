@@ -238,6 +238,10 @@ def create_POCTEP_dataframe(raw=False):
         # Electrodes (raw data)/regions (if source data)
         regions = np.arange(signal.shape[1])
 
+        # get channels
+        ch_names = data['cfg'][0, 0]['channels'][0, 0][0]
+        ch_names = [ch_names[ll][0] for ll in range(len(ch_names))]
+
         # 5-second epochs
         epochs = np.arange(0, signal.shape[0], int(fs * 5))
 
@@ -251,7 +255,7 @@ def create_POCTEP_dataframe(raw=False):
                 ID.append(pt)
                 group.append(file.split('_')[0])
                 epoch.append(i)
-                sensor.append(rg)
+                sensor.append(ch_names[rg])
                 EEG.append(ep[:, rg])
 
     # Create the Pandas DataFrame
@@ -260,8 +264,11 @@ def create_POCTEP_dataframe(raw=False):
                        'Epoch': epoch,
                        'Sensor': sensor,
                        'Data': EEG})
-    df.Recording = 'EEG'
-    df.fs = fs
+    df['Recording'] = 'EEG'
+    df['fs'] = fs
+
+    # Save ch_names
+    pd.to_pickle(ch_names, os.path.join('results', 'ch_names_POCTEP.pkl'))
 
     return df
 
@@ -320,7 +327,7 @@ def create_OpenNEURO_dataframe():
                         ID.append(folder)
                         group.append(gp if gp != 'C' else 'HC')
                         epoch.append(i)
-                        sensor.append(elec)
+                        sensor.append(ch_names[elec])
                         EEG.append(ep[:, elec])
 
     # Create the Pandas DataFrame
@@ -329,8 +336,11 @@ def create_OpenNEURO_dataframe():
                        'Epoch': epoch,
                        'Sensor': sensor,
                        'Data': EEG})
-    df.Recording = 'EEG'
-    df.fs = fs
+    df['Recording'] = 'EEG'
+    df['fs'] = fs
+
+    # Save ch_names
+    pd.to_pickle(ch_names, os.path.join('results', 'ch_names_OpenNEURO.pkl'))
 
     return df
 
@@ -381,7 +391,7 @@ if __name__ == "__main__":
                     }
 
                     params = {
-                        'fs': 500,
+                        'fs': data['fs'][0],
                         'fmin': fmin,
                         'fmax': fmax,
                         'fooof_setup': fooof_setup_emp,

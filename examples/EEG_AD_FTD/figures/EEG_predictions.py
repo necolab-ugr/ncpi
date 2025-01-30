@@ -1,5 +1,7 @@
 import os
 import sys
+
+import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import matplotlib.lines as mlines
@@ -9,6 +11,10 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 results_path = '../results'
+
+# Load channel names
+ch_names_POCTEP = pd.read_pickle(os.path.join(results_path, 'ch_names_POCTEP.pkl'))
+ch_names_OpenNEURO = pd.read_pickle(os.path.join(results_path, 'ch_names_OpenNEURO.pkl'))
 
 def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
     '''
@@ -237,12 +243,31 @@ if __name__ == "__main__":
             data_lmer_jext = []
             data_lmer_feat = []
             for elec in range(19):
-                data_lmer = append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer)
+                # Find position of the electrode in the lmer results
+                if option == 'a' or database == 'POCTEP_True':
+                    pos_lmer_results = np.where(lmer_results[f'{group}vsHC']['Sensor'] == ch_names_POCTEP[elec])[0]
+                else:
+                    pos_lmer_results = np.where(lmer_results[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
+                    pos_lmer_results_jext = np.where(lmer_results_jext[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
+                    pos_feature_data = np.where(feature_data[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
+
+                if len(pos_lmer_results) > 0:
+                    data_lmer = append_lmer_results(lmer_results, group, pos_lmer_results[0], p_value_th, data_lmer)
+                else:
+                    data_lmer.append(0)
 
                 if option == 'b':
-                    data_lmer_jext = append_lmer_results(lmer_results_jext, group, elec, p_value_th, data_lmer_jext)
+                    if len(pos_lmer_results_jext) > 0:
+                        data_lmer_jext = append_lmer_results(lmer_results_jext, group, pos_lmer_results_jext[0],
+                                                             p_value_th, data_lmer_jext)
+                    else:
+                        data_lmer_jext.append(0)
                     if row != 4:
-                        data_lmer_feat = append_lmer_results(feature_data, group, elec, p_value_th, data_lmer_feat)
+                        if len(pos_feature_data) > 0:
+                            data_lmer_feat = append_lmer_results(feature_data, group, pos_feature_data[0],
+                                                                 p_value_th, data_lmer_feat)
+                        else:
+                            data_lmer_feat.append(0)
 
             ylims_lmer = [-6., 6.]
 

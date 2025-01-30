@@ -167,6 +167,10 @@ class Analysis:
                 r('''
                 res <- pairs(emm, adjust='holm')
                 df_res <- as.data.frame(res)
+                
+                # Ensure Sensor remains a character column
+                df_res$Sensor <- as.character(df_res$Sensor)
+
                 print(df_res)
                 ''')
 
