@@ -167,12 +167,13 @@ class Analysis:
                 r('''
                 res <- pairs(emm, adjust='holm')
                 df_res <- as.data.frame(res)
-                
-                # Ensure Sensor remains a character column
-                df_res$Sensor <- as.character(df_res$Sensor)
-
-                print(df_res)
                 ''')
+
+                if sensors:
+                    r('''
+                    # Ensure Sensor remains a character column
+                    df_res$Sensor <- as.character(df_res$Sensor)
+                    ''')
 
                 df_res_r = ro.r['df_res']
 
