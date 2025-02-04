@@ -72,7 +72,8 @@ def catch22(sample):
 
     return features['values']
 
-def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9, freq_range = [30., 200.]):
+def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th = 0.9, freq_range = [30., 200.],
+                                    nperseg = -1, compute_knee = False):
     """
     Function to compute the power spectrum parameterization of a time-series sample using the FOOOF algorithm.
 
@@ -96,11 +97,15 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
         Threshold for the r_squared value. Default is 0.9.
     freq_range: list
         Frequency range for the search of the peak parameters. Default is [30., 200.].
+    nperseg: int
+        Length of each segment for the power spectrum. Default is -1 (half a second).
+    compute_knee: bool
+        If True, the knee parameter is computed. Default is False.
 
     Returns
     -------
     features: np.array
-        Array with the aperiodic and peak parameters:
+        Array with the aperiodic component and peak parameters:
         features[0:2] = aperiodic_params_fixed
         features[2:5] = peak_params_fixed
         features[5:8] = aperiodic_params_knee
@@ -118,20 +123,24 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
     # Check that the length of the sample is at least 2 seconds
     if len(sample) >= 2 * fs:
         # Estimate power spectral density using Welch’s method
-        fxx, Pxx = welch(sample, fs, nperseg=int(0.5*fs))
+        if nperseg == -1:
+            fxx, Pxx = welch(sample, fs, nperseg=int(0.5*fs))
+        else:
+            fxx, Pxx = welch(sample, fs, nperseg=nperseg)
 
         if fmin >= fxx[0] and fmax <= fxx[-1]:
             f1 = np.where(fxx >= fmin)[0][0]
             f2 = np.where(fxx >= fmax)[0][0]
         else:
-            print('Warning: fmin and fmax are out of the frequency range of the power spectrum.')
+            print('Warning: fmin and fmax are out of the frequency range of the power spectrum. Adjusting fmin and fmax '
+                  'to the minimum and maximum frequencies of the power spectrum.')
             f1 = fxx[0]
             f2 = fxx[-1]
 
         # Ensure the input data has no 0s
         if not np.any(Pxx == 0):
             # Fit the power spectrum using FOOOF for both aperiodic modes (fixed and knee)
-            for ii,aperiodic_mode in enumerate(['fixed', 'knee']):
+            for ii,aperiodic_mode in enumerate(['fixed', 'knee'] if compute_knee else ['fixed']):
                 fm = FOOOF(peak_threshold=fooof_setup['peak_threshold'],
                            min_peak_height=fooof_setup['min_peak_height'],
                            max_n_peaks=fooof_setup['max_n_peaks'],
@@ -141,7 +150,7 @@ def power_spectrum_parameterization(sample,fs,fmin,fmax,fooof_setup,r_squared_th
                     fm.fit(fxx[f1:f2], Pxx[f1:f2])
                 except:
                     print('Error fitting the power spectrum.')
-                    return np.full(2, np.nan)
+                    return np.full(12, np.nan)
 
                 # Discard fits with negative exponents
                 if fm.aperiodic_params_[-1] <= 0.:
