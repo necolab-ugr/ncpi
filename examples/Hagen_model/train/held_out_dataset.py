@@ -165,6 +165,18 @@ if __name__ == "__main__":
             hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
                            {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
+        # model = 'SNPE'
+        # if method == 'catch22' or method == 'catch22_psp_1':
+        #     hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
+        #                                                          'num_transforms':2}}]
+        # else:
+        #     hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
+        #                                                          'num_transforms':2}}]
+
+        #model = 'Ridge'
+        #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
+
+
         inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X_train, theta_train)
 
@@ -175,12 +187,26 @@ if __name__ == "__main__":
             os.makedirs(os.path.join('data', method))
 
         # Train the model
-        inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
+        if model == 'SNPE':
+            # inference.train(param_grid=None, train_params={
+            #     'learning_rate': 1e-1,
+            #     'stop_after_epochs': 5,
+            #     'max_num_epochs': 100})
+            # inference.train(param_grid=None)
+            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1)
+        else:
+            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
+
         # Save the best model and the StandardScaler
         pickle.dump(pickle.load(open('data/model.pkl', 'rb')),
                     open(os.path.join('data', method, 'model'), 'wb'))
         pickle.dump(pickle.load(open('data/scaler.pkl', 'rb')),
                     open(os.path.join('data', method, 'scaler'), 'wb'))
+
+        # Save density estimator
+        if model == 'SNPE':
+            pickle.dump(pickle.load(open('data/density_estimator.pkl', 'rb')),
+                        open(os.path.join('data', method, 'density_estimator'), 'wb'))
 
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
