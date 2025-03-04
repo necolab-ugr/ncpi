@@ -153,6 +153,22 @@ if __name__ == "__main__":
         theta_test = theta['data'][test_indices]
         end_time = time.time()
 
+        # Save the held-out dataset
+        if not os.path.exists('data'):
+            os.makedirs('data')
+        if not os.path.exists(os.path.join('data', method)):
+            os.makedirs(os.path.join('data', method))
+
+        if os.path.exists(os.path.join('data', method, 'held_out_dataset')):
+            print(f'\n--- The held-out dataset has already been saved.')
+            continue
+        else:
+            with open(os.path.join('data', method, 'held_out_dataset'), 'wb') as file:
+                pickle.dump((X_test, theta_test), file)
+            print(f'\n--- The held-out dataset has been saved.')
+
+        print(f'Done in {(end_time - start_time)/60.} min')
+
         # Create the Inference object, add the simulation data and train the model
         print('\n--- Training the regression model.')
         start_time = time.time()
@@ -179,12 +195,6 @@ if __name__ == "__main__":
 
         inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X_train, theta_train)
-
-        # Create folder to save results
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        if not os.path.exists(os.path.join('data', method)):
-            os.makedirs(os.path.join('data', method))
 
         # Train the model
         if model == 'SNPE':
@@ -221,8 +231,6 @@ if __name__ == "__main__":
         # Save predictions
         with open(os.path.join('data', method, 'predictions'), 'wb') as file:
             pickle.dump(predictions, file)
-        with open(os.path.join('data', method, 'parameters'), 'wb') as file:
-            pickle.dump(theta_test, file)
 
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')

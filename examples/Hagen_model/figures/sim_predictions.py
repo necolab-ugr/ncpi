@@ -27,6 +27,9 @@ def hellinger_distance(p, q):
     # Compute the Hellinger Distance
     return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
 
+# Path to ML models and held-out datasets
+ML_path = '/DATOS/pablomc/ML_models/held_out_data_models'
+
 # Set the random seed
 np.random.seed(0)
 
@@ -38,10 +41,11 @@ all_preds = {}
 all_theta = {}
 for method in all_methods:
     try:
-        with open(os.path.join('../train/data', method, 'predictions'), 'rb') as file:
+        with open(os.path.join(ML_path, 'MLP', method, 'predictions'), 'rb') as file:
             all_preds[method] = np.array(pickle.load(file))
-        with open(os.path.join('../train/data', method, 'parameters'), 'rb') as file:
-            all_theta[method] = np.array(pickle.load(file))
+        with open(os.path.join(ML_path, 'datasets', method, 'held_out_dataset'), 'rb') as file:
+            X_test, theta_test = pickle.load(file)
+            all_theta[method] = np.array(theta_test)
     except:
         print('No data for method: ', method)
 
@@ -158,9 +162,6 @@ for row in range(4):
 
             # Store the errors
             all_errors[list(all_errors.keys())[row]][method] = abs_error
-
-            # y = x
-            # ax.plot([min_, max_], [min_, max_], 'k--', linewidth=0.5)
 
             # ticks
             ax.set_xticks(all_loc[::2 if row < 3 else 3])
