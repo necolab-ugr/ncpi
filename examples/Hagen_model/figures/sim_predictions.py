@@ -5,6 +5,9 @@ from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from scipy.ndimage import gaussian_filter1d
 
+# Machine learning model
+ML_model = 'MLP'
+
 def hellinger_distance(p, q):
     """
     Compute the Hellinger Distance between two discrete probability distributions P and Q.
@@ -27,7 +30,7 @@ def hellinger_distance(p, q):
     # Compute the Hellinger Distance
     return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
 
-# Path to ML models and held-out datasets
+# Path to ML models trained based on a held-out dataset approach
 ML_path = '/DATOS/pablomc/ML_models/held_out_data_models'
 
 # Set the random seed
@@ -41,7 +44,7 @@ all_preds = {}
 all_theta = {}
 for method in all_methods:
     try:
-        with open(os.path.join(ML_path, 'MLP', method, 'predictions'), 'rb') as file:
+        with open(os.path.join(ML_path, ML_model, method, 'predictions'), 'rb') as file:
             all_preds[method] = np.array(pickle.load(file))
         with open(os.path.join(ML_path, 'datasets', method, 'held_out_dataset'), 'rb') as file:
             X_test, theta_test = pickle.load(file)
@@ -305,5 +308,5 @@ ax.text(0.005, 0.97, 'A', fontsize=12, fontweight='bold')
 ax.text(0.01, 0.28, 'B', fontsize=12, fontweight='bold')
 
 # Save the figure
-plt.savefig('sim_predictions.png', bbox_inches='tight')
+plt.savefig(f'sim_predictions_{ML_model}.png', bbox_inches='tight')
 # plt.show()
