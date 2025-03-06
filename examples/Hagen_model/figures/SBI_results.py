@@ -5,9 +5,16 @@ import torch
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from scipy.ndimage import gaussian_filter1d
+from sklearn.model_selection import RepeatedKFold
 
 # Choose whether to compute posteriors and diagnostic metrics
 compute_metrics = True
+
+# Choose whether to use a held-out dataset or folds from RepeatedKFold
+use_held_out_data = True
+
+# Number of random samples to draw from the posteriors
+n_samples = 10**5
 
 def create_white_to_color_cmap(color):
     """
@@ -46,34 +53,55 @@ all_methods = ['catch22', 'catch22_psp_1', 'SC_FluctAnal_2_dfa_50_1_2_logi_prop_
 np.random.seed(0)
 
 # Path to ML models trained based on a held-out dataset approach
-ML_path = '/DATOS/pablomc/ML_models/held_out_data_models'
-
-# Dictionaries to store posteriors and diagnostic metrics
-all_post_samples = {}
-all_theta = {}
-z_score = {}
-shrinkage = {}
-PRE = {}
+if use_held_out_data:
+    ML_path = '/DATOS/pablomc/ML_models/held_out_data_models'
+# Path to ML models trained based on a RepeatedKFold approach
+else:
+    ML_path = '/DATOS/pablomc/ML_models/4_var'
 
 if compute_metrics:
+    # Dictionaries to store posteriors and diagnostic metrics
+    all_post_samples = {}
+    all_theta = {}
+    z_score = {}
+    shrinkage = {}
+    # PRE = {} # Not used
+
     for method in all_methods:
         print(f'\n\n--- Method: {method}\n')
 
-        # Initialize the dictionaries
+        # Initialize dictionaries
         all_post_samples[method] = []
         all_theta[method] = []
         z_score[method] = []
         shrinkage[method] = []
-        PRE[method] = []
+        # PRE[method] = []
 
         # Load density estimators and inference models
         try:
             # Load X and theta from the held-out dataset
-            print('\n--- Loading the held-out dataset')
-            with open(os.path.join(ML_path, 'datasets', method, 'held_out_dataset'), 'rb') as file:
-                X, theta = pickle.load(file)
+            if use_held_out_data:
+                print('\n--- Loading the held-out dataset')
+                with open(os.path.join(ML_path, 'datasets', method, 'held_out_dataset'), 'rb') as file:
+                    X, theta = pickle.load(file)
+            # Load X and theta from all folds of RepeatedKFold and concatenate them
+            else:
+                X = pickle.load(open(os.path.join('/DATOS/pablomc/data',method,'sim_X'),'rb'))
+                theta = pickle.load(open(os.path.join('/DATOS/pablomc/data',method,'sim_theta'),'rb'))
+                rkf = RepeatedKFold(n_splits=10, n_repeats=1, random_state=0)
+                new_X = []
+                new_theta = []
+                for repeat_idx, (train_index, test_index) in enumerate(rkf.split(X)):
+                    if repeat_idx == 0:
+                        new_X = X[test_index]
+                        new_theta = theta['data'][test_index]
+                    else:
+                        new_X = np.concatenate((new_X,X[test_index]),axis=0)
+                        new_theta = np.concatenate((new_theta,theta['data'][test_index]),axis=0)
+                X = new_X
+                theta = new_theta
 
-            # Calculate the E/I ratio for the held-out dataset
+            # Calculate the E/I ratio
             theta_EI = np.zeros((theta.shape[0], 4))
             theta_EI[:, 0] = (theta[:, 0] / theta[:, 2]) / (theta[:, 1] / theta[:, 3])
             theta_EI[:, 1] = theta[:, 4]
@@ -92,8 +120,8 @@ if compute_metrics:
             posterior = [model[i].build_posterior(density_estimator[i]) for i in range(len(density_estimator))]
 
             # Select some random samples
-            print('\n--- Drawing samples from the posteriors')
-            idx = np.random.choice(theta_EI.shape[0], 10**5, replace=False)
+            print(f'\n--- Drawing {n_samples} samples from the posteriors')
+            idx = np.random.choice(theta_EI.shape[0], n_samples, replace=False)
 
             # Draw samples from the posteriors
             for xx, sample in enumerate(idx):
@@ -107,8 +135,12 @@ if compute_metrics:
                     continue
 
                 # Posterior samples
-                posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in
-                                     posterior]
+                if use_held_out_data:
+                    posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in
+                                         posterior]
+                else:
+                    fold = int(10. * sample / theta_EI.shape[0])
+                    posterior_samples = [posterior[fold].sample((5000,), x=x_o, show_progress_bars=False)]
 
                 # Compute the average of the posterior samples
                 avg_post_samples = torch.from_numpy(np.zeros((posterior_samples[0].shape)))
@@ -137,16 +169,16 @@ if compute_metrics:
                 s = np.ones(4) - np.var(new_post_samples.numpy(),axis = 0) / var_theta
                 shrinkage[method].append(s)
 
-                # Calculate PRE
-                p = np.median(np.abs(new_post_samples.numpy() - theta_EI[sample, :]), axis = 0)
-                PRE[method].append(p)
+                # # Calculate PRE
+                # p = np.median(np.abs(new_post_samples.numpy() - theta_EI[sample, :]), axis = 0)
+                # PRE[method].append(p)
 
             # Convert to numpy
             all_theta[method] = np.array(all_theta[method])
             all_post_samples[method] = [post.numpy() for post in all_post_samples[method]]
             z_score[method] = np.array(z_score[method])
             shrinkage[method] = np.array(shrinkage[method])
-            PRE[method] = np.array(PRE[method])
+            # PRE[method] = np.array(PRE[method])
 
         except:
             print(f'\n--- Error loading SBI models for method {method}')
@@ -166,8 +198,8 @@ if compute_metrics:
         pickle.dump(z_score, file)
     with open('data/shrinkage.pkl', 'wb') as file:
         pickle.dump(shrinkage, file)
-    with open('data/PRE.pkl', 'wb') as file:
-        pickle.dump(PRE, file)
+    # with open('data/PRE.pkl', 'wb') as file:
+    #     pickle.dump(PRE, file)
 else:
     print('Loading results from file')
     # Load the results
@@ -179,32 +211,14 @@ else:
         z_score = pickle.load(file)
     with open('data/shrinkage.pkl', 'rb') as file:
         shrinkage = pickle.load(file)
-    with open('data/PRE.pkl', 'rb') as file:
-        PRE = pickle.load(file)
+    # with open('data/PRE.pkl', 'rb') as file:
+    #     PRE = pickle.load(file)
 
-# Pick some clusters to plot
-method = 'power_spectrum_parameterization_1'
-all_gt = np.array([[ 2.3, 1.2, 3.6, 23.],
-                   [1., 0.6, 2., 35.]]) # Ground truth values
-n_clusters = len(all_gt)
-all_cluster_posterior = []
-all_cluster_theta = []
-
-# Find the samples that are close to the ground truth values
-percentage = 0.25
-for gt in all_gt:
-    if len(all_theta[method]) > 0:
-        pos = np.where(np.min(all_theta[method] >= gt * (1 - percentage), axis=1) & \
-                       np.min(all_theta[method] < gt * (1 + percentage), axis=1))[0]
-        if len(pos) > 0:
-            print(f'Cluster {gt}: {len(pos)} samples found')
-            all_cluster_theta.append(np.mean(all_theta[method][pos], axis=0))
-
-            post = np.zeros((all_post_samples[method][0].shape))
-            for ii in pos:
-                post += all_post_samples[method][ii]
-            post /= len(pos)
-            all_cluster_posterior.append(post)
+# Pick 2 posteriors to plot: the one with the lowest and the one with the median z-score
+method = 'catch22_psp_1'
+pos = np.argsort(np.sum(z_score[method],axis = 1))
+all_theta_plot = [all_theta[method][pos[0]], all_theta[method][pos[int(n_samples/2)]]]
+all_posterior_plot = [all_post_samples[method][pos[0]], all_post_samples[method][pos[int(n_samples/2)]]]
 
 # Plots
 # Create the figures and set their properties
@@ -215,7 +229,7 @@ plt.rc('ytick', labelsize=8)
 
 # Pairplot
 lims = [[0, 2.5], [0, 2.], [0, 6.5], [20, 40]]
-colors = ['blue', 'green', 'orchid']
+colors = ['blue', 'green']
 for row in range(4):
     for col in np.arange(row,4):
         ax = fig1.add_axes([0.04 + col * 0.14, 0.84 - row * 0.14, 0.1, 0.1])
@@ -223,13 +237,13 @@ for row in range(4):
         try:
             # Diagonal: 1D histogram
             if row == col:
-                for cluster in range(n_clusters):
-                    hist, bin_edges = np.histogram(all_cluster_posterior[cluster][:, row], bins=50, density=True)
-                    ax.plot(bin_edges[:-1], hist/np.max(hist),color = colors[cluster], alpha = 0.5, linewidth = 2.5)
+                for sample in range(2):
+                    hist, bin_edges = np.histogram(all_posterior_plot[sample][:, row], bins=50, density=True)
+                    ax.plot(bin_edges[:-1], hist/np.max(hist),color = colors[sample], alpha = 0.5, linewidth = 2.5)
                     ax.set_xlim(lims[row])
 
                     # Ground truth values
-                    ax.plot([all_cluster_theta[cluster][row],all_cluster_theta[cluster][row]], [0,1], color = colors[cluster],
+                    ax.plot([all_theta_plot[sample][row],all_theta_plot[sample][row]], [0,1], color = colors[sample],
                             linewidth = 0.5, linestyle = '--')
 
                 # x-labels
@@ -248,20 +262,20 @@ for row in range(4):
 
             # Upper triangle: 2D histogram
             elif row < col:
-                for cluster in range(n_clusters):
-                    hist, x_edges, y_edges = np.histogram2d(all_cluster_posterior[cluster][:, col],
-                                                            all_cluster_posterior[cluster][:, row],
+                for cluster in range(2):
+                    hist, x_edges, y_edges = np.histogram2d(all_posterior_plot[sample][:, col],
+                                                            all_posterior_plot[sample][:, row],
                                                             bins=50, density=True)
 
                     # Create a custom colormap for this cluster
-                    cmap = create_white_to_color_cmap(colors[cluster])
+                    cmap = create_white_to_color_cmap(colors[sample])
 
                     # Plot with transparency
                     ax.pcolormesh(x_edges, y_edges, hist.T, shading='auto', cmap=cmap, vmin=0, vmax=np.max(hist))
 
                     # Ground truth values
-                    ax.scatter([all_cluster_theta[cluster][col]], [all_cluster_theta[cluster][row]], s = 5.,
-                               c = colors[cluster])
+                    ax.scatter([all_theta_plot[sample][col]], [all_theta_plot[sample][row]], s = 5.,
+                               c = colors[sample])
 
                 # Set axes limits
                 ax.set_xlim(lims[col])
@@ -270,18 +284,33 @@ for row in range(4):
         except:
             pass
 
+# Legend
+ax = fig1.add_axes([0.04, 0.35, 0.2, 0.2])
+ax.axis('off')
+ax.plot([], [], color='blue', label='lowest z-score')
+ax.plot([], [], color='green', label='median z-score')
+# Add ground truth values
+ax.plot([], [], color='black', linestyle='--', label='ground truth ('+r'$\theta_0$)')
+ax.scatter([], [], color='black', s = 1., label='ground truth ('+r'$\theta_0$)')
+ax.legend(loc='upper left', fontsize=8)
+
 # Z-scores versus posterior shrinkage
 labels = [r'$E/I$',r'$\tau_{syn}^{exc}$',r'$\tau_{syn}^{inh}$',r'$J_{syn}^{ext}$']
-colors = ['#808080', '#A9A9A9', '#D3D3D3', '#DCDCDC']
 for row in range(3):
     for col in range(2):
         ax = fig1.add_axes([0.67 + col * 0.18, 0.8 - row * 0.21, 0.12, 0.13])
 
         try:
             method = all_methods[row * 2 + col]
-            for param in range(4):
-                ax.scatter(shrinkage[method][:,param], z_score[method][:,param], s = 0.1,
-                           c = colors[param], label = labels[param])
+
+            x = np.linspace(0., 1.05, 100)
+            y = np.linspace(0., 10.05, 100)
+            hist, x_edges, y_edges = np.histogram2d(shrinkage[method].flatten(),
+                                                    z_score[method].flatten(),
+                                                    bins=(x, y), density=True)
+
+            ax.pcolormesh(x_edges, y_edges, hist.T, shading='auto', cmap='Oranges')
+
         except:
             pass
 
@@ -305,15 +334,7 @@ for row in range(3):
         elif (row * 2 + col) == 5:
             ax.set_title(r'$1/f$' + ' ' + r'$slope$', fontsize = 8)
 
-        # legend
-        if row == 0 and col == 0:
-            ax.legend(loc = 'upper left', fontsize=6, handletextpad=0.2, borderpad=0.2, labelspacing=0.2)
-
-        # # limits
-        # ax.set_xlim([0,1])
-        # ax.set_ylim([0,5])
-
-# Parameter recovery error (PRE)
+# Histograms of z-scores
 colors = ['#FFC0CB', '#FF69B4', '#00FF00', '#32CD32', '#228B22', '#006400']
 cmap = LinearSegmentedColormap.from_list('custom_cmap', colors, N=6)
 
@@ -328,7 +349,7 @@ for col in range(4):
     elif col == 2:
         bins = np.linspace(0, 5, 15)
     else:
-        bins = np.linspace(0, 10, 15)
+        bins = np.linspace(0, 15, 15)
 
     for ii,method in enumerate(all_methods):
         try:
@@ -347,7 +368,7 @@ for col in range(4):
                 label = r'$1/f$'+' '+r'$slope$'
 
             # Compute histogram
-            hist, bin_edges = np.histogram(PRE[method][:,col], bins=bins, density=True)
+            hist, bin_edges = np.histogram(z_score[method][:,col], bins=bins, density=True)
 
             # Smooth the histogram using a Gaussian filter
             smoothed_hist = gaussian_filter1d(hist, sigma=1)
@@ -363,7 +384,7 @@ for col in range(4):
     # labels
     if col == 0:
         ax.set_ylabel('probability density', fontsize=8)
-    ax.set_xlabel('PRE', fontsize=8)
+    ax.set_xlabel('z-score', fontsize=8)
 
     # titles
     if col == 0:
@@ -379,8 +400,8 @@ for col in range(4):
 ax = fig1.add_axes([0., 0., 1., 1.])
 ax.axis('off')
 ax.text(0.01, 0.97, 'A', fontsize=12, fontweight='bold')
-ax.text(0.59, 0.97, 'B', fontsize=12, fontweight='bold')
-ax.text(0.01, 0.28, 'C', fontsize=12, fontweight='bold')
+ax.text(0.01, 0.28, 'B', fontsize=12, fontweight='bold')
+ax.text(0.59, 0.97, 'C', fontsize=12, fontweight='bold')
 
 # Save the figure
 plt.savefig('SBI_results.png', bbox_inches='tight')
