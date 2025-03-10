@@ -8,7 +8,7 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import RepeatedKFold
 
 # Choose whether to compute posteriors and diagnostic metrics
-compute_metrics = True
+compute_metrics = False
 
 # Choose whether to use a held-out dataset or folds from RepeatedKFold
 use_held_out_data = True
@@ -65,7 +65,8 @@ if compute_metrics:
     all_theta = {}
     z_score = {}
     shrinkage = {}
-    # PRE = {} # Not used
+    abs_error = {}
+    PRE = {}
 
     for method in all_methods:
         print(f'\n\n--- Method: {method}\n')
@@ -75,7 +76,8 @@ if compute_metrics:
         all_theta[method] = []
         z_score[method] = []
         shrinkage[method] = []
-        # PRE[method] = []
+        abs_error[method] = []
+        PRE[method] = []
 
         # Load density estimators and inference models
         try:
@@ -169,16 +171,23 @@ if compute_metrics:
                 s = np.ones(4) - np.var(new_post_samples.numpy(),axis = 0) / var_theta
                 shrinkage[method].append(s)
 
-                # # Calculate PRE
-                # p = np.median(np.abs(new_post_samples.numpy() - theta_EI[sample, :]), axis = 0)
-                # PRE[method].append(p)
+                # Calculate absolute error
+                e = np.abs( np.mean(new_post_samples.numpy(),axis = 0) - theta_EI[sample, :] )
+                abs_error[method].append(e)
+
+                # Calculate PRE for the smallest 25% of the differences between the posterior samples and the
+                # ground truth
+                diff = np.abs(new_post_samples.numpy() - theta_EI[sample, :])
+                p = np.mean(np.sort(diff,axis = 0)[:int(0.25*diff.shape[0]),:],axis = 0)
+                PRE[method].append(p)
 
             # Convert to numpy
             all_theta[method] = np.array(all_theta[method])
             all_post_samples[method] = [post.numpy() for post in all_post_samples[method]]
             z_score[method] = np.array(z_score[method])
             shrinkage[method] = np.array(shrinkage[method])
-            # PRE[method] = np.array(PRE[method])
+            abs_error[method] = np.array(abs_error[method])
+            PRE[method] = np.array(PRE[method])
 
         except:
             print(f'\n--- Error loading SBI models for method {method}')
@@ -198,8 +207,10 @@ if compute_metrics:
         pickle.dump(z_score, file)
     with open('data/shrinkage.pkl', 'wb') as file:
         pickle.dump(shrinkage, file)
-    # with open('data/PRE.pkl', 'wb') as file:
-    #     pickle.dump(PRE, file)
+    with open('data/abs_error.pkl', 'wb') as file:
+        pickle.dump(abs_error, file)
+    with open('data/PRE.pkl', 'wb') as file:
+        pickle.dump(PRE, file)
 else:
     print('Loading results from file')
     # Load the results
@@ -211,14 +222,31 @@ else:
         z_score = pickle.load(file)
     with open('data/shrinkage.pkl', 'rb') as file:
         shrinkage = pickle.load(file)
-    # with open('data/PRE.pkl', 'rb') as file:
-    #     PRE = pickle.load(file)
+    with open('data/abs_error.pkl', 'rb') as file:
+        abs_error = pickle.load(file)
+    with open('data/PRE.pkl', 'rb') as file:
+        PRE = pickle.load(file)
 
-# Pick 2 posteriors to plot: the one with the lowest and the one with the median z-score
-method = 'catch22_psp_1'
+# Pick 2 posteriors to plot
+method = 'catch22'
 pos = np.argsort(np.sum(z_score[method],axis = 1))
-all_theta_plot = [all_theta[method][pos[0]], all_theta[method][pos[int(n_samples/2)]]]
-all_posterior_plot = [all_post_samples[method][pos[0]], all_post_samples[method][pos[int(n_samples/2)]]]
+
+s0 = pos[0]
+s1 = pos[1]
+# Find the first posterior that is different to the first one
+for i in np.arange(1,len(pos)):
+    sel = True
+    for param in range(4):
+        diff = np.abs((all_theta[method][pos[i]][param] - all_theta[method][s0][param]) /\
+                      np.max(all_theta[method][:,param]))
+        if  diff < 0.05:
+            sel = False
+    if sel:
+        s1 = pos[i]
+        break
+
+all_theta_plot = [all_theta[method][s0], all_theta[method][s1]]
+all_posterior_plot = [all_post_samples[method][s0], all_post_samples[method][s1]]
 
 # Plots
 # Create the figures and set their properties
@@ -228,7 +256,7 @@ plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
 
 # Pairplot
-lims = [[0, 2.5], [0, 2.], [0, 6.5], [20, 40]]
+lims = [[0, 5], [0, 3.], [-4, 6.5], [10, 50]]
 colors = ['blue', 'green']
 for row in range(4):
     for col in np.arange(row,4):
@@ -239,6 +267,8 @@ for row in range(4):
             if row == col:
                 for sample in range(2):
                     hist, bin_edges = np.histogram(all_posterior_plot[sample][:, row], bins=50, density=True)
+                    # 1D smoothing
+                    hist = gaussian_filter1d(hist, sigma=1)
                     ax.plot(bin_edges[:-1], hist/np.max(hist),color = colors[sample], alpha = 0.5, linewidth = 2.5)
                     ax.set_xlim(lims[row])
 
@@ -262,12 +292,12 @@ for row in range(4):
 
             # Upper triangle: 2D histogram
             elif row < col:
-                for cluster in range(2):
+                for sample in range(2):
                     hist, x_edges, y_edges = np.histogram2d(all_posterior_plot[sample][:, col],
                                                             all_posterior_plot[sample][:, row],
                                                             bins=50, density=True)
 
-                    # Create a custom colormap for this cluster
+                    # Create a custom colormap for this sample
                     cmap = create_white_to_color_cmap(colors[sample])
 
                     # Plot with transparency
@@ -287,8 +317,8 @@ for row in range(4):
 # Legend
 ax = fig1.add_axes([0.04, 0.35, 0.2, 0.2])
 ax.axis('off')
-ax.plot([], [], color='blue', label='lowest z-score')
-ax.plot([], [], color='green', label='median z-score')
+ax.plot([], [], color='blue', label='sample 1')
+ax.plot([], [], color='green', label='sample 2')
 # Add ground truth values
 ax.plot([], [], color='black', linestyle='--', label='ground truth ('+r'$\theta_0$)')
 ax.scatter([], [], color='black', s = 1., label='ground truth ('+r'$\theta_0$)')
@@ -305,11 +335,18 @@ for row in range(3):
 
             x = np.linspace(0., 1.05, 100)
             y = np.linspace(0., 10.05, 100)
-            hist, x_edges, y_edges = np.histogram2d(shrinkage[method].flatten(),
-                                                    z_score[method].flatten(),
+            # hist, x_edges, y_edges = np.histogram2d(shrinkage[method].flatten(),
+            #                                         z_score[method].flatten(),
+            #                                         bins=(x, y), density=True)
+            hist, x_edges, y_edges = np.histogram2d(shrinkage[method][:,0],
+                                                    z_score[method][:,0],
                                                     bins=(x, y), density=True)
 
-            ax.pcolormesh(x_edges, y_edges, hist.T, shading='auto', cmap='Oranges')
+            # Low-pass filtering
+            hist = gaussian_filter1d(hist, sigma=7, axis=0)
+            hist = gaussian_filter1d(hist, sigma=7, axis=1)
+
+            ax.pcolormesh(x_edges, y_edges, hist.T, shading='auto', cmap='Reds')
 
         except:
             pass
@@ -334,7 +371,7 @@ for row in range(3):
         elif (row * 2 + col) == 5:
             ax.set_title(r'$1/f$' + ' ' + r'$slope$', fontsize = 8)
 
-# Histograms of z-scores
+# Histograms of errors
 colors = ['#FFC0CB', '#FF69B4', '#00FF00', '#32CD32', '#228B22', '#006400']
 cmap = LinearSegmentedColormap.from_list('custom_cmap', colors, N=6)
 
@@ -347,9 +384,9 @@ for col in range(4):
     elif col == 1:
         bins = np.linspace(0, 5, 15)
     elif col == 2:
-        bins = np.linspace(0, 5, 15)
+        bins = np.linspace(0, 10, 15)
     else:
-        bins = np.linspace(0, 15, 15)
+        bins = np.linspace(0, 30, 15)
 
     for ii,method in enumerate(all_methods):
         try:
@@ -368,10 +405,10 @@ for col in range(4):
                 label = r'$1/f$'+' '+r'$slope$'
 
             # Compute histogram
-            hist, bin_edges = np.histogram(z_score[method][:,col], bins=bins, density=True)
+            hist, bin_edges = np.histogram(PRE[method][:,col], bins=bins, density=True)
 
             # Smooth the histogram using a Gaussian filter
-            smoothed_hist = gaussian_filter1d(hist, sigma=1)
+            smoothed_hist = gaussian_filter1d(hist, sigma=2)
             ax.plot(bin_edges[:-1], smoothed_hist, label=label, color=colors[ii], alpha=0.4, linewidth = 1.5)
 
         except:
@@ -384,7 +421,7 @@ for col in range(4):
     # labels
     if col == 0:
         ax.set_ylabel('probability density', fontsize=8)
-    ax.set_xlabel('z-score', fontsize=8)
+    ax.set_xlabel('PRE', fontsize=8)
 
     # titles
     if col == 0:
