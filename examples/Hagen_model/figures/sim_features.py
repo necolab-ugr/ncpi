@@ -363,7 +363,7 @@ for row in range(4):
                 delta = (y_max - y_min) * 0.1
                 ax.text((len(np.unique(group))-1)/2., y_max + delta/4.,
                         f'$\eta^2$ = {eta_squared:.3f}' if eta_squared > 0.001 else f'$\eta^2$ < 0.001',
-                        ha='center', fontsize=8, color = 'black' if eta_squared >= .05 else 'red')
+                        ha='center', fontsize=8, color = 'black')
 
                 # Change y-lim
                 ax.set_ylim([y_min, y_max + 2 * delta])
