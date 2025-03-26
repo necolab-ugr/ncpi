@@ -1,5 +1,6 @@
 import os
 import pickle
+import time
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
@@ -8,13 +9,35 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import RepeatedKFold
 
 # Choose whether to compute posteriors and diagnostic metrics
-compute_metrics = False
+compute_metrics = True
 
 # Choose whether to use a held-out dataset or folds from RepeatedKFold
 use_held_out_data = True
 
 # Number of random samples to draw from the posteriors
-n_samples = 10**5
+n_samples = 25000
+
+def hellinger_distance(p, q):
+    """
+    Compute the Hellinger Distance between two discrete probability distributions P and Q.
+
+    Parameters:
+    p (np.array): Probability distribution P.
+    q (np.array): Probability distribution Q.
+
+    Returns:
+    float: Hellinger Distance between P and Q.
+    """
+    # Ensure the inputs are numpy arrays
+    p = np.asarray(p)
+    q = np.asarray(q)
+
+    # Normalize the distributions to ensure they sum to 1
+    p = p / np.sum(p)
+    q = q / np.sum(q)
+
+    # Compute the Hellinger Distance
+    return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
 
 def create_white_to_color_cmap(color):
     """
@@ -49,8 +72,9 @@ all_methods = ['catch22', 'catch22_psp_1', 'SC_FluctAnal_2_dfa_50_1_2_logi_prop_
                'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1', 'MD_hrv_classic_pnn40',
                'power_spectrum_parameterization_1']
 
-# Set the numpy seed
+# Set the seeds
 np.random.seed(0)
+torch.manual_seed(0)
 
 # Path to ML models trained based on a held-out dataset approach
 if use_held_out_data:
@@ -58,6 +82,9 @@ if use_held_out_data:
 # Path to ML models trained based on a RepeatedKFold approach
 else:
     ML_path = '/DATOS/pablomc/ML_models/4_var'
+
+# Limits of histograms
+lims = [[-15, 15], [-2, 5], [-2, 12], [0, 60]]
 
 if compute_metrics:
     # Dictionaries to store posteriors and diagnostic metrics
@@ -81,6 +108,7 @@ if compute_metrics:
 
         # Load density estimators and inference models
         try:
+        # if method == 'catch22' or method == 'catch22_psp_1' or method == 'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1':
             # Load X and theta from the held-out dataset
             if use_held_out_data:
                 print('\n--- Loading the held-out dataset')
@@ -110,26 +138,55 @@ if compute_metrics:
             theta_EI[:, 2] = theta[:, 5]
             theta_EI[:, 3] = theta[:, 6]
 
-            # Variance of the prior
+            # Variance of the prior (due to the Law of Large Numbers, this variance will be very close to the
+            # population variance)
             var_theta = np.var(theta_EI, axis=0)
 
             print('\n--- Loading SBI models')
             density_estimator = pickle.load(open(os.path.join(ML_path, 'SBI', method, 'density_estimator'), 'rb'))
             model = pickle.load(open(os.path.join(ML_path, 'SBI', method, 'model'), 'rb'))
+            scaler = pickle.load(open(os.path.join(ML_path, 'SBI', method, 'scaler'), 'rb'))
+
+            # Print info about the density estimator
+            flow = density_estimator[0]  # Extract the Flow model
+            transform = flow._transform  # Get the transform object
+
+            # Extract the first MaskedAffineAutoregressiveTransform
+            maf_transform = transform._transforms[1]  # First MAF layer
+
+            # Extract the autoregressive network (MADE)
+            made = maf_transform.autoregressive_net
+
+            # Input features
+            input_features = made.context_layer.in_features
+
+            # Hidden features
+            output_features = made.context_layer.out_features
+
+            print(f"Number of input features: {input_features}")
+            print(f"Number of hidden features: {output_features}")
 
             # Compute posteriors
             print('\n--- Computing posteriors')
             posterior = [model[i].build_posterior(density_estimator[i]) for i in range(len(density_estimator))]
 
             # Select some random samples
-            print(f'\n--- Drawing {n_samples} samples from the posteriors')
-            idx = np.random.choice(theta_EI.shape[0], n_samples, replace=False)
+            print(f'\n--- Drawing {n_samples} samples from the held-out dataset')
+            if method == 'catch22':
+                idx = np.random.choice(theta_EI.shape[0], n_samples, replace=False)
+            n_post_samples = 5000
+            print(f'--- Sampling {n_post_samples} times the posteriors\n\n')
 
             # Draw samples from the posteriors
             for xx, sample in enumerate(idx):
                 print(f'\r--- Sample {xx + 1}/{len(idx)}, ID: {sample}', end='', flush=True)
-                # Observation
-                x_o = torch.from_numpy(np.array(X[sample], dtype=np.float32))
+
+                # Features (observation)
+                feat = X[sample]
+                # Transform the features
+                feat = scaler.transform(feat.reshape(1, -1))
+                # Torch tensor
+                x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
 
                 # Check if the observation is valid
                 if torch.isnan(x_o).any():
@@ -138,52 +195,86 @@ if compute_metrics:
 
                 # Posterior samples
                 if use_held_out_data:
-                    posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in
+                    posterior_samples = [post.sample((n_post_samples,), x=x_o, show_progress_bars=False) for post in
                                          posterior]
                 else:
                     fold = int(10. * sample / theta_EI.shape[0])
-                    posterior_samples = [posterior[fold].sample((5000,), x=x_o, show_progress_bars=False)]
-
-                # Compute the average of the posterior samples
-                avg_post_samples = torch.from_numpy(np.zeros((posterior_samples[0].shape)))
-                for ii in range(len(posterior_samples)):
-                    avg_post_samples += posterior_samples[ii]
-                avg_post_samples /= len(posterior_samples)
+                    posterior_samples = [posterior[fold].sample((n_post_samples,), x=x_o, show_progress_bars=False)]
 
                 # Calculate E/I
-                new_post_samples = torch.from_numpy(np.zeros((posterior_samples[0].shape[0], 4)))
-                new_post_samples[:, 0] = (avg_post_samples[:, 0] / avg_post_samples[:, 2]) / \
-                                         (avg_post_samples[:, 1] / avg_post_samples[:, 3])
-                new_post_samples[:, 1] = avg_post_samples[:, 4]
-                new_post_samples[:, 2] = avg_post_samples[:, 5]
-                new_post_samples[:, 3] = avg_post_samples[:, 6]
+                new_post_samples = [np.zeros((posterior_samples[0].shape[0],
+                                              4)) for _ in range(len(posterior_samples))]
+                for ii in range(len(posterior_samples)):
+                    new_post_samples[ii][:, 0] = (posterior_samples[ii][:, 0] / posterior_samples[ii][:, 2]) /\
+                                                 (posterior_samples[ii][:, 1] / posterior_samples[ii][:, 3])
+                    new_post_samples[ii][:, 1] = posterior_samples[ii][:, 4]
+                    new_post_samples[ii][:, 2] = posterior_samples[ii][:, 5]
+                    new_post_samples[ii][:, 3] = posterior_samples[ii][:, 6]
+
+                # Average the sorted posterior samples across folds
+                avg_post_samples = np.zeros((new_post_samples[0].shape))
+                for ii in range(len(new_post_samples)):
+                    avg_post_samples += np.sort(new_post_samples[ii], axis=0)
+                avg_post_samples /= len(new_post_samples)
 
                 # Store theta and posterior samples
-                all_post_samples[method].append(new_post_samples)
+                all_post_samples[method].append(avg_post_samples)
                 all_theta[method].append(theta_EI[sample, :])
 
-                # Calculate z-score
-                z = np.abs( (np.mean(new_post_samples.numpy(),axis = 0) - theta_EI[sample, :]) /\
-                            np.std(new_post_samples.numpy(),axis = 0) )
+                # Diagnostic metrics
+                z = np.zeros(4)
+                s = np.zeros(4)
+                e = np.zeros(4)
+                p = np.zeros(4)
+                try:
+                    for param in range(4):
+                        # Remove low-probability samples to prevent distributions with long tails
+                        hist, bin_edges = np.histogram(avg_post_samples[:,param],
+                                                       bins=np.linspace(lims[param][0], lims[param][1], 1000),
+                                                       density=True)
+                        hist = gaussian_filter1d(hist, sigma=5)
+                        hist /= np.max(hist)
+                        iii = bin_edges[np.where(hist > 0.5)[0]]
+                        pos = np.where((avg_post_samples[:,param] > iii[0]) & (avg_post_samples[:,param] <= iii[-1]))[0]
+                        param_post_samples = avg_post_samples[pos,param]
+
+                        # Calculate z-score
+                        z[param] = np.abs( (np.mean(param_post_samples) - theta_EI[sample, param]) /\
+                                            np.std(param_post_samples) )
+
+                        # Calculate shrinkage
+                        s[param] = 1. - np.var(param_post_samples) / var_theta[param]
+
+                        # # Debug
+                        # print(f'--- Parameter {param}:')
+                        # print(f'z-score: {z[param]}, shrinkage: {s[param]}')
+                        # plt.plot(bin_edges[1:], hist, label='original',alpha=0.5, color='blue', linewidth=1.5)
+                        # hist, bin_edges = np.histogram(param_post_samples,
+                        #                                bins=np.linspace(lims[param][0], lims[param][1], 1000),
+                        #                                density=True)
+                        # hist = gaussian_filter1d(hist, sigma=5)
+                        # hist /= np.max(hist)
+                        # plt.plot(bin_edges[1:], hist, label='filtered',alpha=0.5, color='red', linewidth=1.5)
+                        # plt.legend()
+                        # plt.show()
+
+                        # Calculate absolute error
+                        e[param] = np.abs( np.mean(param_post_samples) - theta_EI[sample, param] )
+
+                        # Calculate PRE for the smallest 25% of the differences between the posterior samples and the
+                        # ground truth
+                        diff = np.abs(param_post_samples - theta_EI[sample, param])
+                        p[param] = np.mean(np.sort(diff)[:int(0.25*len(diff))])
+                except:
+                    pass
+
                 z_score[method].append(z)
-
-                # Calculate shrinkage
-                s = np.ones(4) - np.var(new_post_samples.numpy(),axis = 0) / var_theta
                 shrinkage[method].append(s)
-
-                # Calculate absolute error
-                e = np.abs( np.mean(new_post_samples.numpy(),axis = 0) - theta_EI[sample, :] )
                 abs_error[method].append(e)
-
-                # Calculate PRE for the smallest 25% of the differences between the posterior samples and the
-                # ground truth
-                diff = np.abs(new_post_samples.numpy() - theta_EI[sample, :])
-                p = np.mean(np.sort(diff,axis = 0)[:int(0.25*diff.shape[0]),:],axis = 0)
                 PRE[method].append(p)
 
             # Convert to numpy
             all_theta[method] = np.array(all_theta[method])
-            all_post_samples[method] = [post.numpy() for post in all_post_samples[method]]
             z_score[method] = np.array(z_score[method])
             shrinkage[method] = np.array(shrinkage[method])
             abs_error[method] = np.array(abs_error[method])
@@ -227,23 +318,31 @@ else:
     with open('data/PRE.pkl', 'rb') as file:
         PRE = pickle.load(file)
 
+
 # Pick 2 posteriors to plot
 method = 'catch22'
-pos = np.argsort(np.sum(z_score[method],axis = 1))
 
+pos = np.argsort(np.sum(z_score[method] + (1 - shrinkage[method]),axis = 1))
 s0 = pos[0]
 s1 = pos[1]
-# Find the first posterior that is different to the first one
-for i in np.arange(1,len(pos)):
-    sel = True
-    for param in range(4):
-        diff = np.abs((all_theta[method][pos[i]][param] - all_theta[method][s0][param]) /\
-                      np.max(all_theta[method][:,param]))
-        if  diff < 0.05:
-            sel = False
-    if sel:
-        s1 = pos[i]
-        break
+
+# # Find a different sample
+# for i in np.arange(1,len(pos)):
+#     sel = True
+#     for param in range(4):
+#         diff = np.abs((all_theta[method][pos[i]][param] - all_theta[method][s0][param]) /\
+#                       np.max(all_theta[method][:,param]))
+#         if  diff < 0.1:
+#             sel = False
+#     if sel:
+#         s1 = pos[i]
+#         break
+
+# np.random.seed(int(time.time()))
+# s0 = np.random.randint(0, len(all_theta[method]))
+# s1 = np.random.randint(0, len(all_theta[method]))
+
+print(f'\n--- Posteriors to plot: {s0} and {s1}')
 
 all_theta_plot = [all_theta[method][s0], all_theta[method][s1]]
 all_posterior_plot = [all_post_samples[method][s0], all_post_samples[method][s1]]
@@ -256,7 +355,7 @@ plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
 
 # Pairplot
-lims = [[0, 5], [0, 3.], [-4, 6.5], [10, 50]]
+lims = [[-2, 5], [-1, 3.], [-1, 10], [-5, 70]]
 colors = ['blue', 'green']
 for row in range(4):
     for col in np.arange(row,4):
@@ -266,7 +365,9 @@ for row in range(4):
             # Diagonal: 1D histogram
             if row == col:
                 for sample in range(2):
-                    hist, bin_edges = np.histogram(all_posterior_plot[sample][:, row], bins=50, density=True)
+                    hist, bin_edges = np.histogram(all_posterior_plot[sample][:, row],
+                                                   bins= np.linspace(lims[row][0], lims[row][1], 50),
+                                                   density=True)
                     # 1D smoothing
                     hist = gaussian_filter1d(hist, sigma=1)
                     ax.plot(bin_edges[:-1], hist/np.max(hist),color = colors[sample], alpha = 0.5, linewidth = 2.5)
@@ -295,7 +396,13 @@ for row in range(4):
                 for sample in range(2):
                     hist, x_edges, y_edges = np.histogram2d(all_posterior_plot[sample][:, col],
                                                             all_posterior_plot[sample][:, row],
-                                                            bins=50, density=True)
+                                                            bins=(np.linspace(lims[col][0], lims[col][1], 25),
+                                                                  np.linspace(lims[row][0], lims[row][1], 25)),
+                                                            density=True)
+
+                    # Smoothing
+                    hist = gaussian_filter1d(hist, sigma=1, axis=0)
+                    hist = gaussian_filter1d(hist, sigma=1, axis=1)
 
                     # Create a custom colormap for this sample
                     cmap = create_white_to_color_cmap(colors[sample])
@@ -328,25 +435,25 @@ ax.legend(loc='upper left', fontsize=8)
 labels = [r'$E/I$',r'$\tau_{syn}^{exc}$',r'$\tau_{syn}^{inh}$',r'$J_{syn}^{ext}$']
 for row in range(3):
     for col in range(2):
-        ax = fig1.add_axes([0.67 + col * 0.18, 0.8 - row * 0.21, 0.12, 0.13])
+        ax = fig1.add_axes([0.66 + col * 0.18, 0.8 - row * 0.21, 0.12, 0.13])
 
         try:
             method = all_methods[row * 2 + col]
 
-            x = np.linspace(0., 1.05, 100)
-            y = np.linspace(0., 10.05, 100)
-            # hist, x_edges, y_edges = np.histogram2d(shrinkage[method].flatten(),
-            #                                         z_score[method].flatten(),
-            #                                         bins=(x, y), density=True)
-            hist, x_edges, y_edges = np.histogram2d(shrinkage[method][:,0],
-                                                    z_score[method][:,0],
+            x = np.linspace(0., 1.05, 8)
+            y = np.linspace(0., 10.05, 8)
+            hist, x_edges, y_edges = np.histogram2d(shrinkage[method].flatten(),
+                                                    z_score[method].flatten(),
                                                     bins=(x, y), density=True)
 
             # Low-pass filtering
-            hist = gaussian_filter1d(hist, sigma=7, axis=0)
-            hist = gaussian_filter1d(hist, sigma=7, axis=1)
+            hist = gaussian_filter1d(hist, sigma=1, axis=0)
+            hist = gaussian_filter1d(hist, sigma=1, axis=1)
 
-            ax.pcolormesh(x_edges, y_edges, hist.T, shading='auto', cmap='Reds')
+            mesh = ax.pcolormesh(x_edges, y_edges, hist.T, shading='auto', cmap='Reds')
+
+            # Add a colorbar
+            plt.colorbar(mesh, ax=ax)
 
         except:
             pass
@@ -377,16 +484,17 @@ cmap = LinearSegmentedColormap.from_list('custom_cmap', colors, N=6)
 
 for col in range(4):
     ax = fig1.add_axes([0.08 + col * 0.24, 0.07, 0.18, 0.18])
+    all_hist = []
 
     # Define bins to compute histograms
     if col == 0:
-        bins = np.linspace(0, 5, 15)
+        bins = np.linspace(0, 2., 15)
     elif col == 1:
-        bins = np.linspace(0, 5, 15)
+        bins = np.linspace(0, 1.5, 15)
     elif col == 2:
-        bins = np.linspace(0, 10, 15)
+        bins = np.linspace(0, 6., 15)
     else:
-        bins = np.linspace(0, 30, 15)
+        bins = np.linspace(0, 40., 15)
 
     for ii,method in enumerate(all_methods):
         try:
@@ -405,14 +513,33 @@ for col in range(4):
                 label = r'$1/f$'+' '+r'$slope$'
 
             # Compute histogram
-            hist, bin_edges = np.histogram(PRE[method][:,col], bins=bins, density=True)
+            hist, bin_edges = np.histogram(abs_error[method][:,col], bins=bins, density=True)
 
             # Smooth the histogram using a Gaussian filter
-            smoothed_hist = gaussian_filter1d(hist, sigma=2)
+            smoothed_hist = gaussian_filter1d(hist, sigma=1)
+            all_hist.append(smoothed_hist)
             ax.plot(bin_edges[:-1], smoothed_hist, label=label, color=colors[ii], alpha=0.4, linewidth = 1.5)
 
         except:
             continue
+
+    # Compute pairwise Hellinger distances
+    HD_ = []
+    for x in range(6):
+        for y in range(x+1, 6):
+            HD_.append(hellinger_distance(all_hist[x], all_hist[y]))
+            # print('Hellinger distance between', all_methods[x], 'and', all_methods[y], ':', HD_[-1])
+
+    # Show distances
+    # Between catch22 and catch22 + slope
+    ax.text(0.2 if col > 0 else 0.26, 0.9 if col == 0 else 0.25, r'$D_{H,1}=$'+' %.2f' % HD_[0], fontsize=6, ha='center',
+            transform=ax.transAxes, color = colors[1])
+    # Between all the remaining methods
+    ax.text(0.2, 0.15, r'$D_{H,2}=$'+' %.2f' % np.mean(HD_[9:]), fontsize=6, ha='center', transform=ax.transAxes,
+            color = colors[5])
+    # Between catch22 and all the remaining methods
+    ax.text(0.2, 0.05, r'$D_{H,3}=$'+' %.2f' % np.mean(HD_[1:5]), fontsize=6, ha='center', transform=ax.transAxes,
+            color = 'k')
 
     # legend
     if col == 0:
@@ -421,7 +548,7 @@ for col in range(4):
     # labels
     if col == 0:
         ax.set_ylabel('probability density', fontsize=8)
-    ax.set_xlabel('PRE', fontsize=8)
+    ax.set_xlabel('absolute error', fontsize=8)
 
     # titles
     if col == 0:
@@ -437,8 +564,8 @@ for col in range(4):
 ax = fig1.add_axes([0., 0., 1., 1.])
 ax.axis('off')
 ax.text(0.01, 0.97, 'A', fontsize=12, fontweight='bold')
-ax.text(0.01, 0.28, 'B', fontsize=12, fontweight='bold')
-ax.text(0.59, 0.97, 'C', fontsize=12, fontweight='bold')
+ax.text(0.59, 0.97, 'B', fontsize=12, fontweight='bold')
+ax.text(0.01, 0.28, 'C', fontsize=12, fontweight='bold')
 
 # Save the figure
 plt.savefig('SBI_results.png', bbox_inches='tight')
