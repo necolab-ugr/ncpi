@@ -10,6 +10,7 @@ setup(
         "scipy",
         "matplotlib"],
     extras_require={
-        "rpy2": ["rpy2"]
+        "rpy2": ["rpy2"],
+        "mpl_toolkits": ["mpl_toolkits"]
     }
 )

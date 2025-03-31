@@ -1,12 +1,11 @@
 import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 import pandas as pd
 import scipy.interpolate
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 from matplotlib.cm import ScalarMappable
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-from rpy2.robjects import pandas2ri, r
-import rpy2.robjects as ro
+import tools
+
 
 class Analysis:
     """ The Analysis class is designed to facilitate statistical analysis and data visualization.
@@ -21,6 +20,12 @@ class Analysis:
 
 
     def lmer(self, control_group = 'HC', data_col = 'Y', data_index = -1, sensors = False):
+
+        if not tools.ensure_module("rpy2"):
+            raise ImportError("rpy2 is required for lmer but is not installed.")
+
+        from rpy2.robjects import pandas2ri, r
+        import rpy2.robjects as ro
 
         # Activate pandas2ri
         pandas2ri.activate()
@@ -185,9 +190,10 @@ class Analysis:
 
         return results
 
+
     def EEG_topographic_plot(self, **kwargs):
         '''
-        This function generates a topographical plot of EEG data using the 10-20 electrode placement system,
+        Generate a topographical plot of EEG data using the 10-20 electrode placement system,
         visualizing activity from 19 or 20 electrodes.
 
         Parameters
@@ -210,6 +216,10 @@ class Analysis:
             - vmax: (float)
                 Max value used for plotting.
         '''
+
+        if not tools.ensure_module("mpl_toolkits"):
+            raise ImportError("mpl_toolkits is required for EEG_topographic_plot but is not installed.")
+        from mpl_toolkits.axes_grid1 import make_axes_locatable
 
         default_parameters = {
             'radius': 0.6,
@@ -403,4 +413,3 @@ class Analysis:
 
         plot_simple_head(ax, radius, pos)
         plot_EEG(self.data, radius, pos, electrode_size, label, ax, fig, vmin, vmax)
-
