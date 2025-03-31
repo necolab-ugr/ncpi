@@ -7,3 +7,4 @@ from .Features import *
 from .Simulation import *
 from .FieldPotential import *
 from .Analysis import *
+from . import tools

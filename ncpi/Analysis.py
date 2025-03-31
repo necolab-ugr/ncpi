@@ -4,7 +4,7 @@ import scipy.interpolate
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.cm import ScalarMappable
-import tools
+from . import tools
 
 
 class Analysis:
