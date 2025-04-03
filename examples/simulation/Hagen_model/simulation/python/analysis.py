@@ -6,9 +6,6 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as ss
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../../..'))
 import ncpi
 
 def get_spike_rate(times, transient, dt, tstop):

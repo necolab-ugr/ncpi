@@ -1,12 +1,8 @@
 import json
 import time
 import os
-import sys
 import pickle
 import numpy as np
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Names of catch22 features

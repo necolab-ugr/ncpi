@@ -2,15 +2,10 @@ import json
 import sys
 import os
 import pickle
-
 import pandas as pd
-import seaborn as sns
 import scipy.signal as ss
 import numpy as np
 from matplotlib import pyplot as plt
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Parameters of LIF model simulations

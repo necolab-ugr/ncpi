@@ -1,54 +1,8 @@
-import importlib
 import os
 import pickle
-import subprocess
 import numpy as np
 import random
-from sklearn.model_selection import RepeatedKFold
-from sklearn.preprocessing import StandardScaler
-from sklearn.utils import all_estimators
-from sklearn.base import RegressorMixin
-from sbi.inference import SNPE
-import torch
-from sbi.utils import posterior_nn
-from tqdm import tqdm
-
-
-def install(module_name):
-    """
-    Function to install a Python module.
-
-    Parameters
-    ----------
-    module_name: str
-        Module name.
-    """
-    subprocess.check_call(['pip', 'install', module_name])
-    print(f"The module {module_name} was installed!")
-
-
-
-def module(module_name):
-    """
-    Function to dynamically import a Python module.
-
-    Parameters
-    ----------
-    module_name: str
-        Name of the module to import.
-
-    Returns
-    -------
-    module
-        The imported module.
-    """
-    try:
-        module = importlib.import_module(module_name)
-    except ImportError:
-        print(f"{module_name} is not installed!")
-        install(module_name)
-        module = importlib.import_module(module_name)
-    return module
+from ncpi import tools
 
 
 class Inference:
@@ -99,12 +53,46 @@ class Inference:
             If hyperparameters is not a dictionary.
         """
 
+        # Ensure that sklearn is installed
+        if not tools.ensure_module("sklearn"):
+            raise ImportError('sklearn is not installed. Please install it to use the Inference class.')
+        self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
+        self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
+        self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
+        self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
+
+        # Ensure that sbi and torch are installed
+        if model == 'SNPE':
+            if not tools.ensure_module("sbi"):
+                raise ImportError('sbi is not installed. Please install it to use SNPE.')
+            self.SNPE = tools.dynamic_import("sbi.inference", "SNPE")
+            self.posterior_nn = tools.dynamic_import("sbi.utils", "posterior_nn")
+
+            if not tools.ensure_module("torch"):
+                raise ImportError('torch is not installed. Please install it to use SNPE.')
+            self.torch = tools.dynamic_import("torch")
+
+        # Check if pathos is installed. If not, use the default Python multiprocessing library
+        if not tools.ensure_module("pathos"):
+            self.pathos_inst = False
+            self.multiprocessing = tools.dynamic_import("multiprocessing")
+        else:
+            self.pathos_inst = True
+            self.pathos = tools.dynamic_import("pathos", "pools")
+
+        # Check if tqdm is installed
+        if not tools.ensure_module("tqdm"):
+            self.tqdm_inst = False
+        else:
+            self.tqdm_inst = True
+            self.tqdm = tools.dynamic_import("tqdm", "tqdm")
+
         # Assert that model is a string
         if type(model) is not str:
             raise ValueError('Model must be a string.')
 
         # Check if model is in the list of regression models from sklearn, or it is SNPE
-        regressors = [estimator for estimator in all_estimators() if issubclass(estimator[1], RegressorMixin)]
+        regressors = [estimator for estimator in self.all_estimators() if issubclass(estimator[1], self.RegressorMixin)]
         if model not in [regressor[0] for regressor in regressors] + ['SNPE']:
             raise ValueError(f'{model} not in the list of machine-learning models from sklearn or sbi libraries that '
                              f'can be used for inference.')
@@ -128,7 +116,7 @@ class Inference:
         # Set the number of threads used by PyTorch
         if model == 'SNPE':
             torch_threads = int(os.cpu_count()/2)
-            torch.set_num_threads(torch_threads)
+            self.torch.set_num_threads(torch_threads)
 
     def add_simulation_data(self, features, parameters):
         """
@@ -207,7 +195,7 @@ class Inference:
             if 'model' not in hyperparams['density_estimator']:
                 raise ValueError('model must be in density_estimator.')
             # Initialize the posterior neural network
-            density_estimator_build_fun = posterior_nn(
+            density_estimator_build_fun = self.posterior_nn(
                 model=hyperparams['density_estimator']['model'],
                 hidden_features=hyperparams['density_estimator']['hidden_features'],
                 num_transforms=hyperparams['density_estimator']['num_transforms']
@@ -220,7 +208,7 @@ class Inference:
         # Create a dict with the remaining hyperparameters
         others = {key: value for key, value in hyperparams.items() if key not in ['density_estimator', 'prior']}
         # Initialize SNPE
-        model = SNPE(
+        model = self.SNPE(
             prior=hyperparams['prior'],
             density_estimator=density_estimator_build_fun,
             **others
@@ -248,7 +236,7 @@ class Inference:
 
         # Import the sklearn model
         if self.model[1] == 'sklearn':
-            regressors = [estimator for estimator in all_estimators() if issubclass(estimator[1], RegressorMixin)]
+            regressors = [estimator for estimator in self.all_estimators() if issubclass(estimator[1], self.RegressorMixin)]
             pos = np.where(np.array([regressor[0] for regressor in regressors]) == self.model[0])[0][0]
             cl = str(regressors[pos][1]).split('.')[1]
             exec(f'from sklearn.{cl} import {self.model[0]}')
@@ -258,7 +246,7 @@ class Inference:
             if self.model[1] == 'sklearn':
                 model = eval(f'{self.model[0]}')()
             elif self.model[1] == 'sbi':
-                model = SNPE(prior=None)
+                model = self.SNPE(prior=None)
 
         # Initialize model with user-defined hyperparameters
         else:
@@ -274,7 +262,7 @@ class Inference:
             raise ValueError('No parameters provided.')
 
         # Initialize the StandardScaler
-        scaler = StandardScaler()
+        scaler = self.StandardScaler()
 
         # Fit the StandardScaler
         scaler.fit(self.features)
@@ -305,7 +293,7 @@ class Inference:
                 print(f'\n\n--> Hyperparameters: {params}')
 
                 # Initialize RepeatedKFold (added random_state for reproducibility)
-                rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
+                rkf = self.RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=0)
 
                 # Loop over each repeat and fold
                 mean_scores = []
@@ -341,7 +329,7 @@ class Inference:
 
                     if self.model[1] == 'sbi':
                         # Set the seeds for reproducibility
-                        torch.manual_seed(repeat_idx)
+                        self.torch.manual_seed(repeat_idx)
                         random.seed(repeat_idx)
 
                         # Re-initialize the SNPE object with the new configuration
@@ -353,8 +341,8 @@ class Inference:
 
                         # Append simulations
                         model.append_simulations(
-                            torch.from_numpy(Y_train.astype(np.float32)),
-                            torch.from_numpy(X_train.astype(np.float32))
+                            self.torch.from_numpy(Y_train.astype(np.float32)),
+                            self.torch.from_numpy(X_train.astype(np.float32))
                         )
 
                         # Train the neural density estimator
@@ -367,7 +355,7 @@ class Inference:
                         # Loop over all test samples
                         for i in range(len(X_test)):
                             # Sample the posterior
-                            x_o = torch.from_numpy(np.array(X_test[i], dtype=np.float32).reshape(1, -1))
+                            x_o = self.torch.from_numpy(np.array(X_test[i], dtype=np.float32).reshape(1, -1))
                             posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
                             pred = np.mean(posterior_samples.numpy(), axis=0)
                             # Compute the mean squared error
@@ -411,8 +399,8 @@ class Inference:
 
                 # Append simulations
                 model.append_simulations(
-                    torch.from_numpy(self.theta.astype(np.float32)),
-                    torch.from_numpy(self.features.astype(np.float32))
+                    self.torch.from_numpy(self.theta.astype(np.float32)),
+                    self.torch.from_numpy(self.features.astype(np.float32))
                 )
 
                 # Train the neural density estimator
@@ -481,7 +469,7 @@ class Inference:
                         predictions.append(pred[0])
                     if self.model[1] == 'sbi':
                         # Sample the posterior
-                        x_o = torch.from_numpy(np.array(feat, dtype=np.float32))
+                        x_o = self.torch.from_numpy(np.array(feat, dtype=np.float32))
                         if type(posterior) is list:
                             posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in
                                                  posterior]
@@ -535,17 +523,20 @@ class Inference:
             batch_size = 1
         batches = [(i, features[i:i + batch_size]) for i in range(0, len(features), batch_size)]
 
-        # Create a ProcessingPool
-        Pool = getattr(module('pathos'), 'multiprocessing').ProcessingPool
+        # Choose the appropriate parallel processing library
+        pool_class = self.pathos.ProcessPool if self.pathos_inst else self.multiprocessing.Pool
 
-        # Compute the features in parallel using all available CPUs
-        with Pool(num_cpus) as pool:
-            if self.model[1] == 'sbi':
-                results = list(tqdm(pool.imap(process_batch, [(ii,batch, scaler, model, posterior) for ii,batch in batches]),
-                                   total=len(batches), desc="Computing predictions"))
-            else:
-                results = list(tqdm(pool.imap(process_batch, [(ii,batch, scaler, model) for ii,batch in batches]),
-                                   total=len(batches), desc="Computing predictions"))
+        # Prepare batch arguments based on model type
+        use_posterior = self.model[1] == 'sbi'
+        batch_args = [(ii, batch, scaler, model, posterior) if use_posterior else (ii, batch, scaler, model) for
+                      ii, batch in batches]
+
+        # Compute features in parallel
+        with pool_class(num_cpus) as pool:
+            imap_results = pool.imap(process_batch, batch_args)
+            results = list(
+                self.tqdm(imap_results, total=len(batches), desc="Computing predictions")) if self.tqdm_inst else list(
+                imap_results)
 
         # Sort the predictions based on the original index
         results.sort(key=lambda x: x[0])

@@ -1,14 +1,9 @@
 import os
-from copy import deepcopy
-import h5py
-import neuron
-from lfpykernels import KernelApprox,\
-                        GaussCylinderPotential,\
-                        KernelApproxCurrentDipoleMoment
-from LFPy import InfiniteHomogeneousVolCondMEG as IHVCMEG
-from lfpykit.eegmegcalc import NYHeadModel
 import numpy as np
 import matplotlib.pyplot as plt
+from copy import deepcopy
+from ncpi import tools
+
 
 def roll_with_zeros(arr, shift):
     """
@@ -34,14 +29,16 @@ def roll_with_zeros(arr, shift):
         result[:] = arr
     return result
 
+
 class FieldPotential:
     def __init__(self, kernel=True, nyhead=False, MEEG=None, CDM_shape=15500):
         """
         Initialize the FieldPotential object.
+
         Parameters
         ----------
         kernel: bool
-            Initialize the dictionary for storing kernels for computing the CDM or LFP.
+            Choose to compute kernels.
 
         nyhead: bool
             Use the NYHeadModel for computing EEG.
@@ -54,13 +51,46 @@ class FieldPotential:
         CDM_shape: int
             Number of time points in the CDM.
         """
-        # Initialize dictionary for storing kernels
+
         if kernel:
+            # Check that the required modules are installed
+            if not tools.ensure_module("lfpykernels"):
+                raise ImportError("lfpykernels is required for computing kernels but is not installed.")
+            self.KernelApprox = tools.dynamic_import("lfpykernels",
+                                                     "KernelApprox")
+            self.GaussCylinderPotential = tools.dynamic_import("lfpykernels",
+                                                               "GaussCylinderPotential")
+            self.KernelApproxCurrentDipoleMoment = tools.dynamic_import("lfpykernels",
+                                                                        "KernelApproxCurrentDipoleMoment")
+
+            # Is LFPy import really needed?
+            if not tools.ensure_module("LFPy"):
+                raise ImportError("LFPy is required for computing kernels but is not installed.")
+
+            if not tools.ensure_module("neuron"):
+                raise ImportError("neuron is required for computing kernels but is not installed.")
+            self.neuron = tools.dynamic_import("neuron")
+
+            if not tools.ensure_module("h5py"):
+                raise ImportError("h5py is required for computing kernels but is not installed.")
+            self.h5py = tools.dynamic_import("h5py")
+
+            # Initialize dictionary for storing kernels
             self.H_YX = dict()
 
-        # Initialize the head model
         if nyhead:
-            self.nyhead = NYHeadModel()
+            # Check that the required module is installed
+            if not tools.ensure_module("lfpykit"):
+                raise ImportError("lfpykit is required for computing the NYHeadModel but is not installed.")
+            self.NYHeadModel = tools.dynamic_import("lfpykit.eegmegcalc",
+                                                    "NYHeadModel")
+
+            # Initialize the head model
+            self.nyhead = self.NYHeadModel()
+
+        # Import InfiniteHomogeneousVolCondMEG
+        if MEEG is not None:
+            self.IHVCMEG = tools.dynamic_import("LFPy", "InfiniteHomogeneousVolCondMEG")
 
         # Allocate memory for the transformation matrix and MEEG
         if MEEG == 'EEG':
@@ -69,6 +99,7 @@ class FieldPotential:
         elif MEEG == 'MEG':
             self.M = np.zeros((1,3,3))
             self.MEEG = np.zeros((1,3,CDM_shape))
+
 
     def create_kernel(self, MC_folder, output_path, params, biophys, dt, tstop, electrodeParameters=None, CDM=True):
         """
@@ -134,10 +165,10 @@ class FieldPotential:
         params.morphologies = [os.path.join(MC_folder, m) for m in params.morphologies]
 
         # Recompile mod files if needed
-        mech_loaded = neuron.load_mechanisms(os.path.join(MC_folder, 'mod'))
+        mech_loaded = self.neuron.load_mechanisms(os.path.join(MC_folder, 'mod'))
         if not mech_loaded:
             os.system(f'cd {os.path.join(MC_folder, "mod")} && nrnivmodl && cd -')
-            neuron.load_mechanisms(os.path.join(MC_folder, "mod"))
+            self.neuron.load_mechanisms(os.path.join(MC_folder, "mod"))
 
         # Presynaptic activation time
         t_X = params.transient
@@ -158,7 +189,7 @@ class FieldPotential:
         # along z-axis
         probes = []
         if electrodeParameters is not None:
-            gauss_cyl_potential = GaussCylinderPotential(
+            gauss_cyl_potential = self.GaussCylinderPotential(
                 cell=None,
                 z=electrodeParameters['z'],
                 sigma=electrodeParameters['sigma'],
@@ -170,7 +201,7 @@ class FieldPotential:
 
         # Set up recording of current dipole moments.
         if CDM:
-            current_dipole_moment = KernelApproxCurrentDipoleMoment(cell=None)
+            current_dipole_moment = self.KernelApproxCurrentDipoleMoment(cell=None)
             probes.append(current_dipole_moment)
 
         # Compute average firing rate of presynaptic populations X
@@ -184,7 +215,7 @@ class FieldPotential:
                                                          params.morphologies)):
                 # Extract median soma voltages from actual network simulation and
                 # assume this value corresponds to Vrest.
-                with h5py.File(os.path.join(output_path, 'somav.h5'
+                with self.h5py.File(os.path.join(output_path, 'somav.h5'
                                             ), 'r') as f:
                     Vrest = np.median(f[Y][()][:, 200:])
 
@@ -206,7 +237,7 @@ class FieldPotential:
                     for ii in range(len(params.population_names))]
 
                 # Create kernel approximator object
-                kernel = KernelApprox(
+                kernel = self.KernelApprox(
                     X=params.population_names,
                     Y=Y,
                     N_X=np.array(params.population_sizes),
@@ -234,6 +265,7 @@ class FieldPotential:
                 )
 
         return self.H_YX
+
 
     def compute_MEEG(self, CDM, location=None, cMEG = False):
         """
@@ -286,7 +318,7 @@ class FieldPotential:
             # Warning: this code snippet has not been tested yet!
             else:
                 # Instantiate MEG object
-                meg = IHVCMEG(location)
+                meg = self.IHVCMEG(location)
 
                 # Get the transformation matrix
                 self.M = meg.get_transformation_matrix(location)
@@ -753,9 +785,9 @@ class FieldPotential:
             Steady state potential
         """
         for sec in cell.template.all:
-            if neuron.h.ismembrane("Ih_linearized_v2", sec=sec):
+            if self.neuron.h.ismembrane("Ih_linearized_v2", sec=sec):
                 sec.V_R_Ih_linearized_v2 = Vrest
-            elif neuron.h.ismembrane("Ih_linearized_v2_frozen", sec=sec):
+            elif self.neuron.h.ismembrane("Ih_linearized_v2_frozen", sec=sec):
                 sec.V_R_Ih_linearized_v2_frozen = Vrest
 
 
@@ -783,7 +815,7 @@ class FieldPotential:
         ]
         for sec in cell.template.all:
             for ion in ion_channels:
-                if neuron.h.ismembrane(ion, sec=sec):
+                if self.neuron.h.ismembrane(ion, sec=sec):
                     setattr(sec, f'V_R_{ion}', Vrest)
 
 
@@ -798,27 +830,27 @@ class FieldPotential:
         Vrest: float
             Steady state potential
         """
-        neuron.h.t = 0
-        neuron.h.finitialize(Vrest)
-        neuron.h.fcurrent()
+        self.neuron.h.t = 0
+        self.neuron.h.finitialize(Vrest)
+        self.neuron.h.fcurrent()
         for sec in cell.allseclist:
             for seg in sec:
                 seg.e_pas = seg.v
-                if neuron.h.ismembrane("na_ion", sec=sec):
+                if self.neuron.h.ismembrane("na_ion", sec=sec):
                     seg.e_pas += seg.ina / seg.g_pas
-                if neuron.h.ismembrane("k_ion", sec=sec):
+                if self.neuron.h.ismembrane("k_ion", sec=sec):
                     seg.e_pas += seg.ik / seg.g_pas
-                if neuron.h.ismembrane("ca_ion", sec=sec):
+                if self.neuron.h.ismembrane("ca_ion", sec=sec):
                     seg.e_pas += seg.ica / seg.g_pas
-                if neuron.h.ismembrane("Ih", sec=sec):
+                if self.neuron.h.ismembrane("Ih", sec=sec):
                     seg.e_pas += seg.ihcn_Ih / seg.g_pas
-                if neuron.h.ismembrane("Ih_z", sec=sec):
+                if self.neuron.h.ismembrane("Ih_z", sec=sec):
                     seg.e_pas += seg.ih_Ih_z / seg.g_pas
-                if neuron.h.ismembrane("Ih_linearized_v2_frozen", sec=sec):
+                if self.neuron.h.ismembrane("Ih_linearized_v2_frozen", sec=sec):
                     seg.e_pas += seg.ihcn_Ih_linearized_v2_frozen / seg.g_pas
-                if neuron.h.ismembrane("Ih_linearized_v2", sec=sec):
+                if self.neuron.h.ismembrane("Ih_linearized_v2", sec=sec):
                     seg.e_pas += seg.ihcn_Ih_linearized_v2 / seg.g_pas
-                if neuron.h.ismembrane("Ih_frozen", sec=sec):
+                if self.neuron.h.ismembrane("Ih_frozen", sec=sec):
                     seg.e_pas += seg.ihcn_Ih_frozen / seg.g_pas
 
     def compute_mean_nu_X(self, params, OUTPUTPATH, TRANSIENT=200.):
@@ -842,7 +874,7 @@ class FieldPotential:
         nu_X = dict()
         for i, (X, N_X) in enumerate(zip(params.population_names,
                                          params.population_sizes)):
-            with h5py.File(os.path.join(OUTPUTPATH, 'spikes.h5'), 'r') as f:
+            with self.h5py.File(os.path.join(OUTPUTPATH, 'spikes.h5'), 'r') as f:
                 times = np.concatenate(f[X]['times'][()])
                 times = times[times >= TRANSIENT]
                 nu_X[X] = (times.size / N_X

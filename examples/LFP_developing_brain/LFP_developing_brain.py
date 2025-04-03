@@ -1,6 +1,5 @@
 import os
 import shutil
-import sys
 import pickle
 import json
 import pandas as pd
@@ -9,9 +8,6 @@ import numpy as np
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 import ncpi
 
 # Train new models (True) or load existing models (False)

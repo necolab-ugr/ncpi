@@ -1,8 +1,3 @@
-import os
-import sys
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 if __name__ == "__main__":

@@ -1,19 +1,13 @@
 import os
-import sys
 import json
 import pickle
 import shutil
 import numpy as np
 import pandas as pd
-
-# fE/I libraries
 import mne
 from mne.filter import next_fast_len
 from scipy.signal import hilbert
 from joblib import Parallel, delayed
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Set to True if features should be computed for the EEG data instead of the CDM data

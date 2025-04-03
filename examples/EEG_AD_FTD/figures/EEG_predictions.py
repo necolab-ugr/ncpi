@@ -1,20 +1,15 @@
 import os
-import sys
-
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import matplotlib.lines as mlines
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 results_path = '../results'
 
 # Load channel names
 ch_names_POCTEP = pd.read_pickle(os.path.join(results_path, 'ch_names_POCTEP.pkl'))
-ch_names_OpenNEURO = pd.read_pickle(os.path.join(results_path, 'ch_names_OpenNEURO.pkl'))
+# ch_names_OpenNEURO = pd.read_pickle(os.path.join(results_path, 'ch_names_OpenNEURO.pkl'))
 
 def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
     '''
@@ -399,4 +394,4 @@ if __name__ == "__main__":
         fig1.savefig('EI-predictions-Hybrid.png')
         fig2.savefig('Jext-predictions-Hybrid.png')
 
-# plt.show()
+plt.show()
