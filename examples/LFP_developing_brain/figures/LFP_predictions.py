@@ -4,13 +4,13 @@ import sys
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
-
-# ncpi toolbox
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 import ncpi
 
 # Parameters of LIF model simulations
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../Hagen_model/simulation/params'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '../../simulation/Hagen_model/simulation/params'))
+
+# Path to saved firing rates
+fr_path = '/DATOS/pablomc/ML_models/4_var/MLP'
 
 # Calculate new firing rates (True) or load them from file (False)
 compute_firing_rate = False
@@ -115,18 +115,18 @@ for method in all_methods:
                                       output_folder='../../Hagen_model/simulation/output')
 
                 # Save parameters to a pickle file
-                with open(os.path.join('../../Hagen_model/simulation/output', 'network.pkl'), 'wb') as f:
+                with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'network.pkl'), 'wb') as f:
                     pickle.dump(LIF_params, f)
 
                 # Run the simulation
                 sim.simulate('simulation.py', 'simulation_params.py')
 
                 # Load spike times
-                with open(os.path.join('../../Hagen_model/simulation/output', 'times.pkl'), 'rb') as f:
+                with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'times.pkl'), 'rb') as f:
                     times = pickle.load(f)
 
                 # Load tstop
-                with open(os.path.join('../../Hagen_model/simulation/output', 'tstop.pkl'), 'rb') as f:
+                with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'tstop.pkl'), 'rb') as f:
                     tstop = pickle.load(f)
 
                 # Transient period
@@ -152,9 +152,9 @@ if compute_firing_rate:
     with open('data/IDs.pkl', 'wb') as f:
         pickle.dump(IDs, f)
 else:
-    with open('data/firing_rates_preds.pkl', 'rb') as f:
+    with open(os.path.join(fr_path,'firing_rates_preds.pkl'), 'rb') as f:
         firing_rates = pickle.load(f)
-    with open('data/IDs.pkl', 'rb') as f:
+    with open(os.path.join(fr_path,'IDs.pkl'), 'rb') as f:
         IDs = pickle.load(f)
 
 # Create a figure and set its properties
@@ -266,7 +266,12 @@ for row in range(2):
             data_EI['Group'] = data_EI['Group'].astype(str)
 
             Analysis = ncpi.Analysis(data_EI)
-            lmer_res = Analysis.lmer(control_group='4', data_col='Y',data_index=-1, sensors=False)
+            lmer_res = Analysis.lmer(control_group='4', data_col='Y',data_index=-1,
+                                     models = {'mod00': 'Y ~ Group + (1 | ID)',
+                                                         'mod01': 'Y ~ Group'},
+                                     bic_models=["mod00", "mod01"],
+                                     anova_tests = None,
+                                     specs= '~Group')
 
             # Add p-values to the plot
             y_max = ax.get_ylim()[1]

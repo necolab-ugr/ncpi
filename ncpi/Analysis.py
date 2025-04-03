@@ -4,7 +4,7 @@ import scipy.interpolate
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.cm import ScalarMappable
-from . import tools
+from ncpi import tools
 
 
 class Analysis:
@@ -19,29 +19,90 @@ class Analysis:
         self.data = data
 
 
-    def lmer(self, control_group = 'HC', data_col = 'Y', data_index = -1, sensors = False):
+    def lmer(self, control_group = 'HC', data_col = 'Y', data_index = -1, models = None,
+             bic_models = None, anova_tests = None, specs = None):
+        """
+        Perform linear mixed-effects model (lmer) or linear model (lm) comparisons using R's `lme4` and `emmeans`
+        packages.
 
+        Parameters
+        ----------
+        control_group: str
+            The control group to be used for comparisons.
+        data_col: str
+            The name of the data column to be analyzed.
+        data_index: int
+            The index of the data column to be analyzed. If -1, the entire column is used.
+        models: dict
+            A dictionary of models to be used for analysis. The keys are model names and the values are model formulas.
+            if models is None, the default models are used:
+                - mod00: Y ~ Group + (1 | ID)
+                - mod01: Y ~ Group
+            The best model is selected based on BIC (Bayesian Information Criterion), unless bic_models is None.
+        bic_models: list
+            A  list of models to be evaluated using BIC. If bic_models is None, the first model is selected. All models
+            have to be defined in the models dictionary.
+            Example:
+                bic_models = ["mod01", "mod02"] # Compare mod01 vs. mod02
+        anova_tests: dict
+            A dictionary that specifies which models should undergo an ANOVA test after BIC selection. If anova_tests
+            is None, no ANOVA tests are performed. Each test must contain two models to be compared. All models have
+            to be defined in the models dictionary.
+            Example:
+                anova_tests = {
+                    "test1": ["mod00", "mod02"],  # Compare mod00 vs. mod02
+                    "test2": ["mod01", "mod03"]   # Compare mod01 vs. mod03
+                }
+        specs: string
+            The specifications for the emmeans function in R. If specs is None, the default specs are used:
+                - ~Group
+
+        Returns
+        -------
+        results: dict
+            A dictionary containing the results of the analysis. The keys are the names of the groups being compared
+            and the values are DataFrames containing the results of the analysis.
+
+        """
+
+        # Check if rpy2 is installed
         if not tools.ensure_module("rpy2"):
             raise ImportError("rpy2 is required for lmer but is not installed.")
-
-        from rpy2.robjects import pandas2ri, r
-        import rpy2.robjects as ro
+        pandas2ri = tools.dynamic_import("rpy2.robjects.pandas2ri")
+        r = tools.dynamic_import("rpy2.robjects","r")
+        ListVector = tools.dynamic_import("rpy2.robjects","ListVector")
+        ro = tools.dynamic_import("rpy2","robjects")
 
         # Activate pandas2ri
         pandas2ri.activate()
 
-        # Load R libraries
-        r('''
-        library(dplyr)
-        library(lme4)
-        library(emmeans)
-        library(ggplot2)
-        library(repr)
-        library(mgcv)
+        # Import R packages
+        ro.r('''
+        # Function to check and load packages
+        load_packages <- function(packages) {
+            for (pkg in packages) {
+                if (!require(pkg, character.only = TRUE)) {
+                    stop("R package '", pkg, "' is not installed.")
+                }
+            }
+        }
+
+        # Load required packages
+        load_packages(c("dplyr", "lme4", "emmeans", "ggplot2", "repr", "mgcv"))
         ''')
 
+        # Check if the data is a pandas DataFrame
         if not isinstance(self.data, pd.DataFrame):
-            raise ValueError('The data parameter must be a pandas DataFrame.')
+            raise ValueError('The data must be a pandas DataFrame.')
+
+        # Check if the data_col is in the DataFrame
+        if data_col not in self.data.columns:
+            raise ValueError(f'The data_col "{data_col}" is not in the DataFrame columns.')
+
+        # Check if 'ID', 'Group', 'Epoch' and 'Sensor' are in the DataFrame
+        for col in ['ID', 'Group', 'Epoch', 'Sensor']:
+            if col not in self.data.columns:
+                raise ValueError(f'The column "{col}" is not in the DataFrame.')
 
         # Copy the dataframe
         df = self.data.copy()
@@ -49,7 +110,7 @@ class Analysis:
         # Remove all columns except 'ID', 'Group', 'Epoch', 'Sensor' and data_col
         df = df[['ID', 'Group', 'Epoch', 'Sensor', data_col]]
 
-        # If data_index is not empty, select the element from the data_col column
+        # If data_index is not -1, select the data_index value from the data_col
         if data_index >= 0:
             df[data_col] = df[data_col].apply(lambda x: x[data_index])
 
@@ -66,16 +127,43 @@ class Analysis:
         # Rename data_col column to Y
         df.rename(columns={data_col: 'Y'}, inplace=True)
 
+        # Force categorical data type
+        df["Sensor"] = df["Sensor"].astype('category')
+
+        # Default models if none are provided
+        if models is None:
+            models = {
+                'mod00': 'Y ~ Group + (1 | ID)',
+                'mod01': 'Y ~ Group'
+            }
+
+        # Default specs if none are provided
+        if specs is None:
+            specs = '~Group'
+
+        # Check that all models defined in bic_models have been also included in the models dictionary
+        if bic_models is not None:
+            for model in bic_models:
+                if model not in models.keys():
+                    raise ValueError(f'bic_models: the model "{model}" is not defined in the models dictionary.')
+
+        # Check that all models defined in anova_tests have been also included in the models dictionary
+        if anova_tests is not None:
+            for test in anova_tests.values():
+                for model in test:
+                    if model not in models.keys():
+                        raise ValueError(f'anova_tests: the model "{model}" is not defined in the models dictionary.')
+
         results = {}
         for label, label_comp in zip(groups, groups_comp):
             print(f'\n\n--- Group: {label}')
-            # Filter the DataFrame to obtain the desired groups
-            df_pair = df[(df['Group'] == control_group) | (df['Group'] == label)]
+            r('rm(list = ls())')
+            df_pair = df[df['Group'].isin([control_group, label])]
             ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
             ro.globalenv['label'] = label
             ro.globalenv['control_group'] = control_group
 
-            # Convert columns to factors
+            # Convert to factors
             r('''
             df_pair$ID = as.factor(df_pair$ID)
             df_pair$Group = factor(df_pair$Group, levels = c(label, control_group))
@@ -87,102 +175,113 @@ class Analysis:
             # if table in R is empty for any group, skip the analysis
             if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
                 results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
+            # Fit the linear (mixed-effects) models
             else:
-                # Fit the linear mixed-effects models:
-                # - mod00: full model with random intercepts for each subject
-                # - mod01: reduced model without random intercepts
-                # - mod02: full model with random intercepts for each subject and sensor
-                # - mod03: reduced model without random intercepts for each sensor
-                if sensors == False:
-                    r('''
-                    mod00 = Y ~ Group  + (1 | ID)
-                    mod01 = Y ~ Group
-                    m00 <- lmer(mod00, data=df_pair)
-                    m01 <- lm(mod01, data=df_pair)
-                    print(summary(m00))
-                    print(summary(m01))
-                    ''')
-                else:
-                    r('''
-                    mod00 = Y ~ Group * Sensor + (1 | ID)
-                    mod01 = Y ~ Group * Sensor
-                    mod02 = Y ~ Group + Sensor + (1 | ID)
-                    mod03 = Y ~ Group + Sensor
-                    m00 <- lmer(mod00, data=df_pair)
-                    m01 <- lm(mod01, data=df_pair)
-                    m02 <- lmer(mod02, data=df_pair)
-                    m03 <- lm(mod03, data=df_pair)
-                    print(summary(m00))
-                    print(summary(m01))
-                    print(summary(m02))
-                    print(summary(m03))
-                    ''')
+                for ii, (model_name, formula) in enumerate(models.items()):
+                    if (bic_models is None and ii == 0) or (bic_models is not None and model_name in bic_models):
+                        # print(f'--- BIC test: fitting model: {model_name}')
+                        ro.globalenv[model_name] = formula
+                        r(f"{model_name} <- {'lmer' if '(1 | ID)' in formula else 'lm'}({model_name}, data=df_pair)")
 
-                # BIC model selection
+                # BIC test: handle single and multiple model cases properly
                 r('''
-                all_models <- c('m00', 'm01')
-                bics <- c(BIC(m00), BIC(m01))
-                print(bics)
-                index <- which.min(bics)
-                mod_sel <- all_models[index]
+                all_models <- names(which(sapply(ls(), function(x) inherits(get(x), "merMod") || inherits(get(x), "lm"))))
 
-                if (mod_sel == 'm00') {
-                    m_sel <- m00
+                if (length(all_models) == 1) {
+                    m_sel <- all_models[1]  # Use the only model available
+                } else {
+                    bics <- sapply(all_models, function(m) BIC(get(m)))
+                    index <- which.min(bics)
+                    m_sel <- all_models[index]
                 }
-                if (mod_sel == 'm01') {
-                    m_sel <- m01
-                }
+                
+                final_model <- get(m_sel)
+
                 ''')
+                print(f'--- BIC test. Selected model: {r("m_sel")}')
 
-                # ANOVA test
-                if sensors == True:
+                # Perform ANOVA tests only for user-specified comparisons
+                if anova_tests is not None:
+                    # Fit the remaining models
+                    for ii, (model_name, formula) in enumerate(models.items()):
+                        # Check if model already exists in the R environment
+                        if model_name not in r.ls():
+                            # print(f'--- ANOVA test: fitting model: {model_name}')
+                            ro.globalenv[model_name] = formula
+                            r(f"{model_name} <- {'lmer' if '(1 | ID)' in formula else 'lm'}({model_name}, data=df_pair)")
+
+                    # Convert to R list
+                    r_anova_tests = ListVector(anova_tests)
+
+                    # Assign to R global environment
+                    ro.globalenv['anova_tests'] = r_anova_tests
+
+
                     r('''
-                    if (mod_sel == 'm00') {
-                        anova_result = capture.output(anova(m02, m00))
-                        val <- strsplit(anova_result[7], " ")[[1]]
-                        val <- val[val != ""]
-                        p_value = as.numeric(val[length(val)])
-                        p_value = ifelse(is.na(p_value), 0, p_value)
-                        if (p_value >= 0.05) {
-                            m_sel <- m02
+                    m_name <- m_sel
+                    for (comparison in names(anova_tests)) {
+                        models <- anova_tests[[comparison]]
+                        
+                        # Check if the selected model is in the list of models to compare
+                        if (m_sel %in% models) {
+                            anova_result <- capture.output(anova(get(as.character(models[2])), get(as.character(models[1]))))
+                            
+                            # Extract p-value from the ANOVA result.
+                            # Case 1: Standard ANOVA table with Pr(>F)
+                            if (any(grepl("Pr\\\\(>F\\\\)", anova_result))) {
+                                p_line <- anova_result[grep("Pr\\\\(>F\\\\)", anova_result)+2]
+                            }
+                            # Case 2: Mixed effects output with Pr(>Chisq)
+                            else if (any(grepl("Pr\\\\(>Chisq\\\\)", anova_result))) {
+                                p_line <- anova_result[grep("Pr\\\\(>Chisq\\\\)", anova_result) + 2]
+                            }
+                            # are there any other cases?
+                            else {
+                            next
+                            }
+                            matches <- regmatches(p_line, gregexpr("[0-9]+\\\\.?[0-9]*(e[+-]?[0-9]+)?", p_line))[[1]]
+                            p_value <- as.numeric(tail(matches, 1))
+                             
+                            if (!is.na(p_value) && p_value >= 0.05) {
+                                # Determine which model is simpler (counts all fixed-effect terms, including interactions)
+                                formula1 <- formula(get(as.character(models[1])))
+                                formula2 <- formula(get(as.character(models[2])))
+                                
+                                # Count terms (excluding random effects after '|')
+                                terms1 <- length(attr(terms(formula1), "term.labels"))  # Handles *, :, etc.
+                                terms2 <- length(attr(terms(formula2), "term.labels"))
+
+                                # Select the model with less complexity
+                                if (terms1 <= terms2) {
+                                    final_model <- get(as.character(models[1]))
+                                    m_name <- models[1]
+                                } else {
+                                    final_model <- get(as.character(models[2]))
+                                    m_name <- models[2]
+                                }
+                                break
+                            }
                         }
                     }
-                    if (mod_sel == 'm01') {
-                        anova_result = capture.output(anova(m03, m01))
-                        val <- strsplit(anova_result[7], " ")[[1]]
-                        val <- val[val != ""]
-                        p_value = as.numeric(val[length(val)])
-                        p_value = ifelse(is.na(p_value), 0, p_value)
-                        if (p_value >= 0.05) {
-                            m_sel <- m03
-                        }
-                    }
                     ''')
+                    print(f'--- ANOVA test. Selected model: {r("m_name")}')
 
-                # Compute the pairwise comparisons between groups
-                if sensors == False:
-                    r('''
-                    emm <- suppressMessages(emmeans(m_sel, specs=~Group))
-                    ''')
-                else:
-                    r('''
-                    emm <- suppressMessages(emmeans(m_sel, specs=~Group | Sensor))
-                    ''')
+                # Compute pairwise comparisons
+                ro.globalenv['specs'] = specs
 
                 r('''
+                emm <- suppressMessages(emmeans(final_model, specs=as.formula(specs)))
                 res <- pairs(emm, adjust='holm')
                 df_res <- as.data.frame(res)
                 ''')
 
-                if sensors:
+                # Ensure Sensor remains as a character column
+                if 'Sensor' in r('names(df_res)'):
                     r('''
-                    # Ensure Sensor remains a character column
-                    df_res$Sensor <- as.character(df_res$Sensor)
+                        df_res$Sensor <- as.character(df_res$Sensor)
                     ''')
 
                 df_res_r = ro.r['df_res']
-
-                # Convert the R DataFrame to a pandas DataFrame
                 with (pandas2ri.converter + pandas2ri.converter).context():
                     df_res_pd = pandas2ri.conversion.get_conversion().rpy2py(df_res_r)
 
@@ -217,9 +316,11 @@ class Analysis:
                 Max value used for plotting.
         '''
 
+        # Check if mpl_toolkits is installed
         if not tools.ensure_module("mpl_toolkits"):
             raise ImportError("mpl_toolkits is required for EEG_topographic_plot but is not installed.")
-        from mpl_toolkits.axes_grid1 import make_axes_locatable
+        make_axes_locatable = tools.dynamic_import("mpl_toolkits.axes_grid1",
+                                                   "make_axes_locatable")
 
         default_parameters = {
             'radius': 0.6,
@@ -331,6 +432,14 @@ class Analysis:
             vmax: float
                 Max value used for plotting.
             '''
+
+            # Check data type
+            if not isinstance(data, (list, np.ndarray)):
+                raise ValueError('The data must be a list or numpy array.')
+
+            # Check data length
+            if len(data) not in [19, 20]:
+                raise ValueError('The data must contain 19 or 20 elements.')
 
             # Coordinates of the EEG electrodes
             koord_dict = {

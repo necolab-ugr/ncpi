@@ -1,4 +1,6 @@
 import importlib.util
+import importlib
+from typing import Any, Optional
 import subprocess
 import sys
 
@@ -34,3 +36,34 @@ def ensure_module(module_name, package_name=None):
         print(f"Unexpected error: {e}")
 
     return False  # Module is not available
+
+
+def dynamic_import(
+        module_path: str,
+        attribute_name: Optional[str] = None,
+        package: Optional[str] = None
+) -> Any:
+    """
+    Dynamically import a module or module attribute.
+
+    Args:
+        module_path: Full path to the module (e.g., 'package.subpackage.module')
+        attribute_name: Optional name of attribute to import from the module
+        package: Optional package name for relative imports
+
+    Returns:
+        The imported module or attribute
+
+    Raises:
+        ImportError: If the module or attribute cannot be imported
+    """
+    try:
+        module = importlib.import_module(module_path, package=package)
+
+        if attribute_name is not None:
+            return getattr(module, attribute_name)
+        return module
+
+    except ImportError as e:
+        raise ImportError(f"Failed to import {module_path}" +
+                          (f".{attribute_name}" if attribute_name else "")) from e

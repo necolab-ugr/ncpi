@@ -3,88 +3,9 @@ import pickle
 import json
 import numpy as np
 import pandas as pd
-# from rpy2.robjects import pandas2ri, r
-# import rpy2.robjects as ro
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
 from matplotlib import pyplot as plt
-
-# def lm(df):
-#     # Activate pandas2ri
-#     pandas2ri.activate()
-#
-#     # Load R libraries directly in R
-#     r('''
-#     library(dplyr)
-#     library(lme4)
-#     library(emmeans)
-#     library(ggplot2)
-#     library(repr)
-#     library(mgcv)
-#     ''')
-#
-#     # Copy the dataframe
-#     df = df.copy()
-#
-#     # The bin=0 group is considered as the control group
-#     df['Group'] = df['Group'].apply(lambda x: 'HC' if x == 0 else str(x))
-#
-#     # Filter out 'HC' from the list of unique groups
-#     groups = df['Group'].unique()
-#     groups = [group for group in groups if group != 'HC']
-#
-#     # Create a list with the different group comparisons
-#     groups_comp = [f'{group}vsHC' for group in groups]
-#
-#     # Remove rows where the variable is zero
-#     df = df[df['Feature'] != 0]
-#
-#     results = {}
-#     for label, label_comp in zip(groups, groups_comp):
-#         print(f'\n\n--- Group: {label}')
-#         # Filter DataFrame to obtain the desired groups
-#         df_pair = df[(df['Group'] == 'HC') | (df['Group'] == label)]
-#         ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
-#         ro.globalenv['label'] = label
-#         # print(df_pair)
-#
-#         # Convert columns to factors
-#         r('''
-#         df_pair$Group = factor(df_pair$Group, levels = c(label, 'HC'))
-#         print(table(df_pair$Group))
-#         ''')
-#
-#         # if table in R is empty for any group, skip the analysis
-#         if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
-#             results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
-#         else:
-#             # Fit the linear model
-#             r('''
-#             mod = Feature ~ Group
-#             m <- lm(mod, data=df_pair)
-#             print(summary(m))
-#             ''')
-#
-#             # Compute the pairwise comparisons between groups
-#             r('''
-#             emm <- suppressMessages(emmeans(m, specs=~Group))
-#             ''')
-#
-#             r('''
-#             res <- pairs(emm, adjust='holm')
-#             df_res <- as.data.frame(res)
-#             print(df_res)
-#             ''')
-#
-#             df_res_r = ro.r['df_res']
-#
-#             # Convert the R DataFrame to a pandas DataFrame
-#             with (pandas2ri.converter + pandas2ri.converter).context():
-#                 df_res_pd = pandas2ri.conversion.get_conversion().rpy2py(df_res_r)
-#
-#             results[label_comp] = df_res_pd
-#
-#     return results
 
 # Names of catch22 features
 try:
@@ -183,19 +104,6 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
         theta = {'data': np.ones((10,7))}
         X = np.zeros((10,22)) if method == 'catch22' else np.zeros((10, 1))
 
-    # try:
-    #     # Load empirical data
-    #     data_EI = np.load(os.path.join('../data', method, 'emp_data_reduced.pkl'), allow_pickle=True)
-    #     ages[method] = np.array(data_EI['Group'].tolist())
-    #     # Pick only ages >= 4
-    #     data_EI = data_EI[data_EI['Group'] >= 4]
-    #     ages[method] = ages[method][ages[method] >= 4]
-    # except:
-    #     print(f'Error loading empirical data for {method}.')
-    #     # Fake data
-    #     data_EI = pd.DataFrame({'Features': [X[i] for i in range(10)]})
-    #     ages[method] = np.arange(20)
-
     # Remove nan features from simulation data
     if X.ndim == 1:
         X = X.reshape(-1, 1)
@@ -203,14 +111,6 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
     X = X[ii]
     theta['data'] = theta['data'][ii]
     print(f'Number of samples after removing nan features: {len(X)}')
-
-    # # Remove nan features from empirical data
-    # if np.array(data_EI['Features'].tolist()).ndim == 1:
-    #     ii = np.where(~np.isnan(np.array(data_EI['Features'].tolist())))[0]
-    # else:
-    #     ii = np.where(~np.isnan(np.array(data_EI['Features'].tolist())).any(axis=1))[0]
-    # data_EI = data_EI.iloc[ii]
-    # ages[method] = ages[method][ii]
 
     # Collect parameters
     parameters[method]['E_I'] = ((theta['data'][:, 0] / theta['data'][:, 2]) /
@@ -224,15 +124,9 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
         features['dfa'] = X[:, catch22_names.index('SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1')]
         features['rs_range'] = X[:, catch22_names.index('SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1')]
         features['high_fluct'] = X[:, catch22_names.index('MD_hrv_classic_pnn40')]
-        # emp['dfa'] = np.array(data_EI['Features'].apply(
-        #     lambda x: x[catch22_names.index('SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1')]).tolist())
-        # emp['rs_range'] = np.array(data_EI['Features'].apply(
-        #     lambda x: x[catch22_names.index('SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1')]).tolist())
-        # emp['high_fluct'] = np.array(data_EI['Features'].apply(
-        #     lambda x: x[catch22_names.index('MD_hrv_classic_pnn40')]).tolist())
+
     elif method == 'power_spectrum_parameterization_1':
         features['slope'] = X[:,0]
-        # emp['slope'] = np.array(data_EI['Features'].tolist())
 
 # Create a figure and set its properties
 fig = plt.figure(figsize=(7.5, 4.5), dpi=300)
@@ -241,8 +135,6 @@ plt.rc('xtick', labelsize=8)
 plt.rc('ytick', labelsize=8)
 
 # Labels for the parameters
-# param_labels = [r'$E/I$', r'$\tau_{syn}^{exc}$ (ms)', r'$\tau_{syn}^{inh}$ (ms)',
-#           r'$J_{syn}^{ext}$ (nA)', 'LFP data']
 param_labels = [r'$E/I$', r'$\tau_{syn}^{exc}$ (ms)', r'$\tau_{syn}^{inh}$ (ms)',
           r'$J_{syn}^{ext}$ (nA)']
 
@@ -283,12 +175,6 @@ for row in range(4):
         # Simulation data
         if col < 4:
             try:
-                # Bins for the boxplots
-                # n_bins = np.unique(parameters[method][param]).shape[0]
-                # if n_bins > 10:
-                #     n_bins = 10
-                # bins = np.linspace(np.min(parameters[method][param]), 1.05*np.max(parameters[method][param]), n_bins)
-
                 # Constraints for the bins
                 if col == 0:
                     minp = 0.1
@@ -368,75 +254,8 @@ for row in range(4):
                 # Change y-lim
                 ax.set_ylim([y_min, y_max + 2 * delta])
 
-                # # LM analysis
-                # print('\n--- LM analysis.')
-                # # Create the dataframe
-                # df = pd.DataFrame({'Feature': np.concatenate(bin_features),
-                #                    'Group': np.array(group)})
-                # lmer_res = lm(df)
-                #
-                # # Add p-values to the plot
-                # y_max = ax.get_ylim()[1]
-                # y_min = ax.get_ylim()[0]
-                # delta = (y_max - y_min) * 0.1
-                #
-                # if col == 0:
-                #     groups = ['3', '6', '9','12']
-                # elif col == 1 or col == 2:
-                #     groups = ['2', '4', '6']
-                # else:
-                #     groups = ['2', '4']
-                #
-                # for i, group in enumerate(groups):
-                #     p_value = lmer_res[f'{group}vsHC']['p.value']
-                #     if p_value.empty:
-                #         continue
-                #
-                #     # Significance levels
-                #     if p_value[0] < 0.05 and p_value[0] >= 0.01:
-                #         pp = '*'
-                #     elif p_value[0] < 0.01 and p_value[0] >= 0.001:
-                #         pp = '**'
-                #     elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
-                #         pp = '***'
-                #     elif p_value[0] < 0.0001:
-                #         pp = '****'
-                #     else:
-                #         pp = 'n.s.'
-                #
-                #     if pp != 'n.s.':
-                #         offset = -delta*0.2
-                #     else:
-                #         offset = delta*0.05
-                #
-                #     ax.text(int(group)/2., y_max + delta*i + delta*0.05 + offset,
-                #             f'{pp}', ha='center', fontsize=8 if pp != 'n.s.' else 7)
-                #     ax.plot([0, int(group)], [y_max + delta*i, y_max + delta*i], color='black',
-                #             linewidth=0.5)
-                #
-                # # Change y-lim
-                # ax.set_ylim([y_min, y_max + delta*(len(groups))])
-
             except:
                 pass
-
-        # # Empirical data
-        # if col == 4:
-        #     try:
-        #         for i, age in enumerate(np.unique(ages[method])):
-        #             idx = np.where(ages[method] == age)[0]
-        #             data_plot = emp[feat][idx]
-        #
-        #             # Boxplot
-        #             box = ax.boxplot(data_plot, positions=[age], showfliers=False,
-        #                              widths=0.9, patch_artist=True, medianprops=dict(color='red', linewidth=0.8),
-        #                              whiskerprops=dict(color='black', linewidth=0.5),
-        #                              capprops=dict(color='black', linewidth=0.5),
-        #                              boxprops=dict(linewidth=0.5))
-        #             for patch in box['boxes']:
-        #                 patch.set_facecolor(cmap(i / len(np.unique(ages[method]))))
-        #     except:
-        #         pass
 
         # Labels
         if col < 4 and row == 3:
@@ -455,16 +274,6 @@ for row in range(4):
         else:
             ax.set_xticks([])
             ax.set_xticklabels([])
-
-        # if col == 4 and row == 3:
-        #     # X-axis labels
-        #     try:
-        #         ax.set_xticks(np.unique(ages[method])[::2])
-        #         ax.set_xticklabels([f'{str(i)}' for i in np.unique(ages[method])[::2]],fontsize = 8)
-        #     except:
-        #         pass
-        #
-        #     ax.set_xlabel('Postnatal days')
 
         if col == 0:
             ax.yaxis.set_label_coords(-0.35, 0.5)
