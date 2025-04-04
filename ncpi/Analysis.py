@@ -289,6 +289,91 @@ class Analysis:
 
         return results
 
+    def cohend(self, control_group='HC', data_col='Y', data_index=-1):
+        '''
+        Compute Cohen's d for all pairwise group comparisons across sensors.
+
+        Parameters
+        ----------
+        control_group: str
+            The control group to be used for comparisons.
+        data_col: str
+            The name of the data column to be analyzed.
+        data_index: int
+            The index of the data column to be analyzed. If -1, the entire column is used.
+
+        Returns
+        -------
+        results: dict
+            A dictionary containing the results of the analysis. The keys are the names of the groups being compared
+            and the values are lists containing the Cohen's d values for each sensor.
+        '''
+
+        # Check if the data is a pandas DataFrame
+        if not isinstance(self.data, pd.DataFrame):
+            raise ValueError('The data must be a pandas DataFrame.')
+
+        # Check if the data_col is in the DataFrame
+        if data_col not in self.data.columns:
+            raise ValueError(f'The data_col "{data_col}" is not in the DataFrame columns.')
+
+        # Check if 'Group' and 'Sensor' are in the DataFrame
+        for col in ['Group', 'Sensor']:
+            if col not in self.data.columns:
+                raise ValueError(f'The column "{col}" is not in the DataFrame.')
+
+        # Copy the dataframe
+        df = self.data.copy()
+
+        # Remove all columns except 'Group', 'Sensor' and data_col
+        df = df[['Group', 'Sensor', data_col]]
+
+        # If data_index is not -1, select the data_index value from the data_col
+        if data_index >= 0:
+            df[data_col] = df[data_col].apply(lambda x: x[data_index])
+
+        # Filter out control_group from the list of unique groups
+        groups = df['Group'].unique()
+        groups = [group for group in groups if group != control_group]
+
+        # Create a list with the different group comparisons
+        groups_comp = [f'{group}vs{control_group}' for group in groups]
+
+        # Remove rows where the data_col is zero
+        df = df[df[data_col] != 0]
+
+        results = {}
+        for label, label_comp in zip(groups, groups_comp):
+            print(f'\n\n--- Group: {label}')
+
+            # filter out control_group and the current group
+            df_pair = df[df['Group'].isin([control_group, label])]
+
+            all_d = []
+            all_sensors = []
+            for sensor in df_pair['Sensor'].unique():
+                df_sensor = df_pair[df_pair['Sensor'] == sensor]
+
+                group1 = np.array(df_sensor[df_sensor['Group'] == label][data_col])
+                group2 = np.array(df_sensor[df_sensor['Group'] == control_group][data_col])
+
+                # Check if both groups have more than 2 elements
+                if len(group1) > 2 and len(group2) > 2:
+                    # Calculate Cohen's d
+                    n1, n2 = len(group1), len(group2)
+                    mean1, mean2 = np.mean(group1), np.mean(group2)
+                    std1, std2 = np.std(group1, ddof=1), np.std(group2, ddof=1)
+
+                    pooled_std = np.sqrt(((n1 - 1) * std1 ** 2 + (n2 - 1) * std2 ** 2) / (n1 + n2 - 2))
+                    d = (mean1 - mean2) / pooled_std
+                    all_d.append(d)
+                else:
+                    all_d.append(np.nan)
+                all_sensors.append(sensor)
+
+            results[label_comp] = pd.DataFrame({'d': all_d, 'Sensor': all_sensors})
+
+        return results
 
     def EEG_topographic_plot(self, **kwargs):
         '''

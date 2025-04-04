@@ -5,11 +5,22 @@ from matplotlib import pyplot as plt
 import matplotlib.lines as mlines
 import ncpi
 
+# Set the path to the results folder
 results_path = '../results'
 
+# Select the statistical analysis method ('cohen', 'lmer')
+statistical_analysis = 'lmer'
+
+databases = [
+    'POCTEP',
+    # 'OpenNEURO'
+    ]
+
 # Load channel names
-ch_names_POCTEP = pd.read_pickle(os.path.join(results_path, 'ch_names_POCTEP.pkl'))
-# ch_names_OpenNEURO = pd.read_pickle(os.path.join(results_path, 'ch_names_OpenNEURO.pkl'))
+if 'POCTEP' in databases:
+    ch_names_POCTEP = pd.read_pickle(os.path.join(results_path, 'ch_names_POCTEP.pkl'))
+if 'OpenNEURO' in databases:
+    ch_names_OpenNEURO = pd.read_pickle(os.path.join(results_path, 'ch_names_OpenNEURO.pkl'))
 
 def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
     '''
@@ -76,24 +87,10 @@ if __name__ == "__main__":
     spacing_x = 0.04
     spacing_y = 0.064 if option == 'a' else 0.004
 
-    fig1 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
+    fig1 = plt.figure(figsize=(7.5, 5.5), dpi=300)
     if option == 'b':
         fig2 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
-        fig3 = plt.figure(figsize=(7.5, 5.5), dpi=300) 
-
-    if option == 'b':
-        methods = [
-            'catch22',
-            'SB_TransitionMatrix_3ac_sumdiagcov',
-            'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
-            'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1',
-            'CO_HistogramAMI_even_2_5',
-        ]
-    if option == 'a':
-        methods = [
-            'catch22',
-            'power_spectrum_parameterization_1'
-        ]
+        fig3 = plt.figure(figsize=(7.5, 5.5), dpi=300)
 
     max = 0
 
@@ -112,7 +109,12 @@ if __name__ == "__main__":
                 method = 'catch22'
             if row == 2 or row == 3:
                 method = 'power_spectrum_parameterization_1'
-            data = pd.read_pickle(f'{results_path}/POCTEP_True-{method}-4_var-{inference_method}-elec-pred_lmer.pkl')
+            try:
+                data = pd.read_pickle(f'{results_path}/POCTEP_True-{method}-4_var-{inference_method}-'
+                                      f'elec-pred_{statistical_analysis}.pkl')
+            except Exception as e:
+                print(f'Error loading data for {method}: {e}')
+                continue
 
         current_left = left
         for col in range(ncols):
@@ -129,9 +131,14 @@ if __name__ == "__main__":
                     method = 'catch22'
 
                 database = 'POCTEP_True' if col < 3 else 'OpenNEURO'
-                data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-{inference_method}-elec-pred_lmer.pkl')
-                feature_data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-{inference_method}-'
-                                              f'elec-feat_lmer.pkl') if row != 4 else None
+                try:
+                    data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-{inference_method}-'
+                                          f'elec-pred_{statistical_analysis}.pkl')
+                    feature_data = pd.read_pickle(f'{results_path}/{database}-{method}-2_var-{inference_method}-'
+                                                  f'elec-feat_{statistical_analysis}.pkl') if row != 4 else None
+                except Exception as e:
+                    print(f'Error loading data for {method}: {e}')
+                    continue
             
             if option == 'a':
                 if col == 0 or col == 3:
@@ -203,7 +210,7 @@ if __name__ == "__main__":
                 if col >= 3:
                     var = r'Jext' if row == 0 or row == 2 else 'tau_inh'
        
-                lmer_results = data[var]
+                stat_results = data[var]
             
             if option == 'b':
                 if col == 0:
@@ -231,70 +238,82 @@ if __name__ == "__main__":
                         ax1.set_ylabel(r'$[E/I]_{net}$(catch22)', fontsize=8)
                         ax2.set_ylabel(r'$J_{ext}$(catch22)', fontsize=8)
 
-                lmer_results = data['E/I']
-                lmer_results_jext = data['Jext']
+                stat_results = data['E/I']
+                stat_results_jext = data['Jext']
 
-            data_lmer = []
-            data_lmer_jext = []
-            data_lmer_feat = []
+            data_stat = []
+            data_stat_jext = []
+            data_stat_feat = []
             for elec in range(19):
-                # Find position of the electrode in the lmer results
+                # Find position of the electrode in the stat results
                 if option == 'a' or database == 'POCTEP_True':
-                    pos_lmer_results = np.where(lmer_results[f'{group}vsHC']['Sensor'] == ch_names_POCTEP[elec])[0]
+                    pos_results = np.where(stat_results[f'{group}vsHC']['Sensor'] == ch_names_POCTEP[elec])[0]
                 else:
-                    pos_lmer_results = np.where(lmer_results[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
-                    pos_lmer_results_jext = np.where(lmer_results_jext[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
+                    pos_results = np.where(stat_results[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
+                    pos_results_jext = np.where(stat_results_jext[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
                     pos_feature_data = np.where(feature_data[f'{group}vsHC']['Sensor'] == ch_names_OpenNEURO[elec])[0]
 
-                if len(pos_lmer_results) > 0:
-                    data_lmer = append_lmer_results(lmer_results, group, pos_lmer_results[0], p_value_th, data_lmer)
+                if len(pos_results) > 0:
+                    if statistical_analysis == 'lmer':
+                        data_stat = append_lmer_results(stat_results, group, pos_results[0], p_value_th, data_stat)
+                    elif statistical_analysis == 'cohen':
+                        data_stat.append(stat_results[f'{group}vsHC']['d'][pos_results[0]])
                 else:
-                    data_lmer.append(0)
+                    data_stat.append(0)
 
                 if option == 'b':
-                    if len(pos_lmer_results_jext) > 0:
-                        data_lmer_jext = append_lmer_results(lmer_results_jext, group, pos_lmer_results_jext[0],
-                                                             p_value_th, data_lmer_jext)
+                    if len(pos_results_jext) > 0:
+                        if statistical_analysis == 'lmer':
+                            data_stat_jext = append_lmer_results(stat_results_jext, group, pos_results_jext[0],
+                                                                 p_value_th, data_stat_jext)
+                        elif statistical_analysis == 'cohen':
+                            data_stat_jext.append(stat_results_jext[f'{group}vsHC']['d'][pos_results_jext[0]])
                     else:
-                        data_lmer_jext.append(0)
+                        data_stat_jext.append(0)
                     if row != 4:
                         if len(pos_feature_data) > 0:
-                            data_lmer_feat = append_lmer_results(feature_data, group, pos_feature_data[0],
-                                                                 p_value_th, data_lmer_feat)
+                            if statistical_analysis == 'lmer':
+                                data_stat_feat = append_lmer_results(feature_data, group, pos_feature_data[0],
+                                                                     p_value_th, data_stat_feat)
+                            elif statistical_analysis == 'cohen':
+                                data_stat_feat.append(feature_data[f'{group}vsHC']['d'][pos_feature_data[0]])
                         else:
-                            data_lmer_feat.append(0)
+                            data_stat_feat.append(0)
 
-            ylims_lmer = [-6., 6.]
+            if statistical_analysis == 'lmer':
+                ylims_stat = [-6., 6.]
+            else:
+                ylims_stat = [-1., 1.]
 
             # Create brainplot
-            analysis = ncpi.Analysis(data_lmer)
+            analysis = ncpi.Analysis(data_stat)
             analysis.EEG_topographic_plot(
                         electrode_size = 0.6,
                         ax = ax1,
                         fig=fig1,
-                        vmin = ylims_lmer[0],
-                        vmax = ylims_lmer[1],
+                        vmin = ylims_stat[0],
+                        vmax = ylims_stat[1],
                         label=False
             )
 
             if option == 'b':
-                analysis = ncpi.Analysis(data_lmer_jext)
+                analysis = ncpi.Analysis(data_stat_jext)
                 analysis.EEG_topographic_plot(
                             electrode_size = 0.6,
                             ax = ax2,
                             fig=fig2,
-                            vmin = ylims_lmer[0],
-                            vmax = ylims_lmer[1],
+                            vmin = ylims_stat[0],
+                            vmax = ylims_stat[1],
                             label=False
                 )
                 if row != 4:
-                    analysis = ncpi.Analysis(data_lmer_feat)
+                    analysis = ncpi.Analysis(data_stat_feat)
                     analysis.EEG_topographic_plot(
                                 electrode_size = 0.6,
                                 ax = ax3,
                                 fig=fig3,
-                                vmin = ylims_lmer[0],
-                                vmax = ylims_lmer[1],
+                                vmin = ylims_stat[0],
+                                vmax = ylims_stat[1],
                                 label=False
                     )
 
@@ -394,4 +413,4 @@ if __name__ == "__main__":
         fig1.savefig('EI-predictions-Hybrid.png')
         fig2.savefig('Jext-predictions-Hybrid.png')
 
-plt.show()
+# plt.show()

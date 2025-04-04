@@ -9,6 +9,9 @@ import numpy as np
 import shutil
 import ncpi
 
+# Select the statistical analysis method ('cohen', 'lmer')
+statistical_analysis = 'lmer'
+
 databases = [
     'POCTEP', 
     # 'OpenNEURO'
@@ -415,21 +418,24 @@ if __name__ == "__main__":
                 print(f'{method} computed in {(feat_end_time - feat_init_time)/60.} min')
 
 
-            ######################
-            #   LMER: FEATURES   #
-            ######################
+            ######################################
+            #   Statistical analysis: FEATURES   #
+            ######################################
 
-            print(f'\nLinear mixed model analysis of features for {method}...')
+            if statistical_analysis == 'lmer':
+                print(f'\nLinear mixed model analysis of features for {method}...')
+            elif statistical_analysis == 'cohen':
+                print(f'\nCohen\'s d analysis of features for {method}...')
 
-            lmer_init_time = time.time()
+            stat_init_time = time.time()
             for ii, elec in enumerate([False, True]):
                 is_elec = 'elec' if elec else 'noelec'
 
-                lmer_file_name = file_name + f'-{is_elec}-feat_lmer.pkl'
+                stat_file_name = file_name + f'-{is_elec}-feat_{statistical_analysis}.pkl'
 
-                # Check if the lmer results have already been computed
-                if os.path.exists(os.path.join('results', lmer_file_name)):
-                    print(f'{lmer_file_name} already computed.')
+                # Check if statistical results have already been computed
+                if os.path.exists(os.path.join('results', stat_file_name)):
+                    print(f'{stat_file_name} already computed.')
 
                 else:
                     # data with features
@@ -438,53 +444,62 @@ if __name__ == "__main__":
 
                     if method in catch22_names:
                         method_index = catch22_names.index(method)
-                        lmer_result = Analysis.lmer(control_group = 'HC', data_col = 'Features',
-                                                    data_index = method_index,
-                                                    models={
-                                                        'mod00': 'Y ~ Group * Sensor + (1 | ID)',
-                                                        'mod01': 'Y ~ Group * Sensor',
-                                                        'mod02': 'Y ~ Group + Sensor + (1 | ID)',
-                                                        'mod03': 'Y ~ Group + Sensor'
-                                                    } if elec else
-                                                        {'mod00': 'Y ~ Group + (1 | ID)',
-                                                         'mod01': 'Y ~ Group'},
-                                                    bic_models=["mod00", "mod01"],
-                                                    anova_tests={
-                                                        "test1": ["mod00", "mod02"],
-                                                        "test2": ["mod01", "mod03"]
-                                                    } if elec else None,
-                                                    specs = '~Group | Sensor' if elec else '~Group')
+                        if statistical_analysis == 'lmer':
+                            stat_result = Analysis.lmer(control_group = 'HC', data_col = 'Features',
+                                                        data_index = method_index,
+                                                        models={
+                                                            'mod00': 'Y ~ Group * Sensor + (1 | ID)',
+                                                            'mod01': 'Y ~ Group * Sensor',
+                                                            'mod02': 'Y ~ Group + Sensor + (1 | ID)',
+                                                            'mod03': 'Y ~ Group + Sensor'
+                                                        } if elec else
+                                                            {'mod00': 'Y ~ Group + (1 | ID)',
+                                                             'mod01': 'Y ~ Group'},
+                                                        bic_models=["mod00", "mod01"],
+                                                        anova_tests={
+                                                            "test1": ["mod00", "mod02"],
+                                                            "test2": ["mod01", "mod03"]
+                                                        } if elec else None,
+                                                        specs = '~Group | Sensor' if elec else '~Group')
+                        elif statistical_analysis == 'cohen':
+                            stat_result = Analysis.cohend(control_group = 'HC', data_col = 'Features',
+                                                        data_index = method_index)
 
-                        with open(os.path.join('results', lmer_file_name), 'wb') as results_file:
-                            pickle.dump(lmer_result, results_file)
+                        with open(os.path.join('results', stat_file_name), 'wb') as results_file:
+                            pickle.dump(stat_result, results_file)
 
                     if method == 'power_spectrum_parameterization_1':
-                        lmer_result = Analysis.lmer(control_group='HC', data_col='Features',
-                                                    data_index=-1,
-                                                    models={
-                                                        'mod00': 'Y ~ Group * Sensor + (1 | ID)',
-                                                        'mod01': 'Y ~ Group * Sensor',
-                                                        'mod02': 'Y ~ Group + Sensor + (1 | ID)',
-                                                        'mod03': 'Y ~ Group + Sensor'
-                                                    } if elec else
-                                                    {'mod00': 'Y ~ Group + (1 | ID)',
-                                                     'mod01': 'Y ~ Group'},
-                                                    bic_models=["mod00", "mod01"],
-                                                    anova_tests={
-                                                        "test1": ["mod00", "mod02"],
-                                                        "test2": ["mod01", "mod03"]
-                                                    } if elec else None,
-                                                    specs='~Group | Sensor' if elec else '~Group')
+                        if statistical_analysis == 'lmer':
+                            stat_result = Analysis.lmer(control_group='HC', data_col='Features',
+                                                        data_index=-1,
+                                                        models={
+                                                            'mod00': 'Y ~ Group * Sensor + (1 | ID)',
+                                                            'mod01': 'Y ~ Group * Sensor',
+                                                            'mod02': 'Y ~ Group + Sensor + (1 | ID)',
+                                                            'mod03': 'Y ~ Group + Sensor'
+                                                        } if elec else
+                                                        {'mod00': 'Y ~ Group + (1 | ID)',
+                                                         'mod01': 'Y ~ Group'},
+                                                        bic_models=["mod00", "mod01"],
+                                                        anova_tests={
+                                                            "test1": ["mod00", "mod02"],
+                                                            "test2": ["mod01", "mod03"]
+                                                        } if elec else None,
+                                                        specs='~Group | Sensor' if elec else '~Group')
+                        elif statistical_analysis == 'cohen':
+                            stat_result = Analysis.cohend(control_group='HC', data_col='Features',
+                                                          data_index=-1)
 
 
-                        with open(os.path.join('results', lmer_file_name), 'wb') as results_file:
-                            pickle.dump(lmer_result, results_file)
+                        with open(os.path.join('results', stat_file_name), 'wb') as results_file:
+                            pickle.dump(stat_result, results_file)
 
                     if method == 'catch22':
-                        print('LMER is not computed for the whole catch22 set. Use a specific catch22 feature instead.')
+                        print(f'{statistical_analysis} is not computed for the whole catch22 set. '
+                              f'Use a specific catch22 feature instead.')
 
-            lmer_end_time = time.time()
-            print(f'Linear mixed model analysis computed in {(lmer_end_time - lmer_init_time)/60.} min')
+            stat_end_time = time.time()
+            print(f'Statistical analysis computed in {(stat_end_time - stat_init_time)/60.} min')
 
             #######################################################
             #   PREDICTIONS OF PARAMETERS OF THE NEURAL CIRCUIT   #
@@ -588,23 +603,26 @@ if __name__ == "__main__":
                 # Save the DataFrame with the predictions
                 data.to_pickle(os.path.join('results', file_name+'.pkl'))
 
-            ########################
-            #   LMER: PARAMETERS   #
-            ########################
+            ########################################
+            #   Statistical analysis: PARAMETERS   #
+            ########################################
 
-            print(f'\nLinear mixed model analysis of inferred parameters for {method}...')
+            if statistical_analysis == 'lmer':
+                print(f'\nLinear mixed model analysis of inferred parameters for {method}...')
+            elif statistical_analysis == 'cohen':
+                print(f'\nCohen\'s d analysis of inferred parameters for {method}...')
 
-            # Check if the lmer results have already been computed
-            if os.path.exists(os.path.join('results', file_name+'-elec-pred_lmer.pkl')):
-                print(f'{file_name}-elec-pred_lmer.pkl already computed.')
+            # Check if the statistical results have already been computed
+            if os.path.exists(os.path.join('results', file_name+f'-elec-pred_{statistical_analysis}.pkl')):
+                print(f'{file_name}-elec-pred_{statistical_analysis}.pkl already computed.')
 
             else:
                 # Load data with predictions
                 data = pd.read_pickle(os.path.join('results', file_name+'.pkl')) if predictions_computed else data
                 predictions = np.array(data['Predictions'].to_list())
 
-                lmer_init_time = time.time()
-                lmer_dict = {}
+                stat_init_time = time.time()
+                stat_dict = {}
                 for i in range(n_var):
                     if i == 0:  # E/I
                         param = (predictions[:, 0] / predictions[:, 2]) /\
@@ -626,26 +644,30 @@ if __name__ == "__main__":
                     data['Predictions'] = param
                     Analysis = ncpi.Analysis(data)
                     print(f'\n--- Parameter: {param_name}\n')
-                    lmer_dict[param_name] = Analysis.lmer(control_group='HC', data_col='Predictions',
-                                                          data_index=-1,
-                                                          models={
-                                                              'mod00': 'Y ~ Group * Sensor + (1 | ID)',
-                                                              'mod01': 'Y ~ Group * Sensor',
-                                                              'mod02': 'Y ~ Group + Sensor + (1 | ID)',
-                                                              'mod03': 'Y ~ Group + Sensor'
-                                                          },
-                                                          bic_models = ["mod00", "mod01"],
-                                                          anova_tests={
-                                                              "test1": ["mod00", "mod02"],
-                                                              "test2": ["mod01", "mod03"]
-                                                          },
-                                                          specs='~Group | Sensor')
+                    if statistical_analysis == 'lmer':
+                        stat_dict[param_name] = Analysis.lmer(control_group='HC', data_col='Predictions',
+                                                              data_index=-1,
+                                                              models={
+                                                                  'mod00': 'Y ~ Group * Sensor + (1 | ID)',
+                                                                  'mod01': 'Y ~ Group * Sensor',
+                                                                  'mod02': 'Y ~ Group + Sensor + (1 | ID)',
+                                                                  'mod03': 'Y ~ Group + Sensor'
+                                                              },
+                                                              bic_models = ["mod00", "mod01"],
+                                                              anova_tests={
+                                                                  "test1": ["mod00", "mod02"],
+                                                                  "test2": ["mod01", "mod03"]
+                                                              },
+                                                              specs='~Group | Sensor')
+                    elif statistical_analysis == 'cohen':
+                        stat_dict[param_name] = Analysis.cohend(control_group='HC', data_col='Predictions',
+                                                                data_index=-1)
 
-                with open(os.path.join('results', file_name+'-elec-pred_lmer.pkl'), 'wb') as results_file:
-                    pickle.dump(lmer_dict, results_file)
+                with open(os.path.join('results', file_name+f'-elec-pred_{statistical_analysis}.pkl'), 'wb') as results_file:
+                    pickle.dump(stat_dict, results_file)
 
-                lmer_end_time = time.time()
-                print(f'--Linear mixed model analysis computed in {lmer_end_time - lmer_init_time} seconds')
+                stat_end_time = time.time()
+                print(f'--Statistical Analysis computed in {stat_end_time - stat_init_time} seconds')
 
         database_end_time = time.time()
 
