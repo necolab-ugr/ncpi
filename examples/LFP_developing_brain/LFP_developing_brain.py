@@ -10,9 +10,9 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import ncpi
 
-# Train new models (True) or load existing models (False)
-new_train = False
+# Path to ML models
 models_path = f'/DATOS/pablomc/ML_models/4_var/MLP'
+ML_model = 'MLPRegressor'
 
 # Names of catch22 features
 try:
@@ -296,30 +296,13 @@ if __name__ == "__main__":
         end_time = time.time()
         print(f'Done in {(end_time - start_time)/60.} min')
 
-        # Create the Inference object, add the simulation data and train the model
-        print('\n--- Training the regression model.')
+        # Load the Inference objects and add the simulation data
+        print('\n--- Loading the inverse model.')
         start_time = time.time()
 
-        model = 'MLPRegressor'
-        if method == 'catch22':
-            hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-        else:
-            hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                           {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
-
-        # model = 'SNPE'
-        # if method == 'catch22':
-        #     hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
-        #                                                          'num_transforms':2}}]
-        # else:
-        #     hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-        #                                                          'num_transforms':2}}]
-
-        #model = 'Ridge'
-        #hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
-
-        inference = ncpi.Inference(model=model)
+        # Create inference object
+        inference = ncpi.Inference(model=ML_model)
+        # Not sure if this is needed
         inference.add_simulation_data(X, theta['data'])
 
         # Create folder to save results
@@ -328,38 +311,21 @@ if __name__ == "__main__":
         if not os.path.exists(os.path.join('data', method)):
             os.makedirs(os.path.join('data', method))
 
-        # Train the model
-        if new_train:
-            if model == 'SNPE':
-                # inference.train(param_grid=None, train_params={
-                #     'learning_rate': 1e-1,
-                #     'stop_after_epochs': 5,
-                #     'max_num_epochs': 100})
-                # inference.train(param_grid=None)
-                inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1)
-            else:
-                inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
+        # Transfer model and scaler to the data folder
+        shutil.copy(
+            os.path.join(models_path, method, 'scaler'),
+            os.path.join('data', 'scaler.pkl')
+        )
 
-            # Save the best model and the StandardScaler
-            pickle.dump(pickle.load(open('data/model.pkl', 'rb')),
-                        open(os.path.join('data', method, 'model'), 'wb'))
-            pickle.dump(pickle.load(open('data/scaler.pkl', 'rb')),
-                        open(os.path.join('data', method, 'scaler'), 'wb'))
-            # Save density estimator
-            if model == 'SNPE':
-                pickle.dump(pickle.load(open('data/density_estimator.pkl', 'rb')),
-                            open(os.path.join('data', method, 'density_estimator'), 'wb'))
+        shutil.copy(
+            os.path.join(models_path, method, 'model'),
+            os.path.join('data', 'model.pkl')
+        )
 
-        else:
-            # Transfer model and scaler to the data folder
+        if ML_model == 'SNPE':
             shutil.copy(
-                os.path.join(models_path, method, 'scaler'),
-                os.path.join('data', 'scaler.pkl')
-            )
-
-            shutil.copy(
-                os.path.join(models_path, method, 'model'),
-                os.path.join('data', 'model.pkl')
+                os.path.join(models_path, method, 'density_estimator'),
+                os.path.join('data', 'density_estimator.pkl')
             )
 
         end_time = time.time()
