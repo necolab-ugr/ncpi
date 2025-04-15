@@ -7,7 +7,7 @@ ___
   <img src="img/ncpi_logo.png" alt="ncpi logo" width="150">
 </p>
 
-[Getting Started](https://necolab-ugr.github.io/ncpi/) | [Documentation](https://necolab-ugr.github.io/ncpi/)
+[Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html) | [Documentation](https://necolab-ugr.github.io/ncpi/)
 
 `ncpi` is a Python package for model-based inference of neural circuit parameters from population-level 
 electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provides a rapid, reproducible, and robust 

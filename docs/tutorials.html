@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>ncpi</title>
+    <title>Tutorials - ncpi</title>
     <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -115,22 +115,6 @@
             margin-bottom: 0.6em;
         }
 
-        /* Under construction banner */
-        .construction-banner {
-            background-color: #fff8e6;
-            border-left: 4px solid #ffcc00;
-            padding: 1em;
-            margin-bottom: 2em;
-            border-radius: 0 4px 4px 0;
-            display: flex;
-            align-items: center;
-        }
-
-        .construction-banner:before {
-            content: "🚧";
-            margin-right: 0.5em;
-            font-size: 1.2em;
-        }
     </style>
 </head>
 <body>
@@ -138,8 +122,8 @@
         <!-- Navigation Menu (Left) -->
         <nav>
             <ul>
-                <li><a href="index.html" class="active">Home</a></li>
-                <li><a href="tutorials.html">Tutorials</a></li>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="tutorials.html" class="active">Tutorials</a></li>
                 <li><a href="#api">API</a></li>
                 <li><a href="#faq">FAQ</a></li>
                 <li><a href="#contributing">Contributing</a></li>
@@ -150,25 +134,14 @@
 
         <!-- Main Markdown-Style Content (Center) -->
         <main>
-            <div class="construction-banner">
-                This website is currently under construction.
-            </div>
 
-            <h1 id="home">ncpi: neural circuit parameter inference</h1>
+            <h1 id="home">Tutorials for using the ncpi toolbox</h1>
+
             <p>
-                <li><code>ncpi</code> is a Python package for model-based inference of neural circuit parameters from
-                    population-level electrophysiological recordings, such as LFP, ECoG, MEG, and EEG.</li>
+            <p>Start with the <a href="tutorials/getting_started.html">Getting Started</a> guide to learn how to use the ncpi
+            toolbox effectively.</p>
             </p>
-            <p>
-                <li><code>ncpi</code> provides a rapid, reproducible, and robust framework for estimating the most
-                    probable neural circuit parameters associated with an empirical observation, streamlining
-                    traditionally complex workflows into a minimal amount of code.</li>
-            </p>
-            <p>
-                <li>Check out the <a href="tutorials/getting_started.html">Getting started with ncpi</a> tutorial
-                    to see how <code>ncpi</code> can accelerate your research and unlock the full
-                    potential of <strong>model-based neural inference</strong>.</li>
-            </p>
+
         </main>
 
         <!-- Table of Contents (Right) -->
