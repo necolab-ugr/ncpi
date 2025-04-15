@@ -1,11 +1,12 @@
 > 🚧 **This repository is under active development. Features and docs may change.** 🚧
 
-# ncpi: neural circuit parameter inference
-___
-
-<p style="text-align: center;">
-  <img src="img/ncpi_logo.png" alt="ncpi logo" width="150">
-</p>
+<div style="display: flex; flex-direction: column; align-items: center;">
+  <h1>ncpi: neural circuit parameter inference</h1>
+  <p>___</p>
+  <p>
+    <img src="img/ncpi_logo.png" alt="ncpi logo" width="150">
+  </p>
+</div>
 
 [Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html) | [Documentation](https://necolab-ugr.github.io/ncpi/)
 
