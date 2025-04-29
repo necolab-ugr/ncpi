@@ -185,10 +185,9 @@ If you use `ncpi` in your research, please consider citing our work:
   author={Orozco Valero, Alejandro and Rodr{\'\i}guez-Gonz{\'a}lez, Victor and Montobbio, Noemi and Casal, Miguel A.
   and Tlaie, Alejandro and Pelayo, Francisco and Morillas, Christian and Poza Crespo, Jesus and Gomez Peña, Carlos and 
   Mart{\'\i}nez-Cañada, Pablo},
-  journal={Under review}
+  journal={Accepted for publication in npj Systems Biology and Applications}
 }
 
-```bibtex
 @article{garciahybrid,
   title={A Hybrid Machine Learning and Mechanistic Modelling Approach for Probing Potential Biomarkers of 
   Excitation/Inhibition Imbalance in Cortical Circuits in Dementia},
