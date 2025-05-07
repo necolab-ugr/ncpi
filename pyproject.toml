@@ -1,0 +1,70 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ncpi"
+version = "0.1"
+description = "Neural circuit parameter inference using electrophysiological data"
+readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "necolab", email = "pablomc@ugr.es"}]
+keywords = ["biomarkers", "parameter-inference", "neural-circuits", "electrophysiological-data", "brain-simulation"]
+classifiers = [
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License"
+]
+requires-python = ">=3.8"
+
+dependencies = [
+    "scikit-learn",
+    "pycatch22",
+    "numpy",
+    "pandas",
+    "scipy",
+    "matplotlib",
+]
+
+[project.optional-dependencies]
+simulation = [
+    "LFPy",
+    "lfpykernels",
+    "lfpykit",
+    "neuron",
+    "nest",
+]
+analysis = [
+    "fooof",
+    "mne",
+    "h5py",
+    "PyAstronomy",
+]
+ml = [
+    "torch",
+]
+utils = [
+    "pathos",
+    "tqdm",
+    "rpy2",
+]
+interfaces = [
+    "matlab",
+    "matlabengine",
+    "mpl_toolkits",
+]
+
+[project.urls]
+repository = "https://github.com/necolab-ugr/ncpi"
+documentation = "https://necolab-ugr.github.io/ncpi"
+
+# Package installation configuration
+[tool.setuptools.packages.find]
+where = ["."]  # list of folders that contain the packages (["."] by default)
+include = ["*"]  # list of packages to include (["*"] by default)
+exclude = ["tests", "tests.*"]  # list of packages to exclude (["tests"] by default)
