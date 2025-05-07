@@ -5,7 +5,7 @@
 # ncpi: neural circuit parameter inference
 ___
 
-<img src="https://github.com/necolab-ugr/ncpi/blob/main/img/ncpi_logo.png" alt="ncpi logo" width="150">
+<img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo" width="150">
 
 </div>
 
