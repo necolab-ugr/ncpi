@@ -8,3 +8,4 @@ from .Simulation import *
 from .FieldPotential import *
 from .Analysis import *
 from . import tools
+from .PosteriorTrainer import *
