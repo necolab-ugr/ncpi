@@ -33,12 +33,27 @@ inverse modelling pipeline. Designed for modularity, it adapts to your needs wit
 
 
 # Installation
-To install `ncpi`, you can use pip. The package is available on PyPI, so you can install it directly from 
-there.
+
+`ncpi` requires Python 3.10 or higher. To install `ncpi`, you can use pip. The package is available on PyPI, so you can 
+install it directly from there.
 
 ```bash
+# Step 1: Create and activate a conda environment (recommended)
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+
+# Step 2: Install ncpi using pip
 pip install ncpi
 ```
+
+# Folder Structure
+
+- `ncpi/`: Contains the source code for the library, organized into modules and classes.
+- `examples/`: Includes scripts used to reproduce the results presented in the reference papers (see the *Citation* 
+- section).
+- `docs/`: Contains documentation for the library, including usage instructions, API references, and guides.
+- `img/`: Stores image assets for the project, such as the library logo.
+
 
 # Example Usage
 ```python
