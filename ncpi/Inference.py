@@ -7,31 +7,34 @@ from ncpi import tools
 
 class Inference:
     """
-    Class for inferring cortical circuit parameters from features of field potential recordings.
+    General-purpose class for inferring parameters from simulated or observed features using either
+    Bayesian inference (with SBI) or traditional regression (with sklearn).
 
     Attributes
     ----------
     model : list
-        List of the model name and the library where it is implemented.
+        Name and backend library of the chosen model (e.g., ['NPE', 'sbi'] or ['RandomForestRegressor', 'sklearn']).
     hyperparams : dict
-        Dictionary of hyperparameters of the model.
+        Dictionary of hyperparameters passed to the selected model.
     features : np.ndarray
-        Features.
+        Input feature matrix used for training or prediction.
     theta : np.ndarray
-        Parameters to infer.
+        Output parameter matrix (target values to infer).
 
     Methods
     -------
     __init__(model, hyperparams=None)
-        Initializes the Inference class with the specified model and hyperparameters.
-    add_training_data(features, parameters)
-        Adds features and parameters to the training data.
-    initialize_training_data()
-        Initializes the training data.
-    train(param_grid=None, n_splits=10, n_repeats=10)
-        Trains the model using the provided training data.
+        Initializes the class with a model and hyperparameters.
+    add_simulation_data(features, parameters)
+        Adds training data (features and targets).
+    initialize_sbi(hyperparams)
+        Prepares an SBI inference method (only for sbi-based models).
+    train(param_grid=None, n_splits=10, n_repeats=10, train_params={...})
+        Trains the model using either sbi or sklearn depending on configuration.
     predict(features)
-        Predicts the parameters for the given features.
+        Predicts parameters for new input features.
+    sample_posterior(x, num_samples=10000)
+        Samples from the posterior (only for sbi-based models).
     """
 
     def __init__(self, model, hyperparams=None):
@@ -62,15 +65,22 @@ class Inference:
         self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
 
         # Ensure that sbi and torch are installed
-        if model == 'SNPE':
+        if model in ['NPE', 'NLE', 'NRE']:
             if not tools.ensure_module("sbi"):
-                raise ImportError('sbi is not installed. Please install it to use SNPE.')
-            self.SNPE = tools.dynamic_import("sbi.inference", "SNPE")
-            self.posterior_nn = tools.dynamic_import("sbi.utils", "posterior_nn")
-
+                raise ImportError('sbi is not installed.')
             if not tools.ensure_module("torch"):
-                raise ImportError('torch is not installed. Please install it to use SNPE.')
+                raise ImportError('torch is not installed.')
+
+            # Dynamic imports for SBI components
+            self.NPE = tools.dynamic_import("sbi.inference", "NPE")
+            self.NLE = tools.dynamic_import("sbi.inference", "NLE")
+            self.NRE = tools.dynamic_import("sbi.inference", "NRE")
+            self.posterior_nn = tools.dynamic_import("sbi.neural_nets", "posterior_nn")
+            self.likelihood_nn = tools.dynamic_import("sbi.neural_nets", "likelihood_nn")
+            self.classifier_nn = tools.dynamic_import("sbi.neural_nets", "classifier_nn")
+            self.BoxUniform = tools.dynamic_import("sbi.utils", "BoxUniform")
             self.torch = tools.dynamic_import("torch")
+            self.model = [model, 'sbi']
 
         # Check if pathos is installed. If not, use the default Python multiprocessing library
         if not tools.ensure_module("pathos"):
@@ -91,14 +101,15 @@ class Inference:
         if type(model) is not str:
             raise ValueError('Model must be a string.')
 
-        # Check if model is in the list of regression models from sklearn, or it is SNPE
+        # Check if model is in the list of regression models from sklearn, or it is one of the SBI methods
         regressors = [estimator for estimator in self.all_estimators() if issubclass(estimator[1], self.RegressorMixin)]
-        if model not in [regressor[0] for regressor in regressors] + ['SNPE']:
-            raise ValueError(f'{model} not in the list of machine-learning models from sklearn or sbi libraries that '
-                             f'can be used for inference.')
+        sbi_models = ['NPE', 'NLE', 'NRE']
+        if model not in [regressor[0] for regressor in regressors] + sbi_models:
+            raise ValueError(f'{model} not in the list of machine-learning models from sklearn or SBI (NPE, NLE, NRE).')
 
         # Set model and library
-        self.model = [model, 'sbi'] if model == 'SNPE' else [model, 'sklearn']
+        self.model = [model, 'sbi'] if model in sbi_models else [model, 'sklearn']
+
 
         # Check if hyperparameters is a dictionary
         if hyperparams is not None:
@@ -114,9 +125,10 @@ class Inference:
         self.theta = []
 
         # Set the number of threads used by PyTorch
-        if model == 'SNPE':
+        if model in ['NPE', 'NLE', 'NRE']:
             torch_threads = int(os.cpu_count()/2)
             self.torch.set_num_threads(torch_threads)
+
 
     def add_simulation_data(self, features, parameters):
         """
@@ -168,56 +180,49 @@ class Inference:
 
     def initialize_sbi(self, hyperparams):
         """
-        Method to initialize the SNPE model with the specified hyperparameters. The hyperparameters must contain, at
-        least, the density_estimator and prior. The density_estimator must contain the keys 'hidden_features',
-        'num_transforms' and 'model'.
+        Initializes the SBI inference method (NPE, NLE, or NRE) using the appropriate neural estimator.
 
         Parameters
         ----------
         hyperparams : dict
-            Dictionary of hyperparameters of the model.
+            Dictionary of hyperparameters required to set up the inference method.
+            Must include:
+                - 'prior': the prior distribution over parameters (BoxUniform or similar)
+                - 'density_estimator': a dictionary containing:
+                    - 'model': the neural network type (e.g., 'nsf', 'maf', etc.)
+                    - 'hidden_features': number of hidden units per layer
+                    - 'num_transforms': number of normalizing flow transformations (only used for NPE and NLE)
 
         Returns
         -------
-        model : sbi.inference.snpe.SNPE
-            SNPE model.
+        inference : NPE, NLE, or NRE object
+            A configured SBI inference object ready for appending simulations and training.
         """
-        # Check if density_estimator is in hyperparams
-        if 'density_estimator' in hyperparams:
-            # Check that density_estimator is a dictionary and contain the keys 'hidden_features',
-            # 'num_transforms' and 'model'
-            if type(hyperparams['density_estimator']) is not dict:
-                raise ValueError('density_estimator must be a dictionary.')
-            if 'hidden_features' not in hyperparams['density_estimator']:
-                raise ValueError('hidden_features must be in density_estimator.')
-            if 'num_transforms' not in hyperparams['density_estimator']:
-                raise ValueError('num_transforms must be in density_estimator.')
-            if 'model' not in hyperparams['density_estimator']:
-                raise ValueError('model must be in density_estimator.')
-            # Initialize the posterior neural network
-            density_estimator_build_fun = self.posterior_nn(
-                model=hyperparams['density_estimator']['model'],
-                hidden_features=hyperparams['density_estimator']['hidden_features'],
-                num_transforms=hyperparams['density_estimator']['num_transforms']
-            )
+        inference_type = self.model[0].lower()
+        if 'density_estimator' not in hyperparams:
+            raise ValueError('Missing density_estimator.')
+        est = hyperparams['density_estimator']
+        model = est['model']
+        hidden = est['hidden_features']
+        transforms = est.get('num_transforms', 5)
+
+        if inference_type == 'npe':
+            estimator_fn = self.posterior_nn(model=model, hidden_features=hidden, num_transforms=transforms)
+            inference = self.NPE(prior=hyperparams['prior'], density_estimator=estimator_fn)
+        elif inference_type == 'nle':
+            estimator_fn = self.likelihood_nn(model=model, hidden_features=hidden, num_transforms=transforms)
+            inference = self.NLE(prior=hyperparams['prior'], density_estimator=estimator_fn)
+        elif inference_type == 'nre':
+            estimator_fn = self.classifier_nn(model=model, hidden_features=hidden)
+            inference = self.NRE(prior=hyperparams['prior'], ratio_estimator=estimator_fn)
         else:
-            raise ValueError('density_estimator must be in hyperparams.')
-        # Check that prior is in hyperparams
-        if 'prior' not in hyperparams:
-            raise ValueError('prior must be in hyperparams.')
-        # Create a dict with the remaining hyperparameters
-        others = {key: value for key, value in hyperparams.items() if key not in ['density_estimator', 'prior']}
-        # Initialize SNPE
-        model = self.SNPE(
-            prior=hyperparams['prior'],
-            density_estimator=density_estimator_build_fun,
-            **others
-        )
+            raise ValueError(f"Tipo {inference_type} no reconocido.")
 
-        return model
+        return inference
 
 
-    def train(self, param_grid=None, n_splits=10, n_repeats=10, train_params={'learning_rate': 0.0005}):
+
+    def train(self, param_grid=None, n_splits=10, n_repeats=10, train_params={'learning_rate': 0.0005, 'training_batch_size': 256}):
         """
         Method to train the model.
 
@@ -231,7 +236,7 @@ class Inference:
         n_repeats : int, optional
             Number of repeats for RepeatedKFold cross-validation. The default is 10.
         train_params : dict, optional
-            Dictionary of training parameters for SNPE.
+            Dictionary of training parameters for SBI.
         """
 
         # Import the sklearn model
@@ -246,7 +251,7 @@ class Inference:
             if self.model[1] == 'sklearn':
                 model = eval(f'{self.model[0]}')()
             elif self.model[1] == 'sbi':
-                model = self.SNPE(prior=None)
+                model = self.initialize_sbi({'prior': None, 'density_estimator': {}})
 
         # Initialize model with user-defined hyperparameters
         else:
@@ -332,7 +337,7 @@ class Inference:
                         self.torch.manual_seed(repeat_idx)
                         random.seed(repeat_idx)
 
-                        # Re-initialize the SNPE object with the new configuration
+                        # Re-initialize the SBI object with the new configuration
                         model = self.initialize_sbi(params)
 
                         # Ensure theta is a 2D array
@@ -371,18 +376,11 @@ class Inference:
 
             # Update the model with the best hyperparameters
             if best_config is not None:
-                # if self.model[1] == 'sklearn':
-                #     model.set_params(**best_config)
-                # if self.model[1] == 'sbi':
-                #     model = self.initialize_sbi(best_config)
-
                 if self.model[1] == 'sklearn':
                     model = best_fits
                 if self.model[1] == 'sbi':
                     model = [best_fits[i][0] for i in range(len(best_fits))]
                     density_estimator = [best_fits[i][1] for i in range(len(best_fits))]
-
-                # print best hyperparameters
                 print(f'\n\n--> Best hyperparameters: {best_config}\n')
             else:
                 raise ValueError('\nNo best hyperparameters found.\n')
@@ -403,8 +401,12 @@ class Inference:
                     self.torch.from_numpy(self.features.astype(np.float32))
                 )
 
+                # Extract training parameters
+                learning_rate = train_params.get("learning_rate", 0.0005)
+                training_batch_size = train_params.get("training_batch_size", 256)
+
                 # Train the neural density estimator
-                density_estimator = model.train(**train_params)
+                density_estimator = model.train(learning_rate=learning_rate, training_batch_size=training_batch_size)
 
         # Save the best model and the StandardScaler
         if not os.path.exists('data'):
@@ -414,7 +416,7 @@ class Inference:
         with open('data/scaler.pkl', 'wb') as file:
             pickle.dump(scaler, file)
 
-        # Save also the density estimator if the model is SNPE
+        # Save also the density estimator if the model is SBI
         if self.model[1] == 'sbi':
             with open('data/density_estimator.pkl', 'wb') as file:
                 pickle.dump(density_estimator, file)
@@ -442,7 +444,7 @@ class Inference:
             ----------
             batch: tuple
                 Tuple containing the batch of features, the StandardScaler and the model (and the posterior if the model
-                is SNPE).
+                is SBI).
 
             Returns
             -------
@@ -470,13 +472,13 @@ class Inference:
                     if self.model[1] == 'sbi':
                         # Sample the posterior
                         x_o = self.torch.from_numpy(np.array(feat, dtype=np.float32))
+                        num_samples = self.hyperparams.get("num_samples", 5000)
                         if type(posterior) is list:
-                            posterior_samples = [post.sample((5000,), x=x_o, show_progress_bars=False) for post in
-                                                 posterior]
+                            posterior_samples = [post.sample((num_samples,), x=x_o, show_progress_bars=False) for post in posterior]
                             # Compute the mean of the posterior samples
                             pred = np.mean([np.mean(post.numpy(), axis=0) for post in posterior_samples], axis=0)
                         else:
-                            posterior_samples = posterior.sample((5000,), x=x_o, show_progress_bars=False)
+                            posterior_samples = posterior.sample((num_samples,), x=x_o, show_progress_bars=False)
                             # Compute the mean of the posterior samples
                             pred = np.mean(posterior_samples.numpy(), axis=0)
                         predictions.append(pred)
@@ -516,7 +518,7 @@ class Inference:
         # Split the data into batches using the number of available CPUs
         num_cpus = os.cpu_count()
         if self.model[1] == 'sbi':
-            batch_size = len(features) # to avoid memory issues
+            batch_size = len(features)  # to avoid memory issues
         else:
             batch_size = len(features) // num_cpus
         if batch_size == 0:
@@ -543,3 +545,44 @@ class Inference:
         predictions = [pred for _, batch_preds in results for pred in batch_preds]
 
         return predictions
+
+    def sample_posterior(self, x, num_samples=10000):
+        """
+        Sample from the posterior distribution for a given observation.
+
+        Parameters
+        ----------
+        x : np.ndarray
+            Observed feature vector (1D array).
+        num_samples : int, optional
+            Number of posterior samples to draw. Default is 10000.
+
+        Returns
+        -------
+        np.ndarray
+            Array of posterior samples.
+        """
+        if not os.path.exists('data/model.pkl'):
+            raise ValueError('Model not trained.')
+
+        with open('data/model.pkl', 'rb') as f:
+            model = pickle.load(f)
+        with open('data/scaler.pkl', 'rb') as f:
+            scaler = pickle.load(f)
+        with open('data/density_estimator.pkl', 'rb') as f:
+            density_estimator = pickle.load(f)
+
+        if type(density_estimator) is list:
+            posterior = [model[i].build_posterior(density_estimator[i]) for i in range(len(density_estimator))]
+        else:
+            posterior = model.build_posterior(density_estimator)
+
+        x = scaler.transform(x.reshape(1, -1))
+        x_tensor = self.torch.from_numpy(x.astype(np.float32))
+
+        if isinstance(posterior, list):
+            samples = [p.sample((num_samples,), x=x_tensor).numpy() for p in posterior]
+            return np.vstack(samples)
+        else:
+            samples = posterior.sample((num_samples,), x=x_tensor)
+            return samples.numpy()
