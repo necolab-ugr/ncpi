@@ -8,7 +8,7 @@ from ncpi import tools
 class Inference:
     """
     General-purpose class for inferring parameters from simulated or observed features using either
-    Bayesian inference (with SBI) or traditional regression (with sklearn).
+    Bayesian inference (with SBI) or regression (with sklearn).
 
     Attributes
     ----------
@@ -17,16 +17,16 @@ class Inference:
     hyperparams : dict
         Dictionary of hyperparameters passed to the selected model.
     features : np.ndarray
-        Input feature matrix used for training or prediction.
+        Input feature array used for training.
     theta : np.ndarray
-        Output parameter matrix (target values to infer).
+        Parameter array (target values to infer).
 
     Methods
     -------
     __init__(model, hyperparams=None)
         Initializes the class with a model and hyperparameters.
     add_simulation_data(features, parameters)
-        Adds training data (features and targets).
+        Adds training data (features and target parameters).
     initialize_sbi(hyperparams)
         Prepares an SBI inference method (only for sbi-based models).
     train(param_grid=None, n_splits=10, n_repeats=10, train_params={...})
@@ -44,16 +44,10 @@ class Inference:
         Parameters
         ----------
         model : str
-            Name of the machine-learning model to use. It can be any of the regression models from sklearn or 'SNPE' from sbi.
+            Name of the machine-learning model to use. It can be any of the regression models from sklearn or NPE, NLE,
+            NRE from SBI.
         hyperparams : dict, optional
             Dictionary of hyperparameters of the model. The default is None.
-
-        Raises
-        ------
-        ValueError
-            If model is not a string.
-            If model is not in the list of regression models from sklearn or 'SNPE'.
-            If hyperparameters is not a dictionary.
         """
 
         # Ensure that sklearn is installed
@@ -110,7 +104,6 @@ class Inference:
         # Set model and library
         self.model = [model, 'sbi'] if model in sbi_models else [model, 'sklearn']
 
-
         # Check if hyperparameters is a dictionary
         if hyperparams is not None:
             if type(hyperparams) is not dict:
@@ -124,7 +117,7 @@ class Inference:
         self.features = []
         self.theta = []
 
-        # Set the number of threads used by PyTorch
+        # Set the number of threads used by PyTorch for SBI models
         if model in ['NPE', 'NLE', 'NRE']:
             torch_threads = int(os.cpu_count()/2)
             self.torch.set_num_threads(torch_threads)
@@ -199,12 +192,23 @@ class Inference:
             A configured SBI inference object ready for appending simulations and training.
         """
         inference_type = self.model[0].lower()
+
         if 'density_estimator' not in hyperparams:
             raise ValueError('Missing density_estimator.')
+        if 'hidden_features' not in hyperparams['density_estimator']:
+            raise ValueError('Missing hidden_features.')
+        if 'num_transforms' not in hyperparams['density_estimator'] and inference_type in ['npe', 'nle']:
+            raise ValueError('Missing num_transforms.')
+        if 'model' not in hyperparams['density_estimator']:
+            raise ValueError('Missing model.')
+        if 'prior' not in hyperparams:
+            raise ValueError('Missing prior.')
+
         est = hyperparams['density_estimator']
         model = est['model']
         hidden = est['hidden_features']
-        transforms = est.get('num_transforms', 5)
+        if inference_type in ['npe', 'nle']:
+            transforms = est.get('num_transforms', 5)
 
         if inference_type == 'npe':
             estimator_fn = self.posterior_nn(model=model, hidden_features=hidden, num_transforms=transforms)
@@ -216,13 +220,14 @@ class Inference:
             estimator_fn = self.classifier_nn(model=model, hidden_features=hidden)
             inference = self.NRE(prior=hyperparams['prior'], ratio_estimator=estimator_fn)
         else:
-            raise ValueError(f"Tipo {inference_type} no reconocido.")
+            raise ValueError(f"'{self.model[0]} is not a valid SBI model. Choose from NPE, NLE, or NRE.")
 
         return inference
 
 
 
-    def train(self, param_grid=None, n_splits=10, n_repeats=10, train_params={'learning_rate': 0.0005, 'training_batch_size': 256}):
+    def train(self, param_grid=None, n_splits=10, n_repeats=10, train_params={'learning_rate': 0.0005,
+                                                                              'training_batch_size': 256}):
         """
         Method to train the model.
 
@@ -251,7 +256,8 @@ class Inference:
             if self.model[1] == 'sklearn':
                 model = eval(f'{self.model[0]}')()
             elif self.model[1] == 'sbi':
-                model = self.initialize_sbi({'prior': None, 'density_estimator': {}})
+                model = self.initialize_sbi({'prior': None, 'density_estimator':  {'model': "maf", 'hidden_features': 10,
+                                                                                    'num_transforms': 2}})
 
         # Initialize model with user-defined hyperparameters
         else:
@@ -438,7 +444,7 @@ class Inference:
 
         def process_batch(batch):
             """
-            Function to process a batch of features.
+            Function to compute predictions from a batch of features.
 
             Parameters
             ----------
@@ -469,10 +475,15 @@ class Inference:
                         else:
                             pred = model.predict(feat)
                         predictions.append(pred[0])
+
                     if self.model[1] == 'sbi':
                         # Sample the posterior
                         x_o = self.torch.from_numpy(np.array(feat, dtype=np.float32))
-                        num_samples = self.hyperparams.get("num_samples", 5000)
+                        if self.hyperparams is not None:
+                            num_samples = self.hyperparams.get("num_samples", 5000)
+                        else:
+                            num_samples = 5000
+
                         if type(posterior) is list:
                             posterior_samples = [post.sample((num_samples,), x=x_o, show_progress_bars=False) for post in posterior]
                             # Compute the mean of the posterior samples
@@ -533,12 +544,15 @@ class Inference:
         batch_args = [(ii, batch, scaler, model, posterior) if use_posterior else (ii, batch, scaler, model) for
                       ii, batch in batches]
 
-        # Compute features in parallel
-        with pool_class(num_cpus) as pool:
-            imap_results = pool.imap(process_batch, batch_args)
-            results = list(
-                self.tqdm(imap_results, total=len(batches), desc="Computing predictions")) if self.tqdm_inst else list(
-                imap_results)
+        # Compute predictions in parallel if model is not SBI
+        if self.model[1] == 'sbi':
+            results = [process_batch(batch_arg) for batch_arg in batch_args]
+        else:
+            with pool_class(num_cpus) as pool:
+                imap_results = pool.imap(process_batch, batch_args)
+                results = list(
+                    self.tqdm(imap_results, total=len(batches), desc="Computing predictions")) if self.tqdm_inst else list(
+                    imap_results)
 
         # Sort the predictions based on the original index
         results.sort(key=lambda x: x[0])
