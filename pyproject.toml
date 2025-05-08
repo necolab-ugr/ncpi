@@ -20,11 +20,14 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: MIT License"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.10"
 
 dependencies = [
     "scikit-learn",
+    "sbi",
+    "torch",
     "pycatch22",
+    "fooof",
     "numpy",
     "pandas",
     "scipy",
@@ -39,24 +42,29 @@ simulation = [
     "neuron",
     "nest",
 ]
-analysis = [
-    "fooof",
-    "mne",
-    "h5py",
-    "PyAstronomy",
-]
-ml = [
-    "torch",
-]
+
 utils = [
+    "h5py",
     "pathos",
-    "tqdm",
+    "tqdm"]
+
+statistics = [
     "rpy2",
 ]
-interfaces = [
-    "matlab",
-    "matlabengine",
-    "mpl_toolkits",
+
+visualization = [
+    "seaborn",
+    "mne",
+    "mpl_toolkits"
+]
+
+feats_hctsa = [
+    "matlab.engine",
+    "h5py"
+]
+
+feats_fEI_DFA = [
+    "PyAstronomy"
 ]
 
 [project.urls]
