@@ -49,8 +49,7 @@ pip install ncpi
 # Folder Structure
 
 - `ncpi/`: Contains the source code for the library, organized into modules and classes.
-- `examples/`: Includes scripts used to reproduce the results presented in the reference papers (see the *Citation* 
-- section).
+- `examples/`: Includes scripts used to reproduce the results presented in the reference papers (see [Citation](#Citation)).
 - `docs/`: Contains documentation for the library, including usage instructions, API references, and guides.
 - `img/`: Stores image assets for the project, such as the library logo.
 
