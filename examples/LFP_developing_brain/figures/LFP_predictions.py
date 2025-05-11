@@ -6,17 +6,18 @@ import pandas as pd
 from matplotlib import pyplot as plt
 import ncpi
 
-# Parameters of LIF model simulations
+# Folder with parameters of LIF model simulations
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../simulation/Hagen_model/simulation/params'))
 
-# Path to saved firing rates
-fr_path = '/DATOS/pablomc/ML_models/4_var/MLP'
+# Path to the folder with prediction results
+pred_results = '../data'
 
-# Calculate new firing rates (True) or load them from file (False)
+# Calculate new firing rates (True) or load them from file if they already exist (False). If firing rates do not
+# exist, they will not be plotted.
 compute_firing_rate = False
 
-# Random seed for numpy
-np.random.seed(0)
+# Path to saved firing rates
+fr_path = '/DATA/ML_models/4_var/MLP'
 
 # Number of samples to draw from the predictions for computing the firing rates
 n_samples = 50
@@ -27,15 +28,21 @@ firing_rates = {}
 # Methods to plot
 all_methods = ['catch22','power_spectrum_parameterization_1']
 
-# Load data
+# Select the statistical analysis method ('cohen', 'lmer')
+statistical_analysis = 'cohen'
+
+# Random seed for numpy
+np.random.seed(0)
+
 all_IDs = {}
 predictions_EI = {}
 predictions_all = {}
 ages = {}
 for method in all_methods:
+    # Load data
     try:
-        data_EI = np.load(os.path.join('../data',method,'emp_data_reduced.pkl'), allow_pickle=True)
-        data_all = np.load(os.path.join('../data',method,'emp_data_all.pkl'), allow_pickle=True)
+        data_EI = np.load(os.path.join(pred_results,method,'emp_data_reduced.pkl'), allow_pickle=True)
+        data_all = np.load(os.path.join(pred_results,method,'emp_data_all.pkl'), allow_pickle=True)
         all_IDs[method] = np.array(data_all['ID'].tolist())
         predictions_EI[method] = np.array(data_EI['Predictions'].tolist())
         predictions_all[method] = np.array(data_all['Predictions'].tolist())
@@ -53,10 +60,12 @@ for method in all_methods:
         predictions_all[method] = []
         ages[method] = []
 
+    firing_rates[method] = np.zeros((len(np.unique(ages[method])), n_samples))
+    IDs[method] = np.zeros((len(np.unique(ages[method])), n_samples))
+
     # Parameter sampling for computing the firing rates
     if compute_firing_rate:
         sim_params[method] = np.zeros((7, len(np.unique(ages[method])), n_samples))
-        IDs[method] = np.zeros((len(np.unique(ages[method])), n_samples))
         for param in range(4):
             for i, age in enumerate(np.unique(ages[method])):
                 idx = np.where(ages[method] == age)[0]
@@ -87,7 +96,6 @@ for method in all_methods:
                             sim_params[method][param+3, i, :] = data_EI[idx_samples]
 
         # Firing rates
-        firing_rates[method] = np.zeros((len(np.unique(ages[method])), n_samples))
         for i, age in enumerate(np.unique(ages[method])):
             for sample in range(n_samples):
                 print(f'\nComputing firing rate for {method} at age {age} and sample {sample}')
@@ -152,10 +160,14 @@ if compute_firing_rate:
     with open('data/IDs.pkl', 'wb') as f:
         pickle.dump(IDs, f)
 else:
-    with open(os.path.join(fr_path,'firing_rates_preds.pkl'), 'rb') as f:
-        firing_rates = pickle.load(f)
-    with open(os.path.join(fr_path,'IDs.pkl'), 'rb') as f:
-        IDs = pickle.load(f)
+    try:
+        with open(os.path.join(fr_path,'firing_rates_preds.pkl'), 'rb') as f:
+            firing_rates = pickle.load(f)
+        with open(os.path.join(fr_path,'IDs.pkl'), 'rb') as f:
+            IDs = pickle.load(f)
+    except FileNotFoundError:
+        print('Firing rates not found.')
+        pass
 
 # Create a figure and set its properties
 fig = plt.figure(figsize=(7.5, 5), dpi=300)
@@ -244,9 +256,13 @@ for row in range(2):
                 #                    (sim_params[method][1, i, :]/sim_params[method][3, i, :]),
                 #                    color='black', s=2, zorder = 3)
 
-            # LMER analysis
-            print('\n--- Linear mixed model analysis.')
-            data_EI = np.load(os.path.join('../data', method, 'emp_data_reduced.pkl'), allow_pickle=True)
+            # stat. analysis
+            if statistical_analysis == 'lmer':
+                print('\n--- Linear mixed model analysis.')
+            elif statistical_analysis == 'cohen':
+                print('\n--- Cohen\'s d analysis.')
+
+            data_EI = np.load(os.path.join(pred_results, method, 'emp_data_reduced.pkl'), allow_pickle=True)
             # Pick only ages >= 4
             data_EI = data_EI[data_EI['Group'] >= 4]
 
@@ -265,13 +281,23 @@ for row in range(2):
             # Transform the 'Group' column to string type
             data_EI['Group'] = data_EI['Group'].astype(str)
 
+            # Remove nan values from Y column
+            data_EI = data_EI[~np.isnan(data_EI['Y'])]
+
+            # Compute the statistical analysis
             Analysis = ncpi.Analysis(data_EI)
-            lmer_res = Analysis.lmer(control_group='4', data_col='Y',data_index=-1,
-                                     models = {'mod00': 'Y ~ Group + (1 | ID)',
-                                                         'mod01': 'Y ~ Group'},
-                                     bic_models=["mod00", "mod01"],
-                                     anova_tests = None,
-                                     specs= '~Group')
+            if statistical_analysis == 'lmer':
+                stat_result = Analysis.lmer(control_group='4', 
+                                         data_col='Y',
+                                         other_col=['ID', 'Group', 'Epoch', 'Sensor'],
+                                         data_index=-1,
+                                         models = {'mod00': 'Y ~ Group + (1 | ID)',
+                                                             'mod01': 'Y ~ Group'},
+                                         bic_models=["mod00", "mod01"],
+                                         anova_tests = None,
+                                         specs= '~Group')
+            elif statistical_analysis == 'cohen':
+                stat_result = Analysis.cohend(control_group='4', data_col='Y',data_index=-1)
 
             # Add p-values to the plot
             y_max = ax.get_ylim()[1]
@@ -281,26 +307,36 @@ for row in range(2):
             # groups = ['5', '6', '7', '8', '9', '10', '11', '12']
             groups = ['8', '9', '10', '11', '12']
             for i, group in enumerate(groups):
-                p_value = lmer_res[f'{group}vs4']['p.value']
-                if p_value.empty:
-                    continue
+                if statistical_analysis == 'lmer':
+                    p_value = stat_result[f'{group}vs4']['p.value']
+                    if p_value.empty:
+                        continue
+                elif statistical_analysis == 'cohen':
+                    d_value = stat_result[f'{group}vs4']['d']
+                    if d_value.empty:
+                        continue
 
                 # Significance levels
-                if p_value[0] < 0.05 and p_value[0] >= 0.01:
-                    pp = '*'
-                elif p_value[0] < 0.01 and p_value[0] >= 0.001:
-                    pp = '**'
-                elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
-                    pp = '***'
-                elif p_value[0] < 0.0001:
-                    pp = '****'
-                else:
-                    pp = 'n.s.'
+                if statistical_analysis == 'lmer':
+                    if p_value[0] < 0.05 and p_value[0] >= 0.01:
+                        pp = '*'
+                    elif p_value[0] < 0.01 and p_value[0] >= 0.001:
+                        pp = '**'
+                    elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
+                        pp = '***'
+                    elif p_value[0] < 0.0001:
+                        pp = '****'
+                    else:
+                        pp = 'n.s.'
 
-                if pp != 'n.s.':
-                    offset = -delta*0.2
-                else:
-                    offset = delta*0.05
+                    if pp != 'n.s.':
+                        offset = -delta*0.2
+                    else:
+                        offset = delta*0.05
+
+                elif statistical_analysis == 'cohen':
+                    pp = f'{d_value[0]:.2f}'
+                    offset = 0.
 
                 ax.text((int(groups[i]) - 4)/2. + 4, y_max + delta*i + delta*0.1 + offset,
                         f'{pp}', ha='center', fontsize=8 if pp != 'n.s.' else 7)

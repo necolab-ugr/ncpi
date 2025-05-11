@@ -23,8 +23,8 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "scikit-learn",
-    "sbi",
+    "scikit-learn==1.3.2",
+    "sbi==0.24.0",
     "torch",
     "pycatch22",
     "fooof",
@@ -46,7 +46,8 @@ simulation = [
 utils = [
     "h5py",
     "pathos",
-    "tqdm"]
+    "tqdm",
+    "requests"]
 
 statistics = [
     "rpy2",

@@ -193,24 +193,11 @@ tutorial.
 # Citation
 If you use `ncpi` in your research, please consider citing our work:
 
-```bibtex
-@article{ncpitoolbox,
-  title={A Python toolbox for neural circuit parameter inference},
-  author={Orozco Valero, Alejandro and Rodr{\'\i}guez-Gonz{\'a}lez, Victor and Montobbio, Noemi and Casal, Miguel A.
-  and Tlaie, Alejandro and Pelayo, Francisco and Morillas, Christian and Poza Crespo, Jesus and Gomez Peña, Carlos and 
-  Mart{\'\i}nez-Cañada, Pablo},
-  journal={Accepted for publication in npj Systems Biology and Applications}
-}
-
-@article{garciahybrid,
-  title={A Hybrid Machine Learning and Mechanistic Modelling Approach for Probing Potential Biomarkers of 
-  Excitation/Inhibition Imbalance in Cortical Circuits in Dementia},
-  author={Garc{\'\i}a, Juan Miguel and Orozco Valero, Alejandro and Rodr{\'\i}guez-Gonz{\'a}lez, Victor and Montobbio, 
-  Noemi and Pelayo, Francisco and Morillas, Christian and Poza Crespo, Jesus and Gomez Peña, Carlos and 
-  Mart{\'\i}nez-Cañada, Pablo},
-  journal={SSRN}
-}
-```
+**[1] Alejandro Orozco Valero, Víctor Rodríguez-González, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie, 
+Francisco Pelayo, Christian Morillas, Jesús Poza, Carlos Gómez & Pablo Martínez-Cañada**  
+*A Python toolbox for neural circuit parameter inference.*  
+npj Syst Biol Appl 11, 45 (2025).  
+https://doi.org/10.1038/s41540-025-00527-9  
 
 # Acknowledgements
 This study was supported by grants PID2022-139055OA-I00, PID2022-137461NB-C31, and PID2022-138286NB-I00, 
