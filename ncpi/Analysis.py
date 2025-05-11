@@ -3,8 +3,14 @@ import pandas as pd
 import scipy.interpolate
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
+import re
 from matplotlib.cm import ScalarMappable
 from ncpi import tools
+
+
+def extract_variables(formula):
+    tokens = re.split(r'[\s\+\~\|\(\)\*\/\-]+', formula)
+    return set(t for t in tokens if t and not t.replace('.', '', 1).isdigit())
 
 
 class Analysis:
@@ -19,11 +25,11 @@ class Analysis:
         self.data = data
 
 
-    def lmer(self, control_group = 'HC', data_col = 'Y', data_index = -1, models = None,
-             bic_models = None, anova_tests = None, specs = None):
+    def lmer(self, control_group = 'HC', data_col = 'Y', other_col = ['ID', 'Group', 'Epoch', 'Sensor'],
+             data_index = -1, models = None, bic_models = None, anova_tests = None, specs = None):
         """
         Perform linear mixed-effects model (lmer) or linear model (lm) comparisons using R's `lme4` and `emmeans`
-        packages.
+        packages. We assume that, at least, a 'Group' column is present in the dataframe.
 
         Parameters
         ----------
@@ -31,6 +37,9 @@ class Analysis:
             The control group to be used for comparisons.
         data_col: str
             The name of the data column to be analyzed.
+        other_col: list
+            The names of the other columns to be included in the analysis.
+            The default is ['ID', 'Group', 'Epoch', 'Sensor'].
         data_index: int
             The index of the data column to be analyzed. If -1, the entire column is used.
         models: dict
@@ -88,7 +97,7 @@ class Analysis:
         }
 
         # Load required packages
-        load_packages(c("dplyr", "lme4", "emmeans", "ggplot2", "repr", "mgcv"))
+        load_packages(c("lme4", "emmeans"))
         ''')
 
         # Check if the data is a pandas DataFrame
@@ -99,20 +108,24 @@ class Analysis:
         if data_col not in self.data.columns:
             raise ValueError(f'The data_col "{data_col}" is not in the DataFrame columns.')
 
-        # Check if 'ID', 'Group', 'Epoch' and 'Sensor' are in the DataFrame
-        for col in ['ID', 'Group', 'Epoch', 'Sensor']:
+        # Check if the other_col columns are in the DataFrame
+        for col in other_col:
             if col not in self.data.columns:
                 raise ValueError(f'The column "{col}" is not in the DataFrame.')
 
         # Copy the dataframe
         df = self.data.copy()
 
-        # Remove all columns except 'ID', 'Group', 'Epoch', 'Sensor' and data_col
-        df = df[['ID', 'Group', 'Epoch', 'Sensor', data_col]]
+        # Remove all columns except data_col and other_col
+        df = df[other_col + [data_col]]
 
         # If data_index is not -1, select the data_index value from the data_col
         if data_index >= 0:
             df[data_col] = df[data_col].apply(lambda x: x[data_index])
+
+        # Check if 'Group' is in the DataFrame
+        if 'Group' not in df.columns:
+            raise ValueError('The column "Group" is not in the DataFrame.')
 
         # Filter out control_group from the list of unique groups
         groups = df['Group'].unique()
@@ -127,8 +140,9 @@ class Analysis:
         # Rename data_col column to Y
         df.rename(columns={data_col: 'Y'}, inplace=True)
 
-        # Force categorical data type
-        df["Sensor"] = df["Sensor"].astype('category')
+        # Force categorical data type for Sensor
+        if 'Sensor' in df.columns:
+            df["Sensor"] = df["Sensor"].astype(str).astype('category')
 
         # Default models if none are provided
         if models is None:
@@ -154,6 +168,18 @@ class Analysis:
                     if model not in models.keys():
                         raise ValueError(f'anova_tests: the model "{model}" is not defined in the models dictionary.')
 
+        # Check that variables included in models are also in the dataframe
+        df_columns = set(df.columns)
+        missing_vars = {}
+        for name, formula in models.items():
+            vars_in_formula = extract_variables(formula)
+            missing = vars_in_formula - df_columns
+            if missing:
+                missing_vars[name] = missing
+
+        if missing_vars:
+            raise ValueError(f"Some models have missing variables: {missing_vars}")
+
         results = {}
         for label, label_comp in zip(groups, groups_comp):
             print(f'\n\n--- Group: {label}')
@@ -163,14 +189,32 @@ class Analysis:
             ro.globalenv['label'] = label
             ro.globalenv['control_group'] = control_group
 
+            # # Convert to factors
+            # r('''
+            # df_pair$ID = as.factor(df_pair$ID)
+            # df_pair$Group = factor(df_pair$Group, levels = c(label, control_group))
+            # df_pair$Epoch = as.factor(df_pair$Epoch)
+            # df_pair$Sensor = as.factor(df_pair$Sensor)
+            # print(table(df_pair$Group))
+            # ''')
+
             # Convert to factors
-            r('''
-            df_pair$ID = as.factor(df_pair$ID)
-            df_pair$Group = factor(df_pair$Group, levels = c(label, control_group))
-            df_pair$Epoch = as.factor(df_pair$Epoch)
-            df_pair$Sensor = as.factor(df_pair$Sensor)
-            print(table(df_pair$Group))
-            ''')
+            r_code = []
+            for col in other_col:
+                if col == 'Group':
+                    r_code.append(f'df_pair${col} = factor(df_pair${col}, levels = c("{label}", "{control_group}"))')
+                else:
+                    r_code.append(f'df_pair${col} = as.factor(df_pair${col})')
+
+            # Print table for 'Group'
+            if 'Group' in other_col:
+                r_code.append('print(table(df_pair$Group))')
+
+            # Join all lines into one R script string
+            full_r_script = '\n'.join(r_code)
+
+            # Pass to R
+            r(full_r_script)
 
             # if table in R is empty for any group, skip the analysis
             if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:

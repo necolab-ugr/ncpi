@@ -1,7 +1,9 @@
 import os
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
+
+# Path to the folder with prediction results
+pred_results = '../data'
 
 # Names of catch22 features
 try:
@@ -41,17 +43,13 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
 
     # Load empirical data
     try:
-        data_EI = np.load(os.path.join('../data', method, 'emp_data_reduced.pkl'), allow_pickle=True)
+        data_EI = np.load(os.path.join(pred_results, method, 'emp_data_reduced.pkl'), allow_pickle=True)
         ages[method] = np.array(data_EI['Group'].tolist())
         # Pick only ages >= 4
         data_EI = data_EI[data_EI['Group'] >= 4]
         ages[method] = ages[method][ages[method] >= 4]
     except:
-        print(f'Error loading empirical data for {method}.')
-        # Fake data
-        X = np.zeros((10, 22)) if method == 'catch22' else np.zeros((10, 1))
-        data_EI = pd.DataFrame({'Features': [X[i] for i in range(10)]})
-        ages[method] = np.arange(20)
+        raise RuntimeError(f'Error loading empirical data for {method}. Execution stopped.')
 
     # Remove nan features from empirical data
     if np.array(data_EI['Features'].tolist()).ndim == 1:
@@ -71,7 +69,6 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
             lambda x: x[catch22_names.index('MD_hrv_classic_pnn40')]).tolist())
     elif method == 'power_spectrum_parameterization_1':
         emp['slope'] = np.array(data_EI['Features'].tolist())
-
 
 # Create a figure and set its properties
 fig = plt.figure(figsize=(4, 3), dpi=300)
