@@ -1,9 +1,14 @@
-import json
 import os
 import pickle
 import numpy as np
 from pathos.multiprocessing import ProcessingPool as Pool
 from tqdm import tqdm
+
+# Path to the folders containing the simulation data
+sim_file_path_pre = '/DATOS/pablomc/Hagen_model_v1'
+
+# Path to the folder containing the processed data
+sim_file_path_post = '/DATOS/pablomc/data/Hagen_model_v1'
 
 
 def process_batch(ldir):
@@ -67,16 +72,12 @@ def process_batch(ldir):
 
 
 if __name__ == '__main__':
-    # Path to the folders containing the simulation data
-    with open('../config.json', 'r') as config_file:
-        config = json.load(config_file)
-    sim_file_path = config['simulation_raw_data_path']
 
     # List of all the folders containing the simulation data (there are three folders that correspond
     # to the different computing environments used to run the simulations)
-    folder1 = os.path.join(sim_file_path, 'LIF_simulations')
-    folder2 = os.path.join(sim_file_path, 'LIF_simulations_hpmoon','LIF_simulations')
-    folder3 = os.path.join(sim_file_path, 'LIF_simulations_hpc','LIF_simulations')
+    folder1 = os.path.join(sim_file_path_pre, 'LIF_simulations')
+    folder2 = os.path.join(sim_file_path_pre, 'LIF_simulations_hpmoon','LIF_simulations')
+    folder3 = os.path.join(sim_file_path_pre, 'LIF_simulations_hpc','LIF_simulations')
 
     ldir = [os.path.join(folder1, f) for f in os.listdir(folder1)] + \
            [os.path.join(folder2, f) for f in os.listdir(folder2)] + \
@@ -124,19 +125,16 @@ if __name__ == '__main__':
         print(f"Number of simulations in the batch: {len(batch)}")
         print(f"Number of samples processed: {CDM_data.shape[0]}\n")
 
-        # Path to the folder containing the processed data
-        sim_file_path = config['simulation_processed_data_path']
-
         # Create folders if they do not exist
-        splits = os.path.split(sim_file_path)
+        splits = os.path.split(sim_file_path_post)
         if not os.path.isdir(splits[0]):
             os.mkdir(splits[0])
-        if not os.path.isdir(sim_file_path):
-            os.mkdir(sim_file_path)
+        if not os.path.isdir(sim_file_path_post):
+            os.mkdir(sim_file_path_post)
 
         # Save numpy arrays to file
-        pickle.dump(theta_data,open(os.path.join(sim_file_path,f'theta_data_{ii}'),'wb'))
-        pickle.dump(CDM_data,open(os.path.join(sim_file_path,f'CDM_data_{ii}'),'wb'))
+        pickle.dump(theta_data,open(os.path.join(sim_file_path_post,f'theta_data_{ii}'),'wb'))
+        pickle.dump(CDM_data,open(os.path.join(sim_file_path_post,f'CDM_data_{ii}'),'wb'))
 
         # Clear memory
         theta_data['data'] = []

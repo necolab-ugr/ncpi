@@ -1,20 +1,45 @@
 import os
 import pickle
+import sys
 import numpy as np
 import torch
+import time
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import RepeatedKFold
+from ncpi import tools
 
-# Choose whether to compute posteriors and diagnostic metrics
+# Choose whether to compute posteriors and diagnostic metrics (True) or load them from file (False)
 compute_metrics = True
+
+# Path to the local directory where the metrics and posteriors will be saved
+result_folder = 'SBI_results'
 
 # Choose whether to use a held-out dataset or folds from RepeatedKFold
 use_held_out_data = True
 
 # Number of random samples to draw from the posteriors
 n_samples = 25000
+
+# Choose to either download data from Zenodo (True) or load it from a local path (False).
+# Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
+# configure the zenodo_dir variable to point to the local path where the data is stored.
+zenodo_dw_sim = True # simulation data
+
+# Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
+zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
+
+# Paths to zenodo files
+zenodo_dir_sim = "/DATA/zenodo_sim_files"
+
+# Download simulation data and ML models
+if zenodo_dw_sim:
+    print('\n--- Downloading simulation data and ML models from Zenodo.')
+    start_time = time.time()
+    tools.download_zenodo_record(zenodo_URL_sim, download_dir=zenodo_dir_sim)
+    end_time = time.time()
+    print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
 
 def hellinger_distance(p, q):
     """
@@ -77,10 +102,10 @@ torch.manual_seed(0)
 
 # Path to ML models trained based on a held-out dataset approach
 if use_held_out_data:
-    ML_path = '/DATOS/pablomc/ML_models/held_out_data_models'
+    ML_path = os.path.join(zenodo_dir_sim, 'ML_models/held_out_data_models')
 # Path to ML models trained based on a RepeatedKFold approach
 else:
-    ML_path = '/DATOS/pablomc/ML_models/4_var'
+    ML_path = os.path.join(zenodo_dir_sim, 'ML_models/4_param')
 
 # Limits of histograms
 lims = [[-15, 15], [-2, 5], [-2, 12], [0, 60]]
@@ -115,8 +140,8 @@ if compute_metrics:
                     X, theta = pickle.load(file)
             # Load X and theta from all folds of RepeatedKFold and concatenate them
             else:
-                X = pickle.load(open(os.path.join('/DATOS/pablomc/data',method,'sim_X'),'rb'))
-                theta = pickle.load(open(os.path.join('/DATOS/pablomc/data',method,'sim_theta'),'rb'))
+                X = pickle.load(open(os.path.join(zenodo_dir_sim, 'data',method,'sim_X'),'rb'))
+                theta = pickle.load(open(os.path.join(zenodo_dir_sim, 'data',method,'sim_theta'),'rb'))
                 rkf = RepeatedKFold(n_splits=10, n_repeats=1, random_state=0)
                 new_X = []
                 new_theta = []
@@ -283,38 +308,43 @@ if compute_metrics:
             print(f'\n--- Error loading SBI models for method {method}')
             continue
 
-    # Create folder to save results
-    if not os.path.exists('data'):
-        os.makedirs('data')
+    # Check if the results folder exists
+    if not os.path.exists(result_folder):
+        # Try to create folder to save results
+        try:
+            os.makedirs(result_folder)
+        except:
+            RuntimeError(f'Could not create folder {result_folder} to save results.')
+            sys.exit(1)
 
     # Save the results
     print('Saving results to file')
-    with open('data/all_post_samples.pkl', 'wb') as file:
+    with open(os.path.join(result_folder,'all_post_samples.pkl'), 'wb') as file:
         pickle.dump(all_post_samples, file)
-    with open('data/all_theta.pkl', 'wb') as file:
+    with open(os.path.join(result_folder,'all_theta.pkl'), 'wb') as file:
         pickle.dump(all_theta, file)
-    with open('data/z_score.pkl', 'wb') as file:
+    with open(os.path.join(result_folder,'z_score.pkl'), 'wb') as file:
         pickle.dump(z_score, file)
-    with open('data/shrinkage.pkl', 'wb') as file:
+    with open(os.path.join(result_folder,'shrinkage.pkl'), 'wb') as file:
         pickle.dump(shrinkage, file)
-    with open('data/abs_error.pkl', 'wb') as file:
+    with open(os.path.join(result_folder,'abs_error.pkl'), 'wb') as file:
         pickle.dump(abs_error, file)
-    with open('data/PRE.pkl', 'wb') as file:
+    with open(os.path.join(result_folder,'PRE.pkl'), 'wb') as file:
         pickle.dump(PRE, file)
 else:
     print('Loading results from file')
     # Load the results
-    with open('data/all_post_samples.pkl', 'rb') as file:
+    with open(os.path.join(result_folder,'all_post_samples.pkl'), 'rb') as file:
         all_post_samples = pickle.load(file)
-    with open('data/all_theta.pkl', 'rb') as file:
+    with open(os.path.join(result_folder,'all_theta.pkl'), 'rb') as file:
         all_theta = pickle.load(file)
-    with open('data/z_score.pkl', 'rb') as file:
+    with open(os.path.join(result_folder,'z_score.pkl'), 'rb') as file:
         z_score = pickle.load(file)
-    with open('data/shrinkage.pkl', 'rb') as file:
+    with open(os.path.join(result_folder,'shrinkage.pkl'), 'rb') as file:
         shrinkage = pickle.load(file)
-    with open('data/abs_error.pkl', 'rb') as file:
+    with open(os.path.join(result_folder,'abs_error.pkl'), 'rb') as file:
         abs_error = pickle.load(file)
-    with open('data/PRE.pkl', 'rb') as file:
+    with open(os.path.join(result_folder,'PRE.pkl'), 'rb') as file:
         PRE = pickle.load(file)
 
 

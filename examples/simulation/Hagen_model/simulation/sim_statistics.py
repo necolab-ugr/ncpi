@@ -1,66 +1,56 @@
 import os
 import pickle
-import json
 import numpy as np
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
+from ncpi import tools
 
-def load_simulation_data(file_path):
-    """
-    Load simulation data from a file.
+# Choose to either download data from Zenodo (True) or load it from a local path (False).
+# Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
+# configure the zenodo_dir variable to point to the local path where the data is stored.
+zenodo_dw_sim = True # simulation data
 
-    Parameters
-    ----------
-    file_path : str
-        Path to the file containing the simulation data.
+# Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
+zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
-    Returns
-    -------
-    data : ndarray
-        Simulation data loaded from the file.
-    """
+# Paths to zenodo files
+zenodo_dir_sim = "zenodo_sim_files"
 
-    try:
-        with open(file_path, 'rb') as file:
-            data = pickle.load(file)
-            print(f'Loaded file: {file_path}')
-    except Exception as e:
-        print(f'Error loading file: {file_path}')
-        print(e)
+# Download simulation data and ML models
+if zenodo_dw_sim:
+    print('\n--- Downloading simulation data and ML models from Zenodo.')
+    start_time = time.time()
+    tools.download_zenodo_record(zenodo_URL_sim, download_dir=zenodo_dir_sim)
+    end_time = time.time()
+    print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
 
-    # Check if the data is a dictionary
-    if isinstance(data, dict):
-        print(f'The file contains a dictionary. {data.keys()}')
-        # Print info about each key in the dictionary
-        for key in data.keys():
-            if isinstance(data[key], np.ndarray):
-                print(f'Shape of {key}: {data[key].shape}')
-            else:
-                print(f'{key}: {data[key]}')
-    # Check if the data is a ndarray and print its shape
-    elif isinstance(data, np.ndarray):
-        print(f'Shape of data: {data.shape}')
-    print('')
-
-    return data
 
 if __name__ == "__main__":
-    # Load the configuration file that stores all file paths used in the script
-    with open('../config.json', 'r') as config_file:
-        config = json.load(config_file)
-    sim_file_path = config['simulation_features_path']
-
     # Analyze parameters of the simulation data
     for method in ['catch22']:
         print(f'\n\n--- Method: {method}')
-        # Load parameters of the model (theta)
+
+        # Load parameters of the model (theta) and features (X) from simulation data
         print('\n--- Loading simulation data.')
         start_time = time.time()
-        theta = load_simulation_data(os.path.join(sim_file_path, method, 'sim_theta'))
-        end_time = time.time()
-        print(f'Samples loaded: {len(theta["data"])}')
-        print(f'Done in {(end_time - start_time)/60.} min')
+
+        try:
+            with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
+                theta = pickle.load(file)
+            with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_X'), 'rb') as file:
+                X = pickle.load(file)
+        except Exception as e:
+            print(f"Error loading simulation data: {e}")
+
+        # Print info
+        print('theta:')
+        for key, value in theta.items():
+            if isinstance(value, np.ndarray):
+                print(f'--Shape of {key}: {value.shape}')
+            else:
+                print(f'--{key}: {value}')
+        print(f'Shape of X: {X.shape}')
 
         # Plot some statistics of the simulation data
         plt.figure(dpi = 300)

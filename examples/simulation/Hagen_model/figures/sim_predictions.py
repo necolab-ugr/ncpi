@@ -1,12 +1,34 @@
 import os
 import pickle
 import numpy as np
+import time
 from matplotlib import pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from scipy.ndimage import gaussian_filter1d
+from ncpi import tools
 
-# Machine learning model
-ML_model = 'MLP'
+# Choose to either download data from Zenodo (True) or load it from a local path (False).
+# Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
+# configure the zenodo_dir variable to point to the local path where the data is stored.
+zenodo_dw_sim = True # simulation data
+
+# Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
+zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
+
+# Paths to zenodo files
+zenodo_dir_sim = "zenodo_sim_files"
+
+# ML model used to compute the predictions (MLPRegressor or Ridge)
+ML_model = 'MLPRegressor'
+
+# Download simulation data and ML models
+if zenodo_dw_sim:
+    print('\n--- Downloading simulation data and ML models from Zenodo.')
+    start_time = time.time()
+    tools.download_zenodo_record(zenodo_URL_sim, download_dir=zenodo_dir_sim)
+    end_time = time.time()
+    print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
+
 
 def hellinger_distance(p, q):
     """
@@ -30,9 +52,6 @@ def hellinger_distance(p, q):
     # Compute the Hellinger Distance
     return np.sqrt(np.sum((np.sqrt(p) - np.sqrt(q)) ** 2)) / np.sqrt(2)
 
-# Path to ML models trained based on a held-out dataset approach
-ML_path = '/DATOS/pablomc/ML_models/held_out_data_models'
-
 # Set the random seed
 np.random.seed(0)
 
@@ -40,13 +59,21 @@ np.random.seed(0)
 all_methods = ['catch22', 'catch22_psp_1', 'SC_FluctAnal_2_dfa_50_1_2_logi_prop_r1',
                'SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1', 'MD_hrv_classic_pnn40',
                'power_spectrum_parameterization_1']
+
+if ML_model == 'MLPRegressor':
+    folder = 'MLP'
+elif ML_model == 'Ridge':
+    folder = 'Ridge'
+
 all_preds = {}
 all_theta = {}
 for method in all_methods:
     try:
-        with open(os.path.join(ML_path, ML_model, method, 'predictions'), 'rb') as file:
+        with open(os.path.join(zenodo_dir_sim,'ML_models/held_out_data_models', folder, method,
+                               'predictions'), 'rb') as file:
             all_preds[method] = np.array(pickle.load(file))
-        with open(os.path.join(ML_path, 'datasets', method, 'held_out_dataset'), 'rb') as file:
+        with open(os.path.join(zenodo_dir_sim,'ML_models/held_out_data_models', 'datasets', method,
+                               'held_out_dataset'), 'rb') as file:
             X_test, theta_test = pickle.load(file)
             all_theta[method] = np.array(theta_test)
     except:

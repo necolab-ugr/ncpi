@@ -1,10 +1,10 @@
-import importlib
 import os
 import pickle
 import sys
 import nest
 import time
 import numpy as np
+from importlib import util
 
 class LIF_network(object):
     """
@@ -83,8 +83,8 @@ class LIF_network(object):
                             mean=self.LIF_params['J_YX'][i][j],
                             std=abs(self.LIF_params['J_YX'][i][j]) * 0.1,
                         ),
-                        min=0. if self.LIF_params['J_YX'][i][j] >= 0 else np.NINF,
-                        max=np.Inf if self.LIF_params['J_YX'][i][j] >= 0 else 0.,
+                        min=0. if self.LIF_params['J_YX'][i][j] >= 0 else -np.inf,
+                        max=np.inf if self.LIF_params['J_YX'][i][j] >= 0 else 0.,
                     ),
 
                     delay=nest.math.redraw(
@@ -93,7 +93,7 @@ class LIF_network(object):
                             std=self.LIF_params['delay_YX'][i][j] * 0.5,
                         ),
                         min=0.3,
-                        max=np.Inf,
+                        max=np.inf,
                     )
                 )
 
@@ -129,8 +129,8 @@ if __name__ == "__main__":
 
     # Import the script as a module
     module_name = os.path.basename(script_path).replace('.py', '')
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    module = importlib.util.module_from_spec(spec)
+    spec = util.spec_from_file_location(module_name, script_path)
+    module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
     # Simulation time

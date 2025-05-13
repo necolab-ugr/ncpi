@@ -36,11 +36,11 @@ dependencies = [
 
 [project.optional-dependencies]
 simulation = [
-    "LFPy",
     "lfpykernels",
+    "LFPy",
     "lfpykit",
-    "neuron",
-    "nest",
+    "neuron"
+    # Omit `nest` (handled by Conda or Docker, if installing a pre-built NEST package)
 ]
 
 utils = [

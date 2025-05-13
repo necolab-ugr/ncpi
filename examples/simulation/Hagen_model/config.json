@@ -1,6 +1,0 @@
-{
-  "simulation_raw_data_path": "/DATOS/pablomc/Hagen_model_v1",
-  "simulation_processed_data_path": "/DATOS/pablomc/data/Hagen_model_v1",
-  "simulation_features_path": "/DATOS/pablomc/data",
-  "multicompartment_neuron_network_path": "/DATOS/pablomc/multicompartment_neuron_network"
-}

@@ -1,4 +1,3 @@
-import json
 import sys
 import os
 import pickle
@@ -8,8 +7,37 @@ import numpy as np
 from matplotlib import pyplot as plt
 import ncpi
 
-# Parameters of LIF model simulations
+# Parameters of the LIF network model
 sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
+
+# Path to the multicompartment neuron network folder.
+# The 'multicompartment_neuron_network' folder must include the following:
+# - 'BallAndSticks_E.hoc'
+# - 'BallAndSticks_I.hoc'
+# - 'BallAndSticksTemplate.hoc'
+# - A 'mod' directory
+# All these files downloaded from the LFPykernels repository: https://github.com/LFPy/LFPykernels/tree/main/examples
+#
+# Additionally, an 'output' directory must be present with precomputed data from the Zenodo repository:
+#  -  https://zenodo.org/records/6992597
+# In this setup, we use the 'adb947bfb931a5a8d09ad078a6d256b0' subfolder.
+multicompartment_neuron_network_path = '/DATA/multicompartment_neuron_network'
+
+# Set to True to run new simulations, or False to load precomputed results from a pickle file located in a
+# 'data' folder.
+compute_new_sim = True
+
+# Number of repetitions of each simulation
+trials = 6
+
+# Configurations of parameters to simulate:
+# Best fit
+# confs = [[1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 29.89]]
+
+# Changing J_ext
+confs = [[1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 28.],
+          [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 30.],
+          [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 32.]]
 
 # Names of catch22 features
 try:
@@ -65,22 +93,9 @@ def get_spike_rate(times, transient, dt, tstop):
     hist, _ = np.histogram(times, bins=bins)
     return bins, hist.astype(float)
 
-# Debug
-compute_new_sim = False
 
 # Random seed for numpy
 np.random.seed(0)
-
-# Number of repetitions of each simulation
-trials = 6
-
-# Configurations of parameters to simulate
-# best_fit = [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 29.89]
-
-# Changing J_ext
-confs = [[1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 28.],
-          [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 30.],
-          [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 32.]]
 
 # Simulation outputs
 spikes = [[] for _ in range(trials)]
@@ -142,12 +157,9 @@ for trial in range(trials):
                 P_X = LIF_params['X']
                 N_X = LIF_params['N_X']
 
-            # Load the path to the multicompartment neuron network folder
-            with open('../config.json', 'r') as config_file:
-                config = json.load(config_file)
-            multicompartment_neuron_network_path = config['multicompartment_neuron_network_path']
             # Simulation output
-            output_path = os.path.join(multicompartment_neuron_network_path, 'output', 'adb947bfb931a5a8d09ad078a6d256b0')
+            output_path = os.path.join(multicompartment_neuron_network_path, 'output',
+                                       'adb947bfb931a5a8d09ad078a6d256b0')
 
             # Transient period
             from analysis_params import KernelParams
@@ -196,10 +208,14 @@ for trial in range(trials):
                 pickle.dump([times, gids, CDM_data, dt, tstop, transient, P_X, N_X], f)
 
         else:
-            with open(f'data/output_{k}_{trial}.pkl', 'rb') as f:
-                times, gids, CDM_data, dt, tstop, transient, P_X, N_X = pickle.load(f)
-            spikes[trial].append([times, gids])
-            CDMs[trial].append(CDM_data)
+            try:
+                with open(f'data/output_{k}_{trial}.pkl', 'rb') as f:
+                    times, gids, CDM_data, dt, tstop, transient, P_X, N_X = pickle.load(f)
+                spikes[trial].append([times, gids])
+                CDMs[trial].append(CDM_data)
+            except FileNotFoundError:
+                print(f'File data/output_{k}_{trial}.pkl not found. Please run the simulation first.')
+                sys.exit(1)
 
 
 # Create a figure and set its properties
@@ -357,7 +373,7 @@ for method in all_methods:
     # Append the feature dataframes to a list
     all_features[method] = df
 
-# Features
+# Plot features
 colors = ['lightcoral', 'lightblue', 'lightgreen', 'lightgrey']
 for row in range(2):
     for col in range(2):
@@ -403,8 +419,6 @@ for row in range(2):
         else:
             ax.set_xticks([])
             ax.set_xticklabels([])
-
-
 
 # Plot letters
 ax = fig.add_axes([0., 0., 1., 1.])
