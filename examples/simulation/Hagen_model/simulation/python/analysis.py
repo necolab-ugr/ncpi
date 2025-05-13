@@ -1,11 +1,10 @@
-import importlib
-import json
 import os
 import pickle
 import sys
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as ss
+from importlib import util
 import ncpi
 
 def get_spike_rate(times, transient, dt, tstop):
@@ -88,8 +87,8 @@ if __name__ == "__main__":
 
     # Import the script as a module
     module_name = os.path.basename(script_path).replace('.py', '')
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    module = importlib.util.module_from_spec(spec)
+    spec = util.spec_from_file_location(module_name, script_path)
+    module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
     # Transient time
@@ -117,10 +116,9 @@ if __name__ == "__main__":
         P_X = LIF_params['X']
         N_X = LIF_params['N_X']
 
-    # Load the path to the multicompartment neuron network folder
-    with open('../config.json', 'r') as config_file:
-        config = json.load(config_file)
-    multicompartment_neuron_network_path = config['multicompartment_neuron_network_path']
+    # Path to the multicompartment neuron network folder
+    multicompartment_neuron_network_path = '/DATA/multicompartment_neuron_network'
+
     # Simulation output
     output_path = os.path.join(multicompartment_neuron_network_path, 'output','adb947bfb931a5a8d09ad078a6d256b0')
 

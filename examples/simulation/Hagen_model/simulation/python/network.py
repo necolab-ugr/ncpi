@@ -1,8 +1,7 @@
-import importlib
 import os
 import pickle
 import sys
-
+from importlib import util
 
 if __name__ == "__main__":
     # Read the script file path from sys.argv[1]
@@ -14,8 +13,8 @@ if __name__ == "__main__":
 
     # Import the script as a module
     module_name = os.path.basename(script_path).replace('.py', '')
-    spec = importlib.util.spec_from_file_location(module_name, script_path)
-    module = importlib.util.module_from_spec(spec)
+    spec = util.spec_from_file_location(module_name, script_path)
+    module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
 
     # LIF network parameters

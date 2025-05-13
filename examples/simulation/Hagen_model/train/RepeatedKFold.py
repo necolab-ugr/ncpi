@@ -1,22 +1,24 @@
-import json
 import time
 import os
 import pickle
 import numpy as np
 import ncpi
 
+# Path to folder where simulation features are stored
+sim_file_path = 'zenodo_sim_files/data'
+
 # Choose whether to use a held-out dataset or the full dataset
 held_out_dataset = False
 
 # List of parameters to be included in the training
 # Full list of parameters:
-# params =  ['J_EE', 'J_IE', 'J_EI', 'J_II', 'tau_syn_E', 'tau_syn_I', 'J_ext']
+params =  ['J_EE', 'J_IE', 'J_EI', 'J_II', 'tau_syn_E', 'tau_syn_I', 'J_ext']
 
 # Special case that includes the E/I parameter and the synaptic time constants
 # params = ['E_I', 'tau_syn_E', 'tau_syn_I']
 
 # Special case that only includes the E/I parameter
-params = ['E_I']
+# params = ['E_I']
 
 # ML model to train
 model = 'MLPRegressor'
@@ -54,73 +56,7 @@ except:
                      'SP_Summaries_welch_rect_centroid',
                      'FC_LocalSimple_mean3_stderr']
 
-def load_simulation_data(file_path):
-    """
-    Load simulation data from a file.
-
-    Parameters
-    ----------
-    file_path : str
-        Path to the file containing the simulation data.
-
-    Returns
-    -------
-    data : dict, ndarray, or None
-        Simulation data loaded from the file. Returns None if an error occurs.
-
-    Raises
-    ------
-    FileNotFoundError
-        If the file does not exist.
-    pickle.UnpicklingError
-        If the file cannot be unpickled.
-    TypeError
-        If the loaded data is not a dictionary or ndarray.
-    """
-
-    data = None  # Initialize to avoid returning an undefined variable
-
-    # Check if the file exists
-    if not os.path.isfile(file_path):
-        raise FileNotFoundError(f"The file {file_path} does not exist.")
-
-    try:
-        # Load the file using pickle
-        with open(file_path, 'rb') as file:
-            data = pickle.load(file)
-            print(f'Loaded file: {file_path}')
-
-        # Check if the data is a dictionary
-        if isinstance(data, dict):
-            print(f'The file contains a dictionary. {list(data.keys())}')
-            for key, value in data.items():
-                if isinstance(value, np.ndarray):
-                    print(f'Shape of {key}: {value.shape}')
-                else:
-                    print(f'{key}: {value}')
-        # Check if the data is a ndarray
-        elif isinstance(data, np.ndarray):
-            print(f'Shape of data: {data.shape}')
-        else:
-            raise TypeError("Loaded data is neither a dictionary nor an ndarray.")
-
-    except (pickle.UnpicklingError, TypeError) as e:
-        print(f"Error: Unable to load the file '{file_path}'. Invalid data format.")
-        print(e)
-        data = None  # Explicitly set data to None on error
-    except Exception as e:
-        print(f"An unexpected error occurred while loading the file '{file_path}'.")
-        print(e)
-        data = None
-
-    return data
-
 if __name__ == "__main__":
-    # Load the configuration file that stores file paths used in the script
-    with open('../config.json', 'r') as config_file:
-        config = json.load(config_file)
-    sim_file_path = config['simulation_features_path']
-
     # Iterate over the methods used to compute the features
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
@@ -134,17 +70,32 @@ if __name__ == "__main__":
                 folder = 'catch22'
             else:
                 folder = method
-            theta = load_simulation_data(os.path.join(sim_file_path, folder, 'sim_theta'))
-            X = load_simulation_data(os.path.join(sim_file_path, folder, 'sim_X'))
+
+            # Load parameters of the model (theta) and features (X) from simulation data
+            try:
+                with open(os.path.join(sim_file_path, folder, 'sim_theta'), 'rb') as file:
+                    theta = pickle.load(file)
+                with open(os.path.join(sim_file_path, folder, 'sim_X'), 'rb') as file:
+                    X = pickle.load(file)
+            except Exception as e:
+                print(f"Error loading simulation data: {e}")
+                
             if method in catch22_names:
                 X = X[:, catch22_names.index(method)]
                 print(f'X shape: {X.shape}, column selected: {catch22_names.index(method)}')
 
         # Concatenate both catch22 and power spectrum parameterization features
         else:
-            theta = load_simulation_data(os.path.join(sim_file_path, 'catch22', 'sim_theta'))
-            X_1 = load_simulation_data(os.path.join(sim_file_path, 'catch22', 'sim_X'))
-            X_2 = load_simulation_data(os.path.join(sim_file_path, 'power_spectrum_parameterization_1', 'sim_X'))
+            try:
+                with open(os.path.join(sim_file_path, 'catch22', 'sim_theta'), 'rb') as file:
+                    theta = pickle.load(file)
+                with open(os.path.join(sim_file_path, 'catch22', 'sim_X'), 'rb') as file:
+                    X_1 = pickle.load(file)
+                with open(os.path.join(sim_file_path, 'power_spectrum_parameterization_1', 'sim_X'), 'rb') as file:
+                    X_2 = pickle.load(file)
+            except Exception as e:
+                print(f"Error loading simulation data: {e}")
+
             X = np.concatenate((X_1, X_2.reshape(-1,1)), axis=1)
             print(f'X shape: {X.shape}')
 
@@ -220,8 +171,8 @@ if __name__ == "__main__":
                 hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
                                {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
-        if model == 'SNPE':
-            print('--- Using SNPE')
+        if model == 'NPE':
+            print('--- Using NPE')
             if method == 'catch22' or method == 'catch22_psp_1':
                 hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
                                                                      'num_transforms':2}}]
@@ -238,7 +189,7 @@ if __name__ == "__main__":
         inference.add_simulation_data(X_train, theta_train)
 
         # Train the model
-        if model == 'SNPE':
+        if model == 'NPE':
             # inference.train(param_grid=None, train_params={
             #     'learning_rate': 1e-1,
             #     'stop_after_epochs': 5,
@@ -255,7 +206,7 @@ if __name__ == "__main__":
                     open(os.path.join('data', method, 'scaler'), 'wb'))
 
         # Save density estimator
-        if model == 'SNPE':
+        if model == 'NPE':
             pickle.dump(pickle.load(open('data/density_estimator.pkl', 'rb')),
                         open(os.path.join('data', method, 'density_estimator'), 'wb'))
 
