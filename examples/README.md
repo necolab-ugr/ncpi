@@ -59,6 +59,21 @@ package to be installed beforehand. In the R environment, the following packages
 
 ### 🔵 `simulation/`
 
+> **Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
+> the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed.  
+> If you're using Conda or Docker, you can install a pre-built NEST package with:
+>
+> ```bash
+> conda install -c conda-forge nest-simulator=3.8
+> ```
+>
+> Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must be installed via pip:
+>
+> ```bash
+> pip install LFPykernels
+> ```
+
+
 #### Figures Generation (`Hagen_model/figures/`)
 
 - **`example_full_pipeline.py`**  
