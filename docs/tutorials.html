@@ -56,7 +56,7 @@
         main {
             flex: 1;
             padding: 2em;
-            max-width: 800px;
+            max-width: 1000px; /* Increased to accommodate two columns */
             margin: 0 auto;
         }
 
@@ -75,6 +75,19 @@
             color: #24292e;
             border-bottom: 1px solid #e1e4e8;
             padding-bottom: 0.3em;
+        }
+
+        .tutorial-box {
+            border: 1px solid #e1e4e8;
+            border-radius: 8px;
+            padding: 1.2em;
+            margin-bottom: 1.5em;
+            background-color: #fdfdfd;
+            box-sizing: border-box;
+        }
+
+        .tutorial-box h2 {
+            margin-top: 0;
         }
 
         code {
@@ -115,6 +128,22 @@
             margin-bottom: 0.6em;
         }
 
+        /* New styles for 2-column layout */
+        .tutorials-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1.5em;
+        }
+
+        .tutorial-column {
+            flex: 1;
+            min-width: 300px;
+        }
+
+        .tutorial-section {
+            width: 100%;
+            margin-bottom: 2em;
+        }
     </style>
 </head>
 <body>
@@ -132,22 +161,76 @@
             </ul>
         </nav>
 
-        <!-- Main Markdown-Style Content (Center) -->
+        <!-- Main Content (Center) -->
         <main>
-
             <h1 id="home">Tutorials for using the ncpi toolbox</h1>
 
-            <p>
-            <p>Start with the <a href="tutorials/getting_started.html">Getting Started</a> guide to learn how to use the ncpi
-            toolbox effectively.</p>
-            </p>
+            <p>Explore hands-on tutorials to get started with <code>ncpi</code> and build your own workflows. The
+                <strong>Core Workflow</strong> guides you through the complete pipeline from neural simulation to
+                parameter inference: simulating neural activity with biophysical models, extracting informative
+                features from the data, and training inverse models to recover parameters from observations. The
+                <strong>Target Audience Tutorials</strong> provide specialized guidance for experimentalists who
+                want to connect measurements with model parameters, computational neuroscientists developing
+                data-constrained models, and researchers in machine learning and simulation-based inference (SBI)
+                working on neural systems.</p>
 
+            <div class="tutorials-container">
+                <div class="tutorial-column">
+                    <div class="tutorial-section">
+                        <h1>Core Workflow</h1>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/getting_started.html">Getting started</a>
+                        </div>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/simulation_lif.html">Forward modelling of neural activity</a>
+                        </div>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/feature_extraction.html">Computation of features</a>
+                        </div>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/inverse_model_training.html">Inverse model training</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tutorial-column">
+                    <div class="tutorial-section">
+                        <h1>For Target Audiences</h1>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/experimentalists.html">Experimentalists</a>
+                        </div>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/computational_neuroscientists.html">Computational neuroscientists</a>
+                        </div>
+
+                        <div class="tutorial-box">
+                            <a href="tutorials/researchers_ML_SBI.html">Researchers in machine learning and SBI</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </main>
 
         <!-- Table of Contents (Right) -->
         <aside>
             <h2>Table of Contents</h2>
             <ul>
+                <li><a href="#home">Tutorials Overview</a></li>
+                <li><h3>Core Workflow</h3></li>
+                <li><a href="tutorials/getting_started.html">Getting Started</a></li>
+                <li><a href="tutorials/simulation_lif.html">Forward Modelling</a></li>
+                <li><a href="tutorials/feature_extraction.html">Feature Extraction</a></li>
+                <li><a href="tutorials/inverse_model_training.html">Inverse Model Training</a></li>
+                <li><h3>Target Audiences</h3></li>
+                <li><a href="tutorials/experimentalists.html">For Experimentalists</a></li>
+                <li><a href="tutorials/computational_neuroscientists.html">For Computational Neuroscientists</a></li>
+                <li><a href="tutorials/researchers_ML_SBI.html">For ML/SBI Researchers</a></li>
             </ul>
         </aside>
     </div>
