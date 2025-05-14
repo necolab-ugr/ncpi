@@ -51,7 +51,7 @@
         main {
             flex: 1;
             padding: 2em;
-            max-width: 800px;
+            max-width: 1200px;
             margin: 0 auto;
         }
 
@@ -109,6 +109,19 @@
             font-size: 1.1em;
             margin-bottom: 0.6em;
         }
+        @media (max-width: 1100px) {
+            nav,
+            aside {
+                display: none;
+            }
+
+            main {
+                padding: 1em;
+                margin: 0;
+                max-width: 100%;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -134,10 +147,8 @@
 
         <!-- Table of Contents (Right) -->
         <aside>
-            <h2>Table of Contents</h2>
-            <ul>
-            </ul>
         </aside>
+
     </div>
 </body>
 </html>
