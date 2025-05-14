@@ -95,8 +95,8 @@ def simulator(θ):
     spikes = np.zeros((n_neurons, sim_time))
 
     # Define exponential kernel to model synaptic integration
-    tau = sampling_rate * (θ + 0.1)   
-    t_kernel = np.arange(int(sampling_rate * 4))  # Kernel length of 4 seconds
+    tau = sampling_rate * (θ + 0.01)
+    t_kernel = np.arange(int(sampling_rate * 4))  # Kernel length of 4 times the sampling rate
     exp_kernel = np.exp(-t_kernel / tau)
 
     for neuron in range(n_neurons):
@@ -106,10 +106,12 @@ def simulator(θ):
         # Convolve input with synaptic kernel to create smooth modulated signal
         modulated = np.convolve(raw_input, exp_kernel, mode='same')
 
-        # Normalize modulated signal to [0, 1] to use as spike probability
+        # Normalize modulated signal to [0, 1]
         modulated -= modulated.min()
         modulated /= modulated.max()
-        spike_probs = modulated
+
+        # Apply a threshold
+        spike_probs = modulated - 0.9
 
         # Sample binary spikes based on spike probabilities
         spikes[neuron] = np.random.rand(sim_time) < spike_probs
