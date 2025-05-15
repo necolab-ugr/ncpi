@@ -38,13 +38,22 @@ parameters during the early postnatal period.
   Generates **Figure 6**: *"Predictions of changes in cortical circuit parameters derived from developmental 
 LFP data."*
 
-  **Note**: This script performs a Linear Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` 
-package to be installed beforehand. In the R environment, the following packages must also be installed:
+- **`figures/emp_features.py`**: 
+    Plots features extracted from LFP data as a function of postnatal days.
+
+**Note**: `figures/LFP_predictions.py` performs a Linear Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` 
+packages to be installed beforehand. In the R environment, the following packages must also be installed:
+
 
   - `lme4`  
   - `emmeans`
 
-  You can install them using:
+  You can install them with conda using:
+  ```bash
+  conda install -c conda-forge r-base rpy2 r-lme4 r-emmeans
+  ```
+
+  To just install the R packages, use:
 
   ```r
   install.packages("lme4", dependencies = TRUE)
@@ -54,8 +63,6 @@ package to be installed beforehand. In the R environment, the following packages
   If you prefer not to use the LME analysis, you can opt to compute Cohen's d statistic instead, which does not 
   require R.
 
-- **`figures/emp_features.py`**: 
-    Plots features extracted from LFP data as a function of postnatal days.
 
 ### 🔵 `simulation/`
 
