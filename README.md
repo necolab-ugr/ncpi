@@ -165,11 +165,11 @@ if __name__ == "__main__":
     θ_test = np.array(sim_data['θ'][test_indices])
     
     # Create the inference object and add simulation data
-    inference = ncpi.Inference(model='MLPRegressor', 
-                               hyperparams={'hidden_layer_sizes': (50,50),
-                                            'max_iter': 100,
-                                            'tol': 1e-1,
-                                            'n_iter_no_change': 5})
+    inference = ncpi.Inference(model='MLPRegressor',
+                               hyperparams={'hidden_layer_sizes': (200,200,200),
+                                            'max_iter': 200,
+                                            'tol': 0.0001,
+                                            'n_iter_no_change': 10})
     inference.add_simulation_data(X_train, θ_train)
     
     # Train the model
@@ -189,7 +189,7 @@ if __name__ == "__main__":
 ```
 
 # Tutorials
-If you're new to `ncpi`, we recommend starting with our [Getting Started](https://necolab-ugr.github.io/ncpi/)
+If you're new to `ncpi`, we recommend starting with our [Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html)
 tutorial.
 
 # Citation
