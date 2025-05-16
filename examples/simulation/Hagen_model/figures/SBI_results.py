@@ -10,6 +10,9 @@ from scipy.ndimage import gaussian_filter1d
 from sklearn.model_selection import RepeatedKFold
 from ncpi import tools
 
+# Note: The SBI models were trained using sbi version 0.22.0 with the SNPE algorithm. As of sbi version 0.23.0, the
+# required import is no longer supported. To run this code, please downgrade sbi to version 0.22.0.
+
 # Choose whether to compute posteriors and diagnostic metrics (True) or load them from file (False)
 compute_metrics = True
 
