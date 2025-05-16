@@ -1,5 +1,5 @@
 > 🚧 **This repository is under active development, and features or documentation may still evolve. That said, version 
-> v0.2.5 marks a maturing stage of the project: it is functionally stable and has been thoroughly tested with all 
+> v0.2.6 marks a maturing stage of the project: it is functionally stable and has been thoroughly tested with all 
 > included examples, though some aspects may still change ahead of a full stable release** 🚧
 
 <div align="center">

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Researchers in machine learning and SBI</title>
+    <title>Contributing</title>
     <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -46,6 +46,11 @@
 
         nav ul li a:hover {
             text-decoration: underline;
+        }
+
+        nav ul li a.active {
+            font-weight: bold;
+            color: #24292e;
         }
 
         main {
@@ -109,6 +114,24 @@
             font-size: 1.1em;
             margin-bottom: 0.6em;
         }
+
+        /* Under construction banner */
+        .construction-banner {
+            background-color: #fff8e6;
+            border-left: 4px solid #ffcc00;
+            padding: 1em;
+            margin-bottom: 2em;
+            border-radius: 0 4px 4px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .construction-banner:before {
+            content: "🚧";
+            margin-right: 0.5em;
+            font-size: 1.2em;
+        }
+
         @media (max-width: 1100px) {
             nav,
             aside {
@@ -122,6 +145,7 @@
             }
         }
 
+
     </style>
 </head>
 <body>
@@ -129,25 +153,37 @@
         <!-- Navigation Menu (Left) -->
         <nav>
             <ul>
-                <li><a href="../index.html">Home</a></li>
-                <li><a href="../tutorials.html" class="active">Tutorials</a></li>
-                <li><a href="../API.html">API</a></li>
-                <li><a href="../FAQ.html">FAQ</a></li>
-                <li><a href="../Contributing.html">Contributing</a></li>
-                <li><a href="../Citation.html">Citation</a></li>
-                <li><a href="../Credits.html">Credits</a></li>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="tutorials.html">Tutorials</a></li>
+                <li><a href="API.html">API</a></li>
+                <li><a href="FAQ.html">FAQ</a></li>
+                <li><a href="Contributing.html" class="active">Contributing</a></li>
+                <li><a href="Citation.html">Citation</a></li>
+                <li><a href="Credits.html">Credits</a></li>
             </ul>
         </nav>
 
         <!-- Main Markdown-Style Content (Center) -->
         <main>
-            <h1>🚧 Under Construction 🚧</h1>
-            <p>We're working on something awesome.<br>Please check back soon!</p>
+
+
+            <section id="Contributing">
+                <h2>Contributing</h2>
+
+            <p>
+            We welcome and appreciate contributions from the community! Whether you’ve found a bug, have a feature
+            request, want to improve the documentation, or simply have ideas to share, your input helps make the
+            library better for everyone.
+            </p>
+
+            </section>
         </main>
+
 
         <!-- Table of Contents (Right) -->
         <aside>
         </aside>
+
     </div>
 </body>
 </html>

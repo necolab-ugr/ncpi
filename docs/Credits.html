@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Researchers in machine learning and SBI</title>
+    <title>Credits</title>
     <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -46,6 +46,11 @@
 
         nav ul li a:hover {
             text-decoration: underline;
+        }
+
+        nav ul li a.active {
+            font-weight: bold;
+            color: #24292e;
         }
 
         main {
@@ -109,6 +114,24 @@
             font-size: 1.1em;
             margin-bottom: 0.6em;
         }
+
+        /* Under construction banner */
+        .construction-banner {
+            background-color: #fff8e6;
+            border-left: 4px solid #ffcc00;
+            padding: 1em;
+            margin-bottom: 2em;
+            border-radius: 0 4px 4px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .construction-banner:before {
+            content: "🚧";
+            margin-right: 0.5em;
+            font-size: 1.2em;
+        }
+
         @media (max-width: 1100px) {
             nav,
             aside {
@@ -122,6 +145,7 @@
             }
         }
 
+
     </style>
 </head>
 <body>
@@ -129,25 +153,56 @@
         <!-- Navigation Menu (Left) -->
         <nav>
             <ul>
-                <li><a href="../index.html">Home</a></li>
-                <li><a href="../tutorials.html" class="active">Tutorials</a></li>
-                <li><a href="../API.html">API</a></li>
-                <li><a href="../FAQ.html">FAQ</a></li>
-                <li><a href="../Contributing.html">Contributing</a></li>
-                <li><a href="../Citation.html">Citation</a></li>
-                <li><a href="../Credits.html">Credits</a></li>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="tutorials.html">Tutorials</a></li>
+                <li><a href="API.html">API</a></li>
+                <li><a href="FAQ.html">FAQ</a></li>
+                <li><a href="Contributing.html">Contributing</a></li>
+                <li><a href="Citation.html">Citation</a></li>
+                <li><a href="Credits.html" class="active">Credits</a></li>
             </ul>
         </nav>
 
         <!-- Main Markdown-Style Content (Center) -->
         <main>
-            <h1>🚧 Under Construction 🚧</h1>
-            <p>We're working on something awesome.<br>Please check back soon!</p>
+
+            <section id="credits">
+              <h2>Credits</h2>
+
+              <h3>Project Information</h3>
+              <p>
+                <strong>Project:</strong> <a href="https://github.com/necolab-ugr/ncpi">ncpi (Neural Circuit Parameter
+                  Inference)</a><br>
+                <strong>Organization:</strong> <a href="https://necolab.ugr.es/">Neural Engineering and
+                  Computing (NECO) Lab</a><br>
+                <strong>Institution:</strong> CITIC-UGR, University of Granada (Spain)
+              </p>
+
+              <h3>License</h3>
+              <p>
+                This project is licensed under the <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU General
+                  Public License v3.0 (GPL-3.0)</a>.
+                You are free to use, modify, and distribute this software under the terms of this license, provided
+                  that derivative works also remain under the same license.
+              </p>
+
+              <h3>Funding</h3>
+              <p>
+                This work was supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31,funded by
+                  MCIN/AEI/10.13039/501100011033 and by “ERDF A way of making Europe”; and by “Junta de Andalucía” -
+                  Postdoctoral Fellowship Programme PAIDI 2021.
+              </p>
+
+            </section>
+
+
         </main>
+
 
         <!-- Table of Contents (Right) -->
         <aside>
         </aside>
+
     </div>
 </body>
 </html>

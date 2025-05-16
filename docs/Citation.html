@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Researchers in machine learning and SBI</title>
+    <title>Citation</title>
     <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -46,6 +46,11 @@
 
         nav ul li a:hover {
             text-decoration: underline;
+        }
+
+        nav ul li a.active {
+            font-weight: bold;
+            color: #24292e;
         }
 
         main {
@@ -109,6 +114,24 @@
             font-size: 1.1em;
             margin-bottom: 0.6em;
         }
+
+        /* Under construction banner */
+        .construction-banner {
+            background-color: #fff8e6;
+            border-left: 4px solid #ffcc00;
+            padding: 1em;
+            margin-bottom: 2em;
+            border-radius: 0 4px 4px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .construction-banner:before {
+            content: "🚧";
+            margin-right: 0.5em;
+            font-size: 1.2em;
+        }
+
         @media (max-width: 1100px) {
             nav,
             aside {
@@ -122,6 +145,7 @@
             }
         }
 
+
     </style>
 </head>
 <body>
@@ -129,25 +153,39 @@
         <!-- Navigation Menu (Left) -->
         <nav>
             <ul>
-                <li><a href="../index.html">Home</a></li>
-                <li><a href="../tutorials.html" class="active">Tutorials</a></li>
-                <li><a href="../API.html">API</a></li>
-                <li><a href="../FAQ.html">FAQ</a></li>
-                <li><a href="../Contributing.html">Contributing</a></li>
-                <li><a href="../Citation.html">Citation</a></li>
-                <li><a href="../Credits.html">Credits</a></li>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="tutorials.html">Tutorials</a></li>
+                <li><a href="API.html">API</a></li>
+                <li><a href="FAQ.html">FAQ</a></li>
+                <li><a href="Contributing.html">Contributing</a></li>
+                <li><a href="Citation.html" class="active">Citation</a></li>
+                <li><a href="Credits.html">Credits</a></li>
             </ul>
         </nav>
 
         <!-- Main Markdown-Style Content (Center) -->
         <main>
-            <h1>🚧 Under Construction 🚧</h1>
-            <p>We're working on something awesome.<br>Please check back soon!</p>
+
+            <section id="Citation">
+                <h2>Citation</h2>
+
+            <p>If you use <code>ncpi</code> in your research, please consider citing our work:</p>
+
+            <p><strong>[1] Alejandro Orozco Valero, Víctor Rodríguez-González, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie,
+            Francisco Pelayo, Christian Morillas, Jesús Poza, Carlos Gómez & Pablo Martínez-Cañada</strong><br>
+            <em>A Python toolbox for neural circuit parameter inference.</em><br>
+            <i>npj Syst Biol Appl</i> 11, 45 (2025).<br>
+            <a href="https://doi.org/10.1038/s41540-025-00527-9">https://doi.org/10.1038/s41540-025-00527-9</a></p>
+
+            </section>
+
         </main>
+
 
         <!-- Table of Contents (Right) -->
         <aside>
         </aside>
+
     </div>
 </body>
 </html>
