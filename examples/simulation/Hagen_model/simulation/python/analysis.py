@@ -1,11 +1,32 @@
 import os
 import pickle
 import sys
+import time
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as ss
 from importlib import util
 import ncpi
+from ncpi import tools
+
+# Choose to either download files and precomputed outputs used in simulations of the reference multicompartment neuron
+# network model (True) or load them from a local path (False)
+zenodo_dw_mult = True
+
+# Zenodo URL that contains the data (used if zenodo_dw_mult is True)
+zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
+
+# Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in neuron)
+zenodo_dir = '/DATA/multicompartment_neuron_network'
+
+# Download data
+if zenodo_dw_mult:
+    print('\n--- Downloading data.')
+    start_time = time.time()
+    tools.download_zenodo_record(zenodo_URL_mult, download_dir=zenodo_dir)
+    end_time = time.time()
+    print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
+
 
 def get_spike_rate(times, transient, dt, tstop):
     """
@@ -116,11 +137,12 @@ if __name__ == "__main__":
         P_X = LIF_params['X']
         N_X = LIF_params['N_X']
 
-    # Path to the multicompartment neuron network folder
-    multicompartment_neuron_network_path = '/DATA/multicompartment_neuron_network'
+    # Simulation output from the multicompartment neuron network model
+    output_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network', 'output',
+                               'adb947bfb931a5a8d09ad078a6d256b0')
 
-    # Simulation output
-    output_path = os.path.join(multicompartment_neuron_network_path, 'output','adb947bfb931a5a8d09ad078a6d256b0')
+    # Path to the data files of the multicompartment neuron models
+    multicompartment_neuron_network_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network')
 
     # Compute the kernel
     print('Computing the kernel...')

@@ -4,27 +4,26 @@ import pickle
 import pandas as pd
 import scipy.signal as ss
 import numpy as np
+import time
 from matplotlib import pyplot as plt
 import ncpi
+from ncpi import tools
 
-# Parameters of the LIF network model
+# Path to parameters of the LIF network model
 sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
 
-# Path to the multicompartment neuron network folder.
-# The 'multicompartment_neuron_network' folder must include the following:
-# - 'BallAndSticks_E.hoc'
-# - 'BallAndSticks_I.hoc'
-# - 'BallAndSticksTemplate.hoc'
-# - A 'mod' directory
-# All these files downloaded from the LFPykernels repository: https://github.com/LFPy/LFPykernels/tree/main/examples
-#
-# Additionally, an 'output' directory must be present with precomputed data from the Zenodo repository:
-#  -  https://zenodo.org/records/6992597
-# In this setup, we use the 'adb947bfb931a5a8d09ad078a6d256b0' subfolder.
-multicompartment_neuron_network_path = '/DATA/multicompartment_neuron_network'
+# Choose to either download files and precomputed outputs used in simulations of the reference multicompartment neuron
+# network model (True) or load them from a local path (False)
+zenodo_dw_mult = True
 
-# Set to True to run new simulations, or False to load precomputed results from a pickle file located in a
-# 'data' folder.
+# Zenodo URL that contains the data (used if zenodo_dw_mult is True)
+zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
+
+# Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in NEURON)
+zenodo_dir = '/DATA/multicompartment_neuron_network'
+
+# Set to True to run new simulations of the LIF network model, or False to load precomputed results from a pickle file
+# located in a 'data' folder.
 compute_new_sim = True
 
 # Number of repetitions of each simulation
@@ -38,6 +37,13 @@ trials = 6
 confs = [[1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 28.],
           [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 30.],
           [1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 32.]]
+
+# Do not change these paths if the zenodo_dir has been correctly set:
+# (1) Simulation output from the multicompartment neuron network model
+output_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network', 'output', 'adb947bfb931a5a8d09ad078a6d256b0')
+
+# (2) Path to the data files of the multicompartment neuron models
+multicompartment_neuron_network_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network')
 
 # Names of catch22 features
 try:
@@ -93,6 +99,13 @@ def get_spike_rate(times, transient, dt, tstop):
     hist, _ = np.histogram(times, bins=bins)
     return bins, hist.astype(float)
 
+# Download data
+if zenodo_dw_mult:
+    print('\n--- Downloading data.')
+    start_time = time.time()
+    tools.download_zenodo_record(zenodo_URL_mult, download_dir=zenodo_dir)
+    end_time = time.time()
+    print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
 
 # Random seed for numpy
 np.random.seed(0)
@@ -157,10 +170,6 @@ for trial in range(trials):
                 P_X = LIF_params['X']
                 N_X = LIF_params['N_X']
 
-            # Simulation output
-            output_path = os.path.join(multicompartment_neuron_network_path, 'output',
-                                       'adb947bfb931a5a8d09ad078a6d256b0')
-
             # Transient period
             from analysis_params import KernelParams
             transient = KernelParams.transient
@@ -172,6 +181,7 @@ for trial in range(trials):
             print('Computing the kernel...')
             potential = ncpi.FieldPotential()
             biophys = ['set_Ih_linearized_hay2011', 'make_cell_uniform']
+
             H_YX = potential.create_kernel(multicompartment_neuron_network_path,
                                            output_path,
                                            KernelParams,
