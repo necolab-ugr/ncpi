@@ -41,19 +41,14 @@ LFP data."*
 - **`figures/emp_features.py`**: 
     Plots features extracted from LFP data as a function of postnatal days.
 
-**Note**: `figures/LFP_predictions.py` performs a Linear Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` 
-packages to be installed beforehand. In the R environment, the following packages must also be installed:
+**Note**: `figures/LFP_predictions.py` performs a Linear Mixed-Effects (LME) analysis, which requires both R and the 
+Python `rpy2` packages to be installed beforehand. In the R environment, the following packages must also be installed:
 
 
   - `lme4`  
   - `emmeans`
 
-  You can install them with conda using:
-  ```bash
-  conda install -c conda-forge r-base rpy2 r-lme4 r-emmeans
-  ```
-
-  To just install the R packages, use:
+  To install these packages in R, use:
 
   ```r
   install.packages("lme4", dependencies = TRUE)
@@ -67,19 +62,27 @@ packages to be installed beforehand. In the R environment, the following package
 ### 🔵 `simulation/`
 
 > **Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
-> the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed.  
-> If you're using Conda or Docker, you can install a pre-built NEST package with:
+> the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST 
+> package with:
 >
 > ```bash
 > conda install -c conda-forge nest-simulator=3.8
 > ```
 >
-> Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must be installed via pip:
+> Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must be 
+> installed via pip:
 >
 > ```bash
 > pip install LFPykernels
 > ```
-
+>  If you encounter a binary incompatibility between your installed NumPy and scikit-learn packages after installing NEST—
+> for example, an error like *numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, 
+> got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
+>
+> ```bash
+> pip uninstall scikit-learn numpy -y
+> pip install scikit-learn==1.3.2 numpy
+> ```
 
 #### Figures Generation (`Hagen_model/figures/`)
 

@@ -1,4 +1,6 @@
-> 🚧 **This repository is under active development. Features and docs may change.** 🚧
+> 🚧 **This repository is under active development, and features or documentation may still evolve. That said, version 
+> v0.2.5 marks a maturing stage of the project: it is functionally stable and has been thoroughly tested with all 
+> included examples, though some aspects may still change ahead of a full stable release** 🚧
 
 <div align="center">
 
@@ -9,7 +11,8 @@ ___
 
 </div>
 
-[Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html) | [Documentation](https://necolab-ugr.github.io/ncpi/)
+[Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html) | 
+[Documentation](https://necolab-ugr.github.io/ncpi/)
 
 `ncpi` is a Python package for model-based inference of neural circuit parameters from population-level 
 electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provides a rapid, reproducible, and robust 
@@ -44,6 +47,30 @@ conda activate ncpi-env
 
 # Step 2: Install ncpi using pip
 pip install ncpi
+```
+
+**Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
+the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST package 
+with:
+
+```bash
+conda install -c conda-forge nest-simulator=3.8
+ ```
+
+Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must 
+be installed via pip:
+
+```bash
+pip install LFPykernels
+```
+
+If you encounter a binary incompatibility between your installed NumPy and scikit-learn packages after installing NEST—
+for example, an error like *numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, 
+got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
+
+```bash
+pip uninstall scikit-learn numpy -y
+pip install scikit-learn==1.3.2 numpy
 ```
 
 # Folder Structure
@@ -189,7 +216,8 @@ if __name__ == "__main__":
 ```
 
 # Tutorials
-If you're new to `ncpi`, we recommend starting with our [Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html)
+If you're new to `ncpi`, we recommend starting with our 
+[Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html)
 tutorial.
 
 # Citation
@@ -202,7 +230,5 @@ npj Syst Biol Appl 11, 45 (2025).
 https://doi.org/10.1038/s41540-025-00527-9  
 
 # Acknowledgements
-This study was supported by grants PID2022-139055OA-I00, PID2022-137461NB-C31, and PID2022-138286NB-I00, 
-funded by MCIN/AEI/10.13039/501100011033 and by “ERDF A way of making Europe”; by “Junta de Andalucía” - 
-Postdoctoral Fellowship Programme PAIDI 2021; and by “CIBER en Bioingeniería, Biomateriales y Nanomedicina 
-(CIBER-BBN), Spain” through “Instituto de Salud Carlos III” co-funded with ERDF funds.
+This work was supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31,funded by MCIN/AEI/10.13039/501100011033 
+and by “ERDF A way of making Europe”; and by “Junta de Andalucía” - Postdoctoral Fellowship Programme PAIDI 2021.
