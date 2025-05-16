@@ -28,8 +28,8 @@ class Analysis:
     def lmer(self, control_group = 'HC', data_col = 'Y', other_col = ['ID', 'Group', 'Epoch', 'Sensor'],
              data_index = -1, models = None, bic_models = None, anova_tests = None, specs = None):
         """
-        Perform linear mixed-effects model (lmer) or linear model (lm) comparisons using R's `lme4` and `emmeans`
-        packages. We assume that, at least, a 'Group' column is present in the dataframe.
+        Perform linear mixed-effects model (lmer) or linear model (lm) comparisons using R's `lme4`, `emmeans` and
+        `nlme` packages. We assume that, at least, a 'Group' column is present in the dataframe.
 
         Parameters
         ----------
@@ -96,7 +96,7 @@ class Analysis:
         }
 
         # Load required packages
-        load_packages(c("lme4", "lmerTest", "emmeans"))
+        load_packages(c("lme4", "emmeans", "nlme"))
         ''')
 
         # Check if the data is a pandas DataFrame
@@ -263,21 +263,74 @@ class Analysis:
                     m_name <- m_sel
                     for (comparison in names(anova_tests)) {
                         models <- anova_tests[[comparison]]
-                        # Check if the selected model is in the list of models to compare
                         
+                        # Check if the selected model is in the list of models to compare
                         if (m_sel %in% models) {
                             anova_result <- tryCatch(
                             {
                                 model1 <- get(as.character(models[2]))
                                 model2 <- get(as.character(models[1]))
-
+                                
+                                # Print model classes for debugging
+                                print(paste("model1 class:", paste(class(model1), collapse = ", ")))
+                                print(paste("model2 class:", paste(class(model2), collapse = ", ")))
+                                
+                                # Check if both models are `lm` or `merMod`
                                 if (inherits(model1, "merMod") || inherits(model2, "merMod")) {
-                                # Usar anova directamente en el modelo lmerTest
-                                capture.output(lmerTest::anova(model1, model2))
+                                    # Case 1: One model is `lm`, the other is `lmer` 
+                                    if (inherits(model1, "lm") && inherits(model2, "merMod")) {
+                                        # Convert `lm` → `gls`
+                                        formula1 <- formula(model1)
+                                        data1 <- model.frame(model1)
+                                        model1 <- gls(formula1, data = data1, method = "ML")
+                                        
+                                        # Convert `lmer` → `lme` (if possible)
+                                        formula2 <- formula(model2)
+                                        data2 <- model.frame(model2)
+                                        random_effect <- findbars(formula2)  # Extract random effects
+                                        
+                                        if (length(random_effect) == 1) {
+                                            # Simple random intercept (e.g., `(1 | Group)`)
+                                            model2 <- lme(
+                                                fixed = nobars(formula2),
+                                                random = as.formula(paste("~1 |", deparse(random_effect[[1]][[3]]))),
+                                                data = data2,
+                                                method = "ML"
+                                            )
+                                        } else {
+                                            # If random effects are complex, drop them and refit as `gls`
+                                            model2 <- gls(nobars(formula2), data = data2, method = "ML")
+                                        }
+                                    } 
+                                    else if (inherits(model2, "lm") && inherits(model1, "merMod")) {
+                                        # Same as above, but swap model1/model2
+                                        formula2 <- formula(model2)
+                                        data2 <- model.frame(model2)
+                                        model2 <- gls(formula2, data = data2, method = "ML")
+                                        
+                                        formula1 <- formula(model1)
+                                        data1 <- model.frame(model1)
+                                        random_effect <- findbars(formula1)
+                                        
+                                        if (length(random_effect) == 1) {
+                                            model1 <- lme(
+                                                fixed = nobars(formula1),
+                                                random = as.formula(paste("~1 |", deparse(random_effect[[1]][[3]]))),
+                                                data = data1,
+                                                method = "ML"
+                                            )
+                                        } else {
+                                            model1 <- gls(nobars(formula1), data = data1, method = "ML")
+                                        }
+                                    }
+                                    
+                                    # Now compare using `nlme::anova.lme`
+                                    capture.output(nlme::anova.lme(model1, model2))
                                 } else {
-                                # Usar anova normal para modelos lm
-                                capture.output(stats::anova(model1, model2))
+                                    # Default: Compare two `lm` models
+                                    capture.output(stats::anova(model1, model2))
                                 }
+
                             },
                             error = function(e) {
                                 cat("\n--- ANOVA Error ---\n")

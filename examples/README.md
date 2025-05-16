@@ -47,12 +47,14 @@ Python `rpy2` packages to be installed beforehand. In the R environment, the fol
 
   - `lme4`  
   - `emmeans`
+  - `nlme`
 
   To install these packages in R, use:
 
   ```r
   install.packages("lme4", dependencies = TRUE)
   install.packages("emmeans", dependencies = TRUE)
+  install.packages("nlme", dependencies = TRUE)
   ```
 
   Or alternatively, with conda:

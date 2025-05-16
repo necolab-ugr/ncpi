@@ -8,33 +8,28 @@ import shutil
 import ncpi
 from ncpi import tools
 
-# Select the statistical analysis method ('cohen', 'lmer')
+# Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
 raw = True
 if raw:
-    data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SENSORS'
+    data_path = '/DATA/empirical_datasets/POCTEP_data/CLEAN/SENSORS'
 else:
-    data_path = '/DATOS/pablomc/empirical_datasets/POCTEP_data/CLEAN/SOURCES/dSPM/DK'
-
-
+    data_path = '/DATA/empirical_datasets/POCTEP_data/CLEAN/SOURCES/dSPM/DK'
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
 # configure the zenodo_dir variables to point to the local paths where the data is stored.
-zenodo_dw_sim = False # simulation data
+zenodo_dw_sim = True # simulation data
 
 # Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
-# Zenodo URL that contains the empirical data (used if zenodo_dw_emp is True)
-zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
-
-# Paths to zenodo files
+# Paths to zenodo simulation files
 zenodo_dir_sim = "zenodo_sim_files"
 
 # Methods used to compute the features
 all_methods = ['catch22','power_spectrum_parameterization_1']
 
-# ML model used to compute the predictions (MLPRegressor, Ridge or NPE)
+# ML model used to compute the predictions
 ML_model = 'MLPRegressor'
 
 
@@ -44,8 +39,8 @@ def create_POCTEP_dataframe(data_path):
 
     Parameters
     ----------
-    raw : bool, optional
-        If True, load the raw data. If False, load the source data.
+    data_path: str
+        Path to the directory containing the POCTEP data files.
 
     Returns
     -------
@@ -73,7 +68,7 @@ def create_POCTEP_dataframe(data_path):
         # get sampling frequency
         fs = data['cfg'][0, 0]['fs'][0, 0][0, 0]
 
-        # Electrodes (raw data)/regions (if source data)
+        # Electrodes (raw data)/ regions (if source data)
         regions = np.arange(signal.shape[1])
 
         # get channels
@@ -105,7 +100,6 @@ def create_POCTEP_dataframe(data_path):
     df['Recording'] = 'EEG'
     df['fs'] = fs
 
-
     return df
 
 if __name__ == "__main__":
@@ -117,7 +111,7 @@ if __name__ == "__main__":
         end_time = time.time()
         print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
 
-
+    # Go through all methods
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
 
@@ -133,7 +127,6 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"Error loading simulation data: {e}")
 
-
         # Print info
         print('theta:')
         for key, value in theta.items():
@@ -141,11 +134,10 @@ if __name__ == "__main__":
                 print(f'--Shape of {key}: {value.shape}')
             else:
                 print(f'--{key}: {value}')
-        print(f'Shape of X: {X.shape}')# Check if 'Features' and 'Predictions' columns are in the DataFrame
+        print(f'Shape of X: {X.shape}')
 
         end_time = time.time()
         print(f"Done in {(end_time - start_time):.2f} sec.")
-        
 
         # Load empirical data and create DataFrame
         df = create_POCTEP_dataframe(data_path=data_path)
@@ -155,6 +147,7 @@ if __name__ == "__main__":
         ##########################
 
         start_time = time.time()
+
         # Parameters of the feature extraction method
         if method == 'catch22':
             params = None
@@ -179,21 +172,18 @@ if __name__ == "__main__":
 
         end_time = time.time()
         print(f'Done in {(end_time - start_time):.2f} sec')
-            
-        
+
         #######################################################
         #   PREDICTIONS OF PARAMETERS OF THE NEURAL CIRCUIT   #
         #######################################################
 
         print('\nComputing predictions...')
         start_time = time.time()
-        
 
         # Add "Predictions" column to later store the parameters infered
         emp_data['Predictions'] = np.nan
 
-        
-        # List of sensors for DB1
+        # List of sensors
         sensor_list = [
             'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
             'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz'
@@ -212,7 +202,6 @@ if __name__ == "__main__":
 
         for s, sensor in enumerate(sensor_list):
             print(f'--- Sensor: {sensor}')
-
 
             shutil.copy(
                 os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'model'),

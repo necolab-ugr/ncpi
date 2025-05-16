@@ -1,11 +1,9 @@
 import os
-import sys
 import numpy as np
 import pandas as pd
 from matplotlib import pyplot as plt
 import matplotlib.lines as mlines
 import ncpi
-
 
 # Set the path to the results folder
 results_path = '../data'
@@ -13,7 +11,8 @@ results_path = '../data'
 # Select the statistical analysis method ('cohen', 'lmer')
 statistical_analysis = 'lmer'
 
-
+# Set the p-value threshold
+p_value_th = 0.01
 
 def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
     '''
@@ -38,8 +37,8 @@ def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
         List with the z-scores of the linear mixed model analysis.
     '''
 
-    p_value = lmer_results[f'{group}vsHC']['p.value'][elec]
-    z_score = lmer_results[f'{group}vsHC']['z.ratio'][elec]
+    p_value = lmer_results[f'{group}vsHC']['p.value'].iloc[elec]
+    z_score = lmer_results[f'{group}vsHC']['z.ratio'].iloc[elec]
 
     if p_value < p_value_th:
         data_lmer.append(z_score)
@@ -50,11 +49,7 @@ def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
 
 
 if __name__ == "__main__":
-
-    # Some parameters
-    p_value_th = 0.01
-
-
+    # Some parameters for the figure
     ncols = 6 
     nrows = 5
 
@@ -71,11 +66,8 @@ if __name__ == "__main__":
     spacing_x = 0.04
     spacing_y = 0.064 
 
+    # Create figure
     fig1 = plt.figure(figsize=(7.5, 5.5), dpi=300)
-    
-
-    max = 0
-
     current_bottom = bottom
 
     for row in range(2):
@@ -98,8 +90,6 @@ if __name__ == "__main__":
 
         current_left = left
         for col in range(ncols):
-            
-            
             if col == 0 or col == 3:
                 group = 'ADMIL'
                 group_label = 'ADMIL'
@@ -111,8 +101,6 @@ if __name__ == "__main__":
             if col == 2 or col == 5:
                 group = 'ADSEV'
                 group_label = 'ADSEV'
-
-            
 
             # Add ax --> [left, bottom, width, height]
             ax1 = fig1.add_axes([current_left, current_bottom, width, height], frameon=False)
@@ -128,10 +116,8 @@ if __name__ == "__main__":
             ax1.set_xticks([])
             ax1.set_yticks([])
 
-            
             # Titles 
             ax1.set_title(f'{group_label} vs HC', fontsize=10)
-                
 
             # Labels
             if col < 3:
@@ -140,7 +126,7 @@ if __name__ == "__main__":
             if col >= 3:
                 var = 3 if row == 0 or row == 2 else 2
     
-            # Do analisis to predictions
+            # Statistical analysis
             analysis = ncpi.Analysis(data)
             if statistical_analysis == 'lmer':
                 stat_results = analysis.lmer(control_group='HC', data_col='Predictions', data_index=var,
@@ -175,8 +161,7 @@ if __name__ == "__main__":
                 else:
                     data_stat.append(0)
 
-                
-
+            # Limits
             if statistical_analysis == 'lmer':
                 ylims_stat = [-6., 6.]
             else:
@@ -193,7 +178,6 @@ if __name__ == "__main__":
                         label=False
             )
 
-            
 
         # Update "y" spacing
         if row == 1:
@@ -202,7 +186,7 @@ if __name__ == "__main__":
         else:
             current_bottom -= height + spacing_y
 
-
+    # Text and lines
     fontsize = 12
     fig1.text(0.46, 0.94, 'catch22', color='red', alpha=0.5, fontsize=12, fontstyle='italic')
     fig1.text(0.46, 0.48, '1/f slope', color='blue', alpha=0.5, fontsize=12, fontstyle='italic')
@@ -254,6 +238,6 @@ if __name__ == "__main__":
     fig1.add_artist(tauexc_line_f)
     fig1.add_artist(tauinh_line_f)
 
-    fig1.savefig('EEG-predictions-ncpi.png')
+    fig1.savefig('EEG_predictions.png')
 
     
