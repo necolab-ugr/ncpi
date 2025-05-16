@@ -73,7 +73,6 @@ class Analysis:
             and the values are DataFrames containing the results of the analysis.
 
         """
-
         # Check if rpy2 is installed
         if not tools.ensure_module("rpy2"):
             raise ImportError("rpy2 is required for lmer but is not installed.")
@@ -97,7 +96,7 @@ class Analysis:
         }
 
         # Load required packages
-        load_packages(c("lme4", "emmeans"))
+        load_packages(c("lme4", "lmerTest", "emmeans"))
         ''')
 
         # Check if the data is a pandas DataFrame
@@ -243,7 +242,6 @@ class Analysis:
 
                 ''')
                 print(f'--- BIC test. Selected model: {r("m_sel")}')
-
                 # Perform ANOVA tests only for user-specified comparisons
                 if anova_tests is not None:
                     # Fit the remaining models
@@ -260,16 +258,34 @@ class Analysis:
                     # Assign to R global environment
                     ro.globalenv['anova_tests'] = r_anova_tests
 
-
                     r('''
+                    
                     m_name <- m_sel
                     for (comparison in names(anova_tests)) {
                         models <- anova_tests[[comparison]]
-                        
                         # Check if the selected model is in the list of models to compare
+                        
                         if (m_sel %in% models) {
-                            anova_result <- capture.output(anova(get(as.character(models[2])), get(as.character(models[1]))))
-                            
+                            anova_result <- tryCatch(
+                            {
+                                model1 <- get(as.character(models[2]))
+                                model2 <- get(as.character(models[1]))
+
+                                if (inherits(model1, "merMod") || inherits(model2, "merMod")) {
+                                # Usar anova directamente en el modelo lmerTest
+                                capture.output(lmerTest::anova(model1, model2))
+                                } else {
+                                # Usar anova normal para modelos lm
+                                capture.output(stats::anova(model1, model2))
+                                }
+                            },
+                            error = function(e) {
+                                cat("\n--- ANOVA Error ---\n")
+                                print(e)
+                                NULL
+                            }
+                            )
+                                                        
                             # Extract p-value from the ANOVA result.
                             # Case 1: Standard ANOVA table with Pr(>F)
                             if (any(grepl("Pr\\\\(>F\\\\)", anova_result))) {
@@ -286,6 +302,7 @@ class Analysis:
                             matches <- regmatches(p_line, gregexpr("[0-9]+\\\\.?[0-9]*(e[+-]?[0-9]+)?", p_line))[[1]]
                             p_value <- as.numeric(tail(matches, 1))
                              
+                            
                             if (!is.na(p_value) && p_value >= 0.05) {
                                 # Determine which model is simpler (counts all fixed-effect terms, including interactions)
                                 formula1 <- formula(get(as.character(models[1])))
@@ -303,6 +320,7 @@ class Analysis:
                                     final_model <- get(as.character(models[2]))
                                     m_name <- models[2]
                                 }
+                                print(class(final_model))
                                 break
                             }
                         }
