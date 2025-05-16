@@ -55,6 +55,12 @@ Python `rpy2` packages to be installed beforehand. In the R environment, the fol
   install.packages("emmeans", dependencies = TRUE)
   ```
 
+  Or alternatively, with conda:
+  ```bash
+  conda install -c conda-forge r-lme4 r-emmeans
+  ```
+
+
   If you prefer not to use the LME analysis, you can opt to compute Cohen's d statistic instead, which does not 
   require R.
 

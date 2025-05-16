@@ -29,7 +29,7 @@ firing_rates = {}
 all_methods = ['catch22','power_spectrum_parameterization_1']
 
 # Select the statistical analysis method ('cohen', 'lmer')
-statistical_analysis = 'cohen'
+statistical_analysis = 'lmer'
 
 # Random seed for numpy
 np.random.seed(0)
@@ -318,13 +318,13 @@ for row in range(2):
 
                 # Significance levels
                 if statistical_analysis == 'lmer':
-                    if p_value[0] < 0.05 and p_value[0] >= 0.01:
+                    if p_value.iloc[0] < 0.05 and p_value.iloc[0] >= 0.01:
                         pp = '*'
-                    elif p_value[0] < 0.01 and p_value[0] >= 0.001:
+                    elif p_value.iloc[0] < 0.01 and p_value.iloc[0] >= 0.001:
                         pp = '**'
-                    elif p_value[0] < 0.001 and p_value[0] >= 0.0001:
+                    elif p_value.iloc[0] < 0.001 and p_value.iloc[0] >= 0.0001:
                         pp = '***'
-                    elif p_value[0] < 0.0001:
+                    elif p_value.iloc[0] < 0.0001:
                         pp = '****'
                     else:
                         pp = 'n.s.'
