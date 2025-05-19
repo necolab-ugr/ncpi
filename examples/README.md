@@ -12,7 +12,7 @@ https://doi.org/10.1038/s41540-025-00527-9
 
 ## 📂 Folder Structure
 
-### 🔵 `EEG_AD_FTD/`  
+### 🔵 `EEG_AD/`  
 Scripts to generate results from applying our inverse models to the EEG dataset used in the study. This dataset 
 includes both healthy controls (HCs) and patients clinically diagnosed with Alzheimer’s Disease (AD) at varying stages: 
 mild (ADMIL), moderate (ADMOD), and severe (ADSEV).
@@ -20,7 +20,7 @@ mild (ADMIL), moderate (ADMOD), and severe (ADSEV).
 **Note**: This EEG dataset is not publicly available but can be provided by the authors upon reasonable 
   request.
 
-- **`EEG_AD_FTD.py`**:  
+- **`EEG_AD.py`**:  
   Extracts empirical features from EEG data and computes predictions of changes in cortical circuit parameters in 
 patients with dementia due to AD
 - **`figures/EEG_predictions.py`**:  
