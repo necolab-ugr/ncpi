@@ -10,6 +10,32 @@ https://doi.org/10.1038/s41540-025-00527-9
 
 ---
 
+**Note**: `LFP_developing_brain/figures/LFP_predictions.py` and `EEG_AD/figures/EEG_predictions.py`  perform a Linear 
+Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` packages to be installed beforehand. In 
+the R environment, the following packages must also be installed:
+
+
+  - `lme4`  
+  - `emmeans`
+  - `nlme`
+
+  To install these packages in R, use:
+
+  ```r
+  install.packages("lme4", dependencies = TRUE)
+  install.packages("emmeans", dependencies = TRUE)
+  install.packages("nlme", dependencies = TRUE)
+  ```
+
+  Or alternatively, with conda:
+  ```bash
+  conda install -c conda-forge r-lme4 r-emmeans r-nlme
+  ```
+
+
+  If you prefer not to use the LME analysis, you can opt to compute Cohen's d statistic instead, which does not 
+  require R.
+
 ## 📂 Folder Structure
 
 ### 🔵 `EEG_AD/`  
@@ -40,32 +66,6 @@ LFP data."*
 
 - **`figures/emp_features.py`**: 
     Plots features extracted from LFP data as a function of postnatal days.
-
-**Note**: `figures/LFP_predictions.py` performs a Linear Mixed-Effects (LME) analysis, which requires both R and the 
-Python `rpy2` packages to be installed beforehand. In the R environment, the following packages must also be installed:
-
-
-  - `lme4`  
-  - `emmeans`
-  - `nlme`
-
-  To install these packages in R, use:
-
-  ```r
-  install.packages("lme4", dependencies = TRUE)
-  install.packages("emmeans", dependencies = TRUE)
-  install.packages("nlme", dependencies = TRUE)
-  ```
-
-  Or alternatively, with conda:
-  ```bash
-  conda install -c conda-forge r-lme4 r-emmeans
-  ```
-
-
-  If you prefer not to use the LME analysis, you can opt to compute Cohen's d statistic instead, which does not 
-  require R.
-
 
 ### 🔵 `simulation/`
 
