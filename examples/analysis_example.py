@@ -29,6 +29,8 @@ data = data.join(raneff, on='id')
 data['Y'] = data['Y'] + np.random.normal(loc=data['raneff'], scale=.1)
 data.drop(columns='raneff', inplace=True)
 
+print(data.head())
+
 ####################################################################
 # Run analyses
 
@@ -37,37 +39,40 @@ analysis = Analysis(data)
 
 # 1.
 # Reduce random effect structure with BIC
-opt_f = analysis.lmer_selection(data_col='Y', group_col='gr', id_col='id', numeric=['epoch'],
-             full_model='Y~gr*epoch + sensor + (1|id)', random_crit='BIC', fixed_crit=None)
+opt_f = analysis.lmer_selection(full_model='Y ~ gr*epoch + sensor + (1|id)',
+                                numeric=['epoch'],
+                                random_crit='BIC', fixed_crit=None)
 # Run post-hoc analyses using selected model
-results = analysis.lmer_tests(data_col='Y', group_col='gr', control_group='HC', id_col='id', numeric=['epoch'],
-                                models=opt_f, specs=['gr', 'gr:epoch'])
+results = analysis.lmer_tests(models=opt_f, group_col='gr', control_group='HC',
+                              numeric=['epoch'], specs=['gr', 'gr:epoch'])
 
 
 # 2.
 # Reduce random effect structure with BIC and fixed effect structure with LRT (anova)
-opt_f = analysis.lmer_selection(data_col='Y', group_col='gr', id_col='id', numeric=['epoch'],
-             full_model='Y~gr*epoch + sensor + (1|id)', random_crit='BIC', fixed_crit='LRT')
+opt_f = analysis.lmer_selection(full_model='Y~gr*epoch + sensor + (1|id)',
+                                numeric=['epoch'],
+                                random_crit='BIC', fixed_crit='LRT')
 # Run post-hoc analyses using selected model
-results = analysis.lmer_tests(data_col='Y', group_col='gr', control_group='HC', id_col='id', numeric=['epoch'],
-                                models=opt_f, specs=['gr', 'gr:epoch'])
+results = analysis.lmer_tests(models=opt_f, group_col='gr', control_group='HC',
+                              numeric=['epoch'], specs=['gr', 'gr:epoch'])
 
 
 # 3.
 # Reduce random effect structure with BIC and fixed effect structure with LRT (anova),
 # but always keeping the sensor term in the model
-opt_f = analysis.lmer_selection(data_col='Y', group_col='gr', id_col='id', numeric=['epoch'],
-             full_model='Y~gr*epoch + sensor + (1|id)', random_crit='BIC', fixed_crit='LRT', include=['sensor'])
+opt_f = analysis.lmer_selection(full_model='Y~gr*epoch + sensor + (1|id)',
+                                numeric=['epoch'],
+                                random_crit='BIC', fixed_crit='LRT', include=['sensor'])
 # Run post-hoc analyses using selected model
-results = analysis.lmer_tests(data_col='Y', group_col='gr', control_group='HC', id_col='id', numeric=['epoch'],
-                                models=opt_f, specs=['gr', 'gr:epoch'])
+results = analysis.lmer_tests(models=opt_f, group_col='gr', control_group='HC',
+                              numeric=['epoch'], specs=['gr', 'gr:epoch'])
 
 
 # 4.
 # Use BIC to compare only a specified set of possible models
 # (i.e., without exploring all their subsets via backward selection),
 # then run post-hoc analyses
-results = analysis.lmer_tests(data_col='Y', group_col='gr', control_group='HC', id_col='id', numeric=['epoch'],
-                models=['Y~ gr*epoch + (1|sensor) + (1|id)',
-                        'Y~ gr*epoch + sensor + (1|id)'],  # Best model is selected using BIC
+results = analysis.lmer_tests(models=['Y~ gr*epoch + (1|sensor) + (1|id)',
+                                      'Y~ gr*epoch + sensor + (1|id)'],  # Best model is selected using BIC
+                group_col='gr', control_group='HC', numeric=['epoch'],
                 specs=['gr', 'gr:epoch'])

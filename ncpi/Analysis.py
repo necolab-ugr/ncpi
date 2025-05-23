@@ -24,33 +24,35 @@ class Analysis:
     def __init__(self, data):
         self.data = data
 
-
-    def lmer_tests(self, data_col, group_col=None, control_group='HC', id_col=None,
-                     numeric=[], data_index=-1, models=None, specs=None, print_info=True):
+    def lmer_tests(self, models=None, data_col=None, group_col=None, control_group='HC', id_col=None,
+                   numeric=[], data_index=-1, specs=None, print_info=True):
         """
         Perform linear mixed-effects model (lmer) or linear model (lm) comparisons
         using R's `lme4` and `emmeans` packages.
 
         Parameters
         ----------
+        models: str or list
+            A model formula, or list of formulas, to be used for analysis.
+            If more than one formula is provided, the best model is selected based on BIC (Bayesian Information Criterion).
+            If models is None, both `group_col` and `data_col` have to be defined.
+            In such a case, the following default models are used:
+                - Y ~ {group_col}
+                - Y ~ {group_col} + (1 | {id_col})  (if `id_col` is specified too)
         data_col: str
-            The name of the data column containing the dependent variable.
+            The name of the data column containing the dependent variable (only used if `models` is not specified).
         group_col: str
             The name of the column containing the group variable.
+            If it appears in specs and if `control_group` is specified,
+            pairwise comparisons of this variable are limited to "control vs. other".
         control_group: str
             The control group to be used for comparisons (see `specs`).
         id_col: str
-            The name of the column containing the id variable.
+            The name of the column containing the id variable (only used if `models` is not specified).
         numeric: list
             Variables that are to be considered as numeric. The others will be converted to factors.
         data_index: int
             The index of the data column to be analyzed. If -1, the entire column is used.
-        models: str or list
-            A model formula, or list of formulas, to be used for analysis.
-            If more than one formula is provided, the best model is selected based on BIC (Bayesian Information Criterion).
-            If models is None, `group_col` has to be defined. In such a case, the following default models are used:
-                - Y ~ {group_col}
-                - Y ~ {group_col} + (1 | {id_col})  (if id_col is specified too)
         specs: str or list
             A term, or list of terms, to be used for post-hoc tests.
             If all variables contained in a term are factors (i.e., not given to `numeric` argument),
@@ -105,9 +107,18 @@ class Analysis:
         if not isinstance(self.data, pd.DataFrame):
             raise ValueError('The data must be a pandas DataFrame.')
 
+        if models is None and data_col is not None and data_col not in self.data.columns:
+            raise ValueError(f'Column "{data_col}" (data_col) is not in the DataFrame.')
+        if group_col is not None and group_col not in self.data.columns:
+            raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
+        if id_col is not None and id_col not in self.data.columns:
+            raise ValueError(f'Column "{id_col}" (id_col) is not in the DataFrame.')
+        if group_col is not None and control_group not in self.data[group_col].unique():
+            raise ValueError(f'"{group_col}" column (group_col) does not contain specified control group name "{control_group}".')
+
         # Default models if none are provided
-        if models is None and group_col is None:
-            raise ValueError('If no models are given, group_col must be specified.')
+        if models is None and (group_col is None or data_col is None):
+            raise ValueError('If no models are given, group_col *and* data_col must be specified.')
         elif models is None:
             models = [f'{data_col}~{group_col}']
             if id_col is not None:
@@ -117,15 +128,9 @@ class Analysis:
                 models = [models]  # If only one model is provided, make it into a list of length 1
             # Remove blanks from formulas
             models = [formula.replace(' ', '') for formula in models]
+            data_col = models[0].split('~')[0]
             if any([not formula.startswith(f'{data_col}~') for formula in models]):
-                raise ValueError(f'Models must have data_col "{data_col}" as a dependent variable.')
-
-        if group_col is not None and group_col not in self.data.columns:
-            raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
-        if id_col is not None and id_col not in self.data.columns:
-            raise ValueError(f'Column "{id_col}" (id_col) is not in the DataFrame.')
-        if group_col is not None and control_group not in self.data[group_col].unique():
-            raise ValueError(f'"{group_col}" column (group_col) does not contain specified control group name "{control_group}".')
+                raise ValueError(f'All models must have the same dependent variable.')
 
         all_vars = set()
         for formula in models:
@@ -217,7 +222,9 @@ class Analysis:
             final_model <- get(fitted_models[index])
             ''')
             if print_info:
-                print(f'\n--- BIC test. Selected model: {r('formula(final_model)')}')
+                print(f'--- BIC model selection')
+        if print_info:
+            print(f'Model: {r('formula(final_model)')}')
 
         # Post-hoc analyses
         if print_info:
@@ -269,8 +276,9 @@ class Analysis:
 
         return results
 
-    def lmer_selection(self, data_col, group_col='Group', id_col='ID', numeric=[],
-                       data_index=-1, full_model=None,
+    def lmer_selection(self, full_model=None,
+                       data_col=None, group_col=None, id_col=None, numeric=[],
+                       data_index=-1,
                        crit=None, random_crit='BIC', fixed_crit='LRT', include=None,
                        print_info=1):
         """
@@ -279,21 +287,22 @@ class Analysis:
 
         Parameters
         ----------
+        full_model: str
+            The full model formula to be used as a starting point for backward selection.
+            If full_model is None, both `group_col` and `data_col` have to be specified.
+            In such a case, the following default model is used:
+                - Y ~ {group_col} + (1 | {id_col})  (if `id_col` is not None)
+                - Y ~ {group_col}  (if id_col is None)
         data_col: str
-            The name of the data column containing the dependent variable.
+            The name of the data column containing the dependent variable (only used if `full_model` is not specified).
         group_col: str
-            The name of the column containing the group variable.
+            The name of the column containing the group variable (only used if `full_model` is not specified).
         id_col: str
-            The name of the column containing the id variable.
+            The name of the column containing the id variable (only used if `full_model` is not specified).
         numeric: list
             Variables that are to be considered as numeric. The others will be converted to factors.
         data_index: int
             The index of the data column to be analyzed. If -1, the entire column is used.
-        full_model: str
-            The full model formula to be used as a starting point for backward selection.
-            If full_model is None, `group_col` has to be defined. In such a case, the following default model is used:
-                - Y ~ {group_col} + (1 | {id_col})  (if id_col is not None)
-                - Y ~ {group_col}  (if id_col is None)
         crit: str
             The method to be used for model selection via the `buildmer` function in R.
             Possible options are:
@@ -316,8 +325,8 @@ class Analysis:
             If both `fixed_crit` and `random_crit` are provided, random effect selection is performed first; 
             fixed effect selection is performed starting from the model with the optimal random effect structure.
             `fixed_crit` is ignored if `crit` is not None.
-        include: list
-            List of terms to always include in the model - won't be tested during model selection.
+        include: str or list
+            A term, or list of terms, to always include in the model - won't be tested during model selection.
         print_info: bool
             Whether to print info (True) or not (False).
 
@@ -366,23 +375,24 @@ class Analysis:
         if not isinstance(self.data, pd.DataFrame):
             raise ValueError('The data must be a pandas DataFrame.')
 
+        if full_model is None and data_col is not None and data_col not in self.data.columns:
+            raise ValueError(f'Column "{data_col}" (data_col) is not in the DataFrame.')
+        if group_col is not None and group_col not in self.data.columns:
+            raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
+        if id_col is not None and id_col not in self.data.columns:
+            raise ValueError(f'Column "{id_col}" (id_col) is not in the DataFrame.')
+
         # Default models if none are provided
-        if full_model is None and group_col is None:
-            raise ValueError(f'Either specify a model or a name for group_col.')
+        if full_model is None and (group_col is None or data_col is None):
+            raise ValueError(f'Either specify a model, or a name for group_col *and* data_col.')
         elif full_model is None:
             full_model = f'{data_col}~{group_col}'
             if id_col is not None:
                 full_model = full_model + f'+(1|{id_col})'
         else:
-            # Remove blanks from formula
+            # Remove blanks from formula and extract dependent variable (overwrite data_col)
             full_model = full_model.replace(' ', '')
-            if not full_model.startswith(f'{data_col}~'):
-                raise ValueError(f'Model must have data_col "{data_col}" as a dependent variable.')
-
-        if group_col is not None and group_col not in self.data.columns:
-            raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
-        if id_col is not None and id_col not in self.data.columns:
-            raise ValueError(f'Column "{id_col}" (id_col) is not in the DataFrame.')
+            data_col = full_model.split('~')[0]
 
         all_vars = extract_variables(full_model)
         # Check if every variable corresponds to a column in the DataFrame
