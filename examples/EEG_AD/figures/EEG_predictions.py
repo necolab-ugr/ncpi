@@ -143,7 +143,7 @@ if __name__ == "__main__":
                                             'test2': ["mod02", "mod03"],
                                         },
                                         specs='~Group | Sensor')
-            elif statistical_analysis == 'cohend':
+            elif statistical_analysis == 'cohen':
                 stat_results = analysis.cohend(control_group='HC', data_col='Predictions', data_index=var)
             
             data_stat = []
@@ -156,7 +156,7 @@ if __name__ == "__main__":
                 if len(pos_results) > 0:
                     if statistical_analysis == 'lmer':
                         data_stat = append_lmer_results(stat_results, group, pos_results[0], p_value_th, data_stat)
-                    elif statistical_analysis == 'cohend':
+                    elif statistical_analysis == 'cohen':
                         data_stat.append(stat_results[f'{group}vsHC']['d'][pos_results[0]])
                 else:
                     data_stat.append(0)
