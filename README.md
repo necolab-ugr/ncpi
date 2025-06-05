@@ -57,8 +57,8 @@ with:
 conda install -c conda-forge nest-simulator=3.8
  ```
 
-Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must 
-be installed via pip:
+Similarly, to compute field potentials using the kernel method, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) 
+package must be installed via pip:
 
 ```bash
 pip install LFPykernels
