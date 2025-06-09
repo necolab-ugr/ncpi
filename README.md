@@ -203,11 +203,10 @@ if __name__ == "__main__":
     θ_test = np.array(sim_data['θ'][test_indices])
     
     # Create the inference object and add simulation data
-    inference = ncpi.Inference(model='MLPRegressor',
-                               hyperparams={'hidden_layer_sizes': (100,100),
-                                            'max_iter': 200,
-                                            'tol': 0.0001,
-                                            'n_iter_no_change': 10})
+    inference = ncpi.Inference(model='RandomForestRegressor',
+                               hyperparams={'n_estimators': 100,
+                                            'max_depth': 10,
+                                            'min_samples_split': 2})
     inference.add_simulation_data(X_train, θ_train)
     
     # Train the model
