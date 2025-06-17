@@ -1,14 +1,15 @@
 import numpy as np
 import pandas as pd
 import scipy.interpolate
+import re
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import re
 from matplotlib.cm import ScalarMappable
 from ncpi import tools
 
 
 def extract_variables(formula):
+    """Extract variable names from a formula string."""
     tokens = re.split(r'[\s\+\~\|\(\)\*\/\-\:]+', formula)
     return set(t for t in tokens if t and not t.replace('.', '', 1).isdigit())
 
@@ -24,65 +25,63 @@ class Analysis:
     def __init__(self, data):
         self.data = data
 
-    def lmer_tests(self, models=None, data_col=None, group_col=None, control_group='HC', id_col=None,
-                   numeric=[], data_index=-1, specs=None, print_info=True):
+    def lmer_tests(self, models=None,  group_col=None, control_group=None, numeric=[], specs=None, print_info=True):
         """
-        Perform linear mixed-effects model (lmer) or linear model (lm) comparisons
-        using R's `lme4` and `emmeans` packages.
+        Perform linear mixed-effects model (lmer) or linear model (lm) fitting and post-hoc tests using R's lme4 and
+        emmeans packages.
 
         Parameters
         ----------
         models: str or list
-            A model formula, or list of formulas, to be used for analysis.
-            If more than one formula is provided, the best model is selected based on BIC (Bayesian Information Criterion).
-            If models is None, both `group_col` and `data_col` have to be defined.
-            In such a case, the following default models are used:
+            A model formula, or list of formulas, to be used for analysis. If more than one formula is provided,
+            the best model is selected based on BIC (Bayesian Information Criterion).
+            Example formulas:
                 - Y ~ {group_col}
-                - Y ~ {group_col} + (1 | {id_col})  (if `id_col` is specified too)
-        data_col: str
-            The name of the data column containing the dependent variable (only used if `models` is not specified).
+                - Y ~ {group_col} + (1 | ID)
         group_col: str
-            The name of the column containing the group variable.
-            If it appears in specs and if `control_group` is specified,
-            pairwise comparisons of this variable are limited to "control vs. other".
+            The name of the column containing the group variable. It has to be specified if no specs are given (see
+            `specs` argument).
         control_group: str
-            The control group to be used for comparisons (see `specs`).
-        id_col: str
-            The name of the column containing the id variable (only used if `models` is not specified).
+            The name of the control group to be used for comparisons. If None, all groups will be compared against each
+            other (see `specs` argument).
         numeric: list
-            Variables that are to be considered as numeric. The others will be converted to factors.
-        data_index: int
-            The index of the data column to be analyzed. If -1, the entire column is used.
+            Variables that are to be considered as numeric. The others will be converted to factors. If numeric=[],
+            all variables in the model are considered as factors.
         specs: str or list
             A term, or list of terms, to be used for post-hoc tests.
-            If all variables contained in a term are factors (i.e., not given to `numeric` argument),
-            the term is used as specifications for pairwise comparisons via the emmeans function in R.
+
+            - Scenario 1: If all variables contained in a term are factors (i.e., not given to `numeric` argument), the
+                          term is used as specifications for pairwise comparisons via the emmeans function in R.
             Example:
-            specs='Group'  # pairwise differences of all group against control group (or between all groups if `control_group` is None)
+            specs='Group'  # pairwise differences of all group against control group (or between all groups if
+                            `control_group` is None)
             specs='Sensor|Group'  # pairwise differences between sensors within each group
-            If the term contains a numeric variable (i.e., given to numeric argument),
-            then its effect on the dependent variable is tested as a slope via emtrends function in R,
-            with all remaining terms as specifications.
+
+            - Scenario 2: If the term contains a numeric variable (i.e., given to numeric argument), then its effect on
+                          the dependent variable is tested as a slope via emtrends function in R, with all remaining
+                          terms as specifications.
             Example:
             specs='Epoch'  # slope of data_col w.r.t. Epoch is tested (specs=~1, var='Epoch')
-            specs='Epoch:Group'  # slope of data_col w.r.t. Epoch is tested separately for each group (specs=~Group, var='Epoch')
-            If `specs` is None, `group_col` has to be defined and will be used as default specs.
+            specs='Epoch:Group'  # slope of data_col w.r.t. Epoch is tested separately for each group (specs=~Group,
+                                   var='Epoch')
+
+            - Scenario 3: If `specs` is None, `group_col` has to be defined and will be used as default specs.
+
         print_info: bool
             Whether to print info (True) or not (False).
 
         Returns
         -------
         results: dict
-            A dictionary containing the results of the analyses. The keys are the specs
-            and the values are DataFrames containing the results of the analysis.
+            A dictionary containing the results of the analyses. The keys are the specs and the values are DataFrames
+            containing the results of the analysis.
 
         """
         # Check if rpy2 is installed
         if not tools.ensure_module("rpy2"):
-            raise ImportError("rpy2 is required for lmer but is not installed.")
+            raise ImportError("rpy2 is required for lmer_tests but is not installed.")
         pandas2ri = tools.dynamic_import("rpy2.robjects.pandas2ri")
         r = tools.dynamic_import("rpy2.robjects","r")
-        ListVector = tools.dynamic_import("rpy2.robjects","ListVector")
         ro = tools.dynamic_import("rpy2","robjects")
 
         # Activate pandas2ri
@@ -100,45 +99,60 @@ class Analysis:
         }
 
         # Load required packages
-        load_packages(c("lme4", "emmeans"))  #, "nlme"
+        load_packages(c("lme4", "emmeans")) 
         ''')
 
         # Check if the data is a pandas DataFrame
         if not isinstance(self.data, pd.DataFrame):
             raise ValueError('The data must be a pandas DataFrame.')
 
-        if models is None and data_col is not None and data_col not in self.data.columns:
-            raise ValueError(f'Column "{data_col}" (data_col) is not in the DataFrame.')
-        if group_col is not None and group_col not in self.data.columns:
-            raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
-        if id_col is not None and id_col not in self.data.columns:
-            raise ValueError(f'Column "{id_col}" (id_col) is not in the DataFrame.')
-        if group_col is not None and control_group not in self.data[group_col].unique():
-            raise ValueError(f'"{group_col}" column (group_col) does not contain specified control group name "{control_group}".')
+        ##################################
+        #### Check and prepare models ####
+        ##################################
 
-        # Default models if none are provided
-        if models is None and (group_col is None or data_col is None):
-            raise ValueError('If no models are given, group_col *and* data_col must be specified.')
-        elif models is None:
-            models = [f'{data_col}~{group_col}']
-            if id_col is not None:
-                models = models + [f'{data_col}~{group_col}+(1|{id_col})']
-        else:
-            if isinstance(models, str):
-                models = [models]  # If only one model is provided, make it into a list of length 1
-            # Remove blanks from formulas
-            models = [formula.replace(' ', '') for formula in models]
-            data_col = models[0].split('~')[0]
-            if any([not formula.startswith(f'{data_col}~') for formula in models]):
-                raise ValueError(f'All models must have the same dependent variable.')
+        # Check  if models is not None
+        if models is None:
+            raise ValueError('No models provided. Please provide a model or a list of models.')
 
+        # If only one model is provided, make it into a list of length 1
+        if isinstance(models, str):
+            models = [models]
+
+        # Remove blanks from formulas
+        models = [formula.replace(' ', '') for formula in models]
+
+        # Check if all models have the same dependent variable
+        Y = models[0].split('~')[0]
+        if any([not formula.startswith(f'{Y}~') for formula in models]):
+            raise ValueError(f'All models must have the same dependent variable.')
+
+        # Automatically treat Y as numeric
+        if Y not in numeric:
+            numeric = numeric + [Y]
+
+        # Check if every variable has a corresponding column in the DataFrame
         all_vars = set()
         for formula in models:
             all_vars = all_vars.union(extract_variables(formula))
-        # Check if every variable has a corresponding column in the DataFrame
-        for col in all_vars:
-            if col not in self.data.columns:
-                raise ValueError(f'Column "{col}" is not in the DataFrame.')
+        for var in all_vars:
+            if var not in self.data.columns:
+                raise ValueError(f'Variable "{var}" is not in the DataFrame.')
+
+        ################################
+        #### Check and prepare data ####
+        ################################
+
+        # Check if group_col is in the DataFrame and add it to all_vars if not already present
+        if group_col:
+            if group_col not in self.data.columns:
+                raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
+            all_vars.add(group_col)
+        elif specs is None:
+            raise ValueError('If no specs are given, group_col must be specified.')
+
+        # Check if control_group is in the list of unique values of group_col
+        if control_group is not None and control_group not in self.data[group_col].unique():
+            raise ValueError(f'Control group "{control_group}" is not in the group_col "{group_col}" values.')
 
         # Copy the dataframe
         df = self.data.copy()
@@ -146,28 +160,26 @@ class Analysis:
         # Remove all columns except the variables to analyse
         df = df[list(all_vars)]
 
-        # [*1] If data_index is not -1, select the data_index value from the data_col
-        if data_index >= 0:
-            df[data_col] = df[data_col].apply(lambda x: x[data_index])
+        # [***] Remove rows where the data_col is zero (is it necessary?)
+        # df = df[df[data_col] != 0]
 
-        # [*2] Remove rows where the data_col is zero
-        df = df[df[data_col] != 0]
-
-        # [3*] Force categorical data type for Sensor
-        if 'Sensor' in df.columns:
-            df["Sensor"] = df["Sensor"].astype(str).astype('category')
-
-        # Remove blanks from specs
-        if isinstance(specs, str):
-            specs = [specs]
-        specs = [x.replace(' ', '') for x in specs]
+        #################################
+        #### Check and prepare specs ####
+        #################################
 
         # Default specs if none are provided
-        if specs is None and group_col is None:
-            raise ValueError('If no specs are given, group_col must be specified.')
-        elif specs is None:
+        if specs is None:
+            if group_col is None:
+                raise ValueError('If no specs are given, group_col must be specified.')
             specs = [group_col]
 
+        # If only one spec is provided, make it into a list of length 1
+        if isinstance(specs, str):
+            specs = [specs]
+        # Remove blanks from specs
+        specs = [x.replace(' ', '') for x in specs]
+
+        # Check if all specs are valid and contain variables present in the DataFrame
         posthoc = []
         for ph in specs:
             vars = extract_variables(ph)
@@ -185,28 +197,27 @@ class Analysis:
                 sp = '1' if len(vars)==1 else ':'.join([v for v in vars if v!=var_tmp[0]])
                 posthoc.append(('~' + sp, var_tmp[0]))
 
+        ################
+        #### R code ####
+        ################
+
         # Pass dataframe to R
         ro.globalenv['df'] = pandas2ri.py2rpy(df)
         if control_group is not None:
             ro.globalenv['control_group'] = control_group
 
         # Convert to factors
-        factors = all_vars - {data_col} - set(numeric)
+        factors = all_vars - set(numeric)
         r_code = []
         for col in factors:
-            # if col == group_col:
-            #     r_code.append(f'df${col} = factor(df${col}, levels = c("{label}", "{control_group}"))')
-            # else:
             r_code.append(f'df${col} = as.factor(df${col})')
 
         # Join all lines into one R script string
         full_r_script = '\n'.join(r_code)
-
-        # Pass to R
         r(full_r_script)
 
+        # Pass models to R
         for ii, formula in enumerate(models):
-            #ro.globalenv[model_name] = formula
             r(f"m{ii} <- {'lmer' if '|' in formula else 'lm'}({formula}, data=df)")
 
         ro.globalenv['fitted_models'] = [f'm{ii}' for ii in range(len(models))]
@@ -224,14 +235,14 @@ class Analysis:
             if print_info:
                 print(f'--- BIC model selection')
         if print_info:
-            print(f'Model: {r('formula(final_model)')}')
+            print(f"Model: {r('formula(final_model)')}")
 
         # Post-hoc analyses
         if print_info:
             print('--- Post-hoc tests:')
         results = {}
-        for sp, ph in zip(specs, posthoc):
 
+        for sp, ph in zip(specs, posthoc):
             if isinstance(ph, str):
                 ro.globalenv['specs'] = ph
                 if ph == '~'+group_col and control_group is not None:
@@ -240,6 +251,8 @@ class Analysis:
                     emm <- suppressMessages(emmeans(final_model, specs=as.formula(specs)))
                     res <- contrast(emm, method='trt.vs.ctrl', ref=control_group, adjust = "holm")
                     df_res <- as.data.frame(res)
+                    # Extract readable contrast names (e.g., "ADMIL - HC") 
+                    df_res$contrast <- as.character(res@grid$contrast)
                     ''')
                 else:
                     # All pairwise comparisons
@@ -247,6 +260,8 @@ class Analysis:
                     emm <- suppressMessages(emmeans(final_model, specs=as.formula(specs)))
                     res <- pairs(emm, adjust='holm')
                     df_res <- as.data.frame(res)
+                    # Extract readable contrast names (e.g., "ADMIL - HC") 
+                    df_res$contrast <- as.character(res@grid$contrast)
                     ''')
             else:
                 ro.globalenv['specs'] = ph[0]
@@ -258,15 +273,15 @@ class Analysis:
                 df_res <- as.data.frame(res)
                 ''')
 
-            # Ensure Sensor remains as a character column
+            # Ensure Sensor remains as a character column (is this necessary?)
             if 'Sensor' in r('names(df_res)'):
                 r('''
                 df_res$Sensor <- as.character(df_res$Sensor)
                 ''')
 
             df_res_r = ro.r['df_res']
-            with (pandas2ri.converter + pandas2ri.converter).context():
-                df_res_pd = pandas2ri.conversion.get_conversion().rpy2py(df_res_r)
+            with pandas2ri.converter.context():
+                df_res_pd = pandas2ri.rpy2py(df_res_r)
 
             if print_info:
                 print('\n' + sp)
@@ -276,33 +291,24 @@ class Analysis:
 
         return results
 
-    def lmer_selection(self, full_model=None,
-                       data_col=None, group_col=None, id_col=None, numeric=[],
-                       data_index=-1,
-                       crit=None, random_crit='BIC', fixed_crit='LRT', include=None,
-                       print_info=1):
+    def lmer_selection(self, full_model=None,  group_col=None, numeric=[], crit=None, random_crit='BIC',
+                       fixed_crit='LRT', include=None, print_info=True):
         """
-        Perform linear mixed-effects model (lmer) or linear model (lm) selection
-        using R's `lme4` and `buildmer` packages.
+        Perform linear mixed-effects model (lmer) or linear model (lm) model selection using R's lme4 and buildmer
+        packages.
 
         Parameters
         ----------
         full_model: str
             The full model formula to be used as a starting point for backward selection.
-            If full_model is None, both `group_col` and `data_col` have to be specified.
-            In such a case, the following default model is used:
-                - Y ~ {group_col} + (1 | {id_col})  (if `id_col` is not None)
-                - Y ~ {group_col}  (if id_col is None)
-        data_col: str
-            The name of the data column containing the dependent variable (only used if `full_model` is not specified).
+            Example full model formulas:
+            - Y ~ {group_col}
+            - Y ~ {group_col} + (1 | ID)
         group_col: str
             The name of the column containing the group variable (only used if `full_model` is not specified).
-        id_col: str
-            The name of the column containing the id variable (only used if `full_model` is not specified).
         numeric: list
-            Variables that are to be considered as numeric. The others will be converted to factors.
-        data_index: int
-            The index of the data column to be analyzed. If -1, the entire column is used.
+            Variables that are to be considered as numeric. The others will be converted to factors. If numeric=[],
+            all variables in the model are considered as factors.
         crit: str
             The method to be used for model selection via the `buildmer` function in R.
             Possible options are:
@@ -337,14 +343,6 @@ class Analysis:
 
         """
         
-        if crit is not None:
-            random_crit, fixed_crit = None, None
-
-        if include is None:
-            include = []
-        if isinstance(include, str):
-            include = [include]
-        
         # Check if rpy2 is installed
         if not tools.ensure_module("rpy2"):
             raise ImportError("rpy2 is required for lmer but is not installed.")
@@ -375,52 +373,71 @@ class Analysis:
         if not isinstance(self.data, pd.DataFrame):
             raise ValueError('The data must be a pandas DataFrame.')
 
-        if full_model is None and data_col is not None and data_col not in self.data.columns:
-            raise ValueError(f'Column "{data_col}" (data_col) is not in the DataFrame.')
-        if group_col is not None and group_col not in self.data.columns:
-            raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
-        if id_col is not None and id_col not in self.data.columns:
-            raise ValueError(f'Column "{id_col}" (id_col) is not in the DataFrame.')
+        ######################################
+        #### Check and prepare full_model ####
+        ######################################
 
-        # Default models if none are provided
-        if full_model is None and (group_col is None or data_col is None):
-            raise ValueError(f'Either specify a model, or a name for group_col *and* data_col.')
-        elif full_model is None:
-            full_model = f'{data_col}~{group_col}'
-            if id_col is not None:
-                full_model = full_model + f'+(1|{id_col})'
-        else:
-            # Remove blanks from formula and extract dependent variable (overwrite data_col)
-            full_model = full_model.replace(' ', '')
-            data_col = full_model.split('~')[0]
+        # Check  if full_model is not None
+        if full_model is None:
+            raise ValueError('No full_model provided. Please provide a full model.')
 
+        # Remove blanks from formula
+        full_model = full_model.replace(' ', '')
+
+        # Automatically treat Y as numeric
+        Y = full_model.split('~')[0]
+        if Y not in numeric:
+            numeric = numeric + [Y]
+
+        # Check if every variable has a corresponding column in the DataFrame
         all_vars = extract_variables(full_model)
-        # Check if every variable corresponds to a column in the DataFrame
-        for col in all_vars:
-            if col not in self.data.columns:
-                raise ValueError(f'Column "{col}" is not in the DataFrame.')
+        for var in all_vars:
+            if var not in self.data.columns:
+                raise ValueError(f'Variable "{var}" is not in the DataFrame.')
+
+        ################################
+        #### Check and prepare data ####
+        ################################
+
+        # Check if group_col is in the DataFrame and add it to all_vars if not already present
+        if group_col:
+            if group_col not in self.data.columns:
+                raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
+            all_vars.add(group_col)
+        elif full_model is None:
+            raise ValueError('If no full_model is given, group_col must be specified.')
 
         # Copy the dataframe
         df = self.data.copy()
+
         # Remove all columns except the variables to analyse
         df = df[list(all_vars)]
 
-        # [*1] If data_index is not -1, select the data_index value from the data_col
-        if data_index >= 0:
-            df[data_col] = df[data_col].apply(lambda x: x[data_index])
+        # [***] Remove rows where the data_col is zero (is it necessary?)
+        # df = df[df[data_col] != 0]
 
-        # [*2] Remove rows where the data_col is zero
-        df = df[df[data_col] != 0]
+        ############################################
+        #### Check and prepare crit and include ####
+        ############################################
 
-        # [*3] Force categorical data type for Sensor
-        if 'Sensor' in df.columns:
-            df["Sensor"] = df["Sensor"].astype(str).astype('category')
+        if crit is not None:
+            random_crit, fixed_crit = None, None
+
+        if include is None:
+            include = []
+
+        if isinstance(include, str):
+            include = [include]
+
+        ################
+        #### R code ####
+        ################
 
         # Pass dataframe to R
         ro.globalenv['df'] = pandas2ri.py2rpy(df)
 
         # Convert to factors
-        factors = all_vars - {data_col} - set(numeric)
+        factors = all_vars - set(numeric)
         r_code = []
         for col in factors:
             r_code.append(f'df${col} = as.factor(df${col})')
@@ -436,6 +453,7 @@ class Analysis:
 
         # Terms to always include in the model
         ro.globalenv['include'] = include
+
         # Extract fixed and random effects
         r('''
         ff <- as.formula(full_model)
@@ -456,28 +474,30 @@ class Analysis:
             random_formula <- as.formula(paste("~", paste(random_terms, collapse = " + ")))
             ''')
             if print_info:
-                print(f'Random effect structure selected with {random_crit}: {r('random_formula')}')
+                print(f"Random effect structure selected with {random_crit}: {r('random_formula')}")
         if fixed_crit is not None:
             ro.globalenv['fixed_crit'] = fixed_crit
             r('''
-            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=fixed_crit, include=random, quiet=T))
+            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=fixed_crit, include=random, 
+            quiet=T))
             ff <- formula(selmod)
             fixed_formula <- reformulate(attr(terms(nobars(ff)), "term.labels"))
             ''')
             if print_info:
-                print(f'Fixed effect structure selected with {fixed_crit}: {r('fixed_formula')}')
+                print(f"Fixed effect structure selected with {fixed_crit}: {r('fixed_formula')}")
         if crit is not None:
             ro.globalenv['crit'] = crit
             r('''
-            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=crit, include=paste0('~', paste(include, collapse='+')), quiet=T))
+            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=crit, 
+            include=paste0('~', paste(include, collapse='+')), quiet=T))
             ff <- formula(selmod)
             ''')
             if print_info:
                 print(f'Selection method: {crit}')
         if print_info:
-            print(f'Selected model: {r('ff')}')
+            print(f"Selected model: {r('ff')}")
             if len(include) > 0:
-                print(f'(selected model forced to include: {', '.join(include)})')
+                print(f"(selected model forced to include: {', '.join(include)})")
 
         opt_f = str(r('ff')).replace('\n', '')
 
