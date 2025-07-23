@@ -227,7 +227,7 @@ class Inference:
 
 
     def train(self, param_grid=None, n_splits=10, n_repeats=10, 
-              train_params={'learning_rate': 0.0005, 'training_batch_size': 256}, save_folder='model_saved', scale=False):
+              train_params={'learning_rate': 0.0005, 'training_batch_size': 256}, result_dir='data', scaler=None):
         """
         Method to train the model.
 
@@ -273,8 +273,7 @@ class Inference:
             raise ValueError('No parameters provided.')
 
         # Apply scaler if requested
-        if scale:
-            scaler = self.StandardScaler()
+        if scaler is not None:
             scaler.fit(self.features)
             self.features = scaler.transform(self.features)
 
@@ -411,30 +410,26 @@ class Inference:
                 # Train the neural density estimator
                 density_estimator = model.train(learning_rate=learning_rate, training_batch_size=training_batch_size)
                 
-                posterior = model.build_posterior(density_estimator)
 
-        if not os.path.exists(save_folder):
-            os.makedirs(save_folder)
+        if not os.path.exists(result_dir):
+            os.makedirs(result_dir)
 
-        with open(os.path.join(save_folder, 'model.pkl'), 'wb') as file:
+        with open(os.path.join(result_dir, 'model.pkl'), 'wb') as file:
             pickle.dump(model, file)
-        print(f"\nModel saved at '{save_folder}/model.pkl'")
+        print(f"\nModel saved at '{result_dir}/model.pkl'")
 
-        if scale:
-            with open(os.path.join(save_folder, 'scaler.pkl'), 'wb') as file:
+        if scaler is not None:
+            with open(os.path.join(result_dir, 'scaler.pkl'), 'wb') as file:
                 pickle.dump(scaler, file)
-            print(f"Scaler saved at '{save_folder}/scaler.pkl'")
+            print(f"Scaler saved at '{result_dir}/scaler.pkl'")
 
         if self.model[1] == 'sbi':
-            with open(os.path.join(save_folder, 'density_estimator.pkl'), 'wb') as file:
+            with open(os.path.join(result_dir, 'density_estimator.pkl'), 'wb') as file:
                 pickle.dump(density_estimator, file)
-            print(f"Density estimator saved at '{save_folder}/density_estimator.pkl'")
+            print(f"Density estimator saved at '{result_dir}/density_estimator.pkl'")
 
-            with open(os.path.join(save_folder, 'posterior.pkl'), 'wb') as file:
-                pickle.dump(posterior, file)
-            print(f"Posterior saved at '{save_folder}/posterior.pkl'")
 
-    def predict(self, features, save_folder='model_saved', scale=False):
+    def predict(self, features, result_dir='data', scaler=None):
         """
         Method to predict the parameters.
 
@@ -508,9 +503,9 @@ class Inference:
             # Return the predictions
             return batch_index, predictions
 
-        model_path = os.path.join(save_folder, 'model.pkl')
-        scaler_path = os.path.join(save_folder, 'scaler.pkl')
-        density_estimator_path = os.path.join(save_folder, 'density_estimator.pkl')
+        model_path = os.path.join(result_dir, 'model.pkl')
+        scaler_path = os.path.join(result_dir, 'scaler.pkl')
+        density_estimator_path = os.path.join(result_dir, 'density_estimator.pkl')
 
         if not os.path.exists(model_path):
             raise ValueError(f"Model has not been trained. Expected at {model_path}")
@@ -520,7 +515,7 @@ class Inference:
             model = pickle.load(file)
 
         # Load or assign the scaler
-        if scale:
+        if scaler is not None:
             with open(scaler_path, 'rb') as file:
                 scaler = pickle.load(file)
 
@@ -575,7 +570,7 @@ class Inference:
 
         return predictions
 
-    def sample_posterior(self, x, num_samples=10000, save_folder='model_saved', scale=False):
+    def sample_posterior(self, x, num_samples=10000, result_dir='data', scaler=None):
         """
         Sample from the posterior distribution for a given observation.
 
@@ -591,13 +586,13 @@ class Inference:
         np.ndarray
             Array of posterior samples.
         """
-        model_path = os.path.join(save_folder, 'model.pkl')
-        scaler_path = os.path.join(save_folder, 'scaler.pkl')
-        density_estimator_path = os.path.join(save_folder, 'density_estimator.pkl')
+        model_path = os.path.join(result_dir, 'model.pkl')
+        scaler_path = os.path.join(result_dir, 'scaler.pkl')
+        density_estimator_path = os.path.join(result_dir, 'density_estimator.pkl')
 
         with open(model_path, 'rb') as f:
             model = pickle.load(f)
-        if scale:
+        if scaler is not None:
             with open(scaler_path, 'rb') as f:
                 scaler = pickle.load(f)
         with open(density_estimator_path, 'rb') as f:
@@ -608,7 +603,13 @@ class Inference:
         else:
             posterior = model.build_posterior(density_estimator)
 
-        if scale:
+
+        with open(os.path.join(result_dir, 'posterior.pkl'), 'wb') as file:
+            pickle.dump(posterior, file)
+        print(f"Posterior saved at '{result_dir}/posterior.pkl'")
+        
+        
+        if scaler is not None:
             x = scaler.transform(x.reshape(1, -1))
         
         if isinstance(x, np.ndarray):
