@@ -226,8 +226,8 @@ class Inference:
 
 
 
-    def train(self, param_grid=None, n_splits=10, n_repeats=10, train_params={'learning_rate': 0.0005,
-                                                                              'training_batch_size': 256}):
+    def train(self, param_grid=None, n_splits=10, n_repeats=10, 
+              train_params={'learning_rate': 0.0005, 'training_batch_size': 256}, save_folder='model_saved', scale=False):
         """
         Method to train the model.
 
@@ -272,14 +272,11 @@ class Inference:
         if len(self.theta) == 0:
             raise ValueError('No parameters provided.')
 
-        # Initialize the StandardScaler
-        scaler = self.StandardScaler()
-
-        # Fit the StandardScaler
-        scaler.fit(self.features)
-
-        # Transform the features
-        self.features = scaler.transform(self.features)
+        # Apply scaler if requested
+        if scale:
+            scaler = self.StandardScaler()
+            scaler.fit(self.features)
+            self.features = scaler.transform(self.features)
 
         # Remove Nan and Inf values from features
         if self.features.ndim == 1:
@@ -413,21 +410,31 @@ class Inference:
 
                 # Train the neural density estimator
                 density_estimator = model.train(learning_rate=learning_rate, training_batch_size=training_batch_size)
+                
+                posterior = model.build_posterior(density_estimator)
 
-        # Save the best model and the StandardScaler
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        with open('data/model.pkl', 'wb') as file:
+        if not os.path.exists(save_folder):
+            os.makedirs(save_folder)
+
+        with open(os.path.join(save_folder, 'model.pkl'), 'wb') as file:
             pickle.dump(model, file)
-        with open('data/scaler.pkl', 'wb') as file:
-            pickle.dump(scaler, file)
+        print(f"\nModel saved at '{save_folder}/model.pkl'")
 
-        # Save also the density estimator if the model is SBI
+        if scale:
+            with open(os.path.join(save_folder, 'scaler.pkl'), 'wb') as file:
+                pickle.dump(scaler, file)
+            print(f"Scaler saved at '{save_folder}/scaler.pkl'")
+
         if self.model[1] == 'sbi':
-            with open('data/density_estimator.pkl', 'wb') as file:
+            with open(os.path.join(save_folder, 'density_estimator.pkl'), 'wb') as file:
                 pickle.dump(density_estimator, file)
+            print(f"Density estimator saved at '{save_folder}/density_estimator.pkl'")
 
-    def predict(self, features):
+            with open(os.path.join(save_folder, 'posterior.pkl'), 'wb') as file:
+                pickle.dump(posterior, file)
+            print(f"Posterior saved at '{save_folder}/posterior.pkl'")
+
+    def predict(self, features, save_folder='model_saved', scale=False):
         """
         Method to predict the parameters.
 
@@ -464,7 +471,8 @@ class Inference:
             predictions = []
             for feat in feat_batch:
                 # Transform the features
-                feat = scaler.transform(feat.reshape(1, -1))
+                if scaler is not None:
+                    feat = scaler.transform(feat.reshape(1, -1))
 
                 # Check that feat has no NaN or Inf values
                 if np.all(np.isfinite(feat)):
@@ -500,24 +508,31 @@ class Inference:
             # Return the predictions
             return batch_index, predictions
 
-        # Assert that the model has been trained
-        if not os.path.exists('data/model.pkl'):
-            raise ValueError('Model has not been trained.')
+        model_path = os.path.join(save_folder, 'model.pkl')
+        scaler_path = os.path.join(save_folder, 'scaler.pkl')
+        density_estimator_path = os.path.join(save_folder, 'density_estimator.pkl')
 
-        # Load the best model and the StandardScaler
-        with open('data/model.pkl', 'rb') as file:
+        if not os.path.exists(model_path):
+            raise ValueError(f"Model has not been trained. Expected at {model_path}")
+
+        # Load the trained model
+        with open(model_path, 'rb') as file:
             model = pickle.load(file)
-        with open('data/scaler.pkl', 'rb') as file:
-            scaler = pickle.load(file)
 
+        # Load or assign the scaler
+        if scale:
+            with open(scaler_path, 'rb') as file:
+                scaler = pickle.load(file)
+
+        # Load density_estimator and build posterior if SBI
         if self.model[1] == 'sbi':
-            with open('data/density_estimator.pkl', 'rb') as file:
+            with open(density_estimator_path, 'rb') as file:
                 density_estimator = pickle.load(file)
-                # Build the posterior
-                if type(density_estimator) is list:
-                    posterior = [model[i].build_posterior(density_estimator[i]) for i in range(len(density_estimator))]
-                else:
-                    posterior = model.build_posterior(density_estimator)
+
+            if isinstance(density_estimator, list):
+                posterior = [model[i].build_posterior(density_estimator[i]) for i in range(len(density_estimator))]
+            else:
+                posterior = model.build_posterior(density_estimator)
 
         # Assert that features is a numpy array
         if type(features) is not np.ndarray:
@@ -560,7 +575,7 @@ class Inference:
 
         return predictions
 
-    def sample_posterior(self, x, num_samples=10000):
+    def sample_posterior(self, x, num_samples=10000, save_folder='model_saved', scale=False):
         """
         Sample from the posterior distribution for a given observation.
 
@@ -576,14 +591,16 @@ class Inference:
         np.ndarray
             Array of posterior samples.
         """
-        if not os.path.exists('data/model.pkl'):
-            raise ValueError('Model not trained.')
+        model_path = os.path.join(save_folder, 'model.pkl')
+        scaler_path = os.path.join(save_folder, 'scaler.pkl')
+        density_estimator_path = os.path.join(save_folder, 'density_estimator.pkl')
 
-        with open('data/model.pkl', 'rb') as f:
+        with open(model_path, 'rb') as f:
             model = pickle.load(f)
-        with open('data/scaler.pkl', 'rb') as f:
-            scaler = pickle.load(f)
-        with open('data/density_estimator.pkl', 'rb') as f:
+        if scale:
+            with open(scaler_path, 'rb') as f:
+                scaler = pickle.load(f)
+        with open(density_estimator_path, 'rb') as f:
             density_estimator = pickle.load(f)
 
         if type(density_estimator) is list:
@@ -591,8 +608,13 @@ class Inference:
         else:
             posterior = model.build_posterior(density_estimator)
 
-        x = scaler.transform(x.reshape(1, -1))
-        x_tensor = self.torch.from_numpy(x.astype(np.float32))
+        if scale:
+            x = scaler.transform(x.reshape(1, -1))
+        
+        if isinstance(x, np.ndarray):
+            x_tensor = self.torch.from_numpy(x.astype(np.float32))
+        else:
+            x_tensor = x.float()
 
         if isinstance(posterior, list):
             samples = [p.sample((num_samples,), x=x_tensor).numpy() for p in posterior]
@@ -600,3 +622,51 @@ class Inference:
         else:
             samples = posterior.sample((num_samples,), x=x_tensor)
             return samples.numpy()
+
+    def __getstate__(self):
+        """
+        Called when pickling the object. Removes non-pickleable entries like modules.
+        """
+        state = self.__dict__.copy()
+        # Eliminar módulos no pickleables
+        for key in list(state.keys()):
+            if isinstance(state[key], type(os)):
+                del state[key]
+        return state
+
+    def __setstate__(self, state):
+        """
+        Called when unpickling the object. Re-imports required modules.
+        """
+        self.__dict__.update(state)
+
+        # Reimportar dinámicamente todo lo necesario
+        self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
+        self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
+        self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
+        self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
+
+        if self.model[1] == 'sbi':
+            self.NPE = tools.dynamic_import("sbi.inference", "NPE")
+            self.NLE = tools.dynamic_import("sbi.inference", "NLE")
+            self.NRE = tools.dynamic_import("sbi.inference", "NRE")
+            self.posterior_nn = tools.dynamic_import("sbi.neural_nets", "posterior_nn")
+            self.likelihood_nn = tools.dynamic_import("sbi.neural_nets", "likelihood_nn")
+            self.classifier_nn = tools.dynamic_import("sbi.neural_nets", "classifier_nn")
+            self.BoxUniform = tools.dynamic_import("sbi.utils", "BoxUniform")
+            self.torch = tools.dynamic_import("torch")
+            self.torch.set_num_threads(int(os.cpu_count() / 2))
+
+        if not tools.ensure_module("pathos"):
+            self.pathos_inst = False
+            self.multiprocessing = tools.dynamic_import("multiprocessing")
+        else:
+            self.pathos_inst = True
+            self.pathos = tools.dynamic_import("pathos", "pools")
+
+        if tools.ensure_module("tqdm"):
+            self.tqdm_inst = True
+            self.tqdm = tools.dynamic_import("tqdm", "tqdm")
+        else:
+            self.tqdm_inst = False
+
