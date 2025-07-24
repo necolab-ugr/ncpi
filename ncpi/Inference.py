@@ -50,13 +50,10 @@ class Inference:
             Dictionary of hyperparameters of the model. The default is None.
         """
 
+        
         # Ensure that sklearn is installed
         if not tools.ensure_module("sklearn"):
             raise ImportError('sklearn is not installed. Please install it to use the Inference class.')
-        self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
-        self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
-        self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
-        self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
 
         # Ensure that sbi and torch are installed
         if model in ['NPE', 'NLE', 'NRE']:
@@ -65,44 +62,24 @@ class Inference:
             if not tools.ensure_module("torch"):
                 raise ImportError('torch is not installed.')
 
-            # Dynamic imports for SBI components
-            self.NPE = tools.dynamic_import("sbi.inference", "NPE")
-            self.NLE = tools.dynamic_import("sbi.inference", "NLE")
-            self.NRE = tools.dynamic_import("sbi.inference", "NRE")
-            self.posterior_nn = tools.dynamic_import("sbi.neural_nets", "posterior_nn")
-            self.likelihood_nn = tools.dynamic_import("sbi.neural_nets", "likelihood_nn")
-            self.classifier_nn = tools.dynamic_import("sbi.neural_nets", "classifier_nn")
-            self.BoxUniform = tools.dynamic_import("sbi.utils", "BoxUniform")
-            self.torch = tools.dynamic_import("torch")
-            self.model = [model, 'sbi']
-
-        # Check if pathos is installed. If not, use the default Python multiprocessing library
-        if not tools.ensure_module("pathos"):
-            self.pathos_inst = False
-            self.multiprocessing = tools.dynamic_import("multiprocessing")
-        else:
-            self.pathos_inst = True
-            self.pathos = tools.dynamic_import("pathos", "pools")
-
-        # Check if tqdm is installed
-        if not tools.ensure_module("tqdm"):
-            self.tqdm_inst = False
-        else:
-            self.tqdm_inst = True
-            self.tqdm = tools.dynamic_import("tqdm", "tqdm")
-
         # Assert that model is a string
         if type(model) is not str:
             raise ValueError('Model must be a string.')
 
-        # Check if model is in the list of regression models from sklearn, or it is one of the SBI methods
-        regressors = [estimator for estimator in self.all_estimators() if issubclass(estimator[1], self.RegressorMixin)]
+        # Temporary imports to determine model backend
+        all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
+        RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
+        regressors = [estimator for estimator in all_estimators() if issubclass(estimator[1], RegressorMixin)]
+        
         sbi_models = ['NPE', 'NLE', 'NRE']
         if model not in [regressor[0] for regressor in regressors] + sbi_models:
             raise ValueError(f'{model} not in the list of machine-learning models from sklearn or SBI (NPE, NLE, NRE).')
 
         # Set model and library
         self.model = [model, 'sbi'] if model in sbi_models else [model, 'sklearn']
+
+        # Initialize all required modules dynamically
+        self._initialize_modules()
 
         # Check if hyperparameters is a dictionary
         if hyperparams is not None:
@@ -629,7 +606,7 @@ class Inference:
         Called when pickling the object. Removes non-pickleable entries like modules.
         """
         state = self.__dict__.copy()
-        # Eliminar módulos no pickleables
+        # Remove non-pickleable modules
         for key in list(state.keys()):
             if isinstance(state[key], type(os)):
                 del state[key]
@@ -640,13 +617,21 @@ class Inference:
         Called when unpickling the object. Re-imports required modules.
         """
         self.__dict__.update(state)
+        self._initialize_modules()
 
-        # Reimportar dinámicamente todo lo necesario
+
+    def _initialize_modules(self):
+        """
+        Dynamically import all required modules.
+        Called during __init__ and __setstate__ to ensure consistency.
+        """
+        # sklearn
         self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
         self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
         self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
         self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
 
+        # sbi
         if self.model[1] == 'sbi':
             self.NPE = tools.dynamic_import("sbi.inference", "NPE")
             self.NLE = tools.dynamic_import("sbi.inference", "NLE")
@@ -658,6 +643,7 @@ class Inference:
             self.torch = tools.dynamic_import("torch")
             self.torch.set_num_threads(int(os.cpu_count() / 2))
 
+        # pathos or multiprocessing
         if not tools.ensure_module("pathos"):
             self.pathos_inst = False
             self.multiprocessing = tools.dynamic_import("multiprocessing")
@@ -665,6 +651,7 @@ class Inference:
             self.pathos_inst = True
             self.pathos = tools.dynamic_import("pathos", "pools")
 
+        # tqdm
         if tools.ensure_module("tqdm"):
             self.tqdm_inst = True
             self.tqdm = tools.dynamic_import("tqdm", "tqdm")
