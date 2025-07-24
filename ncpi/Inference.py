@@ -66,20 +66,26 @@ class Inference:
         if type(model) is not str:
             raise ValueError('Model must be a string.')
 
-        # Temporary imports to determine model backend
-        all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
-        RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
-        regressors = [estimator for estimator in all_estimators() if issubclass(estimator[1], RegressorMixin)]
-        
-        sbi_models = ['NPE', 'NLE', 'NRE']
-        if model not in [regressor[0] for regressor in regressors] + sbi_models:
-            raise ValueError(f'{model} not in the list of machine-learning models from sklearn or SBI (NPE, NLE, NRE).')
-
-        # Set model and library
-        self.model = [model, 'sbi'] if model in sbi_models else [model, 'sklearn']
-
-        # Initialize all required modules dynamically
+        # Initialize modules (sets self.all_estimators, self.RegressorMixin, etc.)
         self._initialize_modules()
+
+        # Get all sklearn regressors
+        regressor_names = [
+            name for name, cls in self.all_estimators()
+            if issubclass(cls, self.RegressorMixin)
+        ]
+
+        # Define supported SBI models
+        supported_sbi_models = {'NPE', 'NLE', 'NRE'}
+
+        # Validate model name
+        if model not in regressor_names and model not in supported_sbi_models:
+            raise ValueError(
+                f"'{model}' is not a valid model name. Must be a sklearn regressor or one of {sorted(supported_sbi_models)}."
+            )
+
+        # Set model and its associated library
+        self.model = [model, 'sbi' if model in supported_sbi_models else 'sklearn']
 
         # Check if hyperparameters is a dictionary
         if hyperparams is not None:
@@ -619,42 +625,40 @@ class Inference:
         self.__dict__.update(state)
         self._initialize_modules()
 
-
     def _initialize_modules(self):
         """
         Dynamically import all required modules.
         Called during __init__ and __setstate__ to ensure consistency.
         """
-        # sklearn
+        # --- Sklearn ---
         self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
         self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
         self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
         self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
 
-        # sbi
-        if self.model[1] == 'sbi':
+        # --- SBI ---
+        if hasattr(self, 'model') and self.model[1] == 'sbi':
             self.NPE = tools.dynamic_import("sbi.inference", "NPE")
             self.NLE = tools.dynamic_import("sbi.inference", "NLE")
             self.NRE = tools.dynamic_import("sbi.inference", "NRE")
             self.posterior_nn = tools.dynamic_import("sbi.neural_nets", "posterior_nn")
             self.likelihood_nn = tools.dynamic_import("sbi.neural_nets", "likelihood_nn")
             self.classifier_nn = tools.dynamic_import("sbi.neural_nets", "classifier_nn")
-            self.BoxUniform = tools.dynamic_import("sbi.utils", "BoxUniform")
+            # self.BoxUniform = tools.dynamic_import("sbi.utils", "BoxUniform")
             self.torch = tools.dynamic_import("torch")
             self.torch.set_num_threads(int(os.cpu_count() / 2))
 
-        # pathos or multiprocessing
-        if not tools.ensure_module("pathos"):
-            self.pathos_inst = False
-            self.multiprocessing = tools.dynamic_import("multiprocessing")
-        else:
+        # --- Multiprocessing / Pathos ---
+        if tools.ensure_module("pathos"):
             self.pathos_inst = True
             self.pathos = tools.dynamic_import("pathos", "pools")
+        else:
+            self.pathos_inst = False
+            self.multiprocessing = tools.dynamic_import("multiprocessing")
 
-        # tqdm
+        # --- tqdm ---
         if tools.ensure_module("tqdm"):
             self.tqdm_inst = True
             self.tqdm = tools.dynamic_import("tqdm", "tqdm")
         else:
             self.tqdm_inst = False
-

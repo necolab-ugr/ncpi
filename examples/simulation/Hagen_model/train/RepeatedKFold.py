@@ -2,6 +2,7 @@ import time
 import os
 import pickle
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 import ncpi
 
 # Path to folder where simulation features are stored
@@ -188,16 +189,19 @@ if __name__ == "__main__":
         inference = ncpi.Inference(model=model)
         inference.add_simulation_data(X_train, theta_train)
 
+        # Create a scaler for the features
+        scaler = StandardScaler()
+
         # Train the model
         if model == 'NPE':
             # inference.train(param_grid=None, train_params={
             #     'learning_rate': 1e-1,
             #     'stop_after_epochs': 5,
             #     'max_num_epochs': 100})
-            # inference.train(param_grid=None)
-            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1)
+            # inference.train(param_grid=None, scaler=scaler)
+            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1, scaler=scaler)
         else:
-            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20)
+            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20, scaler=scaler)
 
         # Save the best model and the StandardScaler
         pickle.dump(pickle.load(open('data/model.pkl', 'rb')),
@@ -219,7 +223,7 @@ if __name__ == "__main__":
             start_time = time.time()
 
             # Predict the parameters from the test data
-            predictions = inference.predict(X_test)
+            predictions = inference.predict(X_test, scaler=scaler)
 
             # Save predictions
             with open(os.path.join('data', method, 'predictions'), 'wb') as file:
