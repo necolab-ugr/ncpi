@@ -67,7 +67,7 @@ class Inference:
             raise ValueError('Model must be a string.')
 
         # Initialize modules (sets self.all_estimators, self.RegressorMixin, etc.)
-        self._initialize_modules()
+        self._initialize_modules(model)
 
         # Get all sklearn regressors
         regressor_names = [
@@ -99,11 +99,6 @@ class Inference:
         # Initialize features and parameters
         self.features = []
         self.theta = []
-
-        # Set the number of threads used by PyTorch for SBI models
-        if model in ['NPE', 'NLE', 'NRE']:
-            torch_threads = int(os.cpu_count()/2)
-            self.torch.set_num_threads(torch_threads)
 
 
     def add_simulation_data(self, features, parameters):
@@ -625,7 +620,7 @@ class Inference:
         self.__dict__.update(state)
         self._initialize_modules()
 
-    def _initialize_modules(self):
+    def _initialize_modules(self, model=None):
         """
         Dynamically import all required modules.
         Called during __init__ and __setstate__ to ensure consistency.
@@ -637,7 +632,9 @@ class Inference:
         self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
 
         # --- SBI ---
-        if hasattr(self, 'model') and self.model[1] == 'sbi':
+        # Define supported SBI models
+        supported_sbi_models = {'NPE', 'NLE', 'NRE'}
+        if model in supported_sbi_models:
             self.NPE = tools.dynamic_import("sbi.inference", "NPE")
             self.NLE = tools.dynamic_import("sbi.inference", "NLE")
             self.NRE = tools.dynamic_import("sbi.inference", "NRE")
