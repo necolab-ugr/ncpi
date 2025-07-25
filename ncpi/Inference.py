@@ -482,7 +482,7 @@ class Inference:
             return batch_index, predictions
 
         model_path = os.path.join(result_dir, 'model.pkl')
-        scaler_path = os.path.join(result_dir, 'scaler.pkl')
+        # scaler_path = os.path.join(result_dir, 'scaler.pkl')
         density_estimator_path = os.path.join(result_dir, 'density_estimator.pkl')
 
         if not os.path.exists(model_path):
@@ -492,10 +492,10 @@ class Inference:
         with open(model_path, 'rb') as file:
             model = pickle.load(file)
 
-        # Load or assign the scaler
-        if scaler is not None:
-            with open(scaler_path, 'rb') as file:
-                scaler = pickle.load(file)
+        # # Load or assign the scaler
+        # if scaler is not None:
+        #     with open(scaler_path, 'rb') as file:
+        #         scaler = pickle.load(file)
 
         # Load density_estimator and build posterior if SBI
         if self.model[1] == 'sbi':
@@ -565,14 +565,14 @@ class Inference:
             Array of posterior samples.
         """
         model_path = os.path.join(result_dir, 'model.pkl')
-        scaler_path = os.path.join(result_dir, 'scaler.pkl')
+        # scaler_path = os.path.join(result_dir, 'scaler.pkl')
         density_estimator_path = os.path.join(result_dir, 'density_estimator.pkl')
 
         with open(model_path, 'rb') as f:
             model = pickle.load(f)
-        if scaler is not None:
-            with open(scaler_path, 'rb') as f:
-                scaler = pickle.load(f)
+        # if scaler is not None:
+        #     with open(scaler_path, 'rb') as f:
+        #         scaler = pickle.load(f)
         with open(density_estimator_path, 'rb') as f:
             density_estimator = pickle.load(f)
 
@@ -627,7 +627,7 @@ class Inference:
         """
         # --- Sklearn ---
         self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
-        self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
+        # self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
         self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
         self.RegressorMixin = tools.dynamic_import("sklearn.base", "RegressorMixin")
 
