@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import scipy.interpolate
 import re
+import warnings
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.cm import ScalarMappable
@@ -25,7 +26,8 @@ class Analysis:
     def __init__(self, data):
         self.data = data
 
-    def lmer_tests(self, models=None,  group_col=None, control_group=None, numeric=[], specs=None, print_info=True):
+    def lmer_tests(self, models,  group_col=None, control_group=None,
+                   numeric=[], specs=None, print_info=True):
         """
         Perform linear mixed-effects model (lmer) or linear model (lm) fitting and post-hoc tests using R's lme4 and
         emmeans packages.
@@ -46,9 +48,10 @@ class Analysis:
             other (see `specs` argument).
         numeric: list
             Variables that are to be considered as numeric. The others will be converted to factors. If numeric=[],
-            all variables in the model are considered as factors.
+            all independent variables in the model are considered as factors.
         specs: str or list
-            A term, or list of terms, to be used for post-hoc tests.
+            A term, or list of terms, to be used for post-hoc tests. If a term contains variables that do not appear
+            among the fixed effects of the (selected) model, it is ignored and the corresponding test is not performed.
 
             - Scenario 1: If all variables contained in a term are factors (i.e., not given to `numeric` argument), the
                           term is used as specifications for pairwise comparisons via the emmeans function in R.
@@ -59,7 +62,7 @@ class Analysis:
 
             - Scenario 2: If the term contains a numeric variable (i.e., given to numeric argument), then its effect on
                           the dependent variable is tested as a slope via emtrends function in R, with all remaining
-                          terms as specifications.
+                          terms as specifications. The term must not contain more than 1 numeric variable.
             Example:
             specs='Epoch'  # slope of data_col w.r.t. Epoch is tested (specs=~1, var='Epoch')
             specs='Epoch:Group'  # slope of data_col w.r.t. Epoch is tested separately for each group (specs=~Group,
@@ -106,13 +109,9 @@ class Analysis:
         if not isinstance(self.data, pd.DataFrame):
             raise ValueError('The data must be a pandas DataFrame.')
 
-        ##################################
+        ####################rs##############
         #### Check and prepare models ####
         ##################################
-
-        # Check  if models is not None
-        if models is None:
-            raise ValueError('No models provided. Please provide a model or a list of models.')
 
         # If only one model is provided, make it into a list of length 1
         if isinstance(models, str):
@@ -138,68 +137,26 @@ class Analysis:
             if var not in self.data.columns:
                 raise ValueError(f'Variable "{var}" is not in the DataFrame.')
 
-        ################################
-        #### Check and prepare data ####
-        ################################
-
-        # Check if group_col is in the DataFrame and add it to all_vars if not already present
         if group_col:
-            if group_col not in self.data.columns:
-                raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
-            all_vars.add(group_col)
+            # Check if group_col is in model formulas
+            if group_col not in all_vars:
+                raise ValueError(f'Variable "{group_col}" provided as group_col is not in '
+                                 + ('any of the models.' if len(models) > 1 else 'the model.'))
+            # Check if control_group is in the list of unique values of group_col
+            if control_group is not None and control_group not in self.data[group_col].unique():
+                raise ValueError(f'Control group "{control_group}" is not in the group_col "{group_col}" values.')
         elif specs is None:
             raise ValueError('If no specs are given, group_col must be specified.')
 
-        # Check if control_group is in the list of unique values of group_col
-        if control_group is not None and control_group not in self.data[group_col].unique():
-            raise ValueError(f'Control group "{control_group}" is not in the group_col "{group_col}" values.')
+        ###################
+        #### Model fit ####
+        ###################
 
         # Copy the dataframe
         df = self.data.copy()
 
         # Remove all columns except the variables to analyse
         df = df[list(all_vars)]
-
-        # [***] Remove rows where the data_col is zero (is it necessary?)
-        # df = df[df[data_col] != 0]
-
-        #################################
-        #### Check and prepare specs ####
-        #################################
-
-        # Default specs if none are provided
-        if specs is None:
-            if group_col is None:
-                raise ValueError('If no specs are given, group_col must be specified.')
-            specs = [group_col]
-
-        # If only one spec is provided, make it into a list of length 1
-        if isinstance(specs, str):
-            specs = [specs]
-        # Remove blanks from specs
-        specs = [x.replace(' ', '') for x in specs]
-
-        # Check if all specs are valid and contain variables present in the DataFrame
-        posthoc = []
-        for ph in specs:
-            vars = extract_variables(ph)
-            if any([v not in df.columns for v in vars]):
-                raise ValueError(f'specs "{ph}" contains variable not present in data columns.')
-            if all([v not in numeric for v in vars]):
-                posthoc.append('~' + ph)
-            else:
-                var_tmp = []
-                for v in vars:
-                    if len(var_tmp)>1:
-                        raise ValueError(f'specs "{ph}": max 1 numeric variable per test.')
-                    if v in numeric:
-                        var_tmp.append(v)
-                sp = '1' if len(vars)==1 else ':'.join([v for v in vars if v!=var_tmp[0]])
-                posthoc.append(('~' + sp, var_tmp[0]))
-
-        ################
-        #### R code ####
-        ################
 
         # Pass dataframe to R
         ro.globalenv['df'] = pandas2ri.py2rpy(df)
@@ -227,25 +184,69 @@ class Analysis:
             r(f"final_model <- m0")
         else:
             r('''
-            fitted_models <- unlist(fitted_models)
-            bics <- sapply(fitted_models, function(m) BIC(get(m)))
-            index <- which.min(bics)
-            final_model <- get(fitted_models[index])
-            ''')
+                fitted_models <- unlist(fitted_models)
+                bics <- sapply(fitted_models, function(m) BIC(get(m)))
+                index <- which.min(bics)
+                final_model <- get(fitted_models[index])
+                ''')
             if print_info:
                 print(f'--- BIC model selection')
         if print_info:
             print(f"Model: {r('formula(final_model)')}")
 
-        # Post-hoc analyses
+        # Fixed effects in the selected model
+        selmod_fixed = ro.r('attr(terms(nobars(final_model)), "term.labels")')
+
+        #################################
+        #### Check and prepare specs ####
+        #################################
+
+        # Default specs if none are provided
+        if specs is None:
+            if group_col is None:
+                raise ValueError('If no specs are given, group_col must be specified.')
+            specs = [group_col]
+
+        # If only one spec is provided, make it into a list of length 1
+        if isinstance(specs, str):
+            specs = [specs]
+        # Remove blanks from specs
+        specs = [x.replace(' ', '') for x in specs]
+
+        # Check if all specs are valid and contain variables present in selected model
+        posthoc = []
+        for sp in specs:
+            vars = extract_variables(sp)
+            if any([v not in selmod_fixed for v in vars]):
+                #raise ValueError(f'specs "{sp}" contains variable not present in any of the models.')
+                if print_info:
+                    print(f'(!) Specs "{sp}" skipped: contains variable not present as fixed effect in the '
+                            + ('selected ' if len(models) > 1 else '') + 'model.\n')
+            elif all([v not in numeric for v in vars]):
+                posthoc.append('~' + sp)
+            else:
+                var_tmp = [v for v in vars if v in numeric]
+                if len(var_tmp) > 1:
+                    # raise ValueError(f'Invalid specs "{sp}": max 1 numeric variable per test.')
+                    if print_info:
+                        print(f'(!) Specs "{sp}" skipped: max 1 numeric variable per test.\n')
+                else:
+                    sp = '1' if len(vars) == 1 else ':'.join([v for v in vars if v != var_tmp[0]])
+                    posthoc.append(('~' + sp, var_tmp[0]))
+
+        ###########################
+        #### Post-hoc analyses ####
+        ###########################
+
         if print_info:
             print('--- Post-hoc tests:')
         results = {}
 
         for sp, ph in zip(specs, posthoc):
+
             if isinstance(ph, str):
                 ro.globalenv['specs'] = ph
-                if ph == '~'+group_col and control_group is not None:
+                if group_col is not None and ph.split('|')[0] == '~' + group_col and control_group is not None:
                     # Compare all groups against control group
                     r('''
                     emm <- suppressMessages(emmeans(final_model, specs=as.formula(specs)))
@@ -273,11 +274,11 @@ class Analysis:
                 df_res <- as.data.frame(res)
                 ''')
 
-            # Ensure Sensor remains as a character column (is this necessary?)
-            if 'Sensor' in r('names(df_res)'):
-                r('''
-                df_res$Sensor <- as.character(df_res$Sensor)
-                ''')
+            # Ensure grouping variables remain as character columns in results
+            vars = extract_variables(sp)
+            for v in vars:
+                if v in r('names(df_res)'):
+                    r(f"df_res${v} <- as.character(df_res${v})")
 
             df_res_r = ro.r['df_res']
             with pandas2ri.converter.context():
@@ -289,9 +290,12 @@ class Analysis:
 
             results[sp] = df_res_pd
 
+        if len(results) == 0:
+            warnings.warn(f'No valid specs.')
+
         return results
 
-    def lmer_selection(self, full_model=None,  group_col=None, numeric=[], crit=None, random_crit='BIC',
+    def lmer_selection(self, full_model, numeric=[], crit=None, random_crit='BIC',
                        fixed_crit='LRT', include=None, print_info=True):
         """
         Perform linear mixed-effects model (lmer) or linear model (lm) model selection using R's lme4 and buildmer
@@ -302,13 +306,11 @@ class Analysis:
         full_model: str
             The full model formula to be used as a starting point for backward selection.
             Example full model formulas:
-            - Y ~ {group_col}
-            - Y ~ {group_col} + (1 | ID)
-        group_col: str
-            The name of the column containing the group variable (only used if `full_model` is not specified).
+            - Y ~ Group * Sensor
+            - Y ~ Group + Sensor + (1 | ID)
         numeric: list
             Variables that are to be considered as numeric. The others will be converted to factors. If numeric=[],
-            all variables in the model are considered as factors.
+            all independent variables in the model are considered as factors.
         crit: str
             The method to be used for model selection via the `buildmer` function in R.
             Possible options are:
@@ -369,6 +371,10 @@ class Analysis:
         load_packages(c("lme4", "buildmer"))
         ''')
 
+        # r_code = 'load_packages(c("buildmer"))'
+        # result = subprocess.run(["Rscript", "-"], input=r_code, text=True, check=True, capture_output=True)
+        # out = result.stdout
+
         # Check if the data is a pandas DataFrame
         if not isinstance(self.data, pd.DataFrame):
             raise ValueError('The data must be a pandas DataFrame.')
@@ -376,10 +382,6 @@ class Analysis:
         ######################################
         #### Check and prepare full_model ####
         ######################################
-
-        # Check  if full_model is not None
-        if full_model is None:
-            raise ValueError('No full_model provided. Please provide a full model.')
 
         # Remove blanks from formula
         full_model = full_model.replace(' ', '')
@@ -399,22 +401,11 @@ class Analysis:
         #### Check and prepare data ####
         ################################
 
-        # Check if group_col is in the DataFrame and add it to all_vars if not already present
-        if group_col:
-            if group_col not in self.data.columns:
-                raise ValueError(f'Column "{group_col}" (group_col) is not in the DataFrame.')
-            all_vars.add(group_col)
-        elif full_model is None:
-            raise ValueError('If no full_model is given, group_col must be specified.')
-
         # Copy the dataframe
         df = self.data.copy()
 
         # Remove all columns except the variables to analyse
         df = df[list(all_vars)]
-
-        # [***] Remove rows where the data_col is zero (is it necessary?)
-        # df = df[df[data_col] != 0]
 
         ############################################
         #### Check and prepare crit and include ####
@@ -468,18 +459,22 @@ class Analysis:
         if random_crit is not None:
             ro.globalenv['random_crit'] = random_crit
             r('''
-            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=random_crit, include=fixed, quiet=T))
+            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=random_crit, 
+                                include=fixed, singular.ok=T, quiet=T))
             ff <- formula(selmod)
             random_terms <- sapply(findbars(ff), function(term) paste0("(", deparse(term), ")"))
-            random_formula <- as.formula(paste("~", paste(random_terms, collapse = " + ")))
+            if (is.list(random_terms) && length(random_terms) == 0) 
+                {random_formula <- list()} else {
+                random_formula <- as.formula(paste("~", paste(random_terms, collapse = " + ")))
+                }
             ''')
             if print_info:
                 print(f"Random effect structure selected with {random_crit}: {r('random_formula')}")
         if fixed_crit is not None:
             ro.globalenv['fixed_crit'] = fixed_crit
             r('''
-            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=fixed_crit, include=random, 
-            quiet=T))
+            selmod <- buildmer(ff, data=df, buildmerControl=list(direction="backward", crit=fixed_crit, 
+                                include=random, singular.ok=T, quiet=T))
             ff <- formula(selmod)
             fixed_formula <- reformulate(attr(terms(nobars(ff)), "term.labels"))
             ''')

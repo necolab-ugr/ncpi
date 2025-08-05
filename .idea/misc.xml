@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="ncpi_python_3_8" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="ncpi_python_3_8" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="stats-env" project-jdk-type="Python SDK" />
 </project>

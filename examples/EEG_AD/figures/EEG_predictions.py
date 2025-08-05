@@ -16,7 +16,7 @@ p_value_th = 0.01
 
 def append_lmer_results(lmer_results, elec, p_value_th, data_lmer):
     '''
-    Create a list with the z-scores of the linear mixed model analysis for a given group and electrode.
+    Create a list with the z-ratios or t-ratios of the linear mixed model analysis for a given group and electrode.
 
     Parameters
     ----------
@@ -36,10 +36,14 @@ def append_lmer_results(lmer_results, elec, p_value_th, data_lmer):
     '''
 
     p_value = lmer_results['p.value'].iloc[elec]
-    z_score = lmer_results['z.ratio'].iloc[elec]
+    if 'z.ratio' in lmer_results.columns:
+        statistic = lmer_results['z.ratio'].iloc[elec]
+    else:
+        statistic = lmer_results['t.ratio'].iloc[elec]
+    #statistic = lmer_results['z.ratio'].iloc[elec]
 
     if p_value < p_value_th:
-        data_lmer.append(z_score)
+        data_lmer.append(statistic)
     else:
         data_lmer.append(0)
 
@@ -49,7 +53,7 @@ def append_lmer_results(lmer_results, elec, p_value_th, data_lmer):
 if __name__ == "__main__":
     # Some parameters for the figure
     ncols = 6 
-    nrows = 5
+    nrows = 4  #5
 
     left = 0.06
     right = 0.11
@@ -80,11 +84,14 @@ if __name__ == "__main__":
         if row == 2 or row == 3:
             method = 'power_spectrum_parameterization_1'
         try:
-            data = pd.read_pickle(os.path.join('../data', method, 'emp_data_reduced.pkl'))
+            data = pd.read_pickle(os.path.join(results_path, method, 'emp_data_reduced.pkl'))
             
         except Exception as e:
             print(f'Error loading data for {method}: {e}')
             continue
+
+        data['Sensor'] = data['Sensor'].apply(lambda x: str(x))  # convert from np.str_ to str (to avoid warning when importing to R)
+        data = data[data['Group'] != 'MCI']  # remove MCI from dataset so p-value correction does not take it into account
 
         current_left = left
         for col in range(ncols):
@@ -132,39 +139,35 @@ if __name__ == "__main__":
             # Statistical analysis
             analysis = ncpi.Analysis(data_preds)
             if statistical_analysis == 'lmer':
-                # stat_results = analysis.lmer(control_group='HC', data_col='Predictions', data_index=var,
-                #                         other_col=['ID', 'Group', 'Epoch', 'Sensor'],
-                #                         models={
-                #                             'mod00': 'Y ~ Group * Sensor + (1 | ID)',
-                #                             'mod01': 'Y ~ Group * Sensor',
-                #                             'mod02': 'Y ~ Group + Sensor + (1 | ID)',
-                #                             'mod03': 'Y ~ Group + Sensor',
-                #                         },
-                #                         bic_models=["mod00", "mod01"],
-                #                         anova_tests={
-                #                             'test1': ["mod00", "mod01"],
-                #                             'test2': ["mod02", "mod03"],
-                #                         },
-                #                         specs='~Group | Sensor')
 
-                # # Reduce fixed effect structure with LRT (anova)
-                # opt_f = analysis.lmer_selection(full_model='Predictions ~ Group * Sensor + (1 | ID)',
-                #                                   numeric=['Predictions'],
-                #                                   crit=None,
-                #                                   fixed_crit='LRT',
-                #                                   random_crit='BIC',
-                #                                   include=['Sensor', 'Group'])
-
-
-                opt_f_1 = 'Predictions ~ Group * Sensor + (1 | ID)'
-                opt_f_2 = 'Predictions ~ Group + Sensor + (1 | ID)'
-
+                # Reduce random effect structure with BIC and fixed effect structure with LRT (anova)
+                opt_f = analysis.lmer_selection(full_model='Predictions ~ Group * Sensor + (1 | ID)',
+                                                  numeric=['Predictions'],
+                                                  crit=None,
+                                                  fixed_crit='LRT',
+                                                  random_crit='BIC',
+                                                  include=['Sensor', 'Group'])
                 # Run post-hoc analyses using selected model
-                stat_results = analysis.lmer_tests(models=[opt_f_1,opt_f_2],
+                stat_results = analysis.lmer_tests(models=opt_f,
                                               numeric=['Predictions'],
                                               group_col='Group',
                                               control_group='HC',
                                               specs=['Group|Sensor'])
+
+                # opt_f_1 = 'Predictions ~ Group * Sensor + (1 | ID)'
+                # opt_f_2 = 'Predictions ~ Group + Sensor + (1 | ID)'
+                # stat_results = analysis.lmer_tests(models=[opt_f_1, opt_f_2],
+                #                               numeric=['Predictions'],
+                #                               group_col='Group',
+                #                               control_group='HC',
+                #                               specs=['Group|Sensor'])
+
+                # opt_f = 'Predictions ~ Group * Sensor + (1 | ID)'
+                # stat_results = analysis.lmer_tests(models=opt_f,
+                #                               numeric=['Predictions'],
+                #                               group_col='Group',
+                #                               control_group='HC',
+                #                               specs=['Group|Sensor'])
 
             elif statistical_analysis == 'cohend':
                 stat_results = analysis.cohend(control_group='HC', data_col='Predictions', data_index=var)
@@ -268,4 +271,5 @@ if __name__ == "__main__":
     # fig1.savefig('EEG_predictions.png')
 
 plt.show()
-    
+
+#plt.gcf().savefig(os.path.join(results_path, 'fig7.pdf'), bbox_inches='tight')
