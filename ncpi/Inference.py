@@ -220,6 +220,12 @@ class Inference:
             Number of repeats for RepeatedKFold cross-validation. The default is 10.
         train_params : dict, optional
             Dictionary of training parameters for SBI.
+            
+        IMPORTANT NOTE:
+            If a 'scaler' (e.g., StandardScaler) is provided during training, it is fitted here and saved as 'scaler.pkl'.
+            When predicting or sampling later, you MUST use the EXACT same trained scaler:
+              - either by passing it explicitly as the 'scaler' argument,
+              - or by loading it from 'result_dir/scaler.pkl'.
         """
 
         # Import the sklearn model
@@ -397,6 +403,7 @@ class Inference:
             pickle.dump(model, file)
         print(f"\nModel saved at '{result_dir}/model.pkl'")
 
+
         if scaler is not None:
             with open(os.path.join(result_dir, 'scaler.pkl'), 'wb') as file:
                 pickle.dump(scaler, file)
@@ -561,11 +568,17 @@ class Inference:
             Observed feature vector (1D array).
         num_samples : int, optional
             Number of posterior samples to draw. Default is 10000.
+        result_dir : str
+            Directory where the model (and scaler, if used) was saved.
+        scaler : object or None
+            IMPORTANT: if a scaler was applied during training, you must use the SAME trained scaler here
+            (by loading it from 'result_dir/scaler.pkl' if necessary) before transforming 'x'.
 
         Returns
         -------
         np.ndarray
             Array of posterior samples.
+            
         """
         model_path = os.path.join(result_dir, 'model.pkl')
         # scaler_path = os.path.join(result_dir, 'scaler.pkl')
