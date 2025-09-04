@@ -156,7 +156,7 @@ if __name__ == "__main__":
                                'min_peak_height': 0.,
                                'max_n_peaks': 5,
                                'peak_width_limits': (10., 50.)}
-            params={'fs': emp_data['fs'][0],
+            params={'fs': df['fs'][0],
                    'fmin': 5.,
                    'fmax': 45.,
                    'fooof_setup': fooof_setup_emp,
