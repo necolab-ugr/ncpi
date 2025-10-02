@@ -17,7 +17,7 @@ pred_results = '../data'
 compute_firing_rate = False
 
 # Path to saved firing rates
-fr_path = '/DATA/ML_models/4_var/MLP'
+fr_path = './data'
 
 # Number of samples to draw from the predictions for computing the firing rates
 n_samples = 50
@@ -118,9 +118,9 @@ for method in all_methods:
                 LIF_params['J_ext'] = J_ext
 
                 # Create a Simulation object
-                sim = ncpi.Simulation(param_folder='../../Hagen_model/simulation/params',
-                                      python_folder='../../Hagen_model/simulation/python',
-                                      output_folder='../../Hagen_model/simulation/output')
+                sim = ncpi.Simulation(param_folder='../../simulation/Hagen_model/simulation/params',
+                                      python_folder='../../simulation/Hagen_model/simulation/python',
+                                      output_folder='../../simulation/Hagen_model/simulation/output')
 
                 # Save parameters to a pickle file
                 with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'network.pkl'), 'wb') as f:
