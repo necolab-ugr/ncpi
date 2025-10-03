@@ -476,8 +476,8 @@ class Analysis:
                 if len(group1) > 2 and len(group2) > 2:
                     # Calculate Cohen's d
                     n1, n2 = len(group1), len(group2)
-                    mean1, mean2 = np.mean(group1), np.mean(group2)
-                    std1, std2 = np.std(group1, ddof=1), np.std(group2, ddof=1)
+                    mean1, mean2 = np.nanmean(group1), np.nanmean(group2)
+                    std1, std2 = np.nanstd(group1, ddof=1), np.nanstd(group2, ddof=1)
 
                     pooled_std = np.sqrt(((n1 - 1) * std1 ** 2 + (n2 - 1) * std2 ** 2) / (n1 + n2 - 2))
                     d = (mean1 - mean2) / pooled_std
