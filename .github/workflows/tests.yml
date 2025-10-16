@@ -1,0 +1,53 @@
+name: Ncpi Tests
+
+on:
+  push:
+    branches: [ main, master, ncpi-update ]
+  pull_request:
+    branches: [ main, master, ncpi-update ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+    
+    - name: Check disk space before download
+      run: df -h
+    
+    - name: Create directory for tests data (empty in repo)
+      run: |
+        mkdir -p tests/data
+            
+    - name: Download partial zenodo simulation test data (~4,7 GB) and extract files
+      run: |
+        # Download from cloud storage
+        wget -O tests/data/zenodo_sim_part_files.7z https://zenodo.org/records/17306561/files/zenodo_sim_files.7z
+        7z x tests/data/zenodo_sim_part_files.7z -otests/data/
+        rm tests/data/zenodo_sim_part_files.7z  # Free space immediately
+        
+    - name: Download partial zenodo empirical test data (~490 MB) and extract files
+      run: |
+        # Download from cloud storage
+        wget -O tests/data/zenodo_emp_part_files.7z https://zenodo.org/records/17306561/files/zenodo_emp_files.7z
+        7z x tests/data/zenodo_emp_part_files.7z -otests/data/
+        rm tests/data/zenodo_emp_part_files.7z  # Free space immediately
+        
+    - name: List files to verify download
+      run: |
+        ls -lhat tests/data/
+        echo "Downloaded data size:"
+        du -sh tests/data/  # Check size  
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest
+        
+    - name: Run tests with pytest
+      run: |
+        pytest -v
