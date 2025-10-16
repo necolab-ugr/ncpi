@@ -4,3 +4,6 @@ pandas
 scipy
 # p7zip-full 
 # wget
+matplotlib.pyplot
+# random
+importlib
