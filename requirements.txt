@@ -2,5 +2,5 @@
 numpy
 pandas
 scipy
-p7zip-full 
-wget
+# p7zip-full 
+# wget
