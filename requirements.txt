@@ -1,0 +1,8 @@
+# requirements.txt
+numpy
+pandas
+scipy
+time
+pickle
+p7zip-full 
+wget
