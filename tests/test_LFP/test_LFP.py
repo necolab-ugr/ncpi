@@ -13,7 +13,8 @@ import time
 # Test library files of these folders (comment # import ncpi)
 import sys
 sys.path.append(os.path.join(os.path.dirname(__file__), "../../ncpi"))
-from ncpi import tools
+from Features import Features
+from Inference import Inference
 
 import pytest
 
@@ -69,7 +70,7 @@ def LFP_mean(method):
     start_time = time.time()
 
     # Create inference object
-    inference = ncpi.Inference(model=ML_model)
+    inference = Inference(model=ML_model)
     # Not sure if this is really needed
     inference.add_simulation_data(X, theta['data'])
 
@@ -177,7 +178,7 @@ def LFP_mean(method):
     df.fs = emp_data['fs'][0]
 
     # Compute features
-    features = ncpi.Features(method=method if method == 'catch22' else 'power_spectrum_parameterization',
+    features = Features(method=method if method == 'catch22' else 'power_spectrum_parameterization',
                                 params=params)
     emp_data = features.compute_features(df)
 
