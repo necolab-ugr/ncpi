@@ -7,24 +7,27 @@ import numpy as np
 import time
 
 # Test python library
-# import ncpi
-# from ncpi import tools
+import ncpi
+from ncpi import tools
 
 # Test library files of these folders (comment # import ncpi)
-import sys
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../ncpi"))
-from ncpi import tools
+# import sys
+# sys.path.append(os.path.join(os.path.dirname(__file__), "../../ncpi"))
+# from ncpi import tools
 
 import pytest
 
 # Methods used to compute the features
 # all_methods = ['catch22','power_spectrum_parameterization_1']
 
+# Get the directory where this test file is located
+test_dir = os.path.dirname(os.path.abspath(__file__))
+
 # Paths to zenodo simulation files
-zenodo_dir_sim = "../data/zenodo_sim_files"
+zenodo_dir_sim = os.path.join(test_dir, "..", "data", "zenodo_sim_files") 
 
 # Paths to zenodo empirical files
-zenodo_dir_emp= "../data/zenodo_emp_files"
+zenodo_dir_emp= os.path.join(test_dir, "..", "data", "zenodo_emp_files")
 
 # ML model used to compute the predictions
 ML_model = 'MLPRegressor'
