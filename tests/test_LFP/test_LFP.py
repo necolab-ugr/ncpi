@@ -7,13 +7,13 @@ import numpy as np
 import time
 
 # Test python library
-import ncpi
-from ncpi import tools
+# import ncpi
+# from ncpi import tools
 
 # Test library files of these folders (comment # import ncpi)
-# import sys
-# sys.path.append(os.path.join(os.path.dirname(__file__), "../../ncpi"))
-# from ncpi import tools
+import sys
+sys.path.append(os.path.join(os.path.dirname(__file__), "../../ncpi"))
+from ncpi import tools
 
 import pytest
 
