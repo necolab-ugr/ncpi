@@ -71,6 +71,9 @@ def LFP_mean(method):
 
     # Create inference object
     inference = Inference(model=ML_model)
+    # Reshape X to 2D if it's 1D
+    if X.ndim == 1:
+        X = X.reshape(1, -1)
     # Not sure if this is really needed
     inference.add_simulation_data(X, theta['data'])
 
