@@ -72,8 +72,8 @@ def LFP_mean(method):
     # Create inference object
     inference = Inference(model=ML_model)
     # Reshape X to 2D if it's 1D
-    if X.ndim == 1:
-        X = X.reshape(1, -1)
+    # if X.ndim == 1:
+    #    X = X.reshape(1, -1)
     # Not sure if this is really needed
     inference.add_simulation_data(X, theta['data'])
 
@@ -196,6 +196,7 @@ def LFP_mean(method):
     print('\n--- Computing predictions from empirical data.')
     start_time = time.time()
     # Predict the parameters from the features of the empirical data
+    print(f'Shape of X: {emp_data.shape}, {emp_data['Features']')
     predictions = inference.predict(np.array(emp_data['Features'].tolist()))
 
     # Calculate the average for testing
