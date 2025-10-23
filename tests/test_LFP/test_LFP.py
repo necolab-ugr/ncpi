@@ -11,9 +11,34 @@ import numpy as np
 
 # Test files of this repository (comment # import ncpi)
 import sys
+
+# Debug import
+current_file_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(current_file_dir, "..", ".."))
+
+# Add project root to Python path
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
+print(f"Project root: {project_root}")
+print(f"Python path: {sys.path}")
+
+# Now try to import
+try:
+    import ncpi
+    print("Successfully imported ncpi")
+except ImportError as e:
+    print(f"Import failed: {e}")
+    # List contents to debug
+    ncpi_dir = os.path.join(project_root, "ncpi")
+    if os.path.exists(ncpi_dir):
+        print(f"Contents of ncpi directory: {os.listdir(ncpi_dir)}")
+
+
 # Import ncpi/tools.py as file, not as the Python package. It gets the current directory of test_LFP.py
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "ncpi"))
-import ncpi
+# sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "ncpi"))
+sys.path.insert(0, os.path.join(project_root, 'ncpi'))
+# import ncpi
 
 # Import functions from LFP_developing_brain.py
 LFP_path = os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'LFP_developing_brain')
