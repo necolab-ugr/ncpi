@@ -70,17 +70,17 @@ def LFP_mean(method):
 
     print(f'\n\n--- Method: {method}')
     # Load parameters of the model (theta) and features (X) from simulation data
-    X, theta = LFP_developing_brain.load_model_features(method)
+    X, theta = LFP_developing_brain.load_model_features(method, zenodo_dir_sim)
 
     # Reshape X to 2D if it's 1D
     # if X.ndim == 1:
     #    X = X.reshape(1, -1)
 
     # Load the Inference objects and add the simulation data
-    inference = LFP_developing_brain.load_inference_data(method, X, theta)
+    inference = LFP_developing_brain.load_inference_data(method, X, theta, zenodo_dir_sim)
 
     # Load empirical data
-    emp_data = LFP_developing_brain.load_empirical_data()
+    emp_data = LFP_developing_brain.load_empirical_data(zenodo_dir_emp)
     
     # Compute features from empirical data
     emp_data = LFP_developing_brain.compute_features_empirical_data(method, emp_data)

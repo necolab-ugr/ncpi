@@ -41,7 +41,7 @@ ML_model = 'MLPRegressor'
 
 # @tools.timer("Loading simulation data.") # If function "timer" is already in the ncpi Python package
 @timer("Loading simulation data.")
-def load_model_features(method):
+def load_model_features(method, zenodo_dir_sim):
     # Load parameters of the model (theta) and features (X) from simulation data
     try:
         with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
@@ -64,7 +64,7 @@ def load_model_features(method):
 
 # @tools.timer("Loading the inverse model.") # If function "timer" is already in the ncpi Python package
 @timer("Loading the inverse model.")
-def load_inference_data(method, X, theta):
+def load_inference_data(method, X, theta, zenodo_dir_sim):
     # Load the Inference objects and add the simulation data
 
     # Create inference object
@@ -107,7 +107,7 @@ def load_inference_data(method, X, theta):
 
 # @tools.timer("Loading LFP data.") # If function "timer" is already in the ncpi Python package
 @timer("Loading LFP data.")
-def load_empirical_data():
+def load_empirical_data(zenodo_dir_emp):
     # Load empirical data
     file_list = os.listdir(os.path.join(zenodo_dir_emp, 'development_EI_decorrelation/baseline/LFP'))
     emp_data = {'LFP': [], 'fs': [], 'age': []}
@@ -236,13 +236,13 @@ if __name__ == "__main__":
         print(f'\n\n--- Method: {method}')
 
         # Load parameters of the model (theta) and features (X) from simulation data
-        X, theta = load_model_features(method)
+        X, theta = load_model_features(method, zenodo_dir_sim)
 
         # Load the Inference objects and add the simulation data
-        inference = load_inference_data(method, X, theta)
+        inference = load_inference_data(method, X, theta, zenodo_dir_sim)
 
         # Load empirical data
-        emp_data = load_empirical_data()
+        emp_data = load_empirical_data(zenodo_dir_emp)
 
         # Compute features from empirical data
         emp_data = compute_features_empirical_data(method, emp_data)
