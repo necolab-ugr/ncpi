@@ -12,11 +12,11 @@ import numpy as np
 # Test files of this repository (comment # import ncpi)
 import sys
 # Import ncpi/tools.py as file, not as the Python package. It gets the current directory of test_LFP.py
-sys.path.append(os.path.join(os.path.dirname(__file__), "../../ncpi"))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "ncpi"))
 import ncpi
 
 # Import functions from LFP_developing_brain.py
-LFP_path = os.path.join(os.path.dirname(__file__), '../../examples/LFP_developing_brain')
+LFP_path = os.path.join(os.path.dirname(__file__), '..', '..', 'examples', 'LFP_developing_brain')
 sys.path.insert(0, LFP_path)
 import LFP_developing_brain
 
