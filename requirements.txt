@@ -4,9 +4,9 @@ pandas
 scipy
 # p7zip-full 
 # wget
-matplotlib
+# matplotlib
 # random
-importlib
-ncpi
+# importlib
+# ncpi
 LFPykernels
 scikit-learn==1.3.2

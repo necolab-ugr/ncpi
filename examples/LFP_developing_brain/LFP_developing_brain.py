@@ -4,8 +4,8 @@ import pickle
 import pandas as pd
 import scipy
 import numpy as np
-import ncpi
-from ncpi import tools
+# import ncpi
+# from ncpi import tools
 
 # Get the current directory of LFP_developing_brain.py
 import sys
