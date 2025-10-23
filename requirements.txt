@@ -1,0 +1,10 @@
+# requirements.txt
+numpy
+pandas
+scipy
+# p7zip-full 
+# wget
+# matplotlib
+ncpi
+scikit-learn==1.3.2
+LFPykernels
