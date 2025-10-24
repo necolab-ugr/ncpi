@@ -446,6 +446,8 @@ class Inference:
                 # Transform the features
                 if scaler is not None:
                     feat = scaler.transform(feat.reshape(1, -1))
+                # else:
+                #     feat = feat.reshape(-1, 1)
 
                 # Check that feat has no NaN or Inf values
                 if np.all(np.isfinite(feat)):
@@ -482,7 +484,7 @@ class Inference:
             return batch_index, predictions
 
         model_path = os.path.join(result_dir, 'model.pkl')
-        # scaler_path = os.path.join(result_dir, 'scaler.pkl')
+        scaler_path = os.path.join(result_dir, 'scaler.pkl')
         density_estimator_path = os.path.join(result_dir, 'density_estimator.pkl')
 
         if not os.path.exists(model_path):
@@ -493,9 +495,9 @@ class Inference:
             model = pickle.load(file)
 
         # # Load or assign the scaler
-        # if scaler is not None:
-        #     with open(scaler_path, 'rb') as file:
-        #         scaler = pickle.load(file)
+        if scaler is None and os.path.exists(scaler_path):
+            with open(scaler_path, 'rb') as file:
+                scaler = pickle.load(file)
 
         # Load density_estimator and build posterior if SBI
         if self.model[1] == 'sbi':
