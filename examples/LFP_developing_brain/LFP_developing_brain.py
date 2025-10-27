@@ -8,6 +8,21 @@ import time
 import ncpi
 from ncpi import tools
 
+# Get the current directory of LFP_developing_brain.py
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the ncpi folder path and import it as a Python package
+ncpi_path = os.path.join(current_dir, '..', '..', 'ncpi')
+sys.path.append(ncpi_path)
+
+from tools import *
+
+# Check scikit-learn version
+if not check_and_install_sklearn():
+    print("Failed to install required scikit-learn version. Exiting.")
+    sys.exit(1)
+
+
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
 # configure the zenodo_dir variables to point to the local paths where the data is stored.

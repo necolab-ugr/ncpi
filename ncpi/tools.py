@@ -143,3 +143,73 @@ def download_zenodo_record(api_url, download_dir="zenodo_files", extract_tar=Tru
     else:
         print(f"Directory {download_dir} already exists. Skipping download.")
         print("If you want to re-download, please delete the directory.")
+
+
+# Check scikit-learn version
+def get_installed_sklearn_version_conda():
+    """Get scikit-learn version using conda list without importing it"""
+    try:
+        result = subprocess.run(
+            ["conda", "list", "scikit-learn"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        
+        # Parse conda list output
+        lines = result.stdout.split('\n')
+        for line in lines:
+            # Look for the scikit-learn package line (skip headers)
+            if line.strip() and not line.startswith('#') and 'scikit-learn' in line:
+                # Split on multiple spaces and filter out empty strings
+                parts = [part for part in line.split(' ') if part]
+                if len(parts) >= 2 and parts[0] == 'scikit-learn':
+                    return parts[1].strip()
+        
+        return None  # scikit-learn not found via conda
+    except subprocess.CalledProcessError:
+        return None
+    except FileNotFoundError:
+        print("conda command not found... Install conda before running this script")
+
+def check_and_install_sklearn():
+    try:
+        # Get current version without importing
+        current_version = get_installed_sklearn_version_conda()
+        
+        if current_version != '1.3.2':
+            if current_version:
+                print(f"Current scikit-learn version is: {current_version}.")
+            else:
+                print("scikit-learn version not found via conda")
+            print("Required version: 1.3.2")
+            print("Updating scikit-learn...")
+            
+            # Use pip with the current Python executable
+            pip_cmd = [sys.executable, "-m", "pip"]
+            
+            # Uninstall current version if it exists
+            if current_version:
+                subprocess.check_call(pip_cmd + ["uninstall", "-y", "scikit-learn"])
+            
+            # Install specific version
+            subprocess.check_call(pip_cmd + ["install", "scikit-learn==1.3.2"])
+            
+            # Clear any cached sklearn modules
+            for module_name in list(sys.modules.keys()):
+                if module_name.startswith('sklearn'):
+                    del sys.modules[module_name]
+            
+            print("✓ scikit-learn 1.3.2 installed successfully")
+            return True
+        else:
+            print("✓ scikit-learn 1.3.2 is already installed")
+            return True
+            
+    except subprocess.CalledProcessError as e:
+        print(f"Error during installation: {e}")
+        print("You may need to run the script as administrator")
+        return False
+    except Exception as e:
+        print(f"Unexpected error: {e}")
+        return False

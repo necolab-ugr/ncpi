@@ -8,6 +8,20 @@ import shutil
 import ncpi
 from ncpi import tools
 
+# Get the current directory of LFP_developing_brain.py
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the ncpi folder path and import it as a Python package
+ncpi_path = os.path.join(current_dir, '..', '..', 'ncpi')
+sys.path.append(ncpi_path)
+
+from tools import *
+
+# Check scikit-learn version
+if not check_and_install_sklearn():
+    print("Failed to install required scikit-learn version. Exiting.")
+    sys.exit(1)
+
 # Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
 raw = True
 if raw:
