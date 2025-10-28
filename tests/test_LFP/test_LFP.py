@@ -41,6 +41,9 @@ zenodo_dir_sim = os.path.join(test_dir, "..", "data", "zenodo_test_files_LFP", "
 # Paths to zenodo empirical files
 zenodo_dir_emp= os.path.join(test_dir, "..", "data", "zenodo_test_files_LFP", "zenodo_emp_files") # Dir of GitHub testing downloaded files (set in tests.yml)
 
+# ML model used to compute the predictions (MLPRegressor, Ridge or NPE)
+ML_model = 'MLPRegressor'
+
 def LFP_mean(method):
     """
     Compute only certain data for testing and calculate the average
@@ -50,7 +53,7 @@ def LFP_mean(method):
     X, theta = lfp.load_model_features(method, zenodo_dir_sim)
 
     # Load the Inference objects and add the simulation data
-    inference = lfp.load_inference_data(method, X, theta, zenodo_dir_sim)
+    inference = lfp.load_inference_data(method, X, theta, zenodo_dir_sim, ML_model)
 
     # Load empirical data
     emp_data = lfp.load_empirical_data(zenodo_dir_emp)

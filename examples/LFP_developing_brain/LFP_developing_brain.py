@@ -56,7 +56,7 @@ def load_model_features(method, zenodo_dir_sim):
 
 
 @timer("Loading the inverse model.")
-def load_inference_data(method, X, theta, zenodo_dir_sim):
+def load_inference_data(method, X, theta, zenodo_dir_sim, ML_model):
     # Load the Inference objects and add the simulation data
 
     # Create inference object
@@ -232,7 +232,7 @@ if __name__ == "__main__":
         X, theta = load_model_features(method, zenodo_dir_sim)
 
         # Load the Inference objects and add the simulation data
-        inference = load_inference_data(method, X, theta, zenodo_dir_sim)
+        inference = load_inference_data(method, X, theta, zenodo_dir_sim, ML_model)
 
         # Load empirical data
         emp_data = load_empirical_data(zenodo_dir_emp)
