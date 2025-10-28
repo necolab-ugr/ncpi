@@ -41,10 +41,6 @@ zenodo_dir_sim = os.path.join(test_dir, "..", "data", "zenodo_test_files_LFP", "
 # Paths to zenodo empirical files
 zenodo_dir_emp= os.path.join(test_dir, "..", "data", "zenodo_test_files_LFP", "zenodo_emp_files") # Dir of GitHub testing downloaded files (set in tests.yml)
 
-# ML model used to compute the predictions
-ML_model = 'MLPRegressor'
-
-
 def LFP_mean(method):
     """
     Compute only certain data for testing and calculate the average

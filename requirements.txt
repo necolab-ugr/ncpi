@@ -1,0 +1,5 @@
+# requirements.txt
+ncpi
+# p7zip-full 
+# wget
+# LFPykernels
