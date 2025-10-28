@@ -4,6 +4,8 @@ from typing import Any, Optional
 import subprocess
 import sys
 import os
+from functools import wraps
+import time
 
 def ensure_module(module_name, package_name=None):
     """
@@ -143,3 +145,47 @@ def download_zenodo_record(api_url, download_dir="zenodo_files", extract_tar=Tru
     else:
         print(f"Directory {download_dir} already exists. Skipping download.")
         print("If you want to re-download, please delete the directory.")
+
+
+
+def timer(description=None):
+    """
+    Decorator that measures and prints execution time of a function.
+    
+    Args:
+        description (str): A custom message describing what the function does.
+                         This will be printed before the function executes.
+    
+    Returns:
+        function: A decorator that can be applied to any function to add timing.
+    
+    Example:
+        @timer("Downloading simulation data and ML models.")
+        def download_data():
+            # function content
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            """
+            The wrapper function that adds timing before and after function execution.
+
+            Args:
+                *args: Variable length argument list passed to the original function.
+                **kwargs: Arbitrary keyword arguments passed to the original function.
+            """
+            # Print the custom description message before function execution
+            print(f'\n--- {description}')
+
+            start_time = time.time()
+            
+            # Execute the original function with all its arguments
+            result = func(*args, **kwargs)
+            
+            end_time = time.time()
+
+            # Calculate and print the execution time in minutes
+            print(f'Done in {(end_time - start_time):.2f} seconds.{(f", which is equivalent to {int((end_time - start_time) // 60)}:{int((end_time - start_time) % 60):02d} min" if (end_time - start_time) >= 60 else "")}')
+            return result
+        return wrapper
+    return decorator
