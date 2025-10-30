@@ -22,10 +22,18 @@ LFP_path = os.path.join(project_root, 'examples', 'LFP_developing_brain')
 if LFP_path not in sys.path:
     sys.path.append(LFP_path)
 
-# Now try to import the file LFP_developing_brain.py
+# Import test tools
+test_tools_path = os.path.join(project_root, 'tests')  
+
+if test_tools_path not in sys.path:
+    sys.path.append(test_tools_path)     
+
+# Now try to import the file LFP_developing_brain.py and the test tools
 try:
     import LFP_developing_brain as lfp
     print(f"Successfully imported LFP_developing_brain from: {lfp.__file__}")
+    import test_tools
+    print(f"Successfully imported test_tools from: {test_tools.__file__}")
 except ImportError as e:
     print(f"Import failed: {e}")
 
@@ -33,7 +41,7 @@ except ImportError as e:
 # Methods used to compute the features
 # all_methods = ['catch22','power_spectrum_parameterization_1']
 
-# Zenodo URL that contains the simulation and empirical test data and ML models for LFP method
+# Zenodo URL that contains the simulation and empirical test data and ML models for LFP method. It's a 15% subset of the original data.
 zenodo_URL_test = "https://zenodo.org/api/records/17479326"
 
 # Get the directory where this test file is located
@@ -51,23 +59,8 @@ zenodo_dir_emp= os.path.join(zenodo_test_files, "zenodo_emp_files") # Dir of Git
 # ML model used to compute the predictions (MLPRegressor, Ridge or NPE)
 ML_model = 'MLPRegressor'
 
-def download_data_if_needed():
-    """Download test data only when running locally and data is missing"""    
-    # Skip if running in GitHub Actions
-    if os.getenv('GITHUB_ACTIONS'):
-        print("Running in CI - assuming test data is cached")
-        return
-    
-    # Download if zenodo sim files data don't exist locally
-    if not os.path.exists(zenodo_dir_sim):
-        tools.timer("Downloading simulation data for local execution...")(
-            tools.download_zenodo_record
-        )(zenodo_URL_test, download_dir=zenodo_test_files)
-    else:
-        print("Zenodo sim and emp test files already exist locally")
-
 # Download the data if it's not already downloaded
-download_data_if_needed()
+test_tools.download_data_if_needed(zenodo_URL_test, zenodo_test_files)
 
 def LFP_mean(method):
     """
