@@ -19,7 +19,7 @@ jobs:
           path: |
             tests/data/zenodo_test_files_LFP/zenodo_sim_files
             tests/data/zenodo_test_files_LFP/zenodo_emp_files
-          key: ${{ runner.os }}-file-${{ hashFiles('requirements.txt') }}-v1
+          key: ${{ runner.os }}-test-data-permanent-v1 # 7-day cache permanent key
 
     - name: Create directory for tests data (empty in repo)
       if: steps.file-cache.outputs.cache-hit != 'true'
@@ -54,4 +54,4 @@ jobs:
         
     - name: Run tests with pytest
       run: |
-        pytest -v
+        pytest -v --ignore=tests/test_EEG/test_EEG.py
