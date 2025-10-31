@@ -70,7 +70,7 @@ got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
 
 ```bash
 pip uninstall scikit-learn numpy -y
-pip install scikit-learn==1.3.2 numpy
+pip install scikit-learn==1.5.0 numpy
 ```
 
 # Folder Structure
