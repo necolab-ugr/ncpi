@@ -9,21 +9,6 @@ import ncpi
 from ncpi import tools
 from ncpi.tools import timer
 
-# Get the current directory of LFP_developing_brain.py
-import sys
-current_dir = os.path.dirname(os.path.abspath(__file__))
-# Get the ncpi folder path and import it as a Python package
-ncpi_path = os.path.join(current_dir, '..', '..', 'ncpi')
-sys.path.append(ncpi_path)
-
-from tools import *
-
-# Check scikit-learn version
-if not check_and_install_sklearn():
-    print("Failed to install required scikit-learn version. Exiting.")
-    sys.exit(1)
-
-
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
 # configure the zenodo_dir variables to point to the local paths where the data is stored.
@@ -223,6 +208,10 @@ def save_data(emp_data, method):
 
 
 if __name__ == "__main__":
+    # Check scikit-learn version
+    if not tools.ensure_module('scikit-learn', 'scikit-learn==1.3.2'):
+        print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
+
     # Download simulation data and ML models
     if zenodo_dw_sim:
         print('\n--- Downloading simulation data and ML models from Zenodo.')
