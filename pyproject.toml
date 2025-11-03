@@ -23,7 +23,7 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "scikit-learn==1.3.2",
+    "scikit-learn==1.5.0",
     "sbi==0.24.0",
     "torch",
     "pycatch22",
