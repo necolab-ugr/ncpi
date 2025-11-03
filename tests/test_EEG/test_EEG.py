@@ -57,13 +57,13 @@ test_dir = os.path.dirname(os.path.abspath(__file__))
 zenodo_test_files = os.path.join(test_dir, "..", "data")
 
 # Paths to zenodo simulation files
-zenodo_dir_sim = os.path.join(zenodo_test_files, "zenodo_sim_files", "zenodo_sim_files") # You have to write here your data path if you already downloaded it
+zenodo_dir_sim = os.path.join(zenodo_test_files, "zenodo_sim_files") # You have to write here your data path if you already downloaded it
 
 # ML model used to compute the predictions
 ML_model = 'MLPRegressor'
 
 # Download the data if it's not already downloaded
-test_tools.download_data_if_needed(zenodo_URL_test, zenodo_dir_sim)
+test_tools.download_data_if_needed(zenodo_URL_test, zenodo_test_files)
 
 
 def EEG_mean(method):
@@ -102,4 +102,5 @@ def test_EEG():
 # mean_power = EEG_mean('power_spectrum_parameterization_1')
 # print(f'Is \n{mean_catch} equal or similar to \n-1.147342026387889?')
 # print(f'Is \n{mean_power} equal or similar to \n-1.3593237111519152?')
+
 # print('If no error messages were showed, the tests completed successfully.')
