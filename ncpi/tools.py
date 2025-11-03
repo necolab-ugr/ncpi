@@ -28,10 +28,31 @@ def ensure_module(module_name, package_name=None):
             # Check again after installation
             if importlib.util.find_spec(module_name) is None:
                 raise ImportError(f"Installation failed: '{module_name}' not found after installation.")
+        
+        # Check if installed version matches required version from package_name
+        if package_name and '==' in package_name:
+            required_version = package_name.split('==')[1]
+            module = importlib.import_module(module_name)
+            installed_version = getattr(module, '__version__', None)
+            
+            if installed_version != required_version:
+                print(f"Module '{module_name}' version {installed_version} found, but {required_version} required. Reinstalling...")
+                # Uninstall current version
+                subprocess.check_call([sys.executable, "-m", "pip", "uninstall", "-y", module_name])
+                # Install required version
+                subprocess.check_call([sys.executable, "-m", "pip", "install", package_name])
+                
+                # Clear cached modules
+                for mod_name in list(sys.modules.keys()):
+                    if mod_name == module_name or mod_name.startswith(f"{module_name}."):
+                        del sys.modules[mod_name]
+                
+                print(f"Module '{module_name}' reinstalled successfully with version {required_version}.")
 
-        return True  # Module is available
-    except subprocess.CalledProcessError:
-        print(f"Error: Failed to install '{module_name}'. Please install it manually.")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error: {e} Failed to install '{module_name}'. Please install it manually.")
     except ImportError as e:
         print(f"Error: {e}")
     except Exception as e:
@@ -145,7 +166,6 @@ def download_zenodo_record(api_url, download_dir="zenodo_files", extract_tar=Tru
     else:
         print(f"Directory {download_dir} already exists. Skipping download.")
         print("If you want to re-download, please delete the directory.")
-
 
 
 def timer(description=None):
