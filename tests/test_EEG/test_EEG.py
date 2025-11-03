@@ -54,10 +54,10 @@ zenodo_URL_test = "https://zenodo.org/api/records/17483670"
 test_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Path to save zenodo test files locally
-zenodo_test_files = os.path.join(test_dir, "..", "data")
+zenodo_test_files = os.path.join(test_dir, "..", "data") # You have to write here your data path if you already downloaded it
 
 # Paths to zenodo simulation files
-zenodo_dir_sim = os.path.join(zenodo_test_files, "zenodo_sim_files") # You have to write here your data path if you already downloaded it
+zenodo_dir_sim = os.path.join(zenodo_test_files, "zenodo_sim_files") 
 
 # ML model used to compute the predictions
 ML_model = 'MLPRegressor'
@@ -104,3 +104,4 @@ def test_EEG():
 # print(f'Is \n{mean_power} equal or similar to \n-1.3593237111519152?')
 
 # print('If no error messages were showed, the tests completed successfully.')
+
