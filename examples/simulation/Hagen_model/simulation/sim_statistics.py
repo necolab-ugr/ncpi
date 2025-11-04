@@ -15,7 +15,7 @@ zenodo_dw_sim = True # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
 # Paths to zenodo files
-zenodo_dir_sim = "zenodo_sim_files"
+zenodo_dir_sim = os.path.join("zenodo_sim_files")
 
 # Download simulation data and ML models
 if zenodo_dw_sim:

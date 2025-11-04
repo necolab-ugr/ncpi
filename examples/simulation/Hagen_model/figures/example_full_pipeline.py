@@ -10,7 +10,7 @@ import ncpi
 from ncpi import tools
 
 # Path to parameters of the LIF network model
-sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'simulation', 'params'))
 
 # Choose to either download files and precomputed outputs used in simulations of the reference multicompartment neuron
 # network model (True) or load them from a local path (False)
@@ -20,7 +20,7 @@ zenodo_dw_mult = True
 zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
 
 # Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in NEURON)
-zenodo_dir = '/DATA/multicompartment_neuron_network'
+zenodo_dir = os.path.join(os.sep, 'DATA', 'multicompartment_neuron_network')
 
 # Set to True to run new simulations of the LIF network model, or False to load precomputed results from a pickle file
 # located in a 'data' folder.

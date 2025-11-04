@@ -52,12 +52,14 @@ utils = [
 
 statistics = [
     "rpy2",
+    "statsmodels"
 ]
 
 visualization = [
     "seaborn",
     "mne",
-    "mpl_toolkits"
+    "mpl_toolkits",
+    "pdf2image"
 ]
 
 feats_hctsa = [

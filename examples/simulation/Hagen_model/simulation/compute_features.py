@@ -6,10 +6,10 @@ import pandas as pd
 import ncpi
 
 # Path to the folder containing the processed data
-sim_file_path = '/DATOS/pablomc/data/Hagen_model_v1'
+sim_file_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'data', 'Hagen_model_v1')
 
 # Path to the folder where the features will be saved
-features_path = '/DATOS/pablomc/data'
+features_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'data')
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
 compute_EEG = False

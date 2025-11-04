@@ -5,10 +5,10 @@ from pathos.multiprocessing import ProcessingPool as Pool
 from tqdm import tqdm
 
 # Path to the folders containing the simulation data
-sim_file_path_pre = '/DATOS/pablomc/Hagen_model_v1'
+sim_file_path_pre = os.path.join(os.sep, 'DATOS', 'pablomc', 'Hagen_model_v1')
 
 # Path to the folder containing the processed data
-sim_file_path_post = '/DATOS/pablomc/data/Hagen_model_v1'
+sim_file_path_post = os.path.join(os.sep, 'DATOS', 'pablomc', 'data', 'Hagen_model_v1')
 
 
 def process_batch(ldir):

@@ -11,9 +11,9 @@ from ncpi import tools
 # Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
 raw = True
 if raw:
-    data_path = '/DATA/empirical_datasets/POCTEP_data/CLEAN/SENSORS'
+    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS')
 else:
-    data_path = '/DATA/empirical_datasets/POCTEP_data/CLEAN/SOURCES/dSPM/DK'
+    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK')
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
@@ -208,12 +208,12 @@ if __name__ == "__main__":
             print(f'--- Sensor: {sensor}')
 
             shutil.copy(
-                os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'model'),
+                os.path.join(zenodo_dir_sim, 'ML_models', 'EEG', sensor, method, 'model'),
                 os.path.join('data', 'model.pkl')
             )
 
             shutil.copy(
-                os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'scaler'),
+                os.path.join(zenodo_dir_sim, 'ML_models', 'EEG', sensor, method, 'scaler'),
                 os.path.join('data', 'scaler.pkl')
             )
 
@@ -238,4 +238,3 @@ if __name__ == "__main__":
 
         # Save the data including predictions of (E/I)_net
         emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
-            
