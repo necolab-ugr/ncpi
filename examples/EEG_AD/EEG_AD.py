@@ -7,13 +7,14 @@ import numpy as np
 import shutil
 import ncpi
 from ncpi import tools
+from ncpi.tools import timer
 
 # Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
 raw = True
 if raw:
-    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS')
+    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS') # Specify you data path here
 else:
-    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK')
+    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK') # Specify you data path here
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
@@ -102,46 +103,128 @@ def create_POCTEP_dataframe(data_path):
 
     return df
 
+@timer("Loading simulation data.")
+def load_model_features(method, zenodo_dir_sim):
+    try:
+        with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
+            theta = pickle.load(file)
+        with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_X'), 'rb') as file:
+            X = pickle.load(file)
+    except Exception as e:
+        print(f"Error loading simulation data: {e}")
+
+    # Print info
+    print('theta:')
+    for key, value in theta.items():
+        if isinstance(value, np.ndarray):
+            print(f'--Shape of {key}: {value.shape}')
+        else:
+            print(f'--{key}: {value}')
+    print(f'Shape of X: {X.shape}')
+
+    return X, theta
+
+@timer("Feature extraction")
+def feature_extraction(method, df):
+    # Parameters of the feature extraction method
+    if method == 'catch22':
+        params = None
+    elif method == 'power_spectrum_parameterization_1':
+        fooof_setup_emp = {'peak_threshold': 1.,
+                            'min_peak_height': 0.,
+                            'max_n_peaks': 5,
+                            'peak_width_limits': (10., 50.)}
+        params={'fs': df['fs'][0],
+                'fmin': 5.,
+                'fmax': 45.,
+                'fooof_setup': fooof_setup_emp,
+                'r_squared_th':0.9}
+        
+    features = ncpi.Features(method=method if method == 'catch22' else 'power_spectrum_parameterization',
+                                params=params)
+    emp_data = features.compute_features(df)
+
+    # Keep only the aperiodic exponent (1/f slope)
+    if method == 'power_spectrum_parameterization_1':
+        emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
+
+    return emp_data  
+
+
+@timer('Computing predictions...')
+def compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zenodo_dir_sim):      
+    # Add "Predictions" column to later store the parameters infered
+    emp_data['Predictions'] = np.nan
+
+    # List of sensors
+    sensor_list = [
+        'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
+        'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz'
+    ]
+
+    # Create folder to save results
+    if not os.path.exists('data'):
+        os.makedirs('data')
+    if not os.path.exists(os.path.join('data', method)):
+        os.makedirs(os.path.join('data', method))
+
+    # Create inference object
+    inference = ncpi.Inference(model=ML_model)
+    # Not sure if this is really needed
+    inference.add_simulation_data(X, theta['data'])
+
+    for s, sensor in enumerate(sensor_list):
+        print(f'--- Sensor: {sensor}')
+
+        shutil.copy(
+            os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'model'),
+            os.path.join('data', 'model.pkl')
+        )
+
+        shutil.copy(
+            os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'scaler'),
+            os.path.join('data', 'scaler.pkl')
+        )
+
+        sensor_df = emp_data[emp_data['Sensor'].isin([sensor, s])]
+
+        predictions = inference.predict(np.array(sensor_df['Features'].to_list()))
+
+        sensor_df['Predictions'] = [list(pred) for pred in predictions]
+        emp_data.update(sensor_df['Predictions'])
+
+    return emp_data
+
+def save_data(emp_data, method):
+    # Save the data including predictions of all parameters
+    emp_data.to_pickle(os.path.join('data', method, 'emp_data_all.pkl'))
+
+    # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
+    E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
+    others = emp_data['Predictions'].apply(lambda x: x[4:])
+    emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
+                                                np.array(others.tolist())), axis=1)).tolist()
+
+    # Save the data including predictions of (E/I)_net
+    emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
+
 if __name__ == "__main__":
     # Check scikit-learn version
-    if not tools.ensure_module('scikit-learn', 'scikit-learn==1.3.2'):
+    if not tools.ensure_module('sklearn', 'scikit-learn==1.3.2'):
         print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
-
+        
     # Download simulation data and ML models
     if zenodo_dw_sim:
-        print('\n--- Downloading simulation data and ML models from Zenodo.')
-        start_time = time.time()
-        tools.download_zenodo_record(zenodo_URL_sim, download_dir=zenodo_dir_sim)
-        end_time = time.time()
-        print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
+        tools.timer("Downloading simulation data and ML models from Zenodo")(
+            tools.download_zenodo_record
+        )(zenodo_URL_sim, download_dir=zenodo_dir_sim)
 
     # Go through all methods
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
 
         # Load parameters of the model (theta) and features (X) from simulation data
-        print('\n--- Loading simulation data.')
-        start_time = time.time()
-
-        try:
-            with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
-                theta = pickle.load(file)
-            with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_X'), 'rb') as file:
-                X = pickle.load(file)
-        except Exception as e:
-            print(f"Error loading simulation data: {e}")
-
-        # Print info
-        print('theta:')
-        for key, value in theta.items():
-            if isinstance(value, np.ndarray):
-                print(f'--Shape of {key}: {value.shape}')
-            else:
-                print(f'--{key}: {value}')
-        print(f'Shape of X: {X.shape}')
-
-        end_time = time.time()
-        print(f"Done in {(end_time - start_time):.2f} sec.")
+        X, theta = load_model_features(method, zenodo_dir_sim)
 
         # Load empirical data and create DataFrame
         df = create_POCTEP_dataframe(data_path=data_path)
@@ -150,91 +233,13 @@ if __name__ == "__main__":
         #   FEATURE EXTRACTION   #
         ##########################
 
-        start_time = time.time()
-
-        # Parameters of the feature extraction method
-        if method == 'catch22':
-            params = None
-        elif method == 'power_spectrum_parameterization_1':
-            fooof_setup_emp = {'peak_threshold': 1.,
-                               'min_peak_height': 0.,
-                               'max_n_peaks': 5,
-                               'peak_width_limits': (10., 50.)}
-            params={'fs': df['fs'][0],
-                   'fmin': 5.,
-                   'fmax': 45.,
-                   'fooof_setup': fooof_setup_emp,
-                   'r_squared_th':0.9}
-            
-        features = ncpi.Features(method=method if method == 'catch22' else 'power_spectrum_parameterization',
-                                 params=params)
-        emp_data = features.compute_features(df)
-
-        # Keep only the aperiodic exponent (1/f slope)
-        if method == 'power_spectrum_parameterization_1':
-            emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
-
-        end_time = time.time()
-        print(f'Done in {(end_time - start_time):.2f} sec')
+        emp_data = feature_extraction(method, df)
 
         #######################################################
         #   PREDICTIONS OF PARAMETERS OF THE NEURAL CIRCUIT   #
         #######################################################
 
-        print('\nComputing predictions...')
-        start_time = time.time()
+        emp_data = compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zenodo_dir_sim)
 
-        # Add "Predictions" column to later store the parameters infered
-        emp_data['Predictions'] = np.nan
-
-        # List of sensors
-        sensor_list = [
-            'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
-            'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz'
-        ]
-
-        # Create folder to save results
-        if not os.path.exists('data'):
-            os.makedirs('data')
-        if not os.path.exists(os.path.join('data', method)):
-            os.makedirs(os.path.join('data', method))
-
-        # Create inference object
-        inference = ncpi.Inference(model=ML_model)
-        # Not sure if this is really needed
-        inference.add_simulation_data(X, theta['data'])
-
-        for s, sensor in enumerate(sensor_list):
-            print(f'--- Sensor: {sensor}')
-
-            shutil.copy(
-                os.path.join(zenodo_dir_sim, 'ML_models', 'EEG', sensor, method, 'model'),
-                os.path.join('data', 'model.pkl')
-            )
-
-            shutil.copy(
-                os.path.join(zenodo_dir_sim, 'ML_models', 'EEG', sensor, method, 'scaler'),
-                os.path.join('data', 'scaler.pkl')
-            )
-
-            sensor_df = emp_data[emp_data['Sensor'].isin([sensor, s])]
-
-            predictions = inference.predict(np.array(sensor_df['Features'].to_list()))
-
-            sensor_df['Predictions'] = [list(pred) for pred in predictions]
-            emp_data.update(sensor_df['Predictions'])
-
-        end_time = time.time()
-        print(f'Done in {(end_time - start_time):.2f} sec')
-
-        # Save the data including predictions of all parameters
-        emp_data.to_pickle(os.path.join('data', method, 'emp_data_all.pkl'))
-
-        # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
-        E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
-        others = emp_data['Predictions'].apply(lambda x: x[4:])
-        emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
-                                                   np.array(others.tolist())), axis=1)).tolist()
-
-        # Save the data including predictions of (E/I)_net
-        emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
+        # Save the data including predictions of all parameters  
+        save_data(emp_data, method)      
