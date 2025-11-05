@@ -214,19 +214,15 @@ if __name__ == "__main__":
 
     # Download simulation data and ML models
     if zenodo_dw_sim:
-        print('\n--- Downloading simulation data and ML models from Zenodo.')
-        start_time = time.time()
-        tools.download_zenodo_record(zenodo_URL_sim, download_dir=zenodo_dir_sim)
-        end_time = time.time()
-        print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
+        tools.timer("Downloading simulation data and ML models from Zenodo.")(
+            tools.download_zenodo_record
+        )(zenodo_URL_sim, download_dir=zenodo_dir_sim)
 
     # Download empirical data
     if zenodo_dw_emp:
-        print('\n--- Downloading empirical data from Zenodo.')
-        start_time = time.time()
-        tools.download_zenodo_record(zenodo_URL_emp, download_dir=zenodo_dir_emp)
-        end_time = time.time()
-        print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
+        tools.timer("Downloading empirical data from Zenodo.")(
+            tools.download_zenodo_record
+        )(zenodo_URL_emp, download_dir=zenodo_dir_emp)
 
     # Iterate over the methods used to compute the features
     for method in all_methods:
