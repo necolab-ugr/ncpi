@@ -6,7 +6,7 @@ from sklearn.preprocessing import StandardScaler
 import ncpi
 
 # Path to folder where simulation features are stored
-sim_file_path = 'zenodo_sim_files/data'
+sim_file_path = os.path.join('zenodo_sim_files', 'data')
 
 # Choose whether to use a held-out dataset or the full dataset
 held_out_dataset = False

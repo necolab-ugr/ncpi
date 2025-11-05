@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Path to the folder with prediction results
-pred_results = '../data'
+pred_results = os.path.join('..', 'data')
 
 # Names of catch22 features
 try:

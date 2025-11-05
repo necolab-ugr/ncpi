@@ -6,7 +6,7 @@ import matplotlib.lines as mlines
 import ncpi
 
 # Set the path to the results folder
-results_path = '../data'
+results_path = os.path.join('..', 'data')
 
 # Select the statistical analysis method ('cohen', 'lmer')
 statistical_analysis = 'lmer'
@@ -82,7 +82,7 @@ if __name__ == "__main__":
         if row == 2 or row == 3:
             method = 'power_spectrum_parameterization_1'
         try:
-            data = pd.read_pickle(os.path.join('../data', method, 'emp_data_reduced.pkl'))
+            data = pd.read_pickle(os.path.join(results_path, method, 'emp_data_reduced.pkl'))
             
         except Exception as e:
             print(f'Error loading data for {method}: {e}')
@@ -238,6 +238,6 @@ if __name__ == "__main__":
     fig1.add_artist(tauexc_line_f)
     fig1.add_artist(tauinh_line_f)
 
-    fig1.savefig('EEG_predictions.png')
+    fig1.savefig(f'EEG_predictions_{statistical_analysis}.png')
 
     
