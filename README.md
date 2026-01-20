@@ -89,6 +89,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error
 from sklearn.preprocessing import StandardScaler
+import inspect
 
 # Parameters for generating simulated neural data
 n_neurons = 50           # Number of neurons in each simulated recording
@@ -214,10 +215,16 @@ if __name__ == "__main__":
     scaler = StandardScaler()
     
     # Train the model
-    inference.train(param_grid=None, scaler=scaler)
-    
-    # Evaluate the model using the test data
-    predictions = inference.predict(X_test, scaler=scaler)
+    sig = inspect.signature(inference.train)
+    if "scaler" in sig.parameters:
+        inference.train(param_grid=None, scaler=scaler)
+        # Evaluate the model using the test data
+        predictions = inference.predict(X_test, scaler=scaler)
+    else:
+        # Old package version: train() internally creates/uses a scaler already
+        # so just call without scaler.
+        inference.train(param_grid=None)
+        predictions = inference.predict(X_test)
     
     # Calculate MSE
     mse = mean_squared_error(θ_test, predictions)

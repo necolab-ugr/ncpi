@@ -74,12 +74,13 @@ class Analysis:
 
         """
         # Check if rpy2 is installed
-        if not tools.ensure_module("rpy2"):
+        if not tools.ensure_module("rpy2", package="rpy2"):
             raise ImportError("rpy2 is required for lmer but is not installed.")
-        pandas2ri = tools.dynamic_import("rpy2.robjects.pandas2ri")
-        r = tools.dynamic_import("rpy2.robjects","r")
-        ListVector = tools.dynamic_import("rpy2.robjects","ListVector")
-        ro = tools.dynamic_import("rpy2","robjects")
+
+        pandas2ri = tools.dynamic_import("rpy2.robjects.pandas2ri")  # module
+        r = tools.dynamic_import("rpy2.robjects", "r")  # attribute
+        ListVector = tools.dynamic_import("rpy2.robjects", "ListVector")
+        ro = tools.dynamic_import("rpy2.robjects")  # module (more robust)
 
         # Activate pandas2ri
         pandas2ri.activate()
@@ -516,11 +517,9 @@ class Analysis:
                 Max value used for plotting.
         '''
 
-        # Check if mpl_toolkits is installed
-        if not tools.ensure_module("mpl_toolkits"):
-            raise ImportError("mpl_toolkits is required for EEG_topographic_plot but is not installed.")
-        make_axes_locatable = tools.dynamic_import("mpl_toolkits.axes_grid1",
-                                                   "make_axes_locatable")
+        if not tools.ensure_module("mpl_toolkits.axes_grid1", package="matplotlib"):
+            raise ImportError("matplotlib (mpl_toolkits.axes_grid1) is required but is not installed.")
+        make_axes_locatable = tools.dynamic_import("mpl_toolkits.axes_grid1", "make_axes_locatable")
 
         default_parameters = {
             'radius': 0.6,

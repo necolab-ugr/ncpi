@@ -4,7 +4,6 @@ import pickle
 import pandas as pd
 import scipy
 import numpy as np
-import time
 import ncpi
 from ncpi import tools
 from ncpi.tools import timer
@@ -22,8 +21,8 @@ zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-zenodo_dir_sim = "zenodo_sim_files"
-zenodo_dir_emp= "zenodo_emp_files"
+zenodo_dir_sim = "/DATA/zenodo_sim_files"
+zenodo_dir_emp= "/DATA/zenodo_emp_files"
 
 # Methods used to compute the features
 all_methods = ['catch22','power_spectrum_parameterization_1']
@@ -208,9 +207,9 @@ def save_data(emp_data, method):
 
 
 if __name__ == "__main__":
-    # Check scikit-learn version
-    if not tools.ensure_module('scikit-learn', 'scikit-learn==1.3.2'):
-        print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
+    # # Check scikit-learn version
+    # if not tools.ensure_module('scikit-learn', 'scikit-learn==1.3.2'):
+    #     print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
 
     # Download simulation data and ML models
     if zenodo_dw_sim:

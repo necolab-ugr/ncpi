@@ -46,19 +46,24 @@ class Features:
             self.FOOOF = tools.dynamic_import("fooof", "FOOOF")
 
         elif method == 'fEI' or method == 'DFA':
-            if not tools.ensure_module("PyAstronomy"):
+            if not tools.ensure_module("PyAstronomy", package="PyAstronomy"):
                 raise ImportError("PyAstronomy is required for computing fEI or DFA features but is not installed.")
             self.generalizedESD = tools.dynamic_import("PyAstronomy.pyasl", "generalizedESD")
 
         elif method == 'hctsa':
-            if not tools.ensure_module("matlab"):
-                raise ImportError("matlab is required for computing hctsa features but is not installed.")
-            if not tools.ensure_module("matlabengine"):
-                raise ImportError("matlabengine is required for computing hctsa features but is not installed.")
+            # Check if MATLAB engine for Python is installed but do not try to install it
+            if not tools.ensure_module("matlab", raise_on_error=False):
+                raise ImportError("MATLAB Engine for Python is required (provides 'matlab' and 'matlab.engine').")
+
+            matlab_engine = tools.dynamic_import("matlab.engine", raise_on_error=False)
+
+            if matlab_engine is None:
+                raise ImportError("MATLAB Engine is not importable as 'matlab.engine'.")
             if not tools.ensure_module("h5py"):
-                raise ImportError("h5py is required for computing hctsa features but is not installed.")
+                raise ImportError("h5py is required ...")
+
             self.matlab = tools.dynamic_import("matlab")
-            self.matlabengine = tools.dynamic_import("matlab","engine")
+            self.matlabengine = matlab_engine
             self.h5py = tools.dynamic_import("h5py")
 
         # Check if params is a dictionary
