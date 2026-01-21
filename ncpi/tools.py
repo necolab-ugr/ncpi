@@ -417,12 +417,12 @@ def is_http_403(err: Exception) -> bool:
     return status == 403
 
 
-def download_files_archive_with_wget(record_id: str, outdir: str) -> None:
-    """Download Zenodo files-archive using wget as a fallback, then extract it."""
-    if shutil.which("wget") is None:
+def download_files_archive_with_curl(record_id: str, outdir: str) -> None:
+    """Download Zenodo files-archive using curl as a fallback, then extract it."""
+    if shutil.which("curl") is None:
         raise RuntimeError(
-            "Fallback requires 'wget' but it was not found in PATH. "
-            "Install wget or modify fallback to use curl/requests."
+            "\n\nFallback requires 'curl' but it was not found in PATH. "
+            "Install curl or modify fallback to use wget/requests.\n\n"
         )
 
     archive_url = f"https://zenodo.org/api/records/{record_id}/files-archive"
@@ -433,9 +433,11 @@ def download_files_archive_with_wget(record_id: str, outdir: str) -> None:
 
     res = subprocess.run(
         [
-            "wget",
-            "--progress=bar:force",   # <- progress bar
-            "-O",
+            "curl",
+            "-L",
+            "--fail",
+            "--progress-meter",  # <- better than --progress-bar in non-TTY output
+            "-o",
             archive_path,
             archive_url,
         ],
@@ -443,7 +445,7 @@ def download_files_archive_with_wget(record_id: str, outdir: str) -> None:
     )
 
     if res.returncode != 0:
-        raise RuntimeError("wget failed downloading Zenodo files-archive.")
+        raise RuntimeError("curl failed downloading Zenodo files-archive.")
 
     extract_and_delete_all_archives(outdir)
 
@@ -468,12 +470,12 @@ def download_zenodo_record(
     """
     Download files from a Zenodo record. Downloads each file individually from the record's
     JSON metadata. If a 403 Forbidden error is encountered, optionally falls back to downloading
-    the files-archive using wget.
+    the files-archive using curl.
     Args:
         api_url (str): The Zenodo API URL for the record (e.g., "https://zenodo.org/api/records/123456").
         download_dir (str): Directory to save downloaded files. Defaults to "zenodo_files".
         fallback_files_archive (bool): If True, falls back to downloading the files-archive
-                                      using wget on 403 errors. Defaults to True.
+                                      using curl on 403 errors. Defaults to True.
     Raises:
         Exception: Propagates exceptions from network errors or file operations.
     """
@@ -492,7 +494,7 @@ def download_zenodo_record(
     except Exception as e:
         if fallback_files_archive and is_http_403(e):
             rid = record_id_from_api_url(api_url)
-            download_files_archive_with_wget(rid, download_dir)
+            download_files_archive_with_curl(rid, download_dir)
             return
         raise
 
@@ -520,7 +522,7 @@ def download_zenodo_record(
             # Per-file 403 fallback
             if fallback_files_archive and is_http_403(e):
                 rid = record_id_from_api_url(api_url)
-                download_files_archive_with_wget(rid, download_dir)
+                download_files_archive_with_curl(rid, download_dir)
                 return
             raise
 

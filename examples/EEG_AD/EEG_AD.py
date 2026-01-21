@@ -25,7 +25,7 @@ zenodo_dw_sim = True # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
 # Paths to zenodo simulation files
-zenodo_dir_sim = "zenodo_sim_files"
+zenodo_dir_sim = os.path.join("zenodo_sim_files")
 
 # Methods used to compute the features
 all_methods = ['catch22','power_spectrum_parameterization_1']
@@ -209,10 +209,6 @@ def save_data(emp_data, method):
     emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
 
 if __name__ == "__main__":
-    # Check scikit-learn version
-    if not tools.ensure_module('sklearn', 'scikit-learn==1.3.2'):
-        print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
-        
     # Download simulation data and ML models
     if zenodo_dw_sim:
         tools.timer("Downloading simulation data and ML models from Zenodo")(
