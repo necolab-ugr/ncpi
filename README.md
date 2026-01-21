@@ -35,10 +35,10 @@ parameter inference techniques based on [sbi](https://sbi-dev.github.io/sbi)) wi
 inverse modelling pipeline. Designed for modularity, it adapts to your needs without constraints.
 
 
-# Installation on Linux
+# Installation
 
-`ncpi` requires Python 3.10 or higher. To install `ncpi`, you can use pip. The package is available on PyPI, so you can 
-install it directly from there.
+`ncpi` requires **Python 3.10 or higher**. To install `ncpi`, you can use `pip`; the package is available on PyPI and can be installed directly from there.  
+`ncpi` can also be run on **Windows**, within an **Anaconda/Miniconda** environment.
 
 ```bash
 # Step 1: Create and activate a conda environment (recommended)
@@ -50,8 +50,9 @@ pip install ncpi
 ```
 
 **Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
-the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST package 
-with:
+the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed (note also that to run **NEST** on Windows 
+and execute examples that include simulations, you must first install the **Windows Subsystem for Linux (WSL)**). You can install 
+a pre-built NEST package in Linux with:
 
 ```bash
 conda install -c conda-forge nest-simulator=3.8
@@ -71,31 +72,6 @@ got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
 ```bash
 pip uninstall scikit-learn numpy -y
 pip install scikit-learn==1.5.0 numpy
-```
-
-# Installation on Windows
-
-To be able to install all dependencies of `ncpi` in Windows, first you have to install [Windows Subsystem for Linux (WSL)](https://documentation.ubuntu.com/wsl/stable/howto/install-ubuntu-wsl2/).
-
-After the WSL installation, we strongly recommend to install the latest updates by running the following commands within the Ubuntu terminal:
-
-```bash
-$ sudo apt update
-$ sudo apt upgrade -y
-```
-
-Once Ubuntu is up and running in WSL, [conda can be installed there](https://docs.conda.io/projects/conda/en/stable/user-guide/install/linux.html). Now you can follow the rest of the instructions of the [installation of `ncpi` in Linux](#Installation-on-Linux). 
-
-If you encounter the error *Failed building wheel for pycatch22* when installing `pip install ncpi`, install:
-
-```bash
-$ conda install -c conda-forge pycatch22
-```
-
-If the error still persists, install the following dependencies:
-
-```bash
-$ sudo apt install -y build-essential python3-dev
 ```
 
 # Folder Structure
