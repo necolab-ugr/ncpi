@@ -37,8 +37,9 @@ inverse modelling pipeline. Designed for modularity, it adapts to your needs wit
 
 # Installation
 
-`ncpi` requires **Python 3.10 or higher**. To install `ncpi`, you can use `pip`; the package is available on PyPI and can be installed directly from there.  
-`ncpi` can also be run on **Windows**, within an **Anaconda/Miniconda** environment.
+`ncpi` requires **Python 3.10 or higher**. `ncpi` can be run on both **Linux** and **Windows** when installed in an 
+**Anaconda** or **Miniconda** Python environment. To install `ncpi`, you can use `pip`; the package is available on 
+PyPI and can be installed directly from there. 
 
 ```bash
 # Step 1: Create and activate a conda environment (recommended)
@@ -50,9 +51,8 @@ pip install ncpi
 ```
 
 **Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
-the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed (note also that to run **NEST** on Windows 
-and execute examples that include simulations, you must first install the **Windows Subsystem for Linux (WSL)**). You can install 
-a pre-built NEST package in Linux with:
+the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed (note also that to run **NEST** on Windows you must first install the 
+**Windows Subsystem for Linux (WSL)**). You can install a pre-built NEST package in Linux with:
 
 ```bash
 conda install -c conda-forge nest-simulator=3.8
