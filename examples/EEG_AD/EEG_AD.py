@@ -12,9 +12,9 @@ from ncpi.tools import timer
 # Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
 raw = True
 if raw:
-    data_path = os.path.join('DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS') # Specify you data path here
+    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS') # Specify you data path here
 else:
-    data_path = os.path.join('DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK') # Specify you data path here
+    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK') # Specify you data path here
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
@@ -209,9 +209,9 @@ def save_data(emp_data, method):
     emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
 
 if __name__ == "__main__":
-    # # Check scikit-learn version
-    # if not tools.ensure_module('scikit-learn', 'scikit-learn==1.3.2'):
-    #     print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
+    # Check scikit-learn version
+    if not tools.ensure_module('sklearn', 'scikit-learn==1.3.2'):
+        print("Failed to install required scikit-learn version 1.3.2. Please install it manually.")
         
     # Download simulation data and ML models
     if zenodo_dw_sim:

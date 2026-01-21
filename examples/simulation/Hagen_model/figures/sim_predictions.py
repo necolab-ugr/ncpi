@@ -16,7 +16,7 @@ zenodo_dw_sim = True # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
 # Paths to zenodo files
-zenodo_dir_sim = "zenodo_sim_files"
+zenodo_dir_sim = os.path.join("zenodo_sim_files")
 
 # ML model used to compute the predictions (MLPRegressor or Ridge)
 ML_model = 'MLPRegressor'
@@ -69,10 +69,10 @@ all_preds = {}
 all_theta = {}
 for method in all_methods:
     try:
-        with open(os.path.join(zenodo_dir_sim,'ML_models/held_out_data_models', folder, method,
+        with open(os.path.join(zenodo_dir_sim,'ML_models', 'held_out_data_models', folder, method,
                                'predictions'), 'rb') as file:
             all_preds[method] = np.array(pickle.load(file))
-        with open(os.path.join(zenodo_dir_sim,'ML_models/held_out_data_models', 'datasets', method,
+        with open(os.path.join(zenodo_dir_sim,'ML_models', 'held_out_data_models', 'datasets', method,
                                'held_out_dataset'), 'rb') as file:
             X_test, theta_test = pickle.load(file)
             all_theta[method] = np.array(theta_test)

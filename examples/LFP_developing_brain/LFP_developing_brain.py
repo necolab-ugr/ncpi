@@ -21,8 +21,8 @@ zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-zenodo_dir_sim = "/DATA/zenodo_sim_files"
-zenodo_dir_emp= "/DATA/zenodo_emp_files"
+zenodo_dir_sim = os.path.join("zenodo_sim_files")
+zenodo_dir_emp= os.path.join("zenodo_emp_files")
 
 # Methods used to compute the features
 all_methods = ['catch22','power_spectrum_parameterization_1']
@@ -78,18 +78,18 @@ def load_inference_data(method, X, theta, zenodo_dir_sim, ML_model):
         folder = 'SBI'
         
     shutil.copy(
-        os.path.join(zenodo_dir_sim, 'ML_models/4_param', folder, method, 'scaler'),
+        os.path.join(zenodo_dir_sim, 'ML_models', '4_param', folder, method, 'scaler'),
         os.path.join('data', 'scaler.pkl')
     )
 
     shutil.copy(
-        os.path.join(zenodo_dir_sim, 'ML_models/4_param', folder, method, 'model'),
+        os.path.join(zenodo_dir_sim, 'ML_models', '4_param', folder, method, 'model'),
         os.path.join('data', 'model.pkl')
     )
 
     if ML_model == 'NPE':
         shutil.copy(
-            os.path.join(zenodo_dir_sim, 'ML_models/4_param', folder, method,
+            os.path.join(zenodo_dir_sim, 'ML_models', '4_param', folder, method,
                             'density_estimator'),
             os.path.join('data', 'density_estimator.pkl')
         )
@@ -100,13 +100,13 @@ def load_inference_data(method, X, theta, zenodo_dir_sim, ML_model):
 @timer("Loading LFP data.")
 def load_empirical_data(zenodo_dir_emp):
     # Load empirical data
-    file_list = os.listdir(os.path.join(zenodo_dir_emp, 'development_EI_decorrelation/baseline/LFP'))
+    file_list = os.listdir(os.path.join(zenodo_dir_emp, 'development_EI_decorrelation', 'baseline', 'LFP'))
     emp_data = {'LFP': [], 'fs': [], 'age': []}
 
     for i,file_name in enumerate(file_list):
         print(f'\r Progress: {i+1} of {len(file_list)} files loaded', end='', flush=True)
         structure = scipy.io.loadmat(os.path.join(os.path.join(zenodo_dir_emp,
-                                                                'development_EI_decorrelation/baseline/LFP'),
+                                                                'development_EI_decorrelation', 'baseline', 'LFP'),
                                                     file_name))
         LFP = structure['LFP']['LFP'][0,0]
         sum_LFP = np.sum(LFP, axis=0)  # sum LFP across channels

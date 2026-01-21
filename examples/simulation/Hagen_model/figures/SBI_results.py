@@ -17,7 +17,7 @@ from ncpi import tools
 compute_metrics = True
 
 # Path to the local directory where the metrics and posteriors will be saved
-result_folder = 'SBI_results'
+result_folder = os.path.join('SBI_results')
 
 # Choose whether to use a held-out dataset or folds from RepeatedKFold
 use_held_out_data = True
@@ -34,7 +34,7 @@ zenodo_dw_sim = True # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
 # Paths to zenodo files
-zenodo_dir_sim = "/DATA/zenodo_sim_files"
+zenodo_dir_sim = os.path.join(os.sep, 'DATA', 'zenodo_sim_files')
 
 # Download simulation data and ML models
 if zenodo_dw_sim:
@@ -105,10 +105,10 @@ torch.manual_seed(0)
 
 # Path to ML models trained based on a held-out dataset approach
 if use_held_out_data:
-    ML_path = os.path.join(zenodo_dir_sim, 'ML_models/held_out_data_models')
+    ML_path = os.path.join(zenodo_dir_sim, 'ML_models', 'held_out_data_models')
 # Path to ML models trained based on a RepeatedKFold approach
 else:
-    ML_path = os.path.join(zenodo_dir_sim, 'ML_models/4_param')
+    ML_path = os.path.join(zenodo_dir_sim, 'ML_models', '4_param')
 
 # Limits of histograms
 lims = [[-15, 15], [-2, 5], [-2, 12], [0, 60]]

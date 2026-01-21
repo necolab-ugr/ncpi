@@ -7,17 +7,17 @@ from matplotlib import pyplot as plt
 import ncpi
 
 # Folder with parameters of LIF model simulations
-sys.path.append(os.path.join(os.path.dirname(__file__), '../../simulation/Hagen_model/simulation/params'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', 'simulation', 'Hagen_model', 'simulation', 'params'))
 
 # Path to the folder with prediction results
-pred_results = '../data'
+pred_results = os.path.join('..', 'data')
 
 # Calculate new firing rates (True) or load them from file if they already exist (False). If firing rates do not
 # exist, they will not be plotted.
 compute_firing_rate = False
 
 # Path to saved firing rates
-fr_path = './data'
+fr_path = os.path.join('.', 'data')
 
 # Number of samples to draw from the predictions for computing the firing rates
 n_samples = 50
@@ -118,23 +118,23 @@ for method in all_methods:
                 LIF_params['J_ext'] = J_ext
 
                 # Create a Simulation object
-                sim = ncpi.Simulation(param_folder='../../simulation/Hagen_model/simulation/params',
-                                      python_folder='../../simulation/Hagen_model/simulation/python',
-                                      output_folder='../../simulation/Hagen_model/simulation/output')
+                sim = ncpi.Simulation(param_folder = os.path.join('../../simulation/Hagen_model/simulation/params'),
+                                      python_folder = os.path.join('../../simulation/Hagen_model/simulation/python'),
+                                      output_folder = os.path.join('../../simulation/Hagen_model/simulation/output'))
 
                 # Save parameters to a pickle file
-                with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'network.pkl'), 'wb') as f:
+                with open(os.path.join('..', '..', 'simulation', 'Hagen_model', 'simulation', 'output', 'network.pkl'), 'wb') as f:
                     pickle.dump(LIF_params, f)
 
                 # Run the simulation
                 sim.simulate('simulation.py', 'simulation_params.py')
 
                 # Load spike times
-                with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'times.pkl'), 'rb') as f:
+                with open(os.path.join('..', '..', 'simulation', 'Hagen_model', 'simulation', 'output', 'times.pkl'), 'rb') as f:
                     times = pickle.load(f)
 
                 # Load tstop
-                with open(os.path.join('../../simulation/Hagen_model/simulation/output', 'tstop.pkl'), 'rb') as f:
+                with open(os.path.join('..', '..', 'simulation', 'Hagen_model', 'simulation', 'output', 'tstop.pkl'), 'rb') as f:
                     tstop = pickle.load(f)
 
                 # Transient period
@@ -155,15 +155,15 @@ for method in all_methods:
 if compute_firing_rate:
     if not os.path.exists('data'):
         os.makedirs('data')
-    with open('data/firing_rates_preds.pkl', 'wb') as f:
+    with open('data', 'firing_rates_preds.pkl', 'wb') as f:
         pickle.dump(firing_rates, f)
-    with open('data/IDs.pkl', 'wb') as f:
+    with open('data', 'IDs.pkl', 'wb') as f:
         pickle.dump(IDs, f)
 else:
     try:
-        with open(os.path.join(fr_path,'firing_rates_preds.pkl'), 'rb') as f:
+        with open(os.path.join(fr_path, 'firing_rates_preds.pkl'), 'rb') as f:
             firing_rates = pickle.load(f)
-        with open(os.path.join(fr_path,'IDs.pkl'), 'rb') as f:
+        with open(os.path.join(fr_path, 'IDs.pkl'), 'rb') as f:
             IDs = pickle.load(f)
     except FileNotFoundError:
         print('Firing rates not found.')
@@ -383,5 +383,5 @@ ax.text(0.5, 0.94, y_labels[0], color = 'red', alpha = 0.5, fontsize = 10, ha='c
 ax.text(0.5, 0.49, y_labels[1], color = 'blue', alpha = 0.5, fontsize = 10, ha='center')
 
 # Save the figure
-plt.savefig('LFP_predictions.png', bbox_inches='tight')
+plt.savefig(f'LFP_predictions_{statistical_analysis}.png', bbox_inches='tight')
 # plt.show()
