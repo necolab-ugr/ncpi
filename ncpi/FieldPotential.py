@@ -28,43 +28,41 @@ class FieldPotential:
         """
 
         if kernel:
-            # Check that the required modules are installed
-            if not tools.ensure_module("lfpykernels"):
+            if not tools.ensure_module("lfpykernels", package="lfpykernels"):
                 raise ImportError("lfpykernels is required for computing kernels but is not installed.")
-            self.KernelApprox = tools.dynamic_import("lfpykernels",
-                                                     "KernelApprox")
-            self.GaussCylinderPotential = tools.dynamic_import("lfpykernels",
-                                                               "GaussCylinderPotential")
+            self.KernelApprox = tools.dynamic_import("lfpykernels", "KernelApprox")
+            self.GaussCylinderPotential = tools.dynamic_import("lfpykernels", "GaussCylinderPotential")
             self.KernelApproxCurrentDipoleMoment = tools.dynamic_import("lfpykernels",
                                                                         "KernelApproxCurrentDipoleMoment")
 
-            # Is LFPy import really needed?
-            if not tools.ensure_module("LFPy"):
+            # LFPy (ensure explicit pip name)
+            if not tools.ensure_module("LFPy", package="LFPy"):
                 raise ImportError("LFPy is required for computing kernels but is not installed.")
 
-            if not tools.ensure_module("neuron"):
-                raise ImportError("neuron is required for computing kernels but is not installed.")
+            # NEURON is often not reliably fixable by pip alone, but import-check is fine
+            if not tools.ensure_module("neuron", package="neuron", raise_on_error=False):
+                raise ImportError(
+                    "neuron (NEURON) is required for computing kernels but is not importable. "
+                    "You may need to install it via conda or platform-specific instructions."
+                )
             self.neuron = tools.dynamic_import("neuron")
 
-            if not tools.ensure_module("h5py"):
+            if not tools.ensure_module("h5py", package="h5py"):
                 raise ImportError("h5py is required for computing kernels but is not installed.")
             self.h5py = tools.dynamic_import("h5py")
 
-            # Initialize dictionary for storing kernels
             self.H_YX = dict()
 
         if nyhead:
-            # Check that the required module is installed
-            if not tools.ensure_module("lfpykit"):
+            if not tools.ensure_module("lfpykit", package="lfpykit"):
                 raise ImportError("lfpykit is required for computing the NYHeadModel but is not installed.")
-            self.NYHeadModel = tools.dynamic_import("lfpykit.eegmegcalc",
-                                                    "NYHeadModel")
-
-            # Initialize the head model
+            self.NYHeadModel = tools.dynamic_import("lfpykit.eegmegcalc", "NYHeadModel")
             self.nyhead = self.NYHeadModel()
 
-        # Import InfiniteHomogeneousVolCondMEG
         if MEEG is not None:
+            # Ensure LFPy even if kernel=False
+            if not tools.ensure_module("LFPy", package="LFPy"):
+                raise ImportError("LFPy is required for computing MEEG but is not installed.")
             self.IHVCMEG = tools.dynamic_import("LFPy", "InfiniteHomogeneousVolCondMEG")
 
         # Allocate memory for the transformation matrix and MEEG

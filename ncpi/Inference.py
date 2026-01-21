@@ -50,17 +50,35 @@ class Inference:
             Dictionary of hyperparameters of the model. The default is None.
         """
 
-        
-        # Ensure that sklearn is installed
-        if not tools.ensure_module("sklearn"):
-            raise ImportError('sklearn is not installed. Please install it to use the Inference class.')
+        # Ensure scikit-learn is installed: import name is "sklearn", distribution is "scikit-learn"
+        if not tools.ensure_module(
+                "sklearn",
+                package="scikit-learn",
+                version_spec="==1.5.0",
+        ):
+            raise ImportError(
+                "scikit-learn==1.5.0 is required (import name: 'sklearn'). "
+                "Install project dependencies from pyproject.toml."
+            )
 
-        # Ensure that sbi and torch are installed
-        if model in ['NPE', 'NLE', 'NRE']:
-            if not tools.ensure_module("sbi"):
-                raise ImportError('sbi is not installed.')
-            if not tools.ensure_module("torch"):
-                raise ImportError('torch is not installed.')
+        # sbi + torch for certain models
+        if model in ["NPE", "NLE", "NRE"]:
+            if not tools.ensure_module(
+                    "sbi",
+                    package="sbi",
+                    version_spec="==0.24.0",
+            ):
+                raise ImportError(
+                    "sbi==0.24.0 is required. Install project dependencies from pyproject.toml."
+                )
+
+            # Auto-installing torch via pip can be platform/CUDA-specific; check importability,
+            # and give a helpful error if missing.
+            if not tools.ensure_module("torch", package="torch", raise_on_error=False):
+                raise ImportError(
+                    "PyTorch ('torch') is required but is not importable. "
+                    "Install it following the official PyTorch instructions for your platform/CUDA."
+                )
 
         # Assert that model is a string
         if type(model) is not str:
@@ -628,6 +646,9 @@ class Inference:
         Called during __init__ and __setstate__ to ensure consistency.
         """
         # --- Sklearn ---
+        if not tools.ensure_module("sklearn", package="scikit-learn", version_spec="==1.5.0"):
+            raise ImportError("scikit-learn==1.5.0 is required (import name: sklearn).")
+
         self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
         # self.StandardScaler = tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
         self.all_estimators = tools.dynamic_import("sklearn.utils", "all_estimators")
@@ -645,7 +666,8 @@ class Inference:
             self.classifier_nn = tools.dynamic_import("sbi.neural_nets", "classifier_nn")
             # self.BoxUniform = tools.dynamic_import("sbi.utils", "BoxUniform")
             self.torch = tools.dynamic_import("torch")
-            self.torch.set_num_threads(int(os.cpu_count() / 2))
+            n = os.cpu_count() or 1
+            self.torch.set_num_threads(max(1, n // 2))
 
         # --- Multiprocessing / Pathos ---
         if tools.ensure_module("pathos"):
