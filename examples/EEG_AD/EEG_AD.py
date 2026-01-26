@@ -1,6 +1,5 @@
 import os
 import pickle
-import time
 import pandas as pd
 import scipy
 import numpy as np
@@ -12,9 +11,9 @@ from ncpi.tools import timer
 # Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
 raw = True
 if raw:
-    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS') # Specify you data path here
+    data_path = os.path.join(os.sep, 'DATOS','pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS') # Specify you data path here
 else:
-    data_path = os.path.join(os.sep, 'DATA', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK') # Specify you data path here
+    data_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK') # Specify you data path here
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 # Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
@@ -25,7 +24,7 @@ zenodo_dw_sim = True # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
 # Paths to zenodo simulation files
-zenodo_dir_sim = os.path.join("zenodo_sim_files")
+zenodo_dir_sim = os.path.join("/home/pablomc","zenodo_sim_files")
 
 # Methods used to compute the features
 all_methods = ['catch22','power_spectrum_parameterization_1']
@@ -105,6 +104,7 @@ def create_POCTEP_dataframe(data_path):
 
 @timer("Loading simulation data.")
 def load_model_features(method, zenodo_dir_sim):
+    """ Load model parameters (theta) and features (X) from simulation data."""
     try:
         with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
             theta = pickle.load(file)
@@ -124,43 +124,56 @@ def load_model_features(method, zenodo_dir_sim):
 
     return X, theta
 
+
 @timer("Feature extraction")
 def feature_extraction(method, df):
-    # Parameters of the feature extraction method
-    if method == 'catch22':
-        params = None
-    elif method == 'power_spectrum_parameterization_1':
-        fooof_setup_emp = {'peak_threshold': 1.,
-                            'min_peak_height': 0.,
-                            'max_n_peaks': 5,
-                            'peak_width_limits': (10., 50.)}
-        params={'fs': df['fs'][0],
-                'fmin': 5.,
-                'fmax': 45.,
-                'fooof_setup': fooof_setup_emp,
-                'r_squared_th':0.9}
-        
-    features = ncpi.Features(method=method if method == 'catch22' else 'power_spectrum_parameterization',
-                                params=params)
-    emp_data = features.compute_features(df)
+    """ Extract features from empirical data using specified method."""
+    if "Data" not in df.columns:
+        raise ValueError("Expected input DataFrame to contain a 'Data' column with 1D samples.")
 
-    # Keep only the aperiodic exponent (1/f slope)
-    if method == 'power_spectrum_parameterization_1':
-        emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
+    samples = df["Data"].to_list()
 
-    return emp_data  
+    if method == "catch22":
+        features = ncpi.Features(method="catch22", params={"normalize": True})
+        feats = features.compute_features(samples)
+        emp_data = df.copy()
+        emp_data["Features"] = feats
+        return emp_data
+
+    if method == "power_spectrum_parameterization_1":
+        fooof_setup_emp = {
+            "peak_threshold": 1.0,
+            "min_peak_height": 0.0,
+            "max_n_peaks": 5,
+            "peak_width_limits": (10.0, 50.0),
+        }
+
+        params = {
+            "fs": float(df["fs"].iloc[0]),
+            "freq_range": (5.0, 45.0),
+            "specparam_model": dict(fooof_setup_emp),
+            "r_squared_th": 0.9,
+        }
+
+        features = ncpi.Features(method="specparam", params=params)
+        feats = features.compute_features(samples)
+
+        emp_data = df.copy()
+        emp_data["Features"] = [float(np.asarray(d["aperiodic_params"])[1]) for d in feats]
+        return emp_data
+
+    raise ValueError(f"Unknown method: {method}")
 
 
 @timer('Computing predictions...')
-def compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zenodo_dir_sim):      
-    # Add "Predictions" column to later store the parameters infered
+def compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zenodo_dir_sim, sensor_list=None):
     emp_data['Predictions'] = np.nan
 
-    # List of sensors
-    sensor_list = [
-        'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
-        'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz'
-    ]
+    if sensor_list is None:
+        sensor_list = [
+            'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
+            'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz'
+        ]
 
     # Create folder to save results
     if not os.path.exists('data'):

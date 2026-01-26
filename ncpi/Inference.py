@@ -4,6 +4,43 @@ import numpy as np
 import random
 from ncpi import tools
 
+# --- Prediction multiprocessing helpers (worker-global state) ---
+_PRED_MODEL = None
+_PRED_SCALER = None
+
+
+def _prediction_worker_init(model, scaler):
+    """Initializer: runs once per worker process."""
+    global _PRED_MODEL, _PRED_SCALER
+    _PRED_MODEL = model
+    _PRED_SCALER = scaler
+
+
+def _predict_one(x):
+    """Worker: predict for a single input row x (sklearn-only)."""
+    global _PRED_MODEL, _PRED_SCALER
+
+    x = np.asarray(x)
+
+    # If a scalar sneaks in, convert to (1, 1)
+    if x.ndim == 0:
+        x = x.reshape(1, 1)
+    elif x.ndim == 1:
+        x = x.reshape(1, -1)
+
+    if _PRED_SCALER is not None:
+        x = _PRED_SCALER.transform(x)
+
+    if not np.all(np.isfinite(x)):
+        return None
+
+    if isinstance(_PRED_MODEL, list):
+        y = np.mean([m.predict(x) for m in _PRED_MODEL], axis=0)
+    else:
+        y = _PRED_MODEL.predict(x)
+
+    return y[0]
+
 
 class Inference:
     """
@@ -156,7 +193,13 @@ class Inference:
         parameters = parameters[mask]
 
         # Stack features and parameters
+        # Stack features
         features = np.stack(features)
+
+        # If we have a single feature per sample, make it 2D (N, 1)
+        if isinstance(features, np.ndarray) and features.ndim == 1:
+            features = features.reshape(-1, 1)
+
         parameters = np.stack(parameters)
 
         # Reshape features if your data has a single feature
@@ -424,7 +467,6 @@ class Inference:
                 pickle.dump(density_estimator, file)
             print(f"Density estimator saved at '{result_dir}/density_estimator.pkl'")
 
-
     def predict(self, features, result_dir='data', scaler=None):
         """
         Method to predict the parameters.
@@ -442,7 +484,7 @@ class Inference:
 
         def process_batch(batch):
             """
-            Function to compute predictions from a batch of features.
+            Function to compute predictions from a batch of features (used for SBI path only).
 
             Parameters
             ----------
@@ -459,13 +501,12 @@ class Inference:
                 batch_index, feat_batch, scaler, model, posterior = batch
             else:
                 batch_index, feat_batch, scaler, model = batch
+
             predictions = []
             for feat in feat_batch:
                 # Transform the features
                 if scaler is not None:
                     feat = scaler.transform(feat.reshape(1, -1))
-                # else:
-                #     feat = feat.reshape(-1, 1)
 
                 # Check that feat has no NaN or Inf values
                 if np.all(np.isfinite(feat)):
@@ -486,19 +527,19 @@ class Inference:
                             num_samples = 5000
 
                         if type(posterior) is list:
-                            posterior_samples = [post.sample((num_samples,), x=x_o, show_progress_bars=False) for post in posterior]
-                            # Compute the mean of the posterior samples
+                            posterior_samples = [
+                                post.sample((num_samples,), x=x_o, show_progress_bars=False)
+                                for post in posterior
+                            ]
                             pred = np.mean([np.mean(post.numpy(), axis=0) for post in posterior_samples], axis=0)
                         else:
                             posterior_samples = posterior.sample((num_samples,), x=x_o, show_progress_bars=False)
-                            # Compute the mean of the posterior samples
                             pred = np.mean(posterior_samples.numpy(), axis=0)
-                        predictions.append(pred)
 
+                        predictions.append(pred)
                 else:
                     predictions.append([np.nan for _ in range(self.theta.shape[1])])
 
-            # Return the predictions
             return batch_index, predictions
 
         model_path = os.path.join(result_dir, 'model.pkl')
@@ -512,7 +553,7 @@ class Inference:
         with open(model_path, 'rb') as file:
             model = pickle.load(file)
 
-        # # Load or assign the scaler
+        # Load or assign the scaler
         if scaler is None and os.path.exists(scaler_path):
             with open(scaler_path, 'rb') as file:
                 scaler = pickle.load(file)
@@ -534,39 +575,48 @@ class Inference:
         # Stack features
         features = np.stack(features)
 
-        # Split the data into batches using the number of available CPUs
-        num_cpus = os.cpu_count()
+        # If we have a single feature per sample, make it 2D (N, 1)
+        if isinstance(features, np.ndarray) and features.ndim == 1:
+            features = features.reshape(-1, 1)
+
+        # --- SBI path: keep serial behavior ---
         if self.model[1] == 'sbi':
+            num_cpus = os.cpu_count() or 1
             batch_size = len(features)  # to avoid memory issues
-        else:
-            batch_size = len(features) // num_cpus
-        if batch_size == 0:
-            batch_size = 1
-        batches = [(i, features[i:i + batch_size]) for i in range(0, len(features), batch_size)]
+            if batch_size == 0:
+                batch_size = 1
+            batches = [(i, features[i:i + batch_size]) for i in range(0, len(features), batch_size)]
 
-        # Choose the appropriate parallel processing library
-        pool_class = self.pathos.ProcessPool if self.pathos_inst else self.multiprocessing.Pool
-
-        # Prepare batch arguments based on model type
-        use_posterior = self.model[1] == 'sbi'
-        batch_args = [(ii, batch, scaler, model, posterior) if use_posterior else (ii, batch, scaler, model) for
-                      ii, batch in batches]
-
-        # Compute predictions in parallel if model is not SBI
-        if self.model[1] == 'sbi':
+            batch_args = [(ii, batch, scaler, model, posterior) for ii, batch in batches]
             results = [process_batch(batch_arg) for batch_arg in batch_args]
-        else:
-            with pool_class(num_cpus) as pool:
-                imap_results = pool.imap(process_batch, batch_args)
-                results = list(
-                    self.tqdm(imap_results, total=len(batches), desc="Computing predictions")) if self.tqdm_inst else list(
-                    imap_results)
 
-        # Sort the predictions based on the original index
-        results.sort(key=lambda x: x[0])
-        predictions = [pred for _, batch_preds in results for pred in batch_preds]
+            results.sort(key=lambda x: x[0])
+            predictions = [pred for _, batch_preds in results for pred in batch_preds]
+            return predictions
 
+        # --- sklearn path: multiprocessing (spawn + initializer + imap) ---
+        n = len(features)
+        if n == 0:
+            return []
+
+        num_cpus = os.cpu_count() or 1
+        chunksize = max(1, n // (num_cpus * 8))
+
+        ctx = self.multiprocessing.get_context("spawn")
+        with ctx.Pool(
+                processes=num_cpus,
+                initializer=_prediction_worker_init,
+                initargs=(model, scaler),
+        ) as pool:
+            it = pool.imap(_predict_one, features, chunksize=chunksize)
+            if self.tqdm_inst:
+                it = self.tqdm(it, total=n, desc="Computing predictions")
+            preds = list(it)
+
+        nan_row = [np.nan for _ in range(self.theta.shape[1])]
+        predictions = [p if p is not None else nan_row for p in preds]
         return predictions
+
 
     def sample_posterior(self, x, num_samples=10000, result_dir='data', scaler=None):
         """
@@ -669,13 +719,9 @@ class Inference:
             n = os.cpu_count() or 1
             self.torch.set_num_threads(max(1, n // 2))
 
-        # --- Multiprocessing / Pathos ---
-        if tools.ensure_module("pathos"):
-            self.pathos_inst = True
-            self.pathos = tools.dynamic_import("pathos", "pools")
-        else:
-            self.pathos_inst = False
-            self.multiprocessing = tools.dynamic_import("multiprocessing")
+        # --- Multiprocessing (stdlib only) ---
+        self.multiprocessing = tools.dynamic_import("multiprocessing")
+        self.pathos_inst = False
 
         # --- tqdm ---
         if tools.ensure_module("tqdm"):

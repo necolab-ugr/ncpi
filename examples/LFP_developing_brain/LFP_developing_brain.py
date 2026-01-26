@@ -21,8 +21,8 @@ zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-zenodo_dir_sim = os.path.join("zenodo_sim_files")
-zenodo_dir_emp= os.path.join("zenodo_emp_files")
+zenodo_dir_sim = os.path.join("/home/pablomc","zenodo_sim_files")
+zenodo_dir_emp= os.path.join("/home/pablomc","zenodo_emp_files")
 
 # Methods used to compute the features
 all_methods = ['catch22','power_spectrum_parameterization_1']
@@ -122,60 +122,75 @@ def load_empirical_data(zenodo_dir_emp):
     return emp_data
 
 
-@timer("Computing features from empirical data.") 
+@timer("Computing features from empirical data.")
 def compute_features_empirical_data(method, emp_data):
-    # Compute features from empirical data
+    chunk_size_sec = 5
 
-    # Epoch length in seconds
-    chunk_size = 5
+    if method == "catch22":
+        features_method = "catch22"
+        params = {"normalize": True}
 
-    # Parameters of the feature extraction method
-    if method == 'catch22':
-        params = None
-    elif method == 'power_spectrum_parameterization_1':
-        fooof_setup_emp = {'peak_threshold': 1.,
-                            'min_peak_height': 0.,
-                            'max_n_peaks': 5,
-                            'peak_width_limits': (10., 50.)}
-        params={'fs': emp_data['fs'][0],
-                'fmin': 5.,
-                'fmax': 45.,
-                'fooof_setup': fooof_setup_emp,
-                'r_squared_th':0.9}
+    elif method == "power_spectrum_parameterization_1":
+        features_method = "specparam"
 
-    # Split the data into chunks (epochs)
-    chunk_size = int(chunk_size * emp_data['fs'][0])
+        fooof_setup_emp = {
+            "peak_threshold": 1.0,
+            "min_peak_height": 0.0,
+            "max_n_peaks": 5,
+            "peak_width_limits": (10.0, 50.0),
+        }
+
+        params = {
+            "fs": float(emp_data["fs"][0]),
+            "freq_range": (5.0, 45.0),
+            "specparam_model": dict(fooof_setup_emp),
+            "r_squared_th": 0.9,
+        }
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
+    fs0 = float(emp_data["fs"][0])
+    chunk_size = int(chunk_size_sec * fs0)
+
     chunked_data = []
     ID = []
     epoch = []
     group = []
-    for i in range(len(emp_data['LFP'])):
-        for e,j in enumerate(range(0, len(emp_data['LFP'][i]), chunk_size)):
-            if len(emp_data['LFP'][i][j:j+chunk_size]) == chunk_size:
-                chunked_data.append(emp_data['LFP'][i][j:j+chunk_size])
+
+    for i in range(len(emp_data["LFP"])):
+        x = emp_data["LFP"][i]
+        for e, j in enumerate(range(0, len(x), chunk_size)):
+            seg = x[j : j + chunk_size]
+            if len(seg) == chunk_size:
+                chunked_data.append(seg)
                 ID.append(i)
                 epoch.append(e)
-                group.append(emp_data['age'][i])
+                group.append(emp_data["age"][i])
 
-    # Create the Pandas DataFrame
-    df = pd.DataFrame({'ID': ID,
-                        'Group': group,
-                        'Epoch': epoch,
-                        'Sensor': np.zeros(len(ID)), # dummy sensor
-                        'Data': chunked_data})
-    df.Recording = 'LFP'
-    df.fs = emp_data['fs'][0]
+    df = pd.DataFrame(
+        {
+            "ID": ID,
+            "Group": group,
+            "Epoch": epoch,
+            "Sensor": np.zeros(len(ID)),
+            "Data": chunked_data,
+        }
+    )
+    df.Recording = "LFP"
+    df.fs = fs0
 
-    # Compute features
-    features = ncpi.Features(method=method if method == 'catch22' else 'power_spectrum_parameterization',
-                                params=params)
-    emp_data = features.compute_features(df)
+    features = ncpi.Features(method=features_method, params=params)
+    feats = features.compute_features(df["Data"].to_list())
+    out = df.copy()
 
-    # Keep only the aperiodic exponent (1/f slope)
-    if method == 'power_spectrum_parameterization_1':
-        emp_data['Features'] = emp_data['Features'].apply(lambda x: x[1])
+    if method == "power_spectrum_parameterization_1":
+        out["Features"] = [float(np.asarray(d["aperiodic_params"])[1]) for d in feats]
+    else:
+        out["Features"] = feats
 
-    return emp_data
+    return out
+
 
 
 @timer("Computing predictions from empirical data.")
