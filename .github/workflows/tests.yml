@@ -54,4 +54,4 @@ jobs:
         
     - name: Run tests with pytest
       run: |
-        pytest -v --ignore=tests/test_EEG/test_EEG.py
+        pytest -v --ignore=tests/EEG_AD/test_EEG.py
