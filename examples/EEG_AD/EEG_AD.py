@@ -1,119 +1,106 @@
 import os
 import pickle
 import pandas as pd
-import scipy
 import numpy as np
 import shutil
 import ncpi
 from ncpi import tools
 from ncpi.tools import timer
 
-# Select either raw EEG data or source-reconstructed EEG data. This study used the raw EEG data for all analyses.
+from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+
+
+# Select either raw EEG data or source-reconstructed EEG data.
 raw = True
 if raw:
-    data_path = os.path.join(os.sep, 'DATOS','pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS') # Specify you data path here
+    data_path = os.path.join(os.sep, 'DATOS','pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS')
 else:
-    data_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK') # Specify you data path here
+    data_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK')
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
-# Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
-# configure the zenodo_dir variables to point to the local paths where the data is stored.
-zenodo_dw_sim = True # simulation data
-
-# Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
+zenodo_dw_sim = True  # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
-
-# Paths to zenodo simulation files
-zenodo_dir_sim = os.path.join("/home/pablomc","zenodo_sim_files")
+zenodo_dir_sim = os.path.join("/home/pablomc", "zenodo_sim_files")
 
 # Methods used to compute the features
-all_methods = ['catch22','power_spectrum_parameterization_1']
+all_methods = ['catch22', 'power_spectrum_parameterization_1']
 
 # ML model used to compute the predictions
 ML_model = 'MLPRegressor'
 
 
-def create_POCTEP_dataframe(data_path):
-    '''
-    Load the POCTEP dataset and create a DataFrame with the data.
+def create_POCTEP_dataframe(data_path: str) -> pd.DataFrame:
+    """
+    Load the POCTEP dataset and create a DataFrame that matches the old script's schema:
+      ID, Group, Epoch, Sensor, Data, Recording, fs
 
-    Parameters
-    ----------
-    data_path: str
-        Path to the directory containing the POCTEP data files.
+    This function uses EphysDatasetParser for IO + epoching + z-scoring.
+    """
+    ldir = sorted(os.listdir(data_path))
 
-    Returns
-    -------
-    df : pandas.DataFrame
-        DataFrame containing the POCTEP data.
-    '''
+    # Tune patterns to strongly prefer the POCTEP MATLAB struct layout:
+    #   loadmat(... )['data']['signal'], ['data']['cfg']['fs'], ['data']['cfg']['channels']
+    cfg = ParseConfig(
+        epoch_length_s=5.0,
+        epoch_step_s=5.0,
+        zscore=True,
+        # Keep default_fs=None so we DON'T silently invent an fs; POCTEP files should have it.
+        default_fs=None,
+        mat_signal_key_patterns=(r"data\.signal", r"\bsignal\b", r"\beeg\b", r"\bdata\b"),
+        mat_fs_key_patterns=(r"data\.cfg\.fs", r"\bfs\b", r"\bsfreq\b", r"\bsrate\b"),
+        mat_channel_key_patterns=(r"data\.cfg\.channels", r"\bchannels?\b", r"\bch_names\b", r"\belectrodes?\b"),
+        mat_prefer_times_by_channels=True,
+    )
 
+    parser = EphysDatasetParser(config=cfg)
 
-    # List files in the directory
-    ldir = os.listdir(data_path)
+    out_frames = []
+    for pt, file in enumerate(ldir):
+        print(f'\rProcessing {file} - {pt + 1}/{len(ldir)}', end="", flush=True)
+        file_path = os.path.join(data_path, file)
 
-    ID = []
-    group = []
-    epoch = []
-    sensor = []
-    EEG = []
+        parsed = parser.parse(
+            file_path,
+            subject_id=pt,                # old code: ID was file index
+            species="human",
+            group=file.split('_')[0],     # old code: group = prefix before underscore
+            condition="resting-state",
+            recording_type="EEG",
+            data_kind="time_series",
+        )
+        if parsed is None or parsed.empty:
+            continue
 
-    for pt,file in enumerate(ldir):
-        print(f'\rProcessing {file} - {pt + 1 }/{len(ldir)}', end="", flush=True)
+        # Map the parser schema -> old schema
+        df_old = pd.DataFrame({
+            "ID": parsed["subject_id"].astype(int, errors="ignore"),
+            "Group": parsed["group"],
+            "Epoch": parsed["epoch"].astype(int, errors="ignore"),
+            "Sensor": parsed["sensor"],
+            "Data": parsed["data"],
+        })
 
-        # load data
-        data = scipy.io.loadmat(data_path + '/' + file)['data']
-        signal = data['signal'][0, 0]
+        # Old script sets these for the whole DF (fs assumed constant); keep per-row fs too.
+        df_old["Recording"] = "EEG"
+        df_old["fs"] = parsed["fs"].astype(float, errors="ignore")
 
-        # get sampling frequency
-        fs = data['cfg'][0, 0]['fs'][0, 0][0, 0]
+        out_frames.append(df_old)
 
-        # Electrodes (raw data)/ regions (if source data)
-        regions = np.arange(signal.shape[1])
+    if not out_frames:
+        return pd.DataFrame(columns=["ID", "Group", "Epoch", "Sensor", "Data", "Recording", "fs"])
 
-        # get channels
-        ch_names = data['cfg'][0, 0]['channels'][0, 0][0]
-        ch_names = [ch_names[ll][0] for ll in range(len(ch_names))]
+    return pd.concat(out_frames, ignore_index=True)
 
-        # 5-second epochs
-        epochs = np.arange(0, signal.shape[0], int(fs * 5))
-
-        for i in range(len(epochs) - 1):
-            ep = signal[epochs[i]:epochs[i + 1], :]
-            # z-score normalization
-            ep = (ep - np.mean(ep, axis=0)) / np.std(ep, axis=0)
-
-            # Append data
-            for rg in regions:
-                ID.append(pt)
-                group.append(file.split('_')[0])
-                epoch.append(i)
-                sensor.append(ch_names[rg])
-                EEG.append(ep[:, rg])
-
-    # Create the Pandas DataFrame
-    df = pd.DataFrame({'ID': ID,
-                       'Group': group,
-                       'Epoch': epoch,
-                       'Sensor': sensor,
-                       'Data': EEG})
-    df['Recording'] = 'EEG'
-    df['fs'] = fs
-
-    return df
 
 @timer("Loading simulation data.")
-def load_model_features(method, zenodo_dir_sim):
-    """ Load model parameters (theta) and features (X) from simulation data."""
-    try:
-        with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
-            theta = pickle.load(file)
-        with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_X'), 'rb') as file:
-            X = pickle.load(file)
-    except Exception as e:
-        print(f"Error loading simulation data: {e}")
+def load_model_features(method: str, zenodo_dir_sim: str):
+    """Load model parameters (theta) and features (X) from simulation data."""
+    with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as f:
+        theta = pickle.load(f)
+    with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_X'), 'rb') as f:
+        X = pickle.load(f)
 
-    # Print info
+    # Print info (kept from old script)
     print('theta:')
     for key, value in theta.items():
         if isinstance(value, np.ndarray):
@@ -121,13 +108,12 @@ def load_model_features(method, zenodo_dir_sim):
         else:
             print(f'--{key}: {value}')
     print(f'Shape of X: {X.shape}')
-
     return X, theta
 
 
 @timer("Feature extraction")
-def feature_extraction(method, df):
-    """ Extract features from empirical data using specified method."""
+def feature_extraction(method: str, df: pd.DataFrame) -> pd.DataFrame:
+    """Extract features from empirical data using specified method."""
     if "Data" not in df.columns:
         raise ValueError("Expected input DataFrame to contain a 'Data' column with 1D samples.")
 
@@ -166,8 +152,17 @@ def feature_extraction(method, df):
 
 
 @timer('Computing predictions...')
-def compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zenodo_dir_sim, sensor_list=None):
-    emp_data['Predictions'] = np.nan
+def compute_predictions_neural_circuit(
+    emp_data: pd.DataFrame,
+    method: str,
+    ML_model: str,
+    X,
+    theta,
+    zenodo_dir_sim: str,
+    sensor_list=None
+) -> pd.DataFrame:
+    emp_data = emp_data.copy()
+    emp_data["Predictions"] = np.nan
 
     if sensor_list is None:
         sensor_list = [
@@ -176,14 +171,11 @@ def compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zen
         ]
 
     # Create folder to save results
-    if not os.path.exists('data'):
-        os.makedirs('data')
-    if not os.path.exists(os.path.join('data', method)):
-        os.makedirs(os.path.join('data', method))
+    os.makedirs("data", exist_ok=True)
+    os.makedirs(os.path.join("data", method), exist_ok=True)
 
     # Create inference object
     inference = ncpi.Inference(model=ML_model)
-    # Not sure if this is really needed
     inference.add_simulation_data(X, theta['data'])
 
     for s, sensor in enumerate(sensor_list):
@@ -193,62 +185,59 @@ def compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zen
             os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'model'),
             os.path.join('data', 'model.pkl')
         )
-
         shutil.copy(
             os.path.join(zenodo_dir_sim, 'ML_models/EEG', sensor, method, 'scaler'),
             os.path.join('data', 'scaler.pkl')
         )
 
-        sensor_df = emp_data[emp_data['Sensor'].isin([sensor, s])]
+        # Keep the old filtering behavior exactly: allow matching either by sensor name or numeric index
+        sensor_df = emp_data[emp_data["Sensor"].isin([sensor, s])].copy()
+        if sensor_df.empty:
+            continue
 
-        predictions = inference.predict(np.array(sensor_df['Features'].to_list()))
+        predictions = inference.predict(np.array(sensor_df["Features"].to_list()))
+        sensor_df["Predictions"] = [list(pred) for pred in predictions]
 
-        sensor_df['Predictions'] = [list(pred) for pred in predictions]
-        emp_data.update(sensor_df['Predictions'])
+        # Correct write-back (old code intended to update the corresponding rows)
+        emp_data.loc[sensor_df.index, "Predictions"] = sensor_df["Predictions"]
 
     return emp_data
 
-def save_data(emp_data, method):
+
+def save_data(emp_data: pd.DataFrame, method: str) -> None:
     # Save the data including predictions of all parameters
     emp_data.to_pickle(os.path.join('data', method, 'emp_data_all.pkl'))
 
     # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
     E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
     others = emp_data['Predictions'].apply(lambda x: x[4:])
-    emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
-                                                np.array(others.tolist())), axis=1)).tolist()
+    emp_data = emp_data.copy()
+    emp_data['Predictions'] = (
+        np.concatenate(
+            (E_I_net.values.reshape(-1, 1), np.array(others.tolist())),
+            axis=1
+        )
+    ).tolist()
 
     # Save the data including predictions of (E/I)_net
     emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
 
+
 if __name__ == "__main__":
-    # Download simulation data and ML models
     if zenodo_dw_sim:
         tools.timer("Downloading simulation data and ML models from Zenodo")(
             tools.download_zenodo_record
         )(zenodo_URL_sim, download_dir=zenodo_dir_sim)
 
-    # Go through all methods
     for method in all_methods:
         print(f'\n\n--- Method: {method}')
 
-        # Load parameters of the model (theta) and features (X) from simulation data
         X, theta = load_model_features(method, zenodo_dir_sim)
 
-        # Load empirical data and create DataFrame
         df = create_POCTEP_dataframe(data_path=data_path)
-
-        ##########################
-        #   FEATURE EXTRACTION   #
-        ##########################
 
         emp_data = feature_extraction(method, df)
 
-        #######################################################
-        #   PREDICTIONS OF PARAMETERS OF THE NEURAL CIRCUIT   #
-        #######################################################
-
         emp_data = compute_predictions_neural_circuit(emp_data, method, ML_model, X, theta, zenodo_dir_sim)
 
-        # Save the data including predictions of all parameters  
-        save_data(emp_data, method)      
+        save_data(emp_data, method)

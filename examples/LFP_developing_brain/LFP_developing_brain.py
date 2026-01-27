@@ -1,18 +1,18 @@
 import os
 import shutil
 import pickle
-import pandas as pd
-import scipy
 import numpy as np
+import pandas as pd
+import scipy.io
 import ncpi
 from ncpi import tools
 from ncpi.tools import timer
 
+from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
-# Important: the zenodo downloads will take a while, so if you have already downloaded the data, set this to False and
-# configure the zenodo_dir variables to point to the local paths where the data is stored.
-zenodo_dw_sim = True # simulation data
-zenodo_dw_emp = True # empirical data
+zenodo_dw_sim = True  # simulation data
+zenodo_dw_emp = True  # empirical data
 
 # Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
@@ -21,111 +21,161 @@ zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-zenodo_dir_sim = os.path.join("/home/pablomc","zenodo_sim_files")
-zenodo_dir_emp= os.path.join("/home/pablomc","zenodo_emp_files")
+zenodo_dir_sim = os.path.join("/home/pablomc", "zenodo_sim_files")
+zenodo_dir_emp = os.path.join("/home/pablomc", "zenodo_emp_files")
 
 # Methods used to compute the features
-all_methods = ['catch22','power_spectrum_parameterization_1']
+all_methods = ["catch22", "power_spectrum_parameterization_1"]
 
 # ML model used to compute the predictions (MLPRegressor, Ridge or NPE)
-ML_model = 'MLPRegressor'
+ML_model = "MLPRegressor"
 
 
 @timer("Loading simulation data.")
 def load_model_features(method, zenodo_dir_sim):
-    # Load parameters of the model (theta) and features (X) from simulation data
-    try:
-        with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_theta'), 'rb') as file:
-            theta = pickle.load(file)
-        with open(os.path.join(zenodo_dir_sim, 'data', method, 'sim_X'), 'rb') as file:
-            X = pickle.load(file)
-    except Exception as e:
-        print(f"Error loading simulation data: {e}")
+    """Load model parameters (theta) and features (X) from simulation data."""
+    with open(os.path.join(zenodo_dir_sim, "data", method, "sim_theta"), "rb") as file:
+        theta = pickle.load(file)
+    with open(os.path.join(zenodo_dir_sim, "data", method, "sim_X"), "rb") as file:
+        X = pickle.load(file)
 
     # Print info
-    print('theta:')
+    print("theta:")
     for key, value in theta.items():
         if isinstance(value, np.ndarray):
-            print(f'--Shape of {key}: {value.shape}')
+            print(f"--Shape of {key}: {value.shape}")
         else:
-            print(f'--{key}: {value}')
-    print(f'Shape of X: {X.shape}')
+            print(f"--{key}: {value}")
+    print(f"Shape of X: {X.shape}")
 
     return X, theta
 
 
 @timer("Loading the inverse model.")
 def load_inference_data(method, X, theta, zenodo_dir_sim, ML_model):
-    # Load the Inference objects and add the simulation data
-
-    # Create inference object
+    """Load the Inference object and copy scaler/model locally."""
     inference = ncpi.Inference(model=ML_model)
-    # Not sure if this is really needed
-    inference.add_simulation_data(X, theta['data'])
+    inference.add_simulation_data(X, theta["data"])
 
     # Create folder to save results
-    if not os.path.exists('data'):
-        os.makedirs('data')
-    if not os.path.exists(os.path.join('data', method)):
-        os.makedirs(os.path.join('data', method))
+    os.makedirs(os.path.join("data", method), exist_ok=True)
 
     # Transfer model and scaler to the data folder
-    if ML_model == 'MLPRegressor':
-        folder = 'MLP'
-    elif ML_model == 'Ridge':
-        folder = 'Ridge'
-    elif ML_model == 'NPE':
-        folder = 'SBI'
-        
-    shutil.copy(
-        os.path.join(zenodo_dir_sim, 'ML_models', '4_param', folder, method, 'scaler'),
-        os.path.join('data', 'scaler.pkl')
-    )
+    if ML_model == "MLPRegressor":
+        folder = "MLP"
+    elif ML_model == "Ridge":
+        folder = "Ridge"
+    elif ML_model == "NPE":
+        folder = "SBI"
+    else:
+        raise ValueError(f"Unknown ML_model: {ML_model}")
 
     shutil.copy(
-        os.path.join(zenodo_dir_sim, 'ML_models', '4_param', folder, method, 'model'),
-        os.path.join('data', 'model.pkl')
+        os.path.join(zenodo_dir_sim, "ML_models", "4_param", folder, method, "scaler"),
+        os.path.join("data", "scaler.pkl"),
+    )
+    shutil.copy(
+        os.path.join(zenodo_dir_sim, "ML_models", "4_param", folder, method, "model"),
+        os.path.join("data", "model.pkl"),
     )
 
-    if ML_model == 'NPE':
+    if ML_model == "NPE":
         shutil.copy(
-            os.path.join(zenodo_dir_sim, 'ML_models', '4_param', folder, method,
-                            'density_estimator'),
-            os.path.join('data', 'density_estimator.pkl')
+            os.path.join(
+                zenodo_dir_sim, "ML_models", "4_param", folder, method, "density_estimator"
+            ),
+            os.path.join("data", "density_estimator.pkl"),
         )
 
     return inference
 
 
-@timer("Loading LFP data.")
+@timer("Loading LFP data (parser-based, old-schema output).")
 def load_empirical_data(zenodo_dir_emp):
-    # Load empirical data
-    file_list = os.listdir(os.path.join(zenodo_dir_emp, 'development_EI_decorrelation', 'baseline', 'LFP'))
-    emp_data = {'LFP': [], 'fs': [], 'age': []}
+    """
+    Matches the old script output schema using your EphysDatasetParser for:
+      - loading LFP signal
+      - summing across channels
+      - 5-second epoching
 
-    for i,file_name in enumerate(file_list):
-        print(f'\r Progress: {i+1} of {len(file_list)} files loaded', end='', flush=True)
-        structure = scipy.io.loadmat(os.path.join(os.path.join(zenodo_dir_emp,
-                                                                'development_EI_decorrelation', 'baseline', 'LFP'),
-                                                    file_name))
-        LFP = structure['LFP']['LFP'][0,0]
-        sum_LFP = np.sum(LFP, axis=0)  # sum LFP across channels
-        fs = structure['LFP']['fs'][0, 0][0, 0]
-        age = structure['LFP']['age'][0,0][0,0]
+    Returns a DataFrame with columns:
+      ID, Group (age), Epoch, Sensor(=0), Data, Recording, fs
+    """
+    lfp_dir = os.path.join(zenodo_dir_emp, "development_EI_decorrelation", "baseline", "LFP")
+    file_list = sorted([f for f in os.listdir(lfp_dir) if f.lower().endswith(".mat")])
 
-        emp_data['LFP'].append(sum_LFP)
-        emp_data['fs'].append(fs)
-        emp_data['age'].append(age)
+    # Configure parser to mimic old pipeline:
+    # - epoch into 5s windows (non-overlapping)
+    # - aggregate sensors by sum (equivalent to np.sum(LFP, axis=0) before epoching)
+    cfg = ParseConfig(
+        epoch_length_s=5.0,
+        epoch_step_s=5.0,
+        aggregate_sensors=True,
+        aggregate_method="sum",
+        aggregate_sensor_label="aggregate",
+        # (optional) make it more likely to pick the intended structure
+        mat_signal_key_patterns=(r"\bLFP\b", r"\blfp\b", r"\bdata\b"),
+        mat_fs_key_patterns=(r"\bfs\b", r"\bsfreq\b", r"\bsrate\b"),
+        mat_channel_key_patterns=(r"\bchannels?\b", r"\bsensors?\b", r"\blabels?\b"),
+    )
+    parser = EphysDatasetParser(config=cfg)
 
-    print(f'\nFiles loaded: {len(emp_data["LFP"])}')
+    out_rows = []
+    fs0 = None
 
-    return emp_data
+    for i, file_name in enumerate(file_list):
+        print(f"\r Progress: {i+1} of {len(file_list)} files loaded", end="", flush=True)
+        fp = os.path.join(lfp_dir, file_name)
+
+        # --- Read age exactly like the old script ---
+        structure = scipy.io.loadmat(fp)
+        age = float(structure["LFP"]["age"][0, 0][0, 0])
+
+        # --- Use parser to load + epoch + aggregate ---
+        dfp = parser.parse(
+            fp,
+            subject_id=i,
+            group=age,              # keep age in "group" like old Group column
+            recording_type="LFP",
+            data_kind="raw",
+        )
+
+        if dfp.empty:
+            continue
+
+        # fs used in old script is fs of the first file
+        if fs0 is None:
+            fs0 = float(dfp["fs"].iloc[0])
+
+        # dfp has one row per epoch (because we aggregated sensors)
+        # Convert to old schema
+        for _, r in dfp.iterrows():
+            out_rows.append(
+                {
+                    "ID": int(i),
+                    "Group": age,
+                    "Epoch": int(r["epoch"]),
+                    "Sensor": 0.0,  # old code uses zeros
+                    "Data": np.asarray(r["data"], dtype=float),
+                }
+            )
+
+    print(f"\nFiles loaded: {len(file_list)}")
+    if fs0 is None:
+        raise RuntimeError("No LFP data parsed. Check paths / file structure.")
+
+    df = pd.DataFrame(out_rows)
+    df["Recording"] = "LFP"
+    df["fs"] = float(fs0)
+    return df
 
 
 @timer("Computing features from empirical data.")
-def compute_features_empirical_data(method, emp_data):
-    chunk_size_sec = 5
-
+def compute_features_empirical_data(method, df):
+    """
+    Takes the old-schema df: ID, Group, Epoch, Sensor, Data, Recording, fs
+    Adds Features column.
+    """
     if method == "catch22":
         features_method = "catch22"
         params = {"normalize": True}
@@ -141,7 +191,7 @@ def compute_features_empirical_data(method, emp_data):
         }
 
         params = {
-            "fs": float(emp_data["fs"][0]),
+            "fs": float(df["fs"].iloc[0]),
             "freq_range": (5.0, 45.0),
             "specparam_model": dict(fooof_setup_emp),
             "r_squared_th": 0.9,
@@ -150,40 +200,10 @@ def compute_features_empirical_data(method, emp_data):
     else:
         raise ValueError(f"Unknown method: {method}")
 
-    fs0 = float(emp_data["fs"][0])
-    chunk_size = int(chunk_size_sec * fs0)
-
-    chunked_data = []
-    ID = []
-    epoch = []
-    group = []
-
-    for i in range(len(emp_data["LFP"])):
-        x = emp_data["LFP"][i]
-        for e, j in enumerate(range(0, len(x), chunk_size)):
-            seg = x[j : j + chunk_size]
-            if len(seg) == chunk_size:
-                chunked_data.append(seg)
-                ID.append(i)
-                epoch.append(e)
-                group.append(emp_data["age"][i])
-
-    df = pd.DataFrame(
-        {
-            "ID": ID,
-            "Group": group,
-            "Epoch": epoch,
-            "Sensor": np.zeros(len(ID)),
-            "Data": chunked_data,
-        }
-    )
-    df.Recording = "LFP"
-    df.fs = fs0
-
     features = ncpi.Features(method=features_method, params=params)
     feats = features.compute_features(df["Data"].to_list())
-    out = df.copy()
 
+    out = df.copy()
     if method == "power_spectrum_parameterization_1":
         out["Features"] = [float(np.asarray(d["aperiodic_params"])[1]) for d in feats]
     else:
@@ -192,32 +212,31 @@ def compute_features_empirical_data(method, emp_data):
     return out
 
 
-
 @timer("Computing predictions from empirical data.")
 def compute_predictions_empirical_data(emp_data, inference):
-    # Compute predictions from the empirical data
-
-    # Predict the parameters from the features of the empirical data
-    predictions = inference.predict(np.array(emp_data['Features'].tolist()))
-
-    # Append the predictions to the DataFrame
-    pd_preds = pd.DataFrame({'Predictions': predictions})
-    emp_data = pd.concat([emp_data, pd_preds], axis=1)
-
+    predictions = inference.predict(np.array(emp_data["Features"].tolist()))
+    emp_data = emp_data.copy()
+    emp_data["Predictions"] = [list(p) for p in predictions]
     return emp_data
 
+
 def save_data(emp_data, method):
+    os.makedirs(os.path.join("data", method), exist_ok=True)
+
     # Save the data including predictions of all parameters
-    emp_data.to_pickle(os.path.join('data', method, 'emp_data_all.pkl'))
+    emp_data.to_pickle(os.path.join("data", method, "emp_data_all.pkl"))
 
     # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
-    E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
-    others = emp_data['Predictions'].apply(lambda x: x[4:])
-    emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
-                                                np.array(others.tolist())), axis=1)).tolist()
+    E_I_net = emp_data["Predictions"].apply(lambda x: (x[0] / x[2]) / (x[1] / x[3]))
+    others = emp_data["Predictions"].apply(lambda x: x[4:])
+    emp_data = emp_data.copy()
+    emp_data["Predictions"] = (
+        np.concatenate((E_I_net.values.reshape(-1, 1), np.array(others.tolist())), axis=1)
+    ).tolist()
 
     # Save the data including predictions of (E/I)_net
-    emp_data.to_pickle(os.path.join('data', method, 'emp_data_reduced.pkl'))
+    emp_data.to_pickle(os.path.join("data", method, "emp_data_reduced.pkl"))
+
 
 if __name__ == "__main__":
     # Download simulation data and ML models
@@ -232,24 +251,20 @@ if __name__ == "__main__":
             tools.download_zenodo_record
         )(zenodo_URL_emp, download_dir=zenodo_dir_emp)
 
-    # Iterate over the methods used to compute the features
     for method in all_methods:
-        print(f'\n\n--- Method: {method}')
+        print(f"\n\n--- Method: {method}")
 
-        # Load parameters of the model (theta) and features (X) from simulation data
         X, theta = load_model_features(method, zenodo_dir_sim)
-
-        # Load the Inference objects and add the simulation data
         inference = load_inference_data(method, X, theta, zenodo_dir_sim, ML_model)
 
-        # Load empirical data
-        emp_data = load_empirical_data(zenodo_dir_emp)
+        # Empirical data as the *old* schema, but parsed via your parser
+        df_emp = load_empirical_data(zenodo_dir_emp)
 
-        # Compute features from empirical data
-        emp_data = compute_features_empirical_data(method, emp_data)
+        # Features
+        emp_data = compute_features_empirical_data(method, df_emp)
 
-        # Compute predictions from the empirical data
+        # Predictions
         emp_data = compute_predictions_empirical_data(emp_data, inference)
 
-        # Save the data including predictions of all parameters and of (E/I)_net
+        # Save
         save_data(emp_data, method)
