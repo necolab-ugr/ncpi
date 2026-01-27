@@ -46,7 +46,7 @@ simulation = [
 
 utils = [
     "h5py",
-    "pathos",
+#    "pathos",
     "tqdm",
     "requests"]
 
