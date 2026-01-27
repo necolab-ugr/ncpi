@@ -27,7 +27,7 @@ dependencies = [
     "sbi==0.24.0",
     "torch",
     "pycatch22",
-    "fooof",
+    "specparam",
     "numpy",
     "pandas",
     "scipy",
