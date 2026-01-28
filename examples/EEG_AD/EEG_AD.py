@@ -138,7 +138,10 @@ def feature_extraction(method: str, df: pd.DataFrame) -> pd.DataFrame:
             "fs": float(df["fs"].iloc[0]),
             "freq_range": (5.0, 45.0),
             "specparam_model": dict(fooof_setup_emp),
-            "r_squared_th": 0.9,
+            "metric_thresholds": {
+                "gof_rsquared": 0.9
+            },
+            "metric_policy": "reject"
         }
 
         features = ncpi.Features(method="specparam", params=params)

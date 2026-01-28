@@ -179,7 +179,6 @@ class Features:
 
         return result['values']
 
-
     def specparam(
             self,
             sample=None,
@@ -192,6 +191,8 @@ class Features:
             model_kwargs=None,
             select_peak=None,
             debug=None,
+            metric_thresholds=None,
+            metric_policy=None,
     ):
         """
         Parameterize a power spectrum using specparam.SpectralModel.
@@ -203,10 +204,11 @@ class Features:
         Parameter precedence:
           explicit argument > self.params[...] > internal default
 
-        Returns
-        -------
-        out : dict
-            Dictionary with aperiodic parameters, selected peak parameters, plus fit metrics.
+        Metric thresholding:
+          - metric_thresholds: dict like {"gof_rsquared": 0.9}
+          - metric_policy: {"reject", "flag"} (default: "reject")
+            * reject -> return NaNs and valid=False
+            * flag   -> keep results but set valid=False
         """
 
         # -------------------------
@@ -221,6 +223,26 @@ class Features:
         freqs = self._resolve_param("freqs", freqs, None)
         power_spectrum = self._resolve_param("power_spectrum", power_spectrum, None)
 
+        # Correct resolution of metric_thresholds / metric_policy
+        metric_thresholds = self._resolve_param("metric_thresholds", metric_thresholds, None)
+        metric_policy = self._resolve_param("metric_policy", metric_policy, "reject")
+
+        # Validate metric_policy
+        if metric_policy not in {"reject", "flag"}:
+            raise ValueError("metric_policy must be one of {'reject', 'flag'}")
+
+        # Validate metric_thresholds
+        if metric_thresholds is not None:
+            if not isinstance(metric_thresholds, dict):
+                raise ValueError("metric_thresholds must be a dict like {'gof_rsquared': 0.9}")
+            for k, v in metric_thresholds.items():
+                if not isinstance(k, str):
+                    raise ValueError("metric_thresholds keys must be metric names (str).")
+                try:
+                    metric_thresholds[k] = float(v)
+                except Exception as e:
+                    raise ValueError(f"metric_thresholds['{k}'] must be numeric.") from e
+
         # -------------------------
         # Validate mutually exclusive inputs
         # -------------------------
@@ -229,13 +251,9 @@ class Features:
         has_psd = power_spectrum is not None
 
         if has_ts:
-            # If using time-series mode, PSD inputs must NOT be provided
             if has_freqs or has_psd:
-                raise ValueError(
-                    "Pass either `sample` (+ `fs`) OR (`freqs` and `power_spectrum`), not both."
-                )
+                raise ValueError("Pass either `sample` (+ `fs`) OR (`freqs` and `power_spectrum`), not both.")
         else:
-            # If not using time-series mode, require BOTH PSD inputs
             if not (has_freqs and has_psd):
                 missing = []
                 if not has_freqs:
@@ -259,17 +277,14 @@ class Features:
                 raise ValueError("`sample` must be a 1D array.")
 
             wkw = {} if welch_kwargs is None else dict(welch_kwargs)
-            # Default to 0.5 s segments if not provided
             nperseg = int(0.5 * float(fs))
             nperseg = max(1, min(nperseg, x.shape[0]))
             wkw.setdefault("nperseg", nperseg)
 
             freqs, power_spectrum = scipy_signal.welch(x, fs=float(fs), **wkw)
-
         else:
             freqs = np.asarray(freqs).squeeze()
             power_spectrum = np.asarray(power_spectrum).squeeze()
-
             if freqs.ndim != 1 or power_spectrum.ndim != 1:
                 raise ValueError("`freqs` and `power_spectrum` must be 1D arrays.")
             if freqs.shape[0] != power_spectrum.shape[0]:
@@ -279,15 +294,13 @@ class Features:
         m = np.isfinite(freqs) & np.isfinite(power_spectrum) & (freqs > 0) & (power_spectrum > 0)
         freqs = freqs[m]
         power_spectrum = power_spectrum[m]
-
         if freqs.size < 5:
             raise ValueError("Not enough valid frequency points to fit.")
 
-        # Ensure freq_range is sane and clipped to available freqs (avoids fit edge issues)
+        # Clip freq_range to support
         fmin, fmax = map(float, freq_range)
         if fmin >= fmax:
             raise ValueError("`freq_range` must be (fmin, fmax) with fmin < fmax.")
-        # Clip to the PSD support
         fmin = max(fmin, float(np.min(freqs)))
         fmax = min(fmax, float(np.max(freqs)))
         if fmin >= fmax:
@@ -316,7 +329,6 @@ class Features:
             if debug:
                 print("Warning: could not extract aperiodic parameters from specparam results container.")
             aperiodic_params = np.array([np.nan, np.nan], dtype=float)
-
         aperiodic_params = np.atleast_1d(aperiodic_params).astype(float)
 
         # -------------------------
@@ -353,17 +365,14 @@ class Features:
 
             if select_peak == "all":
                 all_peaks = peaks
-
             elif select_peak == "max_pw":
                 idx = int(np.nanargmax(pws))
                 selected_peaks = peaks[idx:idx + 1]
-
             elif select_peak == "max_cf_in_range":
                 mask = (cfs >= fmin) & (cfs <= fmax)
                 if np.any(mask):
                     idx = int(np.nanargmax(cfs[mask]))
                     selected_peaks = peaks[mask][idx:idx + 1]
-
             else:
                 raise ValueError("select_peak must be one of {'all', 'max_pw', 'max_cf_in_range'}")
 
@@ -373,13 +382,47 @@ class Features:
         # -------------------------
         # Fit metrics
         # -------------------------
-        metrics = base_model_kwargs.get("metrics", None)
         metric_values = fm.results.metrics.results
 
-        if metrics:
-            metrics_out = {m: float(metric_values.get(m, np.nan)) for m in metrics}
+        # Choose which metrics to output:
+        # - if user set SpectralModel(metrics=[...]) inside specparam_model, try to mirror those
+        requested_metrics = base_model_kwargs.get("metrics", None)
+        if requested_metrics:
+            metrics_out = {m: float(metric_values.get(m, np.nan)) for m in requested_metrics}
         else:
             metrics_out = {"gof_rsquared": float(metric_values.get("gof_rsquared", np.nan))}
+
+        # -------------------------
+        # Metric thresholding (optional)
+        # -------------------------
+        valid_flag = True
+        threshold_checked = {}
+
+        if metric_thresholds:
+            for name, th in metric_thresholds.items():
+                val = float(metric_values.get(name, np.nan))
+                threshold_checked[name] = val
+                if (not np.isfinite(val)) or (val < th):
+                    valid_flag = False
+
+            if (not valid_flag) and (metric_policy == "reject"):
+                out = {
+                    "aperiodic_params": np.array([np.nan, np.nan]),
+                    "peak_cf": np.nan,
+                    "peak_pw": np.nan,
+                    "peak_bw": np.nan,
+                    "n_peaks": 0,
+                    "selected_peaks": np.empty((0, 3)),
+                    "all_peaks": np.empty((0, 3)),
+                    "metrics": metrics_out,
+                    "valid": False,
+                    "thresholds": dict(metric_thresholds),
+                    "threshold_values": threshold_checked,
+                }
+                if debug:
+                    import pprint
+                    pprint.pprint(out, sort_dicts=False)
+                return out
 
         # -------------------------
         # Output
@@ -393,7 +436,13 @@ class Features:
             "selected_peaks": selected_peaks,
             "all_peaks": all_peaks,
             "metrics": metrics_out,
+            "valid": bool(valid_flag),
         }
+
+        # Include threshold info when used (helps debugging downstream)
+        if metric_thresholds:
+            out["thresholds"] = dict(metric_thresholds)
+            out["threshold_values"] = threshold_checked
 
         if debug:
             import pprint
