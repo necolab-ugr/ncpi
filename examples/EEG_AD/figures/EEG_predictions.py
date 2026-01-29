@@ -130,28 +130,28 @@ if __name__ == "__main__":
             analysis = ncpi.Analysis(data)
             if statistical_analysis == 'lmer':
                 stat_results = analysis.lmer(control_group='HC', data_col='Predictions', data_index=var,
-                                        other_col=['ID', 'Group', 'Epoch', 'Sensor'],
+                                        other_col=['subject_id', 'group', 'epoch', 'sensor'],
                                         models={
-                                            'mod00': 'Y ~ Group * Sensor + (1 | ID)',
-                                            'mod01': 'Y ~ Group * Sensor',
-                                            'mod02': 'Y ~ Group + Sensor + (1 | ID)',
-                                            'mod03': 'Y ~ Group + Sensor',
+                                            'mod00': 'Y ~ group * sensor + (1 | subject_id)',
+                                            'mod01': 'Y ~ group * sensor',
+                                            'mod02': 'Y ~ group + sensor + (1 | subject_id)',
+                                            'mod03': 'Y ~ group + sensor',
                                         },
                                         bic_models=["mod00", "mod01"],
                                         anova_tests={
                                             'test1': ["mod00", "mod01"],
                                             'test2': ["mod02", "mod03"],
                                         },
-                                        specs='~Group | Sensor')
+                                        specs='~group | sensor')
             elif statistical_analysis == 'cohen':
                 stat_results = analysis.cohend(control_group='HC', data_col='Predictions', data_index=var)
             
             data_stat = []
             # Extract sensor names
-            empirical_sensors = data['Sensor'].unique()
+            empirical_sensors = data['sensor'].unique()
             for elec in range(19):
                 # Find position of the electrode in the stat results
-                pos_results = np.where(stat_results[f'{group}vsHC']['Sensor'] == empirical_sensors[elec])[0]
+                pos_results = np.where(stat_results[f'{group}vsHC']['sensor'] == empirical_sensors[elec])[0]
                 
                 if len(pos_results) > 0:
                     if statistical_analysis == 'lmer':

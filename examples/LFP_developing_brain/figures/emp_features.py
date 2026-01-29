@@ -44,9 +44,9 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
     # Load empirical data
     try:
         data_EI = np.load(os.path.join(pred_results, method, 'emp_data_reduced.pkl'), allow_pickle=True)
-        ages[method] = np.array(data_EI['Group'].tolist())
+        ages[method] = np.array(data_EI['group'].tolist())
         # Pick only ages >= 4
-        data_EI = data_EI[data_EI['Group'] >= 4]
+        data_EI = data_EI[data_EI['group'] >= 4]
         ages[method] = ages[method][ages[method] >= 4]
     except:
         raise RuntimeError(f'Error loading empirical data for {method}. Execution stopped.')

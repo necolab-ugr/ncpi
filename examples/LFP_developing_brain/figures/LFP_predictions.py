@@ -43,10 +43,10 @@ for method in all_methods:
     try:
         data_EI = np.load(os.path.join(pred_results,method,'emp_data_reduced.pkl'), allow_pickle=True)
         data_all = np.load(os.path.join(pred_results,method,'emp_data_all.pkl'), allow_pickle=True)
-        all_IDs[method] = np.array(data_all['ID'].tolist())
+        all_IDs[method] = np.array(data_all['subject_id'].tolist())
         predictions_EI[method] = np.array(data_EI['Predictions'].tolist())
         predictions_all[method] = np.array(data_all['Predictions'].tolist())
-        ages[method] = np.array(data_EI['Group'].tolist())
+        ages[method] = np.array(data_EI['group'].tolist())
 
         # Pick only ages >= 4
         all_IDs[method] = all_IDs[method][ages[method] >= 4]

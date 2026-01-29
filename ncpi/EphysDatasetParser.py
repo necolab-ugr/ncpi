@@ -1,49 +1,60 @@
-# Copy/paste from the attached file if you prefer.
-# File: EphysDatasetParser_fixed.py
-
 from __future__ import annotations
-
-import re
-import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Literal, Optional, Sequence, Tuple, Union
-
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union, Literal, Tuple
 import numpy as np
-import pandas as pd
 from ncpi import tools
 
-# Optional deps (used if installed)
-try:
-    import mne  # type: ignore
-except Exception:
-    mne = None
 
-try:
-    import scipy.io  # type: ignore
-except Exception:
-    scipy = None
-
-
+# ---- Type aliases ---------------------------------------------------------
+# Type of neural recording modality
 RecordingType = Literal["EEG", "MEG", "ECoG", "LFP", "Unknown"]
-DataKind = Literal["raw", "epochs", "time_series"]
 
-# How to aggregate multi-sensor recordings into a single trace.
+# Representation/state of the data being parsed
+# - raw: continuous unsegmented data (e.g., raw MNE objects, time series or power spectra)
+# - epochs: segmented trials or events
+DataKind = Literal["raw", "epochs"]
+
+# Method used when aggregating data across dimensions
+# (e.g., across trials, channels, or time windows)
 AggregateMethod = Literal["sum", "mean", "median"]
 
+# Domain/representation of the stored signal in `data`.
+# - time: samples over time (typical raw/epochs time series)
+# - frequency: spectral representation (e.g., power/PSD over frequency)
+DataDomain = Literal["time", "frequency"]
+
+# If `data_domain` is frequency, you may also provide explicit frequency axis info.
+# This is intentionally flexible because different sources may store spectra differently
+# (e.g., linear power, log-power, complex FFT, etc.).
+SpectralKind = Literal["psd", "amplitude", "fft", "unknown"]
+
+
+# ---- Default column schema -----------------------------------------------
+# Canonical column names expected in the parsed output.
+# This acts as a contract between the parser and downstream consumers
+# (e.g., analysis code, DataFrames, or storage layers).
 DEFAULT_COLUMNS = [
-    "subject_id",
-    "species",
-    "group",
-    "condition",
-    "epoch",
-    "sensor",
-    "recording_type",
-    "fs",
-    "data",
-    "t0",
-    "t1",
-    "source_file",
+    "subject_id",      # Unique identifier for the subject/animal
+    "species",         # Species of the subject (e.g., human, mouse)
+    "group",           # Experimental or cohort grouping (e.g., control, treatment)
+    "condition",       # Experimental condition (e.g., rest, task)
+    "epoch",           # Epoch or trial identifier
+    "sensor",          # Sensor / channel name or index
+    "recording_type",  # Modality of recording (see RecordingType)
+    "fs",              # Sampling frequency (Hz)
+    "data",            # The actual signal data (array-like or serialized)
+    "t0",              # Start time of the data segment
+    "t1",              # End time of the data segment
+
+    # Optional frequency-domain metadata
+    "data_domain",     # "time" for time-series; "frequency" for spectral data
+    "f0",              # Start frequency (Hz) if data_domain == "frequency"
+    "f1",              # End frequency (Hz) if data_domain == "frequency"
+    "spectral_kind",   # Kind of spectral data (psd/amplitude/fft/unknown) if data_domain == "frequency"
+
+    "source_file",     # Originating file path or identifier
 ]
 
 
@@ -57,7 +68,7 @@ def _require_mne(context: str = "") -> None:
 
 
 def _require_scipy(context: str = "") -> None:
-    if scipy is None:
+    if not tools.ensure_module("scipy"):
         msg = "scipy is required"
         if context:
             msg += f" for {context}"
@@ -65,892 +76,907 @@ def _require_scipy(context: str = "") -> None:
         raise ImportError(msg)
 
 
+# ---- Locators -------------------------------------------------------------
+# Locator grammar (recommended):
+# - "__self__" -> use the input object itself
+# - "a.b.c"    -> nested dict keys OR nested object attributes
+# - "get_data" -> if resolves to a callable attribute, the parser may call it (implementation choice)
+# - callable   -> escape hatch for complex sources (e.g., JSON lists, HDF5 trees)
+# - scalar     -> literal value (e.g., fs=1000.0)
+# - sequence   -> either literal (e.g., ch_names=["Fz","Cz"]) OR tokenized path (e.g., ("a", 0, "b"))
+Scalar = Union[str, int, float, bool]
+Locator = Union[
+    str,
+    Callable[[Any], Any],
+    Scalar,
+    Sequence[Any],
+]
+
+
+@dataclass(frozen=True)
+class CanonicalFields:
+    """
+    User-specified mapping that tells the parser where to find each canonical piece.
+
+    The parser should interpret locators depending on the input type:
+      - MNE objects: dotted attribute paths (e.g., "info.sfreq", "ch_names", "get_data")
+      - dict-like: keys (including nested via dotted path)
+      - pandas/parquet/csv: column names for time, and channel columns / long columns
+      - numpy arrays: usually data is the array itself ("__self__"), fs is literal or sidecar/callable
+      - JSON/HDF5/etc: often best handled via dotted keys or a callable locator for complex layouts
+    """
+
+    # Required (in practice data is always required)
+    # Common patterns:
+    #   - dict-like: "data" or "signal"
+    #   - numpy array: "__self__"
+    #   - MNE raw/epochs: "get_data" (if your resolver calls it) or callable lambda obj: obj.get_data()
+    data: Locator = "data"
+
+    # Optional but strongly recommended
+    fs: Optional[Locator] = None
+
+    # Optional channel information
+    ch_names: Optional[Locator] = None
+
+    # Optional time information (if present explicitly)
+    time: Optional[Locator] = None
+
+    # Optional: declare the domain of `data` ("time" vs "frequency").
+    # If not provided, parsers should assume time-domain signals.
+    data_domain: Optional[Locator] = None  # resolves to DataDomain
+
+    # Optional spectral axis information (only relevant when data_domain == "frequency")
+    freqs: Optional[Locator] = None          # array of frequencies (Hz), if available
+    spectral_kind: Optional[Locator] = None  # resolves to SpectralKind
+
+    # Optional epoching hints / fields (if the input already contains epochs)
+    epoch: Optional[Locator] = None
+
+    # Optional metadata mapping (subject_id, condition, etc.)
+    # Each entry is a locator like above.
+    metadata: Mapping[str, Locator] = field(default_factory=dict)
+
+    # Optional: for tabular containers (pandas/parquet/csv) specify how to interpret columns
+    # - wide: channels are columns (one row per time sample)
+    # - long: columns include [time, channel, value] (one row per channel-time observation)
+    table_layout: Optional[Literal["wide", "long"]] = None
+
+    # If wide layout, specify which columns are channels (else infer by exclusion)
+    # Note: in wide layout, channel column names often *are* the channel names, but you may also
+    # set ch_names separately if you want different output labels.
+    channel_columns: Optional[Sequence[str]] = None
+
+    # If long layout, define column names
+    long_channel_col: Optional[str] = None
+    long_value_col: Optional[str] = None
+    long_time_col: Optional[str] = None
+
+
 @dataclass
 class ParseConfig:
-    # Epoching
+    """Configuration for parsing neural data from MNE and non-MNE sources.
+
+    This configuration is explicit: the user specifies where each canonical field
+    (data, fs, channel names, time, etc.) can be found via `fields`.
+
+    Epoching, MNE load options, and post-processing are controlled here as well.
+    """
+
+    # How to extract canonical fields (data, fs, ch_names, time, domain, etc.)
+    fields: CanonicalFields = field(default_factory=CanonicalFields)
+
+    # If the user wants to epoch continuous data after extraction
     epoch_length_s: Optional[float] = None
     epoch_step_s: Optional[float] = None
 
-    # MNE options
+    # MNE-specific operational options (only used if input is MNE or you load with MNE)
     preload: bool = True
     pick_types: Optional[Dict[str, bool]] = None
     max_seconds: Optional[float] = None
     drop_bads: bool = True
-
-    # Warnings
-    warn_unimplemented: bool = True
-
-    # .mat heuristics
-    mat_signal_key_patterns: Sequence[str] = (
-        r"\bsignal\b",
-        r"\bdata\b",
-        r"\beeg\b",
-        r"\blfp\b",
-        r"\bmeg\b",
-        r"\becog\b",
-        r"\bseeg\b",
-        r"\bts\b",
-        r"time[_\- ]?series",
-    )
-    mat_fs_key_patterns: Sequence[str] = (
-        r"\bfs\b",
-        r"\bsfreq\b",
-        r"\bsrate\b",
-        r"sampling[_\- ]?rate",
-        r"\bhz\b",
-    )
-    mat_channel_key_patterns: Sequence[str] = (
-        r"\bchannels?\b",
-        r"\bch_names\b",
-        r"\belectrodes?\b",
-        r"\bsensors?\b",
-        r"\blabels?\b",
-    )
-    mat_prefer_times_by_channels: bool = True
-
-    # .csv heuristics
-    csv_time_column_candidates: Sequence[str] = ("time", "t", "timestamp", "seconds", "sec")
-
-    # Fallback fs
-    default_fs: Optional[float] = None
 
     # ---------------------------
     # Post-processing
     # ---------------------------
     zscore: bool = False
 
-    aggregate_sensors: bool = False
+    # Aggregation: aggregate over one or more categorical columns.
+    # Examples:
+    #   aggregate_over=("sensor",)            -> collapse sensors
+    #   aggregate_over=("group",)             -> collapse groups
+    #   aggregate_over=("sensor", "group")    -> collapse both
+    aggregate_over: Optional[Sequence[str]] = None
     aggregate_method: AggregateMethod = "sum"
-    aggregate_sensor_label: str = "aggregate"
 
+    # Replacement labels for aggregated columns, e.g. {"sensor": "aggregate", "group": "all_groups"}
+    aggregate_labels: Mapping[str, str] = field(default_factory=lambda: {"sensor": "aggregate"})
+
+    # Behavior
+    warn_unimplemented: bool = True
+
+
+# ---------------------------
+# Parser implementation
+# ---------------------------
 
 class EphysDatasetParser:
-    def __init__(
-        self,
-        columns: Sequence[str] = DEFAULT_COLUMNS,
-        config: Optional[ParseConfig] = None,
-    ) -> None:
-        self.columns = list(columns)
+    """
+    Minimal-but-functional parser that complements ParseConfig/CanonicalFields.
+
+    Supported inputs:
+      - MNE Raw/Epochs objects (if mne installed)
+      - numpy arrays (ndarray)
+      - dict-like (including scipy.io.loadmat output, json-loaded dict)
+      - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
+      - .npy, .json, .mat paths
+
+    Output:
+      - pandas DataFrame with DEFAULT_COLUMNS
+      - one row per (epoch, sensor) with `data` stored as a 1D numpy array
+        (time-domain or frequency-domain)
+    """
+
+    def __init__(self, config: Optional[ParseConfig] = None):
         self.config = config or ParseConfig()
 
-        self._mne_raw_exts = {
-            ".fif",
-            ".edf",
-            ".bdf",
-            ".vhdr",
-            ".set",
-            ".cnt",
-            ".mff",
-            ".ds",
-            ".sqd", ".con",
-        }
-        self._mne_epochs_exts = {".fif"}
+    # -------------------------
+    # Public API
+    # -------------------------
 
-        self._mat_exts = {".mat"}
-        self._csv_exts = {".csv", ".tsv", ".txt"}
+    def parse(self, source: Union[str, Path, Any]) -> "Any":
+        """
+        Parse a source (path or in-memory object) into a pandas DataFrame
+        with DEFAULT_COLUMNS.
+        """
+        obj, source_file = self._load_source(source)
 
-    def parse(
-        self,
-        paths: Union[str, Path, Sequence[Union[str, Path]]],
-        *,
-        subject_id: Union[str, int] = "unknown",
-        species: str = "unknown",
-        group: str = "unknown",
-        condition: str = "unknown",
-        recording_type: RecordingType = "Unknown",
-        data_kind: DataKind = "raw",
-        metadata: Optional[Dict[str, Any]] = None,
-    ) -> pd.DataFrame:
-        files = self._gather_files(paths)
-        rows: List[Dict[str, Any]] = []
+        # 1) Parse raw rows (one row per sensor / epoch)
+        rows = self._parse_object(obj, source_file=source_file)
+        df = self._rows_to_df(rows)
 
-        base_meta = dict(
-            subject_id=subject_id,
-            species=species,
-            group=group,
-            condition=condition,
-            recording_type=recording_type,
-        )
-        if metadata:
-            base_meta.update(metadata)
+        # 2) Optional z-scoring (sensor-wise, pre-aggregation)
+        if self.config.zscore:
+            df = self._apply_zscore(df)
 
-        for f in files:
+        # 3) Aggregate FIRST (e.g. collapse sensors)
+        if self.config.aggregate_over:
+            df = self._apply_aggregation(df)
+
+        # 4) Epoch LAST (temporal operation)
+        if self.config.epoch_length_s is not None:
+            rows = df.to_dict("records")
+            rows = self._apply_epoching_rows(rows)
+            df = self._rows_to_df(rows)
+
+        return df
+
+    # -------------------------
+    # Loading
+    # -------------------------
+
+    def _load_source(self, source: Union[str, Path, Any]) -> Tuple[Any, Optional[str]]:
+        if isinstance(source, (str, Path)):
+            path = Path(source)
+            suffix = path.suffix.lower()
+            source_file = str(path)
+
+            if suffix == ".npy":
+                return np.load(path), source_file
+
+            if suffix == ".json":
+                with path.open("r", encoding="utf-8") as f:
+                    return json.load(f), source_file
+
+            if suffix == ".mat":
+                _require_scipy("MATLAB .mat loading")
+                import scipy.io as sio  # type: ignore
+
+                # squeeze_me helps reduce MATLAB scalars/arrays to python scalars/1D arrays
+                return sio.loadmat(path, squeeze_me=True, struct_as_record=False), source_file
+
+            if suffix in (".csv", ".parquet"):
+                if not tools.ensure_module("pandas"):
+                    raise ImportError("pandas is required to load tabular files (.csv/.parquet).")
+                import pandas as pd  # type: ignore
+
+                if suffix == ".csv":
+                    return pd.read_csv(path), source_file
+                else:
+                    return pd.read_parquet(path), source_file
+
+            raise ValueError(f"Unsupported file type: {suffix}")
+
+        # in-memory object
+        return source, None
+
+    # -------------------------
+    # Locators / resolving
+    # -------------------------
+
+    def _resolve(self, obj: Any, locator: Optional[Locator]) -> Any:
+        if locator is None:
+            return None
+
+        # Callable locator: escape hatch for complex sources
+        if callable(locator):
+            return locator(obj)
+
+        # Tokenized path: ("a", 0, "b") -> obj["a"][0]["b"] / getattr / index
+        # Treat sequences as literal values (e.g., ch_names=["Fz","Cz"], freqs=[...]).
+        # If you want tokenized paths, use a callable locator.
+        if isinstance(locator, (list, tuple)):
+            return locator
+
+        # Scalar literal
+        if isinstance(locator, (int, float, bool)):
+            return locator
+
+        # String locator
+        if isinstance(locator, str):
+            if locator == "__self__":
+                return obj
+
+            # dotted path
+            parts = locator.split(".")
+            cur = obj
+            for p in parts:
+                cur = self._step(cur, p)
+
+            # If final resolves to a zero-arg callable attribute and locator looked like a method name,
+            # we DO NOT auto-call here by default; user can provide lambda if desired.
+            return cur
+
+        return locator
+
+    def _step(self, cur: Any, key: Union[str, int]) -> Any:
+        # pandas DataFrame: treat string keys as column names if present
+        if tools.ensure_module("pandas"):
+            import pandas as pd  # type: ignore
+            if isinstance(cur, pd.DataFrame) and isinstance(key, str) and key in cur.columns:
+                return cur[key]
+
+        # dict-like
+        if isinstance(cur, dict) and key in cur:
+            return cur[key]
+
+        # list/tuple indexing
+        if isinstance(key, int) and isinstance(cur, (list, tuple)):
+            return cur[key]
+
+        # attribute access
+        if isinstance(key, str) and hasattr(cur, key):
+            return getattr(cur, key)
+
+        # dict-like but key might be present as string for MATLAB objects
+        if isinstance(cur, dict) and isinstance(key, str):
+            # try common variations
+            if key in cur:
+                return cur[key]
+            if key.encode() in cur:  # rare
+                return cur[key.encode()]
+
+        raise KeyError(f"Cannot resolve step '{key}' on object of type {type(cur)!r}")
+
+    # -------------------------
+    # Parsing for different object types
+    # -------------------------
+
+    def _parse_object(self, obj: Any, source_file: Optional[str]) -> list[dict]:
+        # pandas DataFrame
+        if tools.ensure_module("pandas"):
+            import pandas as pd  # type: ignore
+
+            if isinstance(obj, pd.DataFrame):
+                return self._parse_dataframe(obj, source_file)
+
+        # MNE objects
+        if tools.ensure_module("mne"):
+            import mne  # type: ignore
+
+            if isinstance(obj, mne.io.BaseRaw):
+                return self._parse_mne_raw(obj, source_file)
+            if isinstance(obj, mne.Epochs):
+                return self._parse_mne_epochs(obj, source_file)
+
+        # dict-like
+        if isinstance(obj, dict):
+            return self._parse_dict_like(obj, source_file)
+
+        # numpy array
+        if isinstance(obj, np.ndarray):
+            return self._parse_ndarray(obj, source_file)
+
+        raise TypeError(f"Unsupported input object type: {type(obj)!r}")
+
+    # ---- DataFrame (wide/long) ----
+
+    def _parse_dataframe(self, df: "Any", source_file: Optional[str]) -> list[dict]:
+        f = self.config.fields
+
+        layout = f.table_layout
+        if layout not in ("wide", "long"):
+            raise ValueError("For pandas inputs, CanonicalFields.table_layout must be 'wide' or 'long'.")
+
+        common_meta = self._resolve_metadata(df)
+
+        fs = self._resolve(df, f.fs)
+        fs = float(fs) if fs is not None else None
+
+        data_domain = self._resolve(df, f.data_domain) or "time"
+        spectral_kind = self._resolve(df, f.spectral_kind)
+        freqs = self._resolve(df, f.freqs)
+
+        if layout == "wide":
+            time_col = f.time if isinstance(f.time, str) else None
+            times = df[time_col].to_numpy() if time_col and time_col in df.columns else None
+
+            channel_cols = list(f.channel_columns) if f.channel_columns is not None else None
+            if channel_cols is None:
+                # infer: all numeric columns excluding time + any metadata columns explicitly referenced
+                exclude = set()
+                if time_col:
+                    exclude.add(time_col)
+                for loc in self.config.fields.metadata.values():
+                    if isinstance(loc, str) and loc in df.columns:
+                        exclude.add(loc)
+
+                channel_cols = [c for c in df.columns if c not in exclude and np.issubdtype(df[c].dtype, np.number)]
+
+            # channel labels
+            ch_names = self._resolve(df, f.ch_names)
+            if isinstance(ch_names, (list, tuple)) and not isinstance(ch_names, str):
+                labels = list(ch_names)
+                if len(labels) != len(channel_cols):
+                    raise ValueError("Length of ch_names does not match number of channel_columns.")
+            else:
+                labels = list(channel_cols)
+
+            # Build one row per channel, store whole vector in `data`
+            rows: list[dict] = []
+            for col, ch in zip(channel_cols, labels):
+                y = df[col].to_numpy()
+                t0, t1 = self._infer_t0_t1(times=times, n=len(y), fs=fs)
+                r = self._base_row(common_meta, source_file)
+                r.update(
+                    sensor=str(ch),
+                    epoch=None,
+                    fs=fs,
+                    data=np.asarray(y),
+                    t0=t0,
+                    t1=t1,
+                    data_domain=data_domain,
+                    spectral_kind=spectral_kind,
+                )
+                if data_domain == "frequency":
+                    f0, f1 = self._infer_f0_f1(freqs=freqs, n=len(y))
+                    r.update(f0=f0, f1=f1)
+                rows.append(r)
+            return rows
+
+        # long layout
+        tcol = f.long_time_col
+        ccol = f.long_channel_col
+        vcol = f.long_value_col
+        if not (tcol and ccol and vcol):
+            raise ValueError("For long layout, long_time_col/long_channel_col/long_value_col must be set.")
+
+        if tcol not in df.columns or ccol not in df.columns or vcol not in df.columns:
+            raise ValueError("Long layout columns not found in DataFrame.")
+
+        rows = []
+        for ch, g in df.groupby(ccol):
+            g2 = g.sort_values(tcol)
+            y = g2[vcol].to_numpy()
+            times = g2[tcol].to_numpy()
+            t0, t1 = self._infer_t0_t1(times=times, n=len(y), fs=fs)
+            r = self._base_row(common_meta, source_file)
+            r.update(
+                sensor=str(ch),
+                epoch=None,
+                fs=fs,
+                data=np.asarray(y),
+                t0=t0,
+                t1=t1,
+                data_domain=data_domain,
+                spectral_kind=spectral_kind,
+            )
+            if data_domain == "frequency":
+                f0, f1 = self._infer_f0_f1(freqs=freqs, n=len(y))
+                r.update(f0=f0, f1=f1)
+            rows.append(r)
+        return rows
+
+    # ---- dict-like (.mat/.json) ----
+
+    def _parse_dict_like(self, d: dict, source_file: Optional[str]) -> list[dict]:
+        f = self.config.fields
+
+        data = self._resolve(d, f.data)
+        fs = self._resolve(d, f.fs)
+        fs = float(np.asarray(fs).item()) if fs is not None and np.asarray(fs).size == 1 else (float(fs) if fs is not None else None)
+
+        data_domain = self._resolve(d, f.data_domain) or "time"
+        spectral_kind = self._resolve(d, f.spectral_kind)
+        freqs = self._resolve(d, f.freqs)
+
+        # epoch label (optional)
+        epoch_val = self._resolve(d, f.epoch)
+
+        # channel names
+        ch_names = self._resolve(d, f.ch_names)
+        if ch_names is not None and not isinstance(ch_names, str):
+            # MATLAB sometimes returns numpy arrays of dtype object
+            if isinstance(ch_names, np.ndarray):
+                ch_names = [str(x) for x in ch_names.tolist()]
+            elif isinstance(ch_names, (list, tuple)):
+                ch_names = [str(x) for x in ch_names]
+
+        meta = self._resolve_metadata(d)
+
+        # data can be:
+        # - 2D: (time, channels) or (channels, time)
+        # - 3D: (epochs, channels, time) or (epochs, time, channels)
+        arr = np.asarray(data)
+
+        if arr.ndim == 1:
+            # single channel
+            labels = [ch_names[0]] if isinstance(ch_names, list) and ch_names else ["ch0"]
+            return [self._row_from_series(meta, labels[0], None, arr, fs, data_domain, freqs, spectral_kind, source_file)]
+
+        if arr.ndim == 2:
+            # Infer orientation:
+            # - If ch_names provided, align to whichever axis matches len(ch_names)
+            # - Else, assume (channels, time) when first dim is smaller than second dim
+            if isinstance(ch_names, list):
+                if len(ch_names) == arr.shape[0]:
+                    time_by_ch = False  # (channels, time)
+                elif len(ch_names) == arr.shape[1]:
+                    time_by_ch = True  # (time, channels)
+                else:
+                    time_by_ch = arr.shape[0] >= arr.shape[1]
+            else:
+                # Common electrophys case: (channels, time)
+                time_by_ch = arr.shape[0] >= arr.shape[1]
+
+            if time_by_ch:
+                n_time, n_ch = arr.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in
+                                                                                                range(n_ch)]
+                rows = []
+                for i, ch in enumerate(labels):
+                    rows.append(
+                        self._row_from_series(meta, ch, epoch_val, arr[:, i], fs, data_domain, freqs, spectral_kind,
+                                              source_file))
+                return rows
+            else:
+                n_ch, n_time = arr.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in
+                                                                                                range(n_ch)]
+                rows = []
+                for i, ch in enumerate(labels):
+                    rows.append(
+                        self._row_from_series(meta, ch, epoch_val, arr[i, :], fs, data_domain, freqs, spectral_kind,
+                                              source_file))
+                return rows
+
+        if arr.ndim == 3:
+            # heuristics: treat first axis as epochs
+            n_ep = arr.shape[0]
+            # remaining could be (channels, time) or (time, channels)
+            rest = arr.shape[1:]
+            # attempt to align ch_names
+            time_by_ch = True
+            if isinstance(ch_names, list):
+                if len(ch_names) == rest[0]:
+                    time_by_ch = False
+                elif len(ch_names) == rest[1]:
+                    time_by_ch = True
+
+            rows = []
+            for e in range(n_ep):
+                ep_arr = arr[e]
+                if time_by_ch:
+                    n_time, n_ch = ep_arr.shape
+                    labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                    for i, ch in enumerate(labels):
+                        rows.append(self._row_from_series(meta, ch, e, ep_arr[:, i], fs, data_domain, freqs, spectral_kind, source_file))
+                else:
+                    n_ch, n_time = ep_arr.shape
+                    labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                    for i, ch in enumerate(labels):
+                        rows.append(self._row_from_series(meta, ch, e, ep_arr[i, :], fs, data_domain, freqs, spectral_kind, source_file))
+            return rows
+
+        raise ValueError(f"Unsupported data ndim for dict-like source: {arr.ndim}")
+
+    # ---- ndarray (.npy in-memory) ----
+
+    def _parse_ndarray(self, arr: np.ndarray, source_file: Optional[str]) -> list[dict]:
+        f = self.config.fields
+        # Resolve from the ndarray itself: allow user to set fs/ch_names as literals
+        fs = self._resolve(arr, f.fs)
+        fs = float(fs) if fs is not None else None
+
+        data_domain = self._resolve(arr, f.data_domain) or "time"
+        spectral_kind = self._resolve(arr, f.spectral_kind)
+        freqs = self._resolve(arr, f.freqs)
+
+        ch_names = self._resolve(arr, f.ch_names)
+        if isinstance(ch_names, (list, tuple)) and not isinstance(ch_names, str):
+            labels = [str(x) for x in ch_names]
+        else:
+            labels = None
+
+        meta = self._resolve_metadata(arr)
+
+        a = np.asarray(arr)
+        if a.ndim == 1:
+            ch = labels[0] if labels else "ch0"
+            return [self._row_from_series(meta, ch, None, a, fs, data_domain, freqs, spectral_kind, source_file)]
+
+        if a.ndim == 2:
+            # assume (time, channels) by default for non-MNE numpy
+            n_time, n_ch = a.shape
+            labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+            return [self._row_from_series(meta, labels2[i], None, a[:, i], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
+
+        if a.ndim == 3:
+            # assume (epochs, time, channels)
+            n_ep, n_time, n_ch = a.shape
+            labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+            rows = []
+            for e in range(n_ep):
+                for i in range(n_ch):
+                    rows.append(self._row_from_series(meta, labels2[i], e, a[e, :, i], fs, data_domain, freqs, spectral_kind, source_file))
+            return rows
+
+        raise ValueError(f"Unsupported ndarray ndim: {a.ndim}")
+
+    # ---- MNE Raw / Epochs ----
+
+    def _parse_mne_raw(self, raw: Any, source_file: Optional[str]) -> list[dict]:
+        _require_mne("MNE parsing")
+        f = self.config.fields
+
+        # optional MNE operations
+        if self.config.drop_bads and hasattr(raw, "drop_channels") and getattr(raw, "info", None) is not None:
+            bads = list(getattr(raw.info, "bads", [])) if hasattr(raw.info, "bads") else raw.info.get("bads", [])
+            if bads:
+                raw = raw.copy().drop_channels(bads)
+
+        if self.config.pick_types:
+            # best-effort pick_types
             try:
-                suf = f.suffix.lower()
-                if data_kind == "epochs" and suf in self._mne_epochs_exts:
-                    rows.extend(self._parse_epochs_file(f, base_meta))
-                    continue
+                raw = raw.copy().pick_types(**self.config.pick_types)
+            except Exception:
+                if self.config.warn_unimplemented:
+                    import warnings
+                    warnings.warn("pick_types could not be applied to this Raw object.")
 
-                if suf in self._mne_raw_exts or (f.is_dir() and suf in {".ds", ".mff"}):
-                    if data_kind in ("raw", "time_series"):
-                        rows.extend(self._parse_raw_file(f, base_meta))
-                    else:
-                        self._warn(f"Unsupported data_kind={data_kind!r} for MNE file {str(f)}")
-                    continue
+        if self.config.max_seconds is not None:
+            try:
+                raw = raw.copy().crop(tmin=0.0, tmax=float(self.config.max_seconds))
+            except Exception:
+                if self.config.warn_unimplemented:
+                    import warnings
+                    warnings.warn("max_seconds crop could not be applied to this Raw object.")
 
-                if suf in self._mat_exts:
-                    rows.extend(self._parse_mat_file(f, base_meta))
-                    continue
-                if suf in self._csv_exts:
-                    rows.extend(self._parse_csv_file(f, base_meta))
-                    continue
+        data = self._resolve(raw, f.data)
+        if callable(data):
+            data = data()
 
-                self._warn_unimplemented(f)
+        arr = np.asarray(data)  # expected (n_channels, n_times)
 
-            except Exception as e:
-                self._warn(f"Failed parsing {str(f)}: {e}")
+        fs = self._resolve(raw, f.fs)
+        fs = float(fs) if fs is not None else float(getattr(raw.info, "sfreq", raw.info.get("sfreq")))
+
+        ch_names = self._resolve(raw, f.ch_names)
+        if isinstance(ch_names, (list, tuple)):
+            labels = [str(x) for x in ch_names]
+        else:
+            labels = list(getattr(raw, "ch_names", []))
+
+        data_domain = self._resolve(raw, f.data_domain) or "time"
+        spectral_kind = self._resolve(raw, f.spectral_kind)
+        freqs = self._resolve(raw, f.freqs)
+
+        meta = self._resolve_metadata(raw)
+
+        rows = []
+        n_ch, n_time = arr.shape
+        for i, ch in enumerate(labels[:n_ch]):
+            y = arr[i, :]
+            t0, t1 = self._infer_t0_t1(times=None, n=len(y), fs=fs)
+            r = self._base_row(meta, source_file)
+            r.update(
+                sensor=str(ch),
+                epoch=None,
+                fs=fs,
+                data=np.asarray(y),
+                t0=t0,
+                t1=t1,
+                data_domain=data_domain,
+                spectral_kind=spectral_kind,
+            )
+            if data_domain == "frequency":
+                f0, f1 = self._infer_f0_f1(freqs=freqs, n=len(y))
+                r.update(f0=f0, f1=f1)
+            rows.append(r)
+        return rows
+
+    def _parse_mne_epochs(self, epochs: Any, source_file: Optional[str]) -> list[dict]:
+        _require_mne("MNE parsing")
+        f = self.config.fields
+
+        data = self._resolve(epochs, f.data)
+        if callable(data):
+            # For MNE Epochs, `get_data` is typically a zero-arg bound method.
+            # If the resolved object is callable, try calling it with no args first.
+            try:
+                data = data()
+            except TypeError:
+                # Fall back to calling with the epochs object for user-supplied callables
+                data = data(epochs)
+
+        arr = np.asarray(data)  # expected (n_epochs, n_channels, n_times)
+
+        fs = self._resolve(epochs, f.fs)
+        fs = float(fs) if fs is not None else float(getattr(epochs.info, "sfreq", epochs.info.get("sfreq")))
+
+        ch_names = self._resolve(epochs, f.ch_names)
+        labels = [str(x) for x in ch_names] if isinstance(ch_names, (list, tuple)) else list(getattr(epochs, "ch_names", []))
+
+        data_domain = self._resolve(epochs, f.data_domain) or "time"
+        spectral_kind = self._resolve(epochs, f.spectral_kind)
+        freqs = self._resolve(epochs, f.freqs)
+
+        meta = self._resolve_metadata(epochs)
+
+        n_ep, n_ch, n_time = arr.shape
+        rows = []
+        for e in range(n_ep):
+            for i, ch in enumerate(labels[:n_ch]):
+                y = arr[e, i, :]
+                t0, t1 = self._infer_t0_t1(times=None, n=len(y), fs=fs)
+                r = self._base_row(meta, source_file)
+                r.update(
+                    sensor=str(ch),
+                    epoch=e,
+                    fs=fs,
+                    data=np.asarray(y),
+                    t0=t0,
+                    t1=t1,
+                    data_domain=data_domain,
+                    spectral_kind=spectral_kind,
+                )
+                if data_domain == "frequency":
+                    f0, f1 = self._infer_f0_f1(freqs=freqs, n=len(y))
+                    r.update(f0=f0, f1=f1)
+                rows.append(r)
+        return rows
+
+
+    # -------------------------
+    # Row construction utilities
+    # -------------------------
+
+    def _resolve_metadata(self, obj: Any) -> dict:
+        out: dict = {}
+        HAS_PANDAS = tools.ensure_module("pandas")
+        if HAS_PANDAS:
+            import pandas as pd  # type: ignore
+
+        for k, loc in self.config.fields.metadata.items():
+            try:
+                v = self._resolve(obj, loc)
+
+                # If metadata resolves to a pandas Series (e.g., df["group"]),
+                # reduce it to a scalar if it's constant across rows.
+                if HAS_PANDAS:
+                    import pandas as pd  # type: ignore
+                    if isinstance(v, pd.Series):
+                        # If constant (including all-NaN), take the first value
+                        if v.nunique(dropna=False) <= 1:
+                            v = v.iloc[0] if len(v) > 0 else None
+                        else:
+                            # Non-constant metadata column: keep as list (or raise, your choice)
+                            v = v.to_list()
+
+                out[k] = v
+            except Exception:
+                out[k] = loc if not callable(loc) else None
+        return out
+
+
+    def _base_row(self, meta: Mapping[str, Any], source_file: Optional[str]) -> dict:
+        row = {c: None for c in DEFAULT_COLUMNS}
+        for k, v in meta.items():
+            if k in row:
+                row[k] = v
+            else:
+                # allow extra metadata without breaking
+                row[k] = v
+        row["source_file"] = source_file
+        return row
+
+    def _row_from_series(
+        self,
+        meta: Mapping[str, Any],
+        sensor: str,
+        epoch: Optional[Any],
+        y: np.ndarray,
+        fs: Optional[float],
+        data_domain: Any,
+        freqs: Any,
+        spectral_kind: Any,
+        source_file: Optional[str],
+    ) -> dict:
+        t0, t1 = self._infer_t0_t1(times=None, n=len(y), fs=fs if data_domain == "time" else None)
+        r = self._base_row(meta, source_file)
+        r.update(
+            sensor=str(sensor),
+            epoch=epoch,
+            fs=fs,
+            data=np.asarray(y),
+            t0=t0 if data_domain == "time" else None,
+            t1=t1 if data_domain == "time" else None,
+            data_domain=data_domain or "time",
+            spectral_kind=spectral_kind,
+        )
+        if (data_domain or "time") == "frequency":
+            f0, f1 = self._infer_f0_f1(freqs=freqs, n=len(y))
+            r.update(f0=f0, f1=f1)
+        return r
+
+    def _infer_t0_t1(self, times: Optional[np.ndarray], n: int, fs: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+        if times is not None and len(times) > 0:
+            return float(times[0]), float(times[-1])
+        if fs is not None and fs > 0 and n > 0:
+            return 0.0, float((n - 1) / fs)
+        return None, None
+
+    def _infer_f0_f1(self, freqs: Any, n: int) -> Tuple[Optional[float], Optional[float]]:
+        if freqs is None:
+            return None, None
+        a = np.asarray(freqs).astype(float)
+        if a.size == 0:
+            return None, None
+        return float(a.min()), float(a.max())
+
+    # -------------------------
+    # Output DF + post-processing
+    # -------------------------
+
+    def _rows_to_df(self, rows: list[dict]) -> "Any":
+        if not tools.ensure_module("pandas"):
+            raise ImportError("pandas is required to return a DataFrame output.")
+        import pandas as pd  # type: ignore
 
         df = pd.DataFrame(rows)
 
-        # ---- Post-processing (optional) ----
-        if not df.empty and self.config.zscore:
-            df = self._zscore_df(df)
-
-        if not df.empty and self.config.aggregate_sensors:
-            df = self._aggregate_sensors_df(df)
-
-        for c in self.columns:
+        # Ensure all default columns exist
+        for c in DEFAULT_COLUMNS:
             if c not in df.columns:
                 df[c] = None
-        df = df[self.columns]
-        return df
 
-    # ---------------------------
-    # Post-processing
-    # ---------------------------
-    def _zscore_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        def _z(x: Any) -> np.ndarray:
-            arr = np.asarray(x, dtype=float)
-            if arr.size == 0:
-                return arr
-            mu = float(np.nanmean(arr))
-            sd = float(np.nanstd(arr))
-            if not np.isfinite(sd) or sd == 0.0:
-                return np.zeros_like(arr, dtype=float)
-            return (arr - mu) / sd
+        # Keep default columns first; allow extras after
+        cols = [c for c in DEFAULT_COLUMNS if c in df.columns] + [c for c in df.columns if c not in DEFAULT_COLUMNS]
+        return df[cols]
 
-        out = df.copy()
-        if "data" in out.columns:
-            out["data"] = out["data"].apply(_z)
-        return out
 
-    def _aggregate_sensors_df(self, df: pd.DataFrame) -> pd.DataFrame:
-        method: AggregateMethod = self.config.aggregate_method
-
-        def _agg_stack(series: pd.Series) -> np.ndarray:
-            arrs = [np.asarray(a, dtype=float).ravel() for a in series.to_list()]
-            if not arrs:
-                return np.asarray([], dtype=float)
-            min_len = min(a.size for a in arrs)
-            if min_len == 0:
-                return np.asarray([], dtype=float)
-            stack = np.vstack([a[:min_len] for a in arrs])
-            if method == "sum":
-                return np.nansum(stack, axis=0)
-            if method == "mean":
-                return np.nanmean(stack, axis=0)
-            if method == "median":
-                return np.nanmedian(stack, axis=0)
-            raise ValueError(f"Unknown aggregate_method: {method!r}")
-
-        group_cols = [c for c in df.columns if c not in ("sensor", "data")]
-        grouped = df.groupby(group_cols, dropna=False, sort=False, as_index=False)
-        out = grouped.agg(data=("data", _agg_stack))
-        out["sensor"] = self.config.aggregate_sensor_label
-        return out
-
-    # ---------------------------
-    # Core parsers (structured via MNE)
-    # ---------------------------
-    def _parse_raw_file(self, file_path: Path, base_meta: Dict[str, Any]) -> List[Dict[str, Any]]:
-        _require_mne("parsing structured MNE electrophysiology files")
-        import mne  # type: ignore
-
-        if not file_path.exists():
-            self._warn(f"Path does not exist: {str(file_path)}")
-            return []
-
-        if not self._is_mne_candidate(file_path):
-            self._warn_unimplemented(file_path)
-            return []
-
-        raw = self._read_raw_mne(file_path, preload=self.config.preload)
-
-        if self.config.drop_bads and raw.info.get("bads"):
-            raw = raw.copy().drop_channels(raw.info["bads"])
-
-        if self.config.pick_types:
-            picks = mne.pick_types(raw.info, **self.config.pick_types)
-            raw = raw.copy().pick(picks)
-
-        fs = float(raw.info["sfreq"])
-        if self.config.max_seconds is not None:
-            max_samp = int(round(self.config.max_seconds * fs))
-            raw = raw.copy().crop(tmin=0.0, tmax=(max_samp - 1) / fs)
-
-        rec_type = base_meta.get("recording_type", "Unknown")
-        if rec_type == "Unknown":
-            rec_type = self._infer_recording_type_from_mne(raw)
-
-        if self.config.epoch_length_s is None:
-            return self._raw_to_rows(raw, fs=fs, base_meta=base_meta, recording_type=rec_type, epoch_index=0)
-        return self._raw_to_fixed_epochs_rows(raw, fs=fs, base_meta=base_meta, recording_type=rec_type)
-
-    def _parse_epochs_file(self, file_path: Path, base_meta: Dict[str, Any]) -> List[Dict[str, Any]]:
-        _require_mne("parsing epochs files")
-        import mne  # type: ignore
-
-        if not file_path.exists():
-            self._warn(f"Path does not exist: {str(file_path)}")
-            return []
-
-        if file_path.suffix.lower() not in self._mne_epochs_exts:
-            self._warn_unimplemented(file_path)
-            return []
-
-        if not re.search(r"(epo|epochs)", file_path.name, flags=re.IGNORECASE):
-            self._warn(f"Attempting read_epochs on FIF that doesn't look like epochs: {file_path.name}")
-
-        epochs = mne.read_epochs(str(file_path), preload=self.config.preload, verbose="ERROR")
-
-        if self.config.drop_bads and epochs.info.get("bads"):
-            epochs = epochs.copy().drop_channels(epochs.info["bads"])
-
-        if self.config.pick_types:
-            picks = mne.pick_types(epochs.info, **self.config.pick_types)
-            epochs = epochs.copy().pick(picks)
-
-        fs = float(epochs.info["sfreq"])
-        rec_type = base_meta.get("recording_type", "Unknown")
-        if rec_type == "Unknown":
-            rec_type = self._infer_recording_type_from_mne(epochs)
-
-        data = epochs.get_data()
-        n_epochs, n_ch, _ = data.shape
-        t0 = float(epochs.times[0])
-        t1 = float(epochs.times[-1])
-
-        rows: List[Dict[str, Any]] = []
-        ch_names = list(epochs.ch_names)
-
-        for ei in range(n_epochs):
-            for ci in range(n_ch):
-                rows.append(
-                    dict(
-                        subject_id=base_meta.get("subject_id"),
-                        species=base_meta.get("species"),
-                        group=base_meta.get("group"),
-                        condition=base_meta.get("condition"),
-                        epoch=int(ei),
-                        sensor=ch_names[ci],
-                        recording_type=rec_type,
-                        fs=fs,
-                        data=np.asarray(data[ei, ci, :], dtype=float),
-                        t0=t0,
-                        t1=t1,
-                        source_file=str(file_path),
-                    )
-                )
-        return rows
-
-    # ---------------------------
-    # Core parsers (unstructured: .mat / .csv)
-    # ---------------------------
-    def _parse_mat_file(self, file_path: Path, base_meta: Dict[str, Any]) -> List[Dict[str, Any]]:
-        _require_scipy("reading MATLAB .mat files")
-        assert scipy is not None
-
-        if not file_path.exists():
-            self._warn(f"Path does not exist: {str(file_path)}")
-            return []
-
-        mat = scipy.io.loadmat(str(file_path), squeeze_me=True, struct_as_record=False)
-        mat = {k: v for k, v in mat.items() if not k.startswith("__")}
-
-        signal, _sig_path = self._mat_find_best_signal(mat)
-        fs, _fs_path = self._mat_find_best_fs(mat)
-        ch_names, _ch_path = self._mat_find_best_channels(mat, n_channels=self._infer_n_channels(signal))
-
-        if fs is None:
-            fs = self.config.default_fs
-        if fs is None:
-            self._warn(
-                f"Could not infer sampling frequency from {file_path.name}; "
-                f"set ParseConfig.default_fs to avoid this warning."
-            )
-            fs = np.nan
-
-        signal = self._normalize_signal_array(signal)
-
-        if signal.ndim == 3:
-            n_epochs, n_ch, _ = signal.shape
-            rows: List[Dict[str, Any]] = []
-            for ei in range(n_epochs):
-                for ci in range(n_ch):
-                    rows.append(
-                        dict(
-                            subject_id=base_meta.get("subject_id"),
-                            species=base_meta.get("species"),
-                            group=base_meta.get("group"),
-                            condition=base_meta.get("condition"),
-                            epoch=int(ei),
-                            sensor=ch_names[ci] if ci < len(ch_names) else f"ch_{ci}",
-                            recording_type=base_meta.get("recording_type", "Unknown"),
-                            fs=float(fs),
-                            data=np.asarray(signal[ei, ci, :], dtype=float),
-                            t0=None,
-                            t1=None,
-                            source_file=str(file_path),
-                        )
-                    )
+    def _apply_epoching_rows(self, rows: list[dict]) -> list[dict]:
+        """Split each time-domain row into fixed-length epochs. Simple sliding window."""
+        L = self.config.epoch_length_s
+        if L is None:
             return rows
 
-        if self.config.epoch_length_s is None:
-            return self._array2d_to_rows(
-                signal,
-                fs=float(fs),
-                base_meta=base_meta,
-                source_file=str(file_path),
-                epoch_index=0,
-                t0=0.0,
-                t1=(signal.shape[1] - 1) / float(fs) if np.isfinite(fs) and signal.shape[1] > 0 else None,
-                ch_names=ch_names,
+        out: list[dict] = []
+        for row in rows:
+            data_domain = row.get("data_domain") or "time"
+            if data_domain != "time":
+                out.append(row)
+                continue
+
+            fs = row.get("fs")
+            x = row.get("data")
+
+            # Need fs and a 1D array to epoch
+            if fs is None or x is None:
+                out.append(row)
+                continue
+
+            x = np.asarray(x)
+            if x.ndim != 1:
+                # your schema assumes each row is a single 1D series; keep as-is
+                out.append(row)
+                continue
+
+            win = int(round(float(L) * float(fs)))
+            if win <= 0 or win > x.shape[0]:
+                out.append(row)
+                continue
+
+            step_s = self.config.epoch_step_s if self.config.epoch_step_s is not None else L
+            step = int(round(float(step_s) * float(fs)))
+            if step <= 0:
+                step = win
+
+            base_epoch = row.get("epoch")
+            is_missing = (
+                    base_epoch is None
+                    or (isinstance(base_epoch, float) and np.isnan(base_epoch))
             )
-        return self._array2d_to_fixed_epochs_rows(
-            signal,
-            fs=float(fs),
-            base_meta=base_meta,
-            source_file=str(file_path),
-            ch_names=ch_names,
-        )
 
-    def _parse_csv_file(self, file_path: Path, base_meta: Dict[str, Any]) -> List[Dict[str, Any]]:
-        if not file_path.exists():
-            self._warn(f"Path does not exist: {str(file_path)}")
-            return []
+            # Use a string epoch id if base_epoch already exists
+            for k, start in enumerate(range(0, x.shape[0] - win + 1, step)):
+                seg = x[start: start + win]
 
-        sep = "," if file_path.suffix.lower() == ".csv" else "\t"
-        try:
-            df = pd.read_csv(file_path, sep=sep)
-        except Exception:
-            df = pd.read_csv(file_path, delim_whitespace=True)
+                r = dict(row)  # shallow copy
+                r["data"] = seg
 
-        time_col = None
-        lower_cols = {c.lower(): c for c in df.columns}
-        for cand in self.config.csv_time_column_candidates:
-            if cand.lower() in lower_cols:
-                time_col = lower_cols[cand.lower()]
-                break
+                # epoch id
+                if is_missing:
+                    r["epoch"] = k
+                else:
+                    r["epoch"] = f"{base_epoch}:{k}"
 
-        fs: Optional[float] = None
-        if time_col is not None:
-            t = pd.to_numeric(df[time_col], errors="coerce").to_numpy()
-            t = t[np.isfinite(t)]
-            if t.size >= 3:
-                dt = np.diff(t)
-                dt = dt[np.isfinite(dt) & (dt > 0)]
-                if dt.size:
-                    fs = float(1.0 / np.median(dt))
+                # time bounds for this epoch
+                r["t0"] = float(start / fs)
+                r["t1"] = float((start + win - 1) / fs)
 
-        if fs is None:
-            fs = self.config.default_fs
+                out.append(r)
 
-        if fs is None:
-            self._warn(
-                f"Could not infer sampling frequency from {file_path.name}; "
-                f"set ParseConfig.default_fs or include a time column to avoid this warning."
-            )
-            fs = np.nan
+        return out
 
-        num_df = df.select_dtypes(include=[np.number]).copy()
-        if time_col is not None and time_col in num_df.columns:
-            num_df = num_df.drop(columns=[time_col])
 
-        if num_df.shape[1] == 0:
-            coerced = df.apply(pd.to_numeric, errors="coerce")
-            if time_col is not None and time_col in coerced.columns:
-                coerced = coerced.drop(columns=[time_col])
-            num_df = coerced.dropna(axis=1, how="all")
-
-        data = num_df.to_numpy()
-        if data.ndim != 2 or data.size == 0:
-            self._warn(f"No numeric signal data found in {file_path.name}")
-            return []
-
-        data = np.asarray(data, dtype=float)
-        data_2d = data.T
-        ch_names = list(num_df.columns) if num_df.shape[1] > 0 else [f"ch_{i}" for i in range(data_2d.shape[0])]
-
-        if self.config.epoch_length_s is None:
-            return self._array2d_to_rows(
-                data_2d,
-                fs=float(fs),
-                base_meta=base_meta,
-                source_file=str(file_path),
-                epoch_index=0,
-                t0=0.0,
-                t1=(data_2d.shape[1] - 1) / float(fs) if np.isfinite(fs) and data_2d.shape[1] > 0 else None,
-                ch_names=ch_names,
-            )
-        return self._array2d_to_fixed_epochs_rows(
-            data_2d,
-            fs=float(fs),
-            base_meta=base_meta,
-            source_file=str(file_path),
-            ch_names=ch_names,
-        )
-
-    # ---------------------------
-    # Helpers: unstructured to tidy rows
-    # ---------------------------
-    def _array2d_to_rows(
-        self,
-        data_2d: np.ndarray,
-        *,
-        fs: float,
-        base_meta: Dict[str, Any],
-        source_file: str,
-        epoch_index: int,
-        t0: Optional[float],
-        t1: Optional[float],
-        ch_names: Sequence[str],
-    ) -> List[Dict[str, Any]]:
-        if data_2d.ndim != 2:
-            raise ValueError(f"Expected 2D array (n_channels, n_times), got shape {data_2d.shape}")
-
-        n_ch, _ = data_2d.shape
-        ch_names = list(ch_names)
-        if len(ch_names) != n_ch:
-            ch_names = (ch_names[:n_ch] + [f"ch_{i}" for i in range(len(ch_names), n_ch)])
-
-        rows: List[Dict[str, Any]] = []
-        for ci in range(n_ch):
-            rows.append(
-                dict(
-                    subject_id=base_meta.get("subject_id"),
-                    species=base_meta.get("species"),
-                    group=base_meta.get("group"),
-                    condition=base_meta.get("condition"),
-                    epoch=int(epoch_index),
-                    sensor=ch_names[ci],
-                    recording_type=base_meta.get("recording_type", "Unknown"),
-                    fs=float(fs),
-                    data=np.asarray(data_2d[ci, :], dtype=float),
-                    t0=t0,
-                    t1=t1,
-                    source_file=source_file,
-                )
-            )
-        return rows
-
-    def _array2d_to_fixed_epochs_rows(
-        self,
-        data_2d: np.ndarray,
-        *,
-        fs: float,
-        base_meta: Dict[str, Any],
-        source_file: str,
-        ch_names: Sequence[str],
-    ) -> List[Dict[str, Any]]:
-        assert self.config.epoch_length_s is not None
-        epoch_len_s = float(self.config.epoch_length_s)
-        step_s = float(self.config.epoch_step_s) if self.config.epoch_step_s is not None else epoch_len_s
-
-        win = int(round(epoch_len_s * fs)) if np.isfinite(fs) else None
-        step = int(round(step_s * fs)) if np.isfinite(fs) else None
-
-        if win is None or step is None or win <= 0 or step <= 0:
-            raise ValueError("Cannot epoch without a finite fs. Provide default_fs or a time column / fs in .mat.")
-
-        _, n_times = data_2d.shape
-        rows: List[Dict[str, Any]] = []
-        start = 0
-        epoch_idx = 0
-        while start + win <= n_times:
-            stop = start + win
-            t0 = start / fs
-            t1 = (stop - 1) / fs
-            snippet = data_2d[:, start:stop]
-            rows.extend(
-                self._array2d_to_rows(
-                    snippet,
-                    fs=fs,
-                    base_meta=base_meta,
-                    source_file=source_file,
-                    epoch_index=epoch_idx,
-                    t0=t0,
-                    t1=t1,
-                    ch_names=ch_names,
-                )
-            )
-            start += step
-            epoch_idx += 1
-        return rows
-
-    # ---------------------------
-    # Raw -> tidy rows helpers (MNE)
-    # ---------------------------
-    def _raw_to_fixed_epochs_rows(
-        self,
-        raw: "mne.io.BaseRaw",
-        *,
-        fs: float,
-        base_meta: Dict[str, Any],
-        recording_type: RecordingType,
-    ) -> List[Dict[str, Any]]:
-        assert self.config.epoch_length_s is not None
-        epoch_len_s = float(self.config.epoch_length_s)
-        step_s = float(self.config.epoch_step_s) if self.config.epoch_step_s is not None else epoch_len_s
-
-        n_total = raw.n_times
-        win = int(round(epoch_len_s * fs))
-        step = int(round(step_s * fs))
-
-        if win <= 0 or step <= 0:
-            raise ValueError("epoch_length_s and epoch_step_s must be > 0")
-
-        rows: List[Dict[str, Any]] = []
-        start = 0
-        epoch_idx = 0
-
-        while start + win <= n_total:
-            stop = start + win
-            t0 = start / fs
-            t1 = (stop - 1) / fs
-            snippet = raw.get_data(start=start, stop=stop)
-            rows.extend(
-                self._array_to_rows(
-                    snippet,
-                    fs=fs,
-                    base_meta=base_meta,
-                    recording_type=recording_type,
-                    epoch_index=epoch_idx,
-                    t0=t0,
-                    t1=t1,
-                    ch_names=list(raw.ch_names),
-                    source_file=str(raw.filenames[0]) if raw.filenames else base_meta.get("source_file", "unknown"),
-                )
-            )
-            start += step
-            epoch_idx += 1
-
-        return rows
-
-    def _raw_to_rows(
-        self,
-        raw: "mne.io.BaseRaw",
-        *,
-        fs: float,
-        base_meta: Dict[str, Any],
-        recording_type: RecordingType,
-        epoch_index: int,
-    ) -> List[Dict[str, Any]]:
-        data = raw.get_data()
-        t0 = 0.0
-        t1 = (raw.n_times - 1) / fs if raw.n_times else None
-        source = str(raw.filenames[0]) if raw.filenames else base_meta.get("source_file", "unknown")
-        return self._array_to_rows(
-            data,
-            fs=fs,
-            base_meta=base_meta,
-            recording_type=recording_type,
-            epoch_index=epoch_index,
-            t0=t0,
-            t1=t1,
-            ch_names=list(raw.ch_names),
-            source_file=source,
-        )
-
-    def _array_to_rows(
-        self,
-        data_2d: np.ndarray,
-        *,
-        fs: float,
-        base_meta: Dict[str, Any],
-        recording_type: RecordingType,
-        epoch_index: int,
-        t0: Optional[float],
-        t1: Optional[float],
-        ch_names: List[str],
-        source_file: str,
-    ) -> List[Dict[str, Any]]:
-        if data_2d.ndim != 2:
-            raise ValueError(f"Expected 2D array (n_channels, n_times), got shape {data_2d.shape}")
-
-        n_ch, _ = data_2d.shape
-        if n_ch != len(ch_names):
-            ch_names = ch_names[:n_ch] + [f"ch_{i}" for i in range(len(ch_names), n_ch)]
-
-        rows: List[Dict[str, Any]] = []
-        for ci in range(n_ch):
-            rows.append(
-                dict(
-                    subject_id=base_meta.get("subject_id"),
-                    species=base_meta.get("species"),
-                    group=base_meta.get("group"),
-                    condition=base_meta.get("condition"),
-                    epoch=int(epoch_index),
-                    sensor=ch_names[ci],
-                    recording_type=recording_type,
-                    fs=float(fs),
-                    data=np.asarray(data_2d[ci, :], dtype=float),
-                    t0=t0,
-                    t1=t1,
-                    source_file=str(source_file),
-                )
-            )
-        return rows
-
-    # ---------------------------
-    # MNE reading + inference
-    # ---------------------------
-    def _read_raw_mne(self, file_path: Path, *, preload: bool) -> "mne.io.BaseRaw":
-        import mne  # type: ignore
-        fp = str(file_path)
-
-        if file_path.suffix.lower() == ".fif":
-            return mne.io.read_raw_fif(fp, preload=preload, verbose="ERROR")
-        if file_path.suffix.lower() == ".vhdr":
-            return mne.io.read_raw_brainvision(fp, preload=preload, verbose="ERROR")
-        if file_path.suffix.lower() in {".edf", ".bdf"}:
-            return mne.io.read_raw_edf(fp, preload=preload, verbose="ERROR")
-        if file_path.suffix.lower() == ".set":
-            return mne.io.read_raw_eeglab(fp, preload=preload, verbose="ERROR")
-
-        if hasattr(mne.io, "read_raw"):
-            return mne.io.read_raw(fp, preload=preload, verbose="ERROR")  # type: ignore[attr-defined]
-
-        raise RuntimeError(f"No suitable MNE raw reader route for: {fp}")
-
-    def _infer_recording_type_from_mne(self, inst: Any) -> RecordingType:
-        if mne is None:
-            return "Unknown"
-        import mne  # type: ignore
-
-        info = inst.info
-        if len(mne.pick_types(info, meg=True, eeg=False, ecog=False, seeg=False, stim=False, misc=False)) > 0:
-            return "MEG"
-        if len(mne.pick_types(info, eeg=True, meg=False, ecog=False, seeg=False, stim=False, misc=False)) > 0:
-            return "EEG"
-        if len(mne.pick_types(info, ecog=True, meg=False, eeg=False, seeg=False, stim=False, misc=False)) > 0:
-            return "ECoG"
-        if len(mne.pick_types(info, seeg=True, meg=False, eeg=False, ecog=False, stim=False, misc=False)) > 0:
-            return "LFP"
-        return "Unknown"
-
-    # ---------------------------
-    # .mat heuristics
-    # ---------------------------
-    def _mat_walk(self, obj: Any, prefix: str = "") -> Iterable[Tuple[str, Any]]:
-        if isinstance(obj, dict):
-            for k, v in obj.items():
-                p = f"{prefix}.{k}" if prefix else str(k)
-                yield p, v
-                yield from self._mat_walk(v, p)
-            return
-
-        if hasattr(obj, "__dict__") and not isinstance(obj, (str, bytes, np.ndarray)):
-            for k, v in vars(obj).items():
-                p = f"{prefix}.{k}" if prefix else str(k)
-                yield p, v
-                yield from self._mat_walk(v, p)
-            return
-
-        if isinstance(obj, np.ndarray):
-            yield prefix, obj
-            if obj.dtype == object:
-                flat = obj.ravel()
-                for i in range(min(flat.size, 50)):
-                    v = flat[i]
-                    p = f"{prefix}[{i}]"
-                    yield p, v
-                    yield from self._mat_walk(v, p)
-            return
-
-        if isinstance(obj, (list, tuple)):
-            for i, v in enumerate(obj):
-                p = f"{prefix}[{i}]"
-                yield p, v
-                yield from self._mat_walk(v, p)
-            return
-
-        yield prefix, obj
-
-    def _mat_key_matches(self, path: str, patterns: Sequence[str]) -> bool:
-        return any(re.search(pat, path, flags=re.IGNORECASE) for pat in patterns)
-
-    def _mat_find_best_signal(self, mat: Dict[str, Any]) -> Tuple[np.ndarray, str]:
-        candidates: List[Tuple[float, str, np.ndarray]] = []
-        for path, v in self._mat_walk(mat):
-            if not isinstance(v, np.ndarray):
-                continue
-            if v.size < 50:
-                continue
-            if not np.issubdtype(v.dtype, np.number):
-                continue
-            if v.ndim not in (1, 2, 3):
-                continue
-
-            score = float(np.log10(v.size + 1))
-            if self._mat_key_matches(path, self.config.mat_signal_key_patterns):
-                score += 2.0
-            if v.ndim == 2:
-                score += 0.5
-            if v.ndim == 3:
-                score += 1.0
-            candidates.append((score, path, v))
-
-        if not candidates:
-            raise ValueError("No numeric signal-like arrays found in .mat file.")
-
-        candidates.sort(key=lambda x: x[0], reverse=True)
-        _, best_path, best_arr = candidates[0]
-        return np.asarray(best_arr), best_path
-
-    def _mat_find_best_fs(self, mat: Dict[str, Any]) -> Tuple[Optional[float], str]:
-        best: Tuple[float, str, float] | None = None
-        for path, v in self._mat_walk(mat):
-            if not self._mat_key_matches(path, self.config.mat_fs_key_patterns):
-                continue
-
-            fs_val: Optional[float] = None
-            if isinstance(v, (int, float, np.number)):
-                fs_val = float(v)
-            elif isinstance(v, np.ndarray) and v.size == 1 and np.issubdtype(v.dtype, np.number):
-                fs_val = float(np.asarray(v).reshape(-1)[0])
-
-            if fs_val is None:
-                continue
-            if not (0.1 <= fs_val <= 50000):
-                continue
-
-            score = 0.0
-            if re.search(r"\b(fs|sfreq|srate)\b", path, flags=re.IGNORECASE):
-                score += 2.0
-            if 10 <= fs_val <= 5000:
-                score += 0.5
-
-            if best is None or score > best[0]:
-                best = (score, path, fs_val)
-
-        if best is None:
-            return None, ""
-        return best[2], best[1]
-
-    def _mat_find_best_channels(self, mat: Dict[str, Any], n_channels: int) -> Tuple[List[str], str]:
-        for path, v in self._mat_walk(mat):
-            if not self._mat_key_matches(path, self.config.mat_channel_key_patterns):
-                continue
-
-            names: List[str] = []
-            if isinstance(v, (list, tuple)) and v and all(isinstance(x, (str, bytes)) for x in v):
-                names = [x.decode() if isinstance(x, bytes) else str(x) for x in v]
-            elif isinstance(v, np.ndarray):
-                if v.dtype.kind in ("U", "S"):
-                    flat = v.ravel().tolist()
-                    names = [x.decode() if isinstance(x, bytes) else str(x) for x in flat]
-                elif v.dtype == object:
-                    flat = v.ravel().tolist()
-                    for x in flat:
-                        if isinstance(x, (str, bytes)):
-                            names.append(x.decode() if isinstance(x, bytes) else str(x))
-
-            if names and (len(names) == n_channels or len(names) >= 1):
-                return names, path
-
-        return [f"ch_{i}" for i in range(n_channels)], ""
-
-    def _infer_n_channels(self, signal: np.ndarray) -> int:
-        if signal.ndim == 1:
-            return 1
-        if signal.ndim == 2:
-            a, b = signal.shape
-            if a <= 512 and b > a:
+    def _apply_zscore(self, df: "Any") -> "Any":
+        # zscore each row's `data` vector independently
+        def z(x):
+            a = np.asarray(x, dtype=float)
+            if a.size == 0:
                 return a
-            if b <= 512 and a > b:
-                return b
-            return b if self.config.mat_prefer_times_by_channels else a
-        if signal.ndim == 3:
-            dims = list(signal.shape)
-            small = [d for d in dims if d <= 512]
-            return int(min(small)) if small else int(min(dims))
-        return 1
+            mu = float(a.mean())
+            sd = float(a.std(ddof=0))
+            if sd == 0.0:
+                return a * 0.0
+            return (a - mu) / sd
 
-    def _normalize_signal_array(self, signal: np.ndarray) -> np.ndarray:
-        sig = np.asarray(signal)
-        if sig.ndim == 1:
-            return sig.reshape(1, -1)
+        df = df.copy()
+        df["data"] = df["data"].apply(z)
+        return df
 
-        if sig.ndim == 2:
-            a, b = sig.shape
-            if self.config.mat_prefer_times_by_channels:
-                if b <= 512 and a > b:
-                    return sig.T
-                if a <= 512 and b > a:
-                    return sig
-                return sig.T
-            else:
-                if a <= 512 and b > a:
-                    return sig
-                if b <= 512 and a > b:
-                    return sig.T
-                return sig
+    def _apply_aggregation(self, df):
+        over = list(self.config.aggregate_over or [])
+        method = self.config.aggregate_method
 
-        if sig.ndim == 3:
-            dims = list(sig.shape)
-            ch_dim = int(np.argmin([d if d <= 512 else 1e9 for d in dims]))
-            time_dim = int(np.argmax(dims))
-            ep_dim = ({0, 1, 2} - {ch_dim, time_dim}).pop()
-            perm = (ep_dim, ch_dim, time_dim)
-            return np.transpose(sig, perm)
+        if not over:
+            return df
 
-        raise ValueError(f"Unsupported signal ndim={sig.ndim} in .mat")
+        # Grouping keys: preserve epoch explicitly
+        group_keys = [
+            c for c in df.columns
+            if c != "data" and c not in over
+        ]
 
-    # ---------------------------
-    # File discovery
-    # ---------------------------
-    def _gather_files(self, paths: Union[str, Path, Sequence[Union[str, Path]]]) -> List[Path]:
-        if isinstance(paths, (str, Path)):
-            paths_list = [Path(paths)]
-        else:
-            paths_list = [Path(p) for p in paths]
+        if "epoch" in df.columns and "epoch" not in group_keys:
+            group_keys.append("epoch")
 
-        files: List[Path] = []
-        for p in paths_list:
-            if p.is_dir():
-                for fp in p.rglob("*"):
-                    if fp.is_dir():
-                        if fp.suffix.lower() in {".ds", ".mff"}:
-                            files.append(fp)
-                        continue
-                    files.append(fp)
-            else:
-                files.append(p)
+        def reduce_arrays(arrs):
+            stack = np.stack([np.asarray(a) for a in arrs], axis=0)
+            if method == "sum":
+                return stack.sum(axis=0)
+            if method == "mean":
+                return stack.mean(axis=0)
+            if method == "median":
+                return np.median(stack, axis=0)
+            raise ValueError(f"Unknown aggregate_method: {method}")
 
-        seen = set()
-        uniq: List[Path] = []
-        for f in files:
-            s = str(f.resolve()) if f.exists() else str(f)
-            if s not in seen:
-                seen.add(s)
-                uniq.append(f)
-        return uniq
+        g = df.groupby(group_keys, dropna=False, sort=False)
+        out = g["data"].apply(lambda s: reduce_arrays(list(s))).reset_index()
 
-    def _is_mne_candidate(self, p: Path) -> bool:
-        if p.is_dir():
-            return p.suffix.lower() in {".ds", ".mff"}
-        return p.suffix.lower() in self._mne_raw_exts
+        for dim in over:
+            label = self.config.aggregate_labels.get(dim, "aggregate")
+            out[dim] = label
 
-    # ---------------------------
-    # Warnings
-    # ---------------------------
-    def _warn_unimplemented(self, file_path: Path) -> None:
-        if self.config.warn_unimplemented:
-            warnings.warn(
-                f"Format not implemented or not recognized. Skipping: {str(file_path)}",
-                category=UserWarning,
-                stacklevel=2,
-            )
-
-    def _warn(self, msg: str) -> None:
-        warnings.warn(msg, category=UserWarning, stacklevel=2)
+        return out

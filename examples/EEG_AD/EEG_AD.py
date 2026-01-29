@@ -7,15 +7,17 @@ import ncpi
 from ncpi import tools
 from ncpi.tools import timer
 
-from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields, DEFAULT_COLUMNS
 
 
 # Select either raw EEG data or source-reconstructed EEG data.
 raw = True
 if raw:
-    data_path = os.path.join(os.sep, 'DATOS','pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SENSORS')
+    data_path = os.path.join(os.sep, 'DATOS','pablomc', 'empirical_datasets',
+                             'POCTEP_data', 'CLEAN', 'SENSORS')
 else:
-    data_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'empirical_datasets', 'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK')
+    data_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'empirical_datasets',
+                             'POCTEP_data', 'CLEAN', 'SOURCES', 'dSPM', 'DK')
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 zenodo_dw_sim = True  # simulation data
@@ -31,64 +33,56 @@ ML_model = 'MLPRegressor'
 
 def create_POCTEP_dataframe(data_path: str) -> pd.DataFrame:
     """
-    Load the POCTEP dataset and create a DataFrame that matches the old script's schema:
-      ID, Group, Epoch, Sensor, Data, Recording, fs
-
-    This function uses EphysDatasetParser for IO + epoching + z-scoring.
+    Load the POCTEP dataset and return a DataFrame in the canonical schema
+    defined by ``EphysDatasetParser.DEFAULT_COLUMNS``.
     """
     ldir = sorted(os.listdir(data_path))
-
-    # Tune patterns to strongly prefer the POCTEP MATLAB struct layout:
-    #   loadmat(... )['data']['signal'], ['data']['cfg']['fs'], ['data']['cfg']['channels']
-    cfg = ParseConfig(
-        epoch_length_s=5.0,
-        epoch_step_s=5.0,
-        zscore=True,
-        # Keep default_fs=None so we DON'T silently invent an fs; POCTEP files should have it.
-        default_fs=None,
-        mat_signal_key_patterns=(r"data\.signal", r"\bsignal\b", r"\beeg\b", r"\bdata\b"),
-        mat_fs_key_patterns=(r"data\.cfg\.fs", r"\bfs\b", r"\bsfreq\b", r"\bsrate\b"),
-        mat_channel_key_patterns=(r"data\.cfg\.channels", r"\bchannels?\b", r"\bch_names\b", r"\belectrodes?\b"),
-        mat_prefer_times_by_channels=True,
-    )
-
-    parser = EphysDatasetParser(config=cfg)
-
     out_frames = []
-    for pt, file in enumerate(ldir):
-        print(f'\rProcessing {file} - {pt + 1}/{len(ldir)}', end="", flush=True)
-        file_path = os.path.join(data_path, file)
 
-        parsed = parser.parse(
-            file_path,
-            subject_id=pt,                # old code: ID was file index
-            species="human",
-            group=file.split('_')[0],     # old code: group = prefix before underscore
-            condition="resting-state",
-            recording_type="EEG",
-            data_kind="time_series",
-        )
-        if parsed is None or parsed.empty:
+    for subject_id, fname in enumerate(ldir):
+        # Skip non-.mat files (and common hidden files)
+        if fname.startswith(".") or not fname.lower().endswith(".mat"):
             continue
 
-        # Map the parser schema -> old schema
-        df_old = pd.DataFrame({
-            "ID": parsed["subject_id"].astype(int, errors="ignore"),
-            "Group": parsed["group"],
-            "Epoch": parsed["epoch"].astype(int, errors="ignore"),
-            "Sensor": parsed["sensor"],
-            "Data": parsed["data"],
-        })
+        print(
+            f"\r\033[KProcessing {fname} - {subject_id + 1}/{len(ldir)}",
+            end="",
+            flush=True,
+        )
 
-        # Old script sets these for the whole DF (fs assumed constant); keep per-row fs too.
-        df_old["Recording"] = "EEG"
-        df_old["fs"] = parsed["fs"].astype(float, errors="ignore")
+        file_path = os.path.join(data_path, fname)
 
-        out_frames.append(df_old)
+        group = fname.split("_")[0]
+
+        cfg = ParseConfig(
+            fields=CanonicalFields(
+                data=lambda d: d["data"].signal,
+                fs=lambda d: float(d["data"].cfg.fs),
+                ch_names=lambda d: list(d["data"].cfg.channels),
+                metadata={
+                    "subject_id": (lambda _d, sid=subject_id: sid),
+                    "group": (lambda _d, g=group: g),
+                    "species": (lambda _d: "human"),
+                    "condition": (lambda _d: "resting-state"),
+                    "recording_type": (lambda _d: "EEG"),
+                },
+            ),
+            # epoching (5 seconds, non-overlapping)
+            epoch_length_s=5.0,
+            epoch_step_s=5.0,
+            # z-score normalization (per epoch row)
+            zscore=True,
+        )
+
+        parsed = EphysDatasetParser(cfg).parse(file_path)
+        out_frames.append(parsed)
 
     if not out_frames:
-        return pd.DataFrame(columns=["ID", "Group", "Epoch", "Sensor", "Data", "Recording", "fs"])
+        # Return an empty canonical DataFrame rather than erroring
+        return pd.DataFrame(columns=EphysDatasetParser.DEFAULT_COLUMNS)
 
+    # Canonical columns are already ensured by the parser;
+    # concat preserves them (extras, if any, appear after canonical).
     return pd.concat(out_frames, ignore_index=True)
 
 
@@ -114,10 +108,10 @@ def load_model_features(method: str, zenodo_dir_sim: str):
 @timer("Feature extraction")
 def feature_extraction(method: str, df: pd.DataFrame) -> pd.DataFrame:
     """Extract features from empirical data using specified method."""
-    if "Data" not in df.columns:
-        raise ValueError("Expected input DataFrame to contain a 'Data' column with 1D samples.")
+    if "data" not in df.columns:
+        raise ValueError("Expected input DataFrame to contain a 'data' column with 1D samples.")
 
-    samples = df["Data"].to_list()
+    samples = df["data"].to_list()
 
     if method == "catch22":
         features = ncpi.Features(method="catch22", params={"normalize": True})
@@ -194,7 +188,7 @@ def compute_predictions_neural_circuit(
         )
 
         # Keep the old filtering behavior exactly: allow matching either by sensor name or numeric index
-        sensor_df = emp_data[emp_data["Sensor"].isin([sensor, s])].copy()
+        sensor_df = emp_data[emp_data["sensor"].isin([sensor, s])].copy()
         if sensor_df.empty:
             continue
 

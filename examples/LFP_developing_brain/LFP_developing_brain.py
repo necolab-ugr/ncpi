@@ -3,12 +3,16 @@ import shutil
 import pickle
 import numpy as np
 import pandas as pd
-import scipy.io
+
 import ncpi
 from ncpi import tools
 from ncpi.tools import timer
-
-from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+from pathlib import Path
+from ncpi.EphysDatasetParser import (
+    EphysDatasetParser,
+    ParseConfig,
+    CanonicalFields,
+)
 
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 zenodo_dw_sim = True  # simulation data
@@ -27,9 +31,9 @@ zenodo_dir_emp = os.path.join("/home/pablomc", "zenodo_emp_files")
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization_1"]
 
+
 # ML model used to compute the predictions (MLPRegressor, Ridge or NPE)
 ML_model = "MLPRegressor"
-
 
 @timer("Loading simulation data.")
 def load_model_features(method, zenodo_dir_sim):
@@ -90,91 +94,56 @@ def load_inference_data(method, X, theta, zenodo_dir_sim, ML_model):
     return inference
 
 
-@timer("Loading LFP data (parser-based, old-schema output).")
+@timer("Loading LFP data.")
 def load_empirical_data(zenodo_dir_emp):
-    """
-    Matches the old script output schema using your EphysDatasetParser for:
-      - loading LFP signal
-      - summing across channels
-      - 5-second epoching
+    """Load empirical LFP data from Zenodo and parse it into canonical schema."""
+    base_dir = Path(zenodo_dir_emp) / "development_EI_decorrelation" / "baseline" / "LFP"
+    files = sorted(base_dir.iterdir())
 
-    Returns a DataFrame with columns:
-      ID, Group (age), Epoch, Sensor(=0), Data, Recording, fs
-    """
-    lfp_dir = os.path.join(zenodo_dir_emp, "development_EI_decorrelation", "baseline", "LFP")
-    file_list = sorted([f for f in os.listdir(lfp_dir) if f.lower().endswith(".mat")])
+    rows = []
 
-    # Configure parser to mimic old pipeline:
-    # - epoch into 5s windows (non-overlapping)
-    # - aggregate sensors by sum (equivalent to np.sum(LFP, axis=0) before epoching)
-    cfg = ParseConfig(
-        epoch_length_s=5.0,
-        epoch_step_s=5.0,
-        aggregate_sensors=True,
-        aggregate_method="sum",
-        aggregate_sensor_label="aggregate",
-        # (optional) make it more likely to pick the intended structure
-        mat_signal_key_patterns=(r"\bLFP\b", r"\blfp\b", r"\bdata\b"),
-        mat_fs_key_patterns=(r"\bfs\b", r"\bsfreq\b", r"\bsrate\b"),
-        mat_channel_key_patterns=(r"\bchannels?\b", r"\bsensors?\b", r"\blabels?\b"),
-    )
-    parser = EphysDatasetParser(config=cfg)
-
-    out_rows = []
-    fs0 = None
-
-    for i, file_name in enumerate(file_list):
-        print(f"\r Progress: {i+1} of {len(file_list)} files loaded", end="", flush=True)
-        fp = os.path.join(lfp_dir, file_name)
-
-        # --- Read age exactly like the old script ---
-        structure = scipy.io.loadmat(fp)
-        age = float(structure["LFP"]["age"][0, 0][0, 0])
-
-        # --- Use parser to load + epoch + aggregate ---
-        dfp = parser.parse(
-            fp,
-            subject_id=i,
-            group=age,              # keep age in "group" like old Group column
-            recording_type="LFP",
-            data_kind="raw",
+    for subject_id, file_path in enumerate(files):
+        print(
+            f"\r Progress: {subject_id + 1} of {len(files)} files loaded",
+            end="",
+            flush=True,
         )
 
-        if dfp.empty:
-            continue
+        config = ParseConfig(
+            fields=CanonicalFields(
+                data=lambda d: d["LFP"].LFP,          # (channels, time)
+                fs=lambda d: float(d["LFP"].fs),
+                metadata={
+                    "subject_id": subject_id,
+                    "group": lambda d: int(d["LFP"].age),  # age → group
+                    "species": "mouse",
+                    "recording_type": "LFP",
+                },
+            ),
+            # 🔑 epoching (5 seconds, non-overlapping)
+            epoch_length_s=5.0,
+            epoch_step_s=5.0,
 
-        # fs used in old script is fs of the first file
-        if fs0 is None:
-            fs0 = float(dfp["fs"].iloc[0])
+            # 🔑 collapse channels (sum LFP)
+            aggregate_over=("sensor",),
+            aggregate_method="sum",
+        )
 
-        # dfp has one row per epoch (because we aggregated sensors)
-        # Convert to old schema
-        for _, r in dfp.iterrows():
-            out_rows.append(
-                {
-                    "ID": int(i),
-                    "Group": age,
-                    "Epoch": int(r["epoch"]),
-                    "Sensor": 0.0,  # old code uses zeros
-                    "Data": np.asarray(r["data"], dtype=float),
-                }
-            )
+        parser = EphysDatasetParser(config)
+        df = parser.parse(file_path)
+        rows.append(df)
 
-    print(f"\nFiles loaded: {len(file_list)}")
-    if fs0 is None:
-        raise RuntimeError("No LFP data parsed. Check paths / file structure.")
+    print(f"\nFiles loaded: {len(rows)}")
 
-    df = pd.DataFrame(out_rows)
-    df["Recording"] = "LFP"
-    df["fs"] = float(fs0)
-    return df
+    out = pd.concat(rows, ignore_index=True)
+    return out
 
 
 @timer("Computing features from empirical data.")
 def compute_features_empirical_data(method, df):
     """
-    Takes the old-schema df: ID, Group, Epoch, Sensor, Data, Recording, fs
-    Adds Features column.
+    Takes canonical-schema df (EphysDatasetParser DEFAULT_COLUMNS),
+    computes features from df["data"], and appends a Features column.
     """
     if method == "catch22":
         features_method = "catch22"
@@ -182,29 +151,24 @@ def compute_features_empirical_data(method, df):
 
     elif method == "power_spectrum_parameterization_1":
         features_method = "specparam"
-
         fooof_setup_emp = {
             "peak_threshold": 1.0,
             "min_peak_height": 0.0,
             "max_n_peaks": 5,
             "peak_width_limits": (10.0, 50.0),
         }
-
         params = {
-            "fs": float(df["fs"].iloc[0]),
+            "fs": float(df["fs"].dropna().iloc[0]),
             "freq_range": (5.0, 45.0),
             "specparam_model": dict(fooof_setup_emp),
-            "metric_thresholds": {
-                "gof_rsquared": 0.9
-            },
-            "metric_policy": "reject"
+            "metric_thresholds": {"gof_rsquared": 0.9},
+            "metric_policy": "reject",
         }
-
     else:
         raise ValueError(f"Unknown method: {method}")
 
     features = ncpi.Features(method=features_method, params=params)
-    feats = features.compute_features(df["Data"].to_list())
+    feats = features.compute_features(df["data"].to_list())
 
     out = df.copy()
     if method == "power_spectrum_parameterization_1":
@@ -260,7 +224,7 @@ if __name__ == "__main__":
         X, theta = load_model_features(method, zenodo_dir_sim)
         inference = load_inference_data(method, X, theta, zenodo_dir_sim, ML_model)
 
-        # Empirical data as the *old* schema, but parsed via your parser
+        # Empirical data
         df_emp = load_empirical_data(zenodo_dir_emp)
 
         # Features
