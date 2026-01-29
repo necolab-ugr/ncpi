@@ -80,7 +80,7 @@ if __name__ == "__main__":
         if row == 0 or row == 1:
             method = 'catch22'
         if row == 2 or row == 3:
-            method = 'power_spectrum_parameterization_1'
+            method = 'power_spectrum_parameterization'
         try:
             data = pd.read_pickle(os.path.join(results_path, method, 'emp_data_reduced.pkl'))
             

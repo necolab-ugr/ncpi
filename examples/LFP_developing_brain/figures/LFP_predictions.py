@@ -26,7 +26,7 @@ IDs = {}
 firing_rates = {}
 
 # Methods to plot
-all_methods = ['catch22','power_spectrum_parameterization_1']
+all_methods = ['catch22','power_spectrum_parameterization']
 
 # Select the statistical analysis method ('cohen', 'lmer')
 statistical_analysis = 'lmer'
