@@ -25,11 +25,11 @@ class Analysis:
         self.data = data
 
 
-    def lmer(self, control_group = 'HC', data_col = 'Y', other_col = ['ID', 'Group', 'Epoch', 'Sensor'],
+    def lmer(self, control_group = 'HC', data_col = 'Y', other_col = ['subject_id', 'group', 'epoch', 'sensor'],
              data_index = -1, models = None, bic_models = None, anova_tests = None, specs = None):
         """
         Perform linear mixed-effects model (lmer) or linear model (lm) comparisons using R's `lme4`, `emmeans` and
-        `nlme` packages. We assume that, at least, a 'Group' column is present in the dataframe.
+        `nlme` packages. We assume that, at least, a 'group' column is present in the dataframe.
 
         Parameters
         ----------
@@ -39,14 +39,14 @@ class Analysis:
             The name of the data column to be analyzed.
         other_col: list
             The names of the other columns to be included in the analysis.
-            The default is ['ID', 'Group', 'Epoch', 'Sensor'].
+            The default is ['subject_id', 'group', 'epoch', 'sensor'].
         data_index: int
             The index of the data column to be analyzed. If -1, the entire column is used.
         models: dict
             A dictionary of models to be used for analysis. The keys are model names and the values are model formulas.
             if models is None, the default models are used:
-                - mod00: Y ~ Group + (1 | ID)
-                - mod01: Y ~ Group
+                - mod00: Y ~ group + (1 | subject_id)
+                - mod01: Y ~ group
             The best model is selected based on BIC (Bayesian Information Criterion), unless bic_models is None.
         bic_models: list
             A  list of models to be evaluated using BIC. If bic_models is None, the first model is selected. All models
@@ -64,7 +64,7 @@ class Analysis:
                 }
         specs: string
             The specifications for the emmeans function in R. If specs is None, the default specs are used:
-                - ~Group
+                - ~group
 
         Returns
         -------
@@ -123,12 +123,12 @@ class Analysis:
         if data_index >= 0:
             df[data_col] = df[data_col].apply(lambda x: x[data_index])
 
-        # Check if 'Group' is in the DataFrame
-        if 'Group' not in df.columns:
-            raise ValueError('The column "Group" is not in the DataFrame.')
+        # Check if 'group' is in the DataFrame
+        if 'group' not in df.columns:
+            raise ValueError('The column "group" is not in the DataFrame.')
 
         # Filter out control_group from the list of unique groups
-        groups = df['Group'].unique()
+        groups = df['group'].unique()
         groups = [group for group in groups if group != control_group]
 
         # Create a list with the different group comparisons
@@ -140,20 +140,20 @@ class Analysis:
         # Rename data_col column to Y
         df.rename(columns={data_col: 'Y'}, inplace=True)
 
-        # Force categorical data type for Sensor
-        if 'Sensor' in df.columns:
-            df["Sensor"] = df["Sensor"].astype(str).astype('category')
+        # Force categorical data type for sensor
+        if 'sensor' in df.columns:
+            df["sensor"] = df["sensor"].astype(str).astype('category')
 
         # Default models if none are provided
         if models is None:
             models = {
-                'mod00': 'Y ~ Group + (1 | ID)',
-                'mod01': 'Y ~ Group'
+                'mod00': 'Y ~ group + (1 | subject_id)',
+                'mod01': 'Y ~ group'
             }
 
         # Default specs if none are provided
         if specs is None:
-            specs = '~Group'
+            specs = '~group'
 
         # Check that all models defined in bic_models have been also included in the models dictionary
         if bic_models is not None:
@@ -182,9 +182,9 @@ class Analysis:
 
         results = {}
         for label, label_comp in zip(groups, groups_comp):
-            print(f'\n\n--- Group: {label}')
+            print(f'\n\n--- group: {label}')
             r('rm(list = ls())')
-            df_pair = df[df['Group'].isin([control_group, label])]
+            df_pair = df[df['group'].isin([control_group, label])]
             ro.globalenv['df_pair'] = pandas2ri.py2rpy(df_pair)
             ro.globalenv['label'] = label
             ro.globalenv['control_group'] = control_group
@@ -192,23 +192,23 @@ class Analysis:
             # # Convert to factors
             # r('''
             # df_pair$ID = as.factor(df_pair$ID)
-            # df_pair$Group = factor(df_pair$Group, levels = c(label, control_group))
-            # df_pair$Epoch = as.factor(df_pair$Epoch)
-            # df_pair$Sensor = as.factor(df_pair$Sensor)
-            # print(table(df_pair$Group))
+            # df_pair$group = factor(df_pair$group, levels = c(label, control_group))
+            # df_pair$epoch = as.factor(df_pair$epoch)
+            # df_pair$sensor = as.factor(df_pair$sensor)
+            # print(table(df_pair$group))
             # ''')
 
             # Convert to factors
             r_code = []
             for col in other_col:
-                if col == 'Group':
+                if col == 'group':
                     r_code.append(f'df_pair${col} = factor(df_pair${col}, levels = c("{label}", "{control_group}"))')
                 else:
                     r_code.append(f'df_pair${col} = as.factor(df_pair${col})')
 
-            # Print table for 'Group'
-            if 'Group' in other_col:
-                r_code.append('print(table(df_pair$Group))')
+            # Print table for 'group'
+            if 'group' in other_col:
+                r_code.append('print(table(df_pair$group))')
 
             # Join all lines into one R script string
             full_r_script = '\n'.join(r_code)
@@ -217,7 +217,7 @@ class Analysis:
             r(full_r_script)
 
             # if table in R is empty for any group, skip the analysis
-            if r('table(df_pair$Group)')[0] == 0 or r('table(df_pair$Group)')[1] == 0:
+            if r('table(df_pair$group)')[0] == 0 or r('table(df_pair$group)')[1] == 0:
                 results[label_comp] = pd.DataFrame({'p.value': [1], 'z.ratio': [0]})
             # Fit the linear (mixed-effects) models
             else:
@@ -225,7 +225,7 @@ class Analysis:
                     if (bic_models is None and ii == 0) or (bic_models is not None and model_name in bic_models):
                         # print(f'--- BIC test: fitting model: {model_name}')
                         ro.globalenv[model_name] = formula
-                        r(f"{model_name} <- {'lmer' if '(1 | ID)' in formula else 'lm'}({model_name}, data=df_pair)")
+                        r(f"{model_name} <- {'lmer' if '(1 | subject_id)' in formula else 'lm'}({model_name}, data=df_pair)")
 
                 # BIC test: handle single and multiple model cases properly
                 r('''
@@ -251,7 +251,7 @@ class Analysis:
                         if model_name not in r.ls():
                             # print(f'--- ANOVA test: fitting model: {model_name}')
                             ro.globalenv[model_name] = formula
-                            r(f"{model_name} <- {'lmer' if '(1 | ID)' in formula else 'lm'}({model_name}, data=df_pair)")
+                            r(f"{model_name} <- {'lmer' if '(1 | subject_id)' in formula else 'lm'}({model_name}, data=df_pair)")
 
                     # Convert to R list
                     r_anova_tests = ListVector(anova_tests)
@@ -291,7 +291,7 @@ class Analysis:
                                         random_effect <- findbars(formula2)  # Extract random effects
                                         
                                         if (length(random_effect) == 1) {
-                                            # Simple random intercept (e.g., `(1 | Group)`)
+                                            # Simple random intercept (e.g., `(1 | group)`)
                                             model2 <- lme(
                                                 fixed = nobars(formula2),
                                                 random = as.formula(paste("~1 |", deparse(random_effect[[1]][[3]]))),
@@ -391,10 +391,10 @@ class Analysis:
                 df_res <- as.data.frame(res)
                 ''')
 
-                # Ensure Sensor remains as a character column
-                if 'Sensor' in r('names(df_res)'):
+                # Ensure sensor remains as a character column
+                if 'sensor' in r('names(df_res)'):
                     r('''
-                        df_res$Sensor <- as.character(df_res$Sensor)
+                        df_res$sensor <- as.character(df_res$sensor)
                     ''')
 
                 df_res_r = ro.r['df_res']
@@ -433,23 +433,23 @@ class Analysis:
         if data_col not in self.data.columns:
             raise ValueError(f'The data_col "{data_col}" is not in the DataFrame columns.')
 
-        # Check if 'Group' and 'Sensor' are in the DataFrame
-        for col in ['Group', 'Sensor']:
+        # Check if 'group' and 'sensor' are in the DataFrame
+        for col in ['group', 'sensor']:
             if col not in self.data.columns:
                 raise ValueError(f'The column "{col}" is not in the DataFrame.')
 
         # Copy the dataframe
         df = self.data.copy()
 
-        # Remove all columns except 'Group', 'Sensor' and data_col
-        df = df[['Group', 'Sensor', data_col]]
+        # Remove all columns except 'group', 'sensor' and data_col
+        df = df[['group', 'sensor', data_col]]
 
         # If data_index is not -1, select the data_index value from the data_col
         if data_index >= 0:
             df[data_col] = df[data_col].apply(lambda x: x[data_index])
 
         # Filter out control_group from the list of unique groups
-        groups = df['Group'].unique()
+        groups = df['group'].unique()
         groups = [group for group in groups if group != control_group]
 
         # Create a list with the different group comparisons
@@ -460,18 +460,18 @@ class Analysis:
 
         results = {}
         for label, label_comp in zip(groups, groups_comp):
-            print(f'\n\n--- Group: {label}')
+            print(f'\n\n--- group: {label}')
 
             # filter out control_group and the current group
-            df_pair = df[df['Group'].isin([control_group, label])]
+            df_pair = df[df['group'].isin([control_group, label])]
 
             all_d = []
             all_sensors = []
-            for sensor in df_pair['Sensor'].unique():
-                df_sensor = df_pair[df_pair['Sensor'] == sensor]
+            for sensor in df_pair['sensor'].unique():
+                df_sensor = df_pair[df_pair['sensor'] == sensor]
 
-                group1 = np.array(df_sensor[df_sensor['Group'] == label][data_col])
-                group2 = np.array(df_sensor[df_sensor['Group'] == control_group][data_col])
+                group1 = np.array(df_sensor[df_sensor['group'] == label][data_col])
+                group2 = np.array(df_sensor[df_sensor['group'] == control_group][data_col])
 
                 # Check if both groups have more than 2 elements
                 if len(group1) > 2 and len(group2) > 2:
@@ -487,7 +487,7 @@ class Analysis:
                     all_d.append(np.nan)
                 all_sensors.append(sensor)
 
-            results[label_comp] = pd.DataFrame({'d': all_d, 'Sensor': all_sensors})
+            results[label_comp] = pd.DataFrame({'d': all_d, 'sensor': all_sensors})
 
         return results
 
