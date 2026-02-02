@@ -14,16 +14,14 @@ statistical_analysis = 'lmer'
 # Set the p-value threshold
 p_value_th = 0.01
 
-def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
+def append_lmer_results(lmer_results, elec, p_value_th, data_lmer):
     '''
-    Create a list with the z-scores of the linear mixed model analysis for a given group and electrode.
+    Create a list with the z-ratios or t-ratios of the linear mixed model analysis for a given group and electrode.
 
     Parameters
     ----------
     lmer_results : dict
         Dictionary with the results of the linear mixed model analysis.
-    group : str
-        Group name.
     elec : int
         Electrode index.
     p_value_th : float
@@ -37,11 +35,15 @@ def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
         List with the z-scores of the linear mixed model analysis.
     '''
 
-    p_value = lmer_results[f'{group}vsHC']['p.value'].iloc[elec]
-    z_score = lmer_results[f'{group}vsHC']['z.ratio'].iloc[elec]
+    p_value = lmer_results['p.value'].iloc[elec]
+    if 'z.ratio' in lmer_results.columns:
+        statistic = lmer_results['z.ratio'].iloc[elec]
+    else:
+        statistic = lmer_results['t.ratio'].iloc[elec]
+    #statistic = lmer_results['z.ratio'].iloc[elec]
 
     if p_value < p_value_th:
-        data_lmer.append(z_score)
+        data_lmer.append(statistic)
     else:
         data_lmer.append(0)
 
@@ -51,7 +53,7 @@ def append_lmer_results(lmer_results, group, elec, p_value_th, data_lmer):
 if __name__ == "__main__":
     # Some parameters for the figure
     ncols = 6 
-    nrows = 5
+    nrows = 4  #5
 
     left = 0.06
     right = 0.11
@@ -67,7 +69,7 @@ if __name__ == "__main__":
     spacing_y = 0.064 
 
     # Create figure
-    fig1 = plt.figure(figsize=(7.5, 5.5), dpi=300)
+    fig1 = plt.figure(figsize=(7.5, 5.5), dpi=150)
     current_bottom = bottom
 
     for row in range(2):
@@ -88,8 +90,12 @@ if __name__ == "__main__":
             print(f'Error loading data for {method}: {e}')
             continue
 
+        data['Sensor'] = data['Sensor'].apply(lambda x: str(x))  # convert from np.str_ to str (to avoid warning when importing to R)
+        data = data[data['Group'] != 'MCI']  # remove MCI from dataset so p-value correction does not take it into account
+
         current_left = left
         for col in range(ncols):
+            print(f'\n----- Processing row {row}, column {col} -----\n')
             if col == 0 or col == 3:
                 group = 'ADMIL'
                 group_label = 'ADMIL'
@@ -125,38 +131,62 @@ if __name__ == "__main__":
 
             if col >= 3:
                 var = 3 if row == 0 or row == 2 else 2
-    
+
+            # Create a copy of the dataframe
+            data_preds = data.copy()
+            data_preds['Predictions'] = data_preds['Predictions'].apply(lambda x: x[var])
+
             # Statistical analysis
-            analysis = ncpi.Analysis(data)
+            analysis = ncpi.Analysis(data_preds)
             if statistical_analysis == 'lmer':
-                stat_results = analysis.lmer(control_group='HC', data_col='Predictions', data_index=var,
-                                        other_col=['subject_id', 'group', 'epoch', 'sensor'],
-                                        models={
-                                            'mod00': 'Y ~ group * sensor + (1 | subject_id)',
-                                            'mod01': 'Y ~ group * sensor',
-                                            'mod02': 'Y ~ group + sensor + (1 | subject_id)',
-                                            'mod03': 'Y ~ group + sensor',
-                                        },
-                                        bic_models=["mod00", "mod01"],
-                                        anova_tests={
-                                            'test1': ["mod00", "mod01"],
-                                            'test2': ["mod02", "mod03"],
-                                        },
-                                        specs='~group | sensor')
-            elif statistical_analysis == 'cohen':
+
+                # Reduce random effect structure with BIC and fixed effect structure with LRT (anova)
+                opt_f = analysis.lmer_selection(full_model='Predictions ~ Group * Sensor + (1 | ID)',
+                                                  numeric=['Predictions'],
+                                                  crit=None,
+                                                  fixed_crit='LRT',
+                                                  random_crit='BIC',
+                                                  include=['Sensor', 'Group'])
+                # Run post-hoc analyses using selected model
+                stat_results = analysis.lmer_tests(models=opt_f,
+                                              numeric=['Predictions'],
+                                              group_col='Group',
+                                              control_group='HC',
+                                              specs=['Group|Sensor'])
+
+                # opt_f_1 = 'Predictions ~ Group * Sensor + (1 | ID)'
+                # opt_f_2 = 'Predictions ~ Group + Sensor + (1 | ID)'
+                # stat_results = analysis.lmer_tests(models=[opt_f_1, opt_f_2],
+                #                               numeric=['Predictions'],
+                #                               group_col='Group',
+                #                               control_group='HC',
+                #                               specs=['Group|Sensor'])
+
+                # opt_f = 'Predictions ~ Group * Sensor + (1 | ID)'
+                # stat_results = analysis.lmer_tests(models=opt_f,
+                #                               numeric=['Predictions'],
+                #                               group_col='Group',
+                #                               control_group='HC',
+                #                               specs=['Group|Sensor'])
+
+            elif statistical_analysis == 'cohend':
                 stat_results = analysis.cohend(control_group='HC', data_col='Predictions', data_index=var)
             
             data_stat = []
+
+            # Select the results for the current group
+            stat_results = stat_results['Group|Sensor'].query("contrast == @group + ' - HC'")
+
             # Extract sensor names
             empirical_sensors = data['sensor'].unique()
             for elec in range(19):
                 # Find position of the electrode in the stat results
-                pos_results = np.where(stat_results[f'{group}vsHC']['sensor'] == empirical_sensors[elec])[0]
+                pos_results = np.where(stat_results['Sensor'] == empirical_sensors[elec])[0]
                 
                 if len(pos_results) > 0:
                     if statistical_analysis == 'lmer':
-                        data_stat = append_lmer_results(stat_results, group, pos_results[0], p_value_th, data_stat)
-                    elif statistical_analysis == 'cohen':
+                        data_stat = append_lmer_results(stat_results, pos_results[0], p_value_th, data_stat)
+                    elif statistical_analysis == 'cohend':
                         data_stat.append(stat_results[f'{group}vsHC']['d'][pos_results[0]])
                 else:
                     data_stat.append(0)
