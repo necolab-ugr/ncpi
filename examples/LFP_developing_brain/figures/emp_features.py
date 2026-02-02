@@ -3,7 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Path to the folder with prediction results
-pred_results = '../data'
+pred_results = os.path.join('..', 'data')
 
 # Names of catch22 features
 try:
@@ -38,15 +38,15 @@ emp = {}
 ages = {}
 
 # Iterate over the methods used to compute the features
-for method in ['catch22', 'power_spectrum_parameterization_1']:
+for method in ['catch22', 'power_spectrum_parameterization']:
     print(f'\n\n--- Method: {method}')
 
     # Load empirical data
     try:
         data_EI = np.load(os.path.join(pred_results, method, 'emp_data_reduced.pkl'), allow_pickle=True)
-        ages[method] = np.array(data_EI['Group'].tolist())
+        ages[method] = np.array(data_EI['group'].tolist())
         # Pick only ages >= 4
-        data_EI = data_EI[data_EI['Group'] >= 4]
+        data_EI = data_EI[data_EI['group'] >= 4]
         ages[method] = ages[method][ages[method] >= 4]
     except:
         raise RuntimeError(f'Error loading empirical data for {method}. Execution stopped.')
@@ -67,7 +67,7 @@ for method in ['catch22', 'power_spectrum_parameterization_1']:
             lambda x: x[catch22_names.index('SC_FluctAnal_2_rsrangefit_50_1_logi_prop_r1')]).tolist())
         emp['high_fluct'] = np.array(data_EI['Features'].apply(
             lambda x: x[catch22_names.index('MD_hrv_classic_pnn40')]).tolist())
-    elif method == 'power_spectrum_parameterization_1':
+    elif method == 'power_spectrum_parameterization':
         emp['slope'] = np.array(data_EI['Features'].tolist())
 
 # Create a figure and set its properties
@@ -96,7 +96,7 @@ for row in range(2):
             method = 'catch22'
         else:
             feat = 'slope'
-            method = 'power_spectrum_parameterization_1'
+            method = 'power_spectrum_parameterization'
 
         # Show empirical data
         try:

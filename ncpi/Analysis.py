@@ -526,23 +526,23 @@ class Analysis:
         if data_col not in self.data.columns:
             raise ValueError(f'The data_col "{data_col}" is not in the DataFrame columns.')
 
-        # Check if 'Group' and 'Sensor' are in the DataFrame
-        for col in ['Group', 'Sensor']:
+        # Check if 'group' and 'sensor' are in the DataFrame
+        for col in ['group', 'sensor']:
             if col not in self.data.columns:
                 raise ValueError(f'The column "{col}" is not in the DataFrame.')
 
         # Copy the dataframe
         df = self.data.copy()
 
-        # Remove all columns except 'Group', 'Sensor' and data_col
-        df = df[['Group', 'Sensor', data_col]]
+        # Remove all columns except 'group', 'sensor' and data_col
+        df = df[['group', 'sensor', data_col]]
 
         # If data_index is not -1, select the data_index value from the data_col
         if data_index >= 0:
             df[data_col] = df[data_col].apply(lambda x: x[data_index])
 
         # Filter out control_group from the list of unique groups
-        groups = df['Group'].unique()
+        groups = df['group'].unique()
         groups = [group for group in groups if group != control_group]
 
         # Create a list with the different group comparisons
@@ -553,25 +553,25 @@ class Analysis:
 
         results = {}
         for label, label_comp in zip(groups, groups_comp):
-            print(f'\n\n--- Group: {label}')
+            print(f'\n\n--- group: {label}')
 
             # filter out control_group and the current group
-            df_pair = df[df['Group'].isin([control_group, label])]
+            df_pair = df[df['group'].isin([control_group, label])]
 
             all_d = []
             all_sensors = []
-            for sensor in df_pair['Sensor'].unique():
-                df_sensor = df_pair[df_pair['Sensor'] == sensor]
+            for sensor in df_pair['sensor'].unique():
+                df_sensor = df_pair[df_pair['sensor'] == sensor]
 
-                group1 = np.array(df_sensor[df_sensor['Group'] == label][data_col])
-                group2 = np.array(df_sensor[df_sensor['Group'] == control_group][data_col])
+                group1 = np.array(df_sensor[df_sensor['group'] == label][data_col])
+                group2 = np.array(df_sensor[df_sensor['group'] == control_group][data_col])
 
                 # Check if both groups have more than 2 elements
                 if len(group1) > 2 and len(group2) > 2:
                     # Calculate Cohen's d
                     n1, n2 = len(group1), len(group2)
-                    mean1, mean2 = np.mean(group1), np.mean(group2)
-                    std1, std2 = np.std(group1, ddof=1), np.std(group2, ddof=1)
+                    mean1, mean2 = np.nanmean(group1), np.nanmean(group2)
+                    std1, std2 = np.nanstd(group1, ddof=1), np.nanstd(group2, ddof=1)
 
                     pooled_std = np.sqrt(((n1 - 1) * std1 ** 2 + (n2 - 1) * std2 ** 2) / (n1 + n2 - 2))
                     d = (mean1 - mean2) / pooled_std
@@ -580,7 +580,7 @@ class Analysis:
                     all_d.append(np.nan)
                 all_sensors.append(sensor)
 
-            results[label_comp] = pd.DataFrame({'d': all_d, 'Sensor': all_sensors})
+            results[label_comp] = pd.DataFrame({'d': all_d, 'sensor': all_sensors})
 
         return results
 
@@ -610,11 +610,9 @@ class Analysis:
                 Max value used for plotting.
         '''
 
-        # Check if mpl_toolkits is installed
-        if not tools.ensure_module("mpl_toolkits"):
-            raise ImportError("mpl_toolkits is required for EEG_topographic_plot but is not installed.")
-        make_axes_locatable = tools.dynamic_import("mpl_toolkits.axes_grid1",
-                                                   "make_axes_locatable")
+        if not tools.ensure_module("mpl_toolkits.axes_grid1", package="matplotlib"):
+            raise ImportError("matplotlib (mpl_toolkits.axes_grid1) is required but is not installed.")
+        make_axes_locatable = tools.dynamic_import("mpl_toolkits.axes_grid1", "make_axes_locatable")
 
         default_parameters = {
             'radius': 0.6,

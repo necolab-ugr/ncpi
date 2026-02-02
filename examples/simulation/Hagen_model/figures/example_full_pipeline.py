@@ -10,7 +10,7 @@ import ncpi
 from ncpi import tools
 
 # Path to parameters of the LIF network model
-sys.path.append(os.path.join(os.path.dirname(__file__), '../simulation/params'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'simulation', 'params'))
 
 # Choose to either download files and precomputed outputs used in simulations of the reference multicompartment neuron
 # network model (True) or load them from a local path (False)
@@ -20,7 +20,7 @@ zenodo_dw_mult = True
 zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
 
 # Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in NEURON)
-zenodo_dir = '/DATA/multicompartment_neuron_network'
+zenodo_dir = os.path.join("/home/pablomc","multicompartment_neuron_network")
 
 # Set to True to run new simulations of the LIF network model, or False to load precomputed results from a pickle file
 # located in a 'data' folder.
@@ -359,29 +359,39 @@ for method in all_methods:
     df.fs = 1000. / (10. * dt)
 
     # Compute features
-    if method == 'catch22':
-        features = ncpi.Features(method='catch22')
-    elif method == 'power_spectrum_parameterization':
-        # Parameters of the fooof algorithm
-        fooof_setup_sim = {'peak_threshold': 1.,
-                           'min_peak_height': 0.,
-                           'max_n_peaks': 5,
-                           'peak_width_limits': (10., 50.)}
-        features = ncpi.Features(method='power_spectrum_parameterization',
-                                 params={'fs': df.fs,
-                                         'fmin': 5.,
-                                         'fmax': 200.,
-                                         'fooof_setup': fooof_setup_sim,
-                                         'r_squared_th': 0.9})
+    if method == "catch22":
+        features = ncpi.Features(method="catch22", params={"normalize": True})
+        feats = features.compute_features(df["Data"].to_list())
+        df = df.copy()
+        df["Features"] = feats
 
-    df = features.compute_features(df)
+    elif method == "power_spectrum_parameterization":
+        fooof_setup_sim = {
+            "peak_threshold": 1.0,
+            "min_peak_height": 0.0,
+            "max_n_peaks": 5,
+            "peak_width_limits": (10.0, 50.0),
+        }
 
-    # Keep only the aperiodic exponent
-    if method == 'power_spectrum_parameterization':
-        df['Features'] = df['Features'].apply(lambda x: x[1])
+        features = ncpi.Features(
+            method="specparam",
+            params={
+                "fs": df.fs,
+                "freq_range": (5.0, 200.0),
+                "specparam_model": dict(fooof_setup_sim),
+                "r_squared_th": 0.9,
+            },
+        )
 
-    # Append the feature dataframes to a list
+        feats = features.compute_features(df["Data"].to_list())
+        df = df.copy()
+        df["Features"] = [float(np.asarray(d["aperiodic_params"])[1]) for d in feats]
+
+    else:
+        raise ValueError(f"Unknown method: {method}")
+
     all_features[method] = df
+
 
 # Plot features
 colors = ['lightcoral', 'lightblue', 'lightgreen', 'lightgrey']

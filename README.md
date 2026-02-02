@@ -37,8 +37,9 @@ inverse modelling pipeline. Designed for modularity, it adapts to your needs wit
 
 # Installation
 
-`ncpi` requires Python 3.10 or higher. To install `ncpi`, you can use pip. The package is available on PyPI, so you can 
-install it directly from there.
+`ncpi` requires **Python 3.10 or higher**. `ncpi` can be run on both **Linux** and **Windows** when installed in an 
+**Anaconda** or **Miniconda** Python environment. To install `ncpi`, you can use `pip`; the package is available on 
+PyPI and can be installed directly from there. 
 
 ```bash
 # Step 1: Create and activate a conda environment (recommended)
@@ -50,15 +51,15 @@ pip install ncpi
 ```
 
 **Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
-the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST package 
-with:
+the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed (note also that to run **NEST** on Windows you must first install the 
+**Windows Subsystem for Linux (WSL)**). You can install a pre-built NEST package in Linux with:
 
 ```bash
 conda install -c conda-forge nest-simulator=3.8
  ```
 
-Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must 
-be installed via pip:
+Similarly, to compute field potentials using the kernel method, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) 
+package must be installed via pip:
 
 ```bash
 pip install LFPykernels
@@ -70,7 +71,7 @@ got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
 
 ```bash
 pip uninstall scikit-learn numpy -y
-pip install scikit-learn==1.3.2 numpy
+pip install scikit-learn==1.5.0 numpy
 ```
 
 # Folder Structure
@@ -87,6 +88,9 @@ import ncpi
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from sklearn.metrics import mean_squared_error
+from sklearn.preprocessing import StandardScaler
+import inspect
 
 # Parameters for generating simulated neural data
 n_neurons = 50           # Number of neurons in each simulated recording
@@ -94,25 +98,15 @@ sim_time = 2000          # Total number of time points per sample
 sampling_rate = 100      # Sampling rate in Hz
 n_samples = 1000        # Total number of samples (combined training + test set)
 
-# Preallocate arrays for storing simulation output
-sim_data = {
-    'X': np.zeros((n_samples, int((sim_time + sampling_rate - 1) / sampling_rate))), 
-    'θ': np.zeros((n_samples, 1))
-}
-
 def simulator(θ):
     """
-    Simulates spike trains modulated by a synaptic-like process.
-    
-    This function generates synthetic neural spike trains by first creating
-    a random input signal for each neuron and convolving it with an exponential
-    kernel that mimics synaptic dynamics. The result is a smooth, temporally 
-    correlated signal interpreted as the probability of spiking at each time step.
+    Simulates spike trains modulated by a shared sinusoidal signal and independent noise.
 
     Parameters
     ----------
     θ : float
-        Controls the exponential decay of the synaptic kernel.
+        Controls the exponential decay of the synaptic kernel and the influence of the 
+        shared signal.
 
     Returns
     -------
@@ -121,44 +115,64 @@ def simulator(θ):
     """
     spikes = np.zeros((n_neurons, sim_time))
 
-    # Define exponential kernel to model synaptic integration
+    # Synaptic kernel
     tau = sampling_rate * (θ + 0.01)
-    t_kernel = np.arange(int(sampling_rate * 4))  # Kernel length of 4 times the sampling rate
+    t_kernel = np.arange(int(sampling_rate * 4))
     exp_kernel = np.exp(-t_kernel / tau)
 
+    # Sinusoidal shared signal
+    freq = 2.0  # Hz
+    time = np.arange(sim_time) / sampling_rate
+    shared_input = 0.5 * (1 + np.sin(2 * np.pi * freq * time))  # Values in [0, 1]
+
     for neuron in range(n_neurons):
-        # Generate random input signal for this neuron
-        raw_input = np.random.rand(sim_time)
+        # Independent signal for each neuron
+        private_input = np.random.rand(sim_time)
+        private_modulated = np.convolve(private_input, exp_kernel, mode='same')
 
-        # Convolve input with synaptic kernel to create smooth modulated signal
-        modulated = np.convolve(raw_input, exp_kernel, mode='same')
+        # Combine shared and private inputs
+        k = 0.5 * θ # Mixing coefficient based on θ
+        modulated = private_modulated + k * np.convolve(shared_input, exp_kernel, mode='same')
 
-        # Normalize modulated signal to [0, 1]
+        # Normalize combined modulation
         modulated -= modulated.min()
         modulated /= modulated.max()
 
-        # Apply a threshold
+        # Generate spikes
         spike_probs = modulated - 0.9
-
-        # Sample binary spikes based on spike probabilities
         spikes[neuron] = np.random.rand(sim_time) < spike_probs
 
     return spikes
 
+
+
 if __name__ == "__main__":
+    # Define the bin size and number of bins for firing rate computation
+    bin_size = 100  # ms
+    bin_size = int(bin_size * sampling_rate / 1000)  # convert to time steps
+    n_bins = int(sim_time / bin_size) # Number of bins
+    
+    # Preallocate arrays for storing simulation output
+    sim_data = {
+        'X': np.zeros((n_samples, n_bins)),
+        'θ': np.zeros((n_samples, 1))
+    }
+    
     # Create the simulation dataset
     for sample in range(n_samples):
         print(f'Creating sample {sample + 1} of {n_samples}', end='\r', flush=True)
         # Generate a random parameter θ
-        θ = np.random.uniform(0, 1)
+        θ = np.random.uniform(0, 0.5)
         
         # Simulate the spike train
         spikes = simulator(θ)
         
         # Compute firing rates
-        fr = [[np.sum(spikes[ii, jj * sampling_rate:(jj + 1) * sampling_rate]) 
-               for jj in range(sim_data['X'].shape[1])]
-               for ii in range(spikes.shape[0])]
+        fr = [
+            [np.sum(spikes[ii, jj * bin_size:(jj + 1) * bin_size])
+             for jj in range(n_bins)]
+             for ii in range(spikes.shape[0])
+        ]
     
         # Create a FieldPotential object
         fp = ncpi.FieldPotential(kernel = False)    
@@ -192,25 +206,38 @@ if __name__ == "__main__":
     θ_test = np.array(sim_data['θ'][test_indices])
     
     # Create the inference object and add simulation data
-    inference = ncpi.Inference(model='MLPRegressor',
-                               hyperparams={'hidden_layer_sizes': (200,200,200),
-                                            'max_iter': 200,
-                                            'tol': 0.0001,
-                                            'n_iter_no_change': 10})
+    inference = ncpi.Inference(model='RandomForestRegressor',
+                               hyperparams={'n_estimators': 100,
+                                            'max_depth': 10,
+                                            'min_samples_split': 2})
     inference.add_simulation_data(X_train, θ_train)
     
-    # Train the model
-    inference.train(param_grid=None)
+    # Create a scaler for the features
+    scaler = StandardScaler()
     
-    # Evaluate the model using the test data
-    predictions = inference.predict(X_test)
+    # Train the model
+    sig = inspect.signature(inference.train)
+    if "scaler" in sig.parameters:
+        inference.train(param_grid=None, scaler=scaler)
+        # Evaluate the model using the test data
+        predictions = inference.predict(X_test, scaler=scaler)
+    else:
+        # Old package version: train() internally creates/uses a scaler already
+        # so just call without scaler.
+        inference.train(param_grid=None)
+        predictions = inference.predict(X_test)
+    
+    # Calculate MSE
+    mse = mean_squared_error(θ_test, predictions)
+
     
     # Plot real vs predicted values
     plt.figure(figsize=(8, 6))
-    plt.scatter(θ_test, predictions, alpha=0.5)
-    plt.plot([θ_test.min(), θ_test.max()], [θ_test.min(), θ_test.max()], 'r--')
+    plt.scatter(θ_test, predictions, alpha=0.5, label=f'MSE = {mse:.3f}')
+    plt.plot([θ_test.min(), θ_test.max()], [θ_test.min(), θ_test.max()], 'r--', label='Ideal Fit')
     plt.xlabel('True θ')
     plt.ylabel('Predicted θ')
+    plt.legend()
     plt.show()
 
 ```

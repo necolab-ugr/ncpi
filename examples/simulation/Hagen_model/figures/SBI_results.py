@@ -17,7 +17,7 @@ from ncpi import tools
 compute_metrics = True
 
 # Path to the local directory where the metrics and posteriors will be saved
-result_folder = 'SBI_results'
+result_folder = os.path.join('SBI_results')
 
 # Choose whether to use a held-out dataset or folds from RepeatedKFold
 use_held_out_data = True
@@ -34,7 +34,7 @@ zenodo_dw_sim = True # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
 # Paths to zenodo files
-zenodo_dir_sim = "/DATA/zenodo_sim_files"
+zenodo_dir_sim = os.path.join(os.sep, 'DATA', 'zenodo_sim_files')
 
 # Download simulation data and ML models
 if zenodo_dw_sim:
@@ -105,10 +105,10 @@ torch.manual_seed(0)
 
 # Path to ML models trained based on a held-out dataset approach
 if use_held_out_data:
-    ML_path = os.path.join(zenodo_dir_sim, 'ML_models/held_out_data_models')
+    ML_path = os.path.join(zenodo_dir_sim, 'ML_models', 'held_out_data_models')
 # Path to ML models trained based on a RepeatedKFold approach
 else:
-    ML_path = os.path.join(zenodo_dir_sim, 'ML_models/4_param')
+    ML_path = os.path.join(zenodo_dir_sim, 'ML_models', '4_param')
 
 # Limits of histograms
 lims = [[-15, 15], [-2, 5], [-2, 12], [0, 60]]
@@ -228,7 +228,11 @@ if compute_metrics:
                     fold = int(10. * sample / theta_EI.shape[0])
                     posterior_samples = [posterior[fold].sample((n_post_samples,), x=x_o, show_progress_bars=False)]
 
-                # Calculate E/I
+                # Compute E/I by dividing the posterior distributions and averaging the sorted samples across folds.
+                # Note: This approach may not be the most straightforward or appropriate.
+                # In a related study (see https://github.com/necolab-ugr/SBI_mechanistic_modeling_AD), 
+                # we trained SBI models directly on the E/I ratio, which offers a more suitable and principled method.
+                
                 new_post_samples = [np.zeros((posterior_samples[0].shape[0],
                                               4)) for _ in range(len(posterior_samples))]
                 for ii in range(len(posterior_samples)):
@@ -255,13 +259,18 @@ if compute_metrics:
                 p = np.zeros(4)
                 try:
                     for param in range(4):
-                        # Remove low-probability samples to prevent distributions with long tails
+                        # Remove low-probability samples to prevent distributions with long tails:
+                        # We observed that calculating E/I as the ratio of posterior distributions over the J_YX parameters 
+                        # resulted in long-tailed distributions with low probability mass—an artifact of the indirect approach. 
+                        # This workaround was unnecessary when training SBI models to predict E/I directly, as done in the related 
+                        # project: https://github.com/necolab-ugr/SBI_mechanistic_modeling_AD.
+                        
                         hist, bin_edges = np.histogram(avg_post_samples[:,param],
                                                        bins=np.linspace(lims[param][0], lims[param][1], 1000),
                                                        density=True)
                         hist = gaussian_filter1d(hist, sigma=5)
                         hist /= np.max(hist)
-                        iii = bin_edges[np.where(hist > 0.5)[0]]
+                        iii = bin_edges[np.where(hist > 0.25)[0]]
                         pos = np.where((avg_post_samples[:,param] > iii[0]) & (avg_post_samples[:,param] <= iii[-1]))[0]
                         param_post_samples = avg_post_samples[pos,param]
 

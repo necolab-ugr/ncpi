@@ -38,6 +38,9 @@ the R environment, the following packages must also be installed:
 
 ## 📂 Folder Structure
 
+- **`tools.py`**:  
+  Contains shared utility functions used across the different example scripts.
+
 ### 🔵 `EEG_AD/`  
 Scripts to generate results from applying our inverse models to the EEG dataset used in the study. This dataset 
 includes both healthy controls (HCs) and patients clinically diagnosed with Alzheimer’s Disease (AD) at varying stages: 

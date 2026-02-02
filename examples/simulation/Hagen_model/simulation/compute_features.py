@@ -6,10 +6,10 @@ import pandas as pd
 import ncpi
 
 # Path to the folder containing the processed data
-sim_file_path = '/DATOS/pablomc/data/Hagen_model_v1'
+sim_file_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'data', 'Hagen_model_v1')
 
 # Path to the folder where the features will be saved
-features_path = '/DATOS/pablomc/data'
+features_path = os.path.join(os.sep, 'DATOS', 'pablomc', 'data')
 
 # Set to True if features should be computed for the EEG data instead of the CDM data
 compute_EEG = False
@@ -91,38 +91,50 @@ if __name__ == '__main__':
                             df.fs = 1000. / 0.625 # samples/s
 
                             # Compute features
-                            if method == 'catch22':
-                                features = ncpi.Features(method='catch22')
-                            elif method == 'power_spectrum_parameterization_1' or method == 'power_spectrum_parameterization_2':
-                                # Parameters of the fooof algorithm
-                                fooof_setup_sim = {'peak_threshold': 1.,
-                                                   'min_peak_height': 0.,
-                                                   'max_n_peaks': 5,
-                                                   'peak_width_limits': (10., 50.)}
-                                features = ncpi.Features(method='power_spectrum_parameterization',
-                                                         params={'fs': df.fs,
-                                                                 'fmin': 5.,
-                                                                 'fmax': 200.,
-                                                                 'fooof_setup': fooof_setup_sim,
-                                                                 'r_squared_th':0.9})
-                            elif method == 'fEI':
-                                features = ncpi.Features(method='fEI',
-                                                         params={'fs': df.fs,
-                                                                 'fmin': 5.,
-                                                                 'fmax': 150.,
-                                                                 'fEI_folder': '../../../ncpi/Matlab'})
+                            if method == "catch22":
+                                features = ncpi.Features(method="catch22", params={"normalize": True})
+                                feats = features.compute_features(df["Data"].to_list())
+                                df["Features"] = feats
 
-                            df = features.compute_features(df)
+                            elif method in {"power_spectrum_parameterization_1", "power_spectrum_parameterization_2"}:
+                                fooof_setup_sim = {
+                                    "peak_threshold": 1.0,
+                                    "min_peak_height": 0.0,
+                                    "max_n_peaks": 5,
+                                    "peak_width_limits": (10.0, 50.0),
+                                }
 
-                            # Keep only the aperiodic exponent
-                            if method == 'power_spectrum_parameterization_1':
-                                df['Features'] = df['Features'].apply(lambda x: x[1])
-                            # Keep aperiodic exponent, peak frequency, peak power, knee frequency, and mean power
-                            if method == 'power_spectrum_parameterization_2':
-                                df['Features'] = df['Features'].apply(lambda x: x[[1, 2, 3, 6, 11]])
+                                features = ncpi.Features(
+                                    method="specparam",
+                                    params={
+                                        "fs": df.fs,
+                                        "freq_range": (5.0, 200.0),
+                                        "specparam_model": fooof_setup_sim,
+                                        "r_squared_th": 0.9,
+                                    },
+                                )
+                                feats = features.compute_features(df["Data"].to_list())
 
-                            # Append the feature dataframes to a list
-                            all_features.append(df['Features'].tolist())
+                                if method == "power_spectrum_parameterization_1":
+                                    df["Features"] = [float(np.asarray(d["aperiodic_params"])[1]) for d in feats]
+
+                                elif method == "power_spectrum_parameterization_2":
+                                    def _pack(d):
+                                        ap = np.asarray(d.get("aperiodic_params", [np.nan, np.nan]), dtype=float)
+                                        exponent = float(ap[1]) if ap.size > 1 else np.nan
+                                        peak_cf = float(d.get("peak_cf", np.nan))
+                                        peak_pw = float(d.get("peak_pw", np.nan))
+                                        knee = np.nan
+                                        mean_power = np.nan
+                                        return np.array([exponent, peak_cf, peak_pw, knee, mean_power], dtype=float)
+
+
+                                    df["Features"] = [_pack(d) for d in feats]
+
+                            else:
+                                raise ValueError(f"Unknown method: {method}")
+
+                            all_features.append(df["Features"].tolist())
 
                         # Save the features to a tmp file
                         if compute_EEG:

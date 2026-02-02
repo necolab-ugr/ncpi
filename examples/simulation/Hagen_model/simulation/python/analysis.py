@@ -17,7 +17,7 @@ zenodo_dw_mult = True
 zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
 
 # Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in neuron)
-zenodo_dir = '/DATA/multicompartment_neuron_network'
+zenodo_dir = os.path.join(os.sep, 'DATA', 'multicompartment_neuron_network')
 
 # Download data
 if zenodo_dw_mult:

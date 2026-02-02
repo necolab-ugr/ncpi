@@ -1,0 +1,57 @@
+name: Ncpi Tests
+
+on:
+  push:
+    branches: [ main, master, ncpi-tests ]
+  pull_request:
+    branches: [ main, master, ncpi-tests ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Cache downloaded file
+      uses: actions/cache@v4
+      id: file-cache
+      with:
+          path: |
+            tests/data/zenodo_test_files_LFP/zenodo_sim_files
+            tests/data/zenodo_test_files_LFP/zenodo_emp_files
+          key: ${{ runner.os }}-test-data-permanent-v1 # 7-day cache permanent key
+
+    - name: Create directory for tests data (empty in repo)
+      if: steps.file-cache.outputs.cache-hit != 'true'
+      run: |
+        mkdir -p tests/data/zenodo_test_files_LFP
+
+    - name: Download files (if they are not cached)
+      if: steps.file-cache.outputs.cache-hit != 'true'
+      run: |
+        # Download partial zenodo simulation test data (~196 MB) and extract files
+        wget -O tests/data/zenodo_test_files_LFP/zenodo_sim_test_files_LFP.7z https://zenodo.org/records/17427470/files/zenodo_sim_test_files_LFP.7z
+        7z x tests/data/zenodo_test_files_LFP/zenodo_sim_test_files_LFP.7z -otests/data/zenodo_test_files_LFP/
+        rm tests/data/zenodo_test_files_LFP/zenodo_sim_test_files_LFP.7z  # Free space immediately
+
+        # Download partial zenodo empirical test data (~490 MB) and extract files
+        wget -O tests/data/zenodo_test_files_LFP/zenodo_emp_test_files_LFP.7z https://zenodo.org/records/17427470/files/zenodo_emp_test_files_LFP.7z
+        7z x tests/data/zenodo_test_files_LFP/zenodo_emp_test_files_LFP.7z -otests/data/zenodo_test_files_LFP/
+        rm tests/data/zenodo_test_files_LFP/zenodo_emp_test_files_LFP.7z  # Free space immediately
+        
+        
+    - name: List test data files
+      run: |
+        ls -lhat tests/data/zenodo_test_files_LFP
+        echo "Data size:"
+        du -sh tests/data/zenodo_test_files_LFP  # Check size
+          
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip setuptools
+        pip install -r requirements.txt
+        pip install . # overwrites ncpi python package. It installs the current version of this repository
+        
+    - name: Run tests with pytest
+      run: |
+        pytest -v --ignore=tests/EEG_AD/test_EEG.py
