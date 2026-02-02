@@ -14,6 +14,37 @@ import ncpi
 from ncpi.tools import timer
 
 
+def _features_to_2d_numpy(feat_list):
+    """
+    Convert a list-like of features into a 2D numpy array:
+      - list of scalars -> (n, 1)
+      - list of vectors -> (n, d) via np.stack
+      - already 2D -> unchanged
+    """
+    feats = list(feat_list)
+
+    if len(feats) == 0:
+        return np.empty((0, 0), dtype=float)
+
+    # If entries are arrays/lists (vector features), stack them
+    first = feats[0]
+    if isinstance(first, (list, tuple, np.ndarray)) and not np.isscalar(first):
+        try:
+            X = np.stack([np.asarray(f) for f in feats], axis=0)
+        except Exception:
+            # fallback: let numpy make an object array (Inference may reject later)
+            X = np.asarray(feats, dtype=object)
+    else:
+        # scalar features
+        X = np.asarray(feats)
+
+    # Critical fix: if 1D, interpret as many 1-feature samples
+    if X.ndim == 1:
+        X = X.reshape(-1, 1)
+
+    return X
+
+
 # ---------------------------
 # Simulation data loading
 # ---------------------------
@@ -331,8 +362,9 @@ def compute_predictions(
     if data_kind == "LFP":
         _copy_assets_LFP(method=method, ML_model=ML_model, zenodo_dir_sim=zenodo_dir_sim)
 
-        predictions = inference.predict(np.asarray(out["Features"].tolist()))
-        out["Predictions"] = [list(p) for p in predictions]
+        X_emp = _features_to_2d_numpy(out["Features"])
+        predictions = inference.predict(X_emp)
+        out["Predictions"] = [list(p) if isinstance(p, (list, np.ndarray)) else [p] for p in predictions]
         return out
 
     # --- EEG branch ---
@@ -352,8 +384,9 @@ def compute_predictions(
         if sensor_df.empty:
             continue
 
-        predictions = inference.predict(np.asarray(sensor_df["Features"].tolist()))
-        sensor_df["Predictions"] = [list(pred) for pred in predictions]
+        X_emp = _features_to_2d_numpy(sensor_df["Features"])
+        predictions = inference.predict(X_emp)
+        sensor_df["Predictions"] = [list(p) if isinstance(p, (list, np.ndarray)) else [p] for p in predictions]
 
         # Write back into out
         out.loc[sensor_df.index, "Predictions"] = sensor_df["Predictions"]

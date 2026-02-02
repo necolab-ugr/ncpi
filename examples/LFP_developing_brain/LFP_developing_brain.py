@@ -1,6 +1,8 @@
 import os
 import sys
 
+import numpy as np
+
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
 

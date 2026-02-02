@@ -13,7 +13,7 @@ held_out_dataset = False
 
 # List of parameters to be included in the training
 # Full list of parameters:
-params =  ['J_EE', 'J_IE', 'J_EI', 'J_II', 'tau_syn_E', 'tau_syn_I', 'J_ext']
+params = ['J_EE', 'J_IE', 'J_EI', 'J_II', 'tau_syn_E', 'tau_syn_I', 'J_ext']
 
 # Special case that includes the E/I parameter and the synaptic time constants
 # params = ['E_I', 'tau_syn_E', 'tau_syn_I']
@@ -32,6 +32,7 @@ all_methods = ['catch22', 'power_spectrum_parameterization_1']
 # Names of catch22 features
 try:
     import pycatch22
+
     catch22_names = pycatch22.catch22_all([0])['names']
 except:
     catch22_names = ['DN_HistogramMode_5',
@@ -80,7 +81,7 @@ if __name__ == "__main__":
                     X = pickle.load(file)
             except Exception as e:
                 print(f"Error loading simulation data: {e}")
-                
+
             if method in catch22_names:
                 X = X[:, catch22_names.index(method)]
                 print(f'X shape: {X.shape}, column selected: {catch22_names.index(method)}')
@@ -97,7 +98,7 @@ if __name__ == "__main__":
             except Exception as e:
                 print(f"Error loading simulation data: {e}")
 
-            X = np.concatenate((X_1, X_2.reshape(-1,1)), axis=1)
+            X = np.concatenate((X_1, X_2.reshape(-1, 1)), axis=1)
             print(f'X shape: {X.shape}')
 
         # Subset the data to include only the parameters of interest
@@ -105,7 +106,7 @@ if __name__ == "__main__":
             print(f'\n--- Subsetting the data to include only the parameters of interest.')
             # First compute the E/I parameter
             if 'E_I' in params:
-                E_I = (theta['data'][:,0]/theta['data'][:,2]) / (theta['data'][:,1]/theta['data'][:,3])
+                E_I = (theta['data'][:, 0] / theta['data'][:, 2]) / (theta['data'][:, 1] / theta['data'][:, 3])
                 E_I = np.reshape(E_I, (-1, 1))
                 theta['data'] = np.concatenate((E_I, theta['data']), axis=1)
                 theta['parameters'] = ['E_I'] + theta['parameters']
@@ -121,7 +122,7 @@ if __name__ == "__main__":
 
         print(f'Shape of theta data: {theta["data"].shape}')
         end_time = time.time()
-        print(f'Done in {(end_time - start_time)/60.} min')
+        print(f'Done in {(end_time - start_time) / 60.} min')
 
         # Create a directory to save results
         if not os.path.exists('data'):
@@ -150,7 +151,7 @@ if __name__ == "__main__":
             with open(os.path.join('data', method, 'held_out_dataset'), 'wb') as file:
                 pickle.dump((X_test, theta_test), file)
             print(f'\n--- The held-out dataset has been saved.')
-            print(f'Done in {(end_time - start_time)/60.} min')
+            print(f'Done in {(end_time - start_time) / 60.} min')
 
         else:
             print('\n--- Using the full dataset.')
@@ -159,6 +160,38 @@ if __name__ == "__main__":
             theta_train = theta['data']
             theta_test = None
 
+        # --- SBI prior (required by new Inference.py) ---
+        # Older scripts passed prior=None; the new Inference.initialize_sbi() requires a non-None prior.
+        # We keep the same end-to-end functionality by building a BoxUniform prior from the training theta range.
+        if model in ('NPE', 'NLE', 'NRE'):
+            try:
+                import torch
+                from sbi.utils import BoxUniform
+
+                theta_np = np.asarray(theta_train)
+                if theta_np.ndim == 1:
+                    theta_np = theta_np.reshape(-1, 1)
+
+                # Low/high per parameter (slightly expanded to avoid zero-width bounds)
+                low = np.min(theta_np, axis=0)
+                high = np.max(theta_np, axis=0)
+                eps = 1e-12
+                span = np.maximum(high - low, eps)
+                low = low - 1e-6 * span
+                high = high + 1e-6 * span
+
+                prior = BoxUniform(
+                    low=torch.as_tensor(low, dtype=torch.float32),
+                    high=torch.as_tensor(high, dtype=torch.float32),
+                )
+            except Exception as e:
+                raise RuntimeError(
+                    "Failed to construct an automatic BoxUniform prior for SBI. "
+                    "Install sbi+torch and ensure theta_train is numeric."
+                ) from e
+        else:
+            prior = None
+
         # Create the Inference object, add the simulation data and train the model
         print('\n--- Training the regression model.')
         start_time = time.time()
@@ -166,27 +199,26 @@ if __name__ == "__main__":
         if model == 'MLPRegressor':
             print('--- Using MLPRegressor')
             if method == 'catch22' or method == 'catch22_psp_1':
-                hyperparams = [{'hidden_layer_sizes': (25,25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                               {'hidden_layer_sizes': (50,50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+                hyperparams = [{'hidden_layer_sizes': (25, 25), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                               {'hidden_layer_sizes': (50, 50), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
             else:
-                hyperparams = [{'hidden_layer_sizes': (2,2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
-                               {'hidden_layer_sizes': (4,4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
+                hyperparams = [{'hidden_layer_sizes': (2, 2), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5},
+                               {'hidden_layer_sizes': (4, 4), 'max_iter': 100, 'tol': 1e-1, 'n_iter_no_change': 5}]
 
         if model == 'NPE':
             print('--- Using NPE')
+            # NOTE: Inference.py now expects a *prior* inside inference.hyperparams (not inside param_grid).
+            # We build an automatic BoxUniform prior from theta_train later.
             if method == 'catch22' or method == 'catch22_psp_1':
-                hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':10,
-                                                                     'num_transforms':2}}]
+                hyperparams = [{'estimator_kwargs': {'model': 'maf', 'hidden_features': 10, 'num_transforms': 2}}]
             else:
-                hyperparams = [{'prior': None, 'density_estimator': {'model':"maf", 'hidden_features':2,
-                                                                     'num_transforms':2}}]
+                hyperparams = [{'estimator_kwargs': {'model': 'maf', 'hidden_features': 2, 'num_transforms': 2}}]
 
         if model == 'Ridge':
             print('--- Using Ridge')
             hyperparams = [{'alpha': 0.01}, {'alpha': 0.1}, {'alpha': 1.}, {'alpha': 10.}, {'alpha': 100.}]
 
-
-        inference = ncpi.Inference(model=model)
+        inference = ncpi.Inference(model=model, hyperparams=({'prior': prior} if prior is not None else None))
         inference.add_simulation_data(X_train, theta_train)
 
         # Create a scaler for the features
@@ -201,7 +233,7 @@ if __name__ == "__main__":
             # inference.train(param_grid=None, scaler=scaler)
             inference.train(param_grid=hyperparams, n_splits=10, n_repeats=1, scaler=scaler)
         else:
-            inference.train(param_grid=hyperparams,n_splits=10, n_repeats=20, scaler=scaler)
+            inference.train(param_grid=hyperparams, n_splits=10, n_repeats=20, scaler=scaler)
 
         # Save the best model and the StandardScaler
         pickle.dump(pickle.load(open('data/model.pkl', 'rb')),
@@ -215,7 +247,7 @@ if __name__ == "__main__":
                         open(os.path.join('data', method, 'density_estimator'), 'wb'))
 
         end_time = time.time()
-        print(f'Done in {(end_time - start_time)/60.} min')
+        print(f'Done in {(end_time - start_time) / 60.} min')
 
         # Evaluate the model using the test data
         if held_out_dataset:
@@ -230,4 +262,4 @@ if __name__ == "__main__":
                 pickle.dump(predictions, file)
 
             end_time = time.time()
-            print(f'Done in {(end_time - start_time)/60.} min')
+            print(f'Done in {(end_time - start_time) / 60.} min')
