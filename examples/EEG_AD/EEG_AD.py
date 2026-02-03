@@ -1,7 +1,9 @@
 import os
 import sys
-
-import numpy as np
+import pandas as pd
+from ncpi import tools as ncpi_tools
+from ncpi.tools import timer, ensure_module
+from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields
 
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PARENT_DIR = os.path.dirname(CURRENT_DIR)
@@ -10,12 +12,9 @@ if PARENT_DIR not in sys.path:
     sys.path.insert(0, PARENT_DIR)
 
 import tools as shared_tools
-from ncpi import tools as ncpi_tools
 
-import pandas as pd
-from ncpi.tools import timer
-from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields
-
+# sklearn models loaded in the EEG/LFP examples require scikit-learn ==1.3.2
+ensure_module("sklearn", "1.3.2")
 
 # ---------------------------
 # User-config / constants
@@ -38,7 +37,7 @@ zenodo_dir_sim = os.path.join("/home/pablomc", "zenodo_sim_files")
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization"]
 
-# ML model used to compute the predictions
+# ML model used to compute the predictions (MLPRegressor, Ridge)
 ML_model = "MLPRegressor"
 
 # sensor list
@@ -134,7 +133,7 @@ def main() -> None:
         # 2) Features from empirical EEG
         emp_data = shared_tools.compute_features(method, df_emp)
 
-        # 3) Predictions (EEG path in unified helper)
+        # 3) Predictions
         emp_data = shared_tools.compute_predictions(
             emp_data,
             data_kind="EEG",
@@ -149,6 +148,9 @@ def main() -> None:
 
         # 4) Save
         shared_tools.save_data(emp_data, method)
+
+    # Restore scikit-learn to latest version
+    ensure_module("sklearn")
 
 
 if __name__ == "__main__":

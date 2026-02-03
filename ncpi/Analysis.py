@@ -1,12 +1,3 @@
-"""
-Notes
------
-- Mixed model functionality depends on **rpy2** and the relevant **R packages**.
-  `lmer_tests` requires R packages: lme4, emmeans
-  `lmer_selection` requires R packages: lme4, buildmer
-
-"""
-
 from __future__ import annotations
 
 import re
@@ -52,6 +43,7 @@ def extract_variables(formula: str) -> set[str]:
 @dataclass(frozen=True)
 class _RContext:
     """Small container for rpy2 objects we use repeatedly."""
+
     pandas2ri: Any
     r: Any
     ro: Any
@@ -87,13 +79,12 @@ class PosthocConfig:
         Override the reference level passed to `contrast(..., ref=...)`.
         If None, uses the Python argument `control_group`.
     """
+
     adjust: str = "holm"
     pairwise_method: str = "pairs"
     pairwise_contrast_method: str = "pairwise"
     treatment_method: str = "trt.vs.ctrl"
     treatment_ref: Optional[Union[str, int]] = None
-
-
 
 
 @dataclass(frozen=True)
@@ -109,9 +100,11 @@ class LmerTestsResult:
     model_info:
         Optional model-selection metadata such as BICs and the selected formula.
     """
+
     posthoc: Dict[str, pd.DataFrame]
     lrt: Optional[pd.DataFrame] = None
     model_info: Optional[Dict[str, object]] = None
+
 
 def _coerce_posthoc_config(posthoc: Optional[Union[PosthocConfig, Mapping[str, object]]]) -> PosthocConfig:
     """Coerce user config to PosthocConfig with sane defaults."""
@@ -128,7 +121,7 @@ def _coerce_posthoc_config(posthoc: Optional[Union[PosthocConfig, Mapping[str, o
 # Main class
 # ---------------------------------------------------------------------
 class Analysis:
-    """Statistical analysis and EEG visualization helper.
+    """Statistical analysis and EEG/MEG visualization helpers.
 
     Parameters
     ----------
@@ -177,25 +170,7 @@ class Analysis:
         return out
 
     def _get_r_context(self, packages: Sequence[str]) -> _RContext:
-        """Import rpy2 and ensure required R packages are available.
-
-        Parameters
-        ----------
-        packages:
-            R package names to load with `require()`.
-
-        Returns
-        -------
-        _RContext
-            Container with rpy2 objects: `pandas2ri`, `r`, and `robjects`.
-
-        Raises
-        ------
-        ImportError
-            If rpy2 is not installed.
-        RuntimeError
-            If an R package is missing (raised by R and surfaced through rpy2).
-        """
+        """Import rpy2 and ensure required R packages are available."""
         if not tools.ensure_module("rpy2"):
             raise ImportError("rpy2 is required but is not installed.")
 
@@ -239,84 +214,51 @@ class Analysis:
     ) -> Union[Dict[str, pd.DataFrame], LmerTestsResult]:
         """Fit lm/lmer model(s) in R, optionally select by BIC, then run post-hoc tests.
 
-        Workflow
-        --------
-        1) Fit one or more candidate models using R (`lm` or `lmer`)
-        2) If multiple candidates are given, select the one with the lowest BIC
-        3) Interpret `specs`:
-           - factor-only specs -> `emmeans()` + contrasts/pairs
-           - specs with exactly one numeric variable -> `emtrends()` + `test()`
-        4) Convert results back to pandas DataFrames.
-
         Parameters
         ----------
         models:
-            One or more R-style model formulas.
-
-            If multiple are provided, all are fitted and the one with smallest BIC is used.
-            All formulas must share the same dependent variable (left side of `~`).
-
+            One or more R-style model formulas as strings.
+            If multiple formulas are provided, the best model is selected by BIC.
         group_col:
-            Name of the primary grouping column. Required when `specs` is None.
-
+            Name of the grouping column (used for treatment-vs-control contrasts).
+            Required if `specs` is None.
         control_group:
-            If provided, and a spec corresponds to the primary group term, comparisons are
-            computed using a treatment-vs-control contrast (see `posthoc.treatment_method`).
-            Otherwise, all-pairs comparisons are computed.
-
+            Name of the control group level within `group_col` (used for treatment-vs-control
+            contrasts). If None, all-pairs comparisons are used.
         numeric:
-            List of variables to treat as numeric. All other variables are converted to factors
-            in R. The dependent variable is always treated as numeric.
-
+            List of variable names that should be treated as numeric.
+            The dependent variable is always treated as numeric.
         specs:
-            Post-hoc specifications. Each spec is a compact string that may include:
-            - `:` for interactions
-            - `|` for conditioning, e.g. `sensor|group` means compare sensors within each group
-
-            If the spec contains no numeric variables -> `emmeans` comparisons.
-            If it contains exactly one numeric variable -> `emtrends` slope tests.
-
-            Specs that refer to variables not present in the selected model's fixed effects are
-            skipped (with a message if `print_info=True`).
-
+            One or more spec strings indicating which post-hoc tests to run.
+            Each spec is either:
+            - A factor variable name (e.g. ``"group"``) for which all-pairs or treatment-vs-control
+              comparisons are performed.
+            - A numeric variable name (e.g. ``"epoch"``) for which slope
+                comparisons are performed.
+            If None, defaults to `[group_col]`.
         posthoc:
-            Optional :class:`PosthocConfig` or mapping configuring:
-            - p-value adjustment (`adjust`)
-            - all-pairs method (`pairwise_method`, `pairwise_contrast_method`)
-            - treatment-vs-control method and reference (`treatment_method`, `treatment_ref`)
-
+            PosthocConfig or dict of options to configure post-hoc testing behavior.
         print_info:
-            Print model selection and per-spec results.
-
+            If True, print progress and results to stdout.
         lrt:
             If True, perform a likelihood-ratio test (LRT) between the selected model
             and a reduced model with terms in `lrt_drop` removed.
-
         lrt_drop:
-            List of terms to drop from the selected model when constructing the reduced model
-            for LRT. Required if `lrt=True`.
-
+            List of term labels (as strings) to drop from the selected model
+            when constructing the reduced model for LRT.
+            Required if `lrt` is True.
         return_model_info:
-            If True, return extra model-selection info such as BICs and the selected formula.
+            If True, return extra model-selection metadata such as BICs
+            and the selected formula.
 
         Returns
         -------
-        dict[str, pandas.DataFrame]
-            Mapping from spec string to its results DataFrame.
-
-        Warnings
-        --------
-        Warns if no valid specs remain after filtering.
-
-        Raises
-        ------
-        TypeError
-            If `self.data` is not a DataFrame.
-        ValueError
-            For invalid formulas, missing columns, or inconsistent grouping config.
-        ImportError
-            If rpy2 is missing.
+        Union[Dict[str, pd.DataFrame], LmerTestsResult]
+            If `lrt` or `return_model_info` is True, returns an LmerTests
+            object containing post-hoc results and extra info.
+            Otherwise, returns a dict of post-hoc result DataFrames keyed by spec.
         """
+
         df_in = self._as_dataframe()
         ctx = self._get_r_context(["lme4", "emmeans"])
         pandas2ri, r, ro = ctx.pandas2ri, ctx.r, ctx.ro
@@ -370,12 +312,17 @@ class Analysis:
         if factor_vars:
             r("\n".join([f"df${col} <- as.factor(df${col})" for col in factor_vars]))
 
-        # Fit candidate models
+        # ------------------------------------------------------------------
+        # Fit mixed models with ML (REML=FALSE) for comparisons
+        # This makes BIC comparisons and any fixed-effect comparisons canonical.
+        # ------------------------------------------------------------------
         for i, formula in enumerate(models_list):
             fit_fun = "lmer" if "|" in formula else "lm"
-            r(f"m{i} <- {fit_fun}({formula}, data=df)")
+            if fit_fun == "lmer":
+                r(f"m{i} <- lmer({formula}, data=df, REML=FALSE)")
+            else:
+                r(f"m{i} <- lm({formula}, data=df)")
 
-        # BIC-based selection if more than one candidate
         # BIC-based selection if more than one candidate
         if len(models_list) == 1:
             r(
@@ -408,7 +355,6 @@ class Analysis:
                 f"treatment_method={ph_cfg.treatment_method}"
             )
 
-
         lrt_df_pd: Optional[pd.DataFrame] = None
         if lrt:
             if not lrt_drop:
@@ -430,6 +376,7 @@ class Analysis:
                 lrt_df_pd = lrt_obj.copy()
             else:
                 from rpy2.robjects.conversion import localconverter
+
                 with localconverter(ro.default_converter + pandas2ri.converter):
                     lrt_df_pd = ro.conversion.rpy2py(lrt_obj)
 
@@ -457,6 +404,7 @@ class Analysis:
                 bic_df_pd = bic_obj.copy()
             else:
                 from rpy2.robjects.conversion import localconverter
+
                 with localconverter(ro.default_converter + pandas2ri.converter):
                     bic_df_pd = ro.conversion.rpy2py(bic_obj)
 
@@ -475,8 +423,13 @@ class Analysis:
                 "selected_formula": selected_formula_py,
             }
 
-        # Fixed effects present in selected model
-        selmod_fixed = set(ro.r('attr(terms(nobars(final_model)), "term.labels")'))
+        # ------------------------------------------------------------------
+        # Use model variables (not term.labels) to validate specs
+        # This avoids incorrectly skipping specs when a variable appears only in interactions.
+        # ------------------------------------------------------------------
+        selmod_vars = set(r("all.vars(nobars(formula(final_model)))"))
+        # Remove response (LHS) if present
+        selmod_vars.discard(y)
 
         # Normalize specs (default to group_col)
         if specs is None:
@@ -484,7 +437,6 @@ class Analysis:
         else:
             specs_list = self._normalize_str_list(specs)
 
-        # Parse specs into aligned instructions
         SpecInstruction = Union[str, Tuple[str, str]]  # "~spec" OR ("~spec_without_numeric", "numeric_var")
         spec_instructions: List[Tuple[str, SpecInstruction]] = []
 
@@ -492,9 +444,9 @@ class Analysis:
         for sp in specs_list:
             vars_in_sp = extract_variables(sp)
 
-            if any(v not in selmod_fixed for v in vars_in_sp):
+            if any(v not in selmod_vars for v in vars_in_sp):
                 if print_info:
-                    print(f'(!) Specs "{sp}" skipped: variable not present as fixed effect.')
+                    print(f'(!) Specs "{sp}" skipped: variable not present in selected model formula.')
                 continue
 
             numeric_in_sp = [v for v in vars_in_sp if v in numeric_set]
@@ -547,7 +499,6 @@ class Analysis:
                         }
                         res <- contrast(emm, method=trt_method, ref=ref_idx, adjust=p_adjust)
                         df_res <- as.data.frame(res)
-                        df_res$contrast <- as.character(res@grid$contrast)
                         """
                     )
                 else:
@@ -557,7 +508,6 @@ class Analysis:
                             emm <- suppressMessages(emmeans(final_model, specs=as.formula(specs)))
                             res <- pairs(emm, adjust=p_adjust)
                             df_res <- as.data.frame(res)
-                            df_res$contrast <- as.character(res@grid$contrast)
                             """
                         )
                     elif ph_cfg.pairwise_method == "contrast":
@@ -566,7 +516,6 @@ class Analysis:
                             emm <- suppressMessages(emmeans(final_model, specs=as.formula(specs)))
                             res <- contrast(emm, method=pairwise_contrast_method, adjust=p_adjust)
                             df_res <- as.data.frame(res)
-                            df_res$contrast <- as.character(res@grid$contrast)
                             """
                         )
                     else:
@@ -595,13 +544,12 @@ class Analysis:
                     r(f"df_res${v} <- as.character(df_res${v})")
 
             # Convert df_res to pandas.
-            # Depending on rpy2 conversion settings, ro.r['df_res'] may already be a pandas.DataFrame.
-            df_res_obj = ro.r['df_res']
+            df_res_obj = ro.r["df_res"]
             if isinstance(df_res_obj, pd.DataFrame):
                 df_res_pd = df_res_obj.copy()
             else:
-                # Use a local converter to avoid relying on deprecated global conversion.
                 from rpy2.robjects.conversion import localconverter
+
                 with localconverter(ro.default_converter + pandas2ri.converter):
                     df_res_pd = ro.conversion.rpy2py(df_res_obj)
 
@@ -638,27 +586,35 @@ class Analysis:
         Parameters
         ----------
         full_model:
-            Starting model formula, e.g. ``'Y ~ group*epoch + (1|id)'``.
+            Full R-style model formula as a string.
         numeric:
-            Variables to treat as numeric (others become factors).
+            List of variable names that should be treated as numeric.
+            The dependent variable is always treated as numeric.
         crit:
-            If set, a single criterion used for the entire selection procedure.
-            When provided, `random_crit` and `fixed_crit` are ignored.
+            Overall criterion for both random and fixed effects.
+            If provided, `random_crit` and `fixed_crit` are ignored.
         random_crit:
-            Criterion for random-effect structure selection (default 'BIC').
+            Criterion for random-effect selection.
+            Common options include: ``'BIC'``, ``'LRT'``,
+            ``'AIC'``, ``'AICc'``, ``'p-value'``.
+            If None, random effects are not selected.
         fixed_crit:
-            Criterion for fixed-effect selection after random selection (default 'LRT').
-            Set to None to skip fixed-effect selection.
+            Criterion for fixed-effect selection.
+            Common options include: ``'BIC'``, ``'LRT'``,
+            ``'AIC'``, ``'AICc'``, ``'p-value'``.
+            If None, fixed effects are not selected.
         include:
-            One or more terms to force-include (never dropped).
+            One or more variable names or terms to always include
+            in the selected model (e.g. intercepts, main effects).
         print_info:
-            Print selection summary.
+            If True, print progress and results to stdout.
 
         Returns
         -------
         str
-            The selected model formula (single-line string).
+            The selected model formula as a string.
         """
+
         df_in = self._as_dataframe()
         ctx = self._get_r_context(["lme4", "buildmer"])
         pandas2ri, r, ro = ctx.pandas2ri, ctx.r, ctx.ro
@@ -793,16 +749,37 @@ class Analysis:
     ) -> Dict[str, pd.DataFrame]:
         """Compute Cohen's d for each non-control group vs control, per sensor.
 
-        Notes
-        -----
-        - d is computed using pooled standard deviation (unbiased sample SD, ddof=1).
-        - If `pooled` is 0 or sample sizes are too small, d is returned as NaN.
+        Parameters
+        ----------
+        control_group:
+            Name of the control group level within `group_col`.
+        data_col:
+            Name of the data column containing numeric values or sequences.
+        data_index:
+            If `data_col` contains sequences (e.g., lists or arrays),
+            the index within each sequence to use for effect-size computation.
+            If -1, uses the entire value as-is.
+        group_col:
+            Name of the grouping column.
+        sensor_col:
+            Name of the sensor/channel column.
+        min_n:
+            Minimum number of samples per group required to compute Cohen's d.
+            If either group has fewer than `min_n` samples for a given sensor,
+            Cohen's d is set to NaN for that sensor.
+        drop_zeros:
+            If True, drop rows where `data_col` is zero before computing effect sizes.
 
         Returns
         -------
-        dict[str, pandas.DataFrame]
-            Mapping ``"{group}vs{control_group}"`` -> DataFrame with columns [sensor_col, "d"].
+        Dict[str, pd.DataFrame]
+            A dict of pandas DataFrames keyed by comparison name
+            (e.g. ``"PatientvsHC"``), each containing columns:
+
+            - `sensor`: Sensor name.
+            - `d`: Cohen's d effect size.
         """
+
         df_in = self._as_dataframe()
 
         for col in (group_col, sensor_col, data_col):
@@ -833,7 +810,9 @@ class Analysis:
                 if len(x) >= min_n and len(y) >= min_n:
                     mean_x, mean_y = np.nanmean(x), np.nanmean(y)
                     std_x, std_y = np.nanstd(x, ddof=1), np.nanstd(y, ddof=1)
-                    pooled = np.sqrt(((len(x) - 1) * std_x**2 + (len(y) - 1) * std_y**2) / (len(x) + len(y) - 2))
+                    pooled = np.sqrt(
+                        ((len(x) - 1) * std_x**2 + (len(y) - 1) * std_y**2) / (len(x) + len(y) - 2)
+                    )
                     d = (mean_x - mean_y) / pooled if pooled != 0 else np.nan
                 else:
                     d = np.nan
@@ -870,59 +849,8 @@ class Analysis:
         image_interp: str = "cubic",
     ):
         """Plot an EEG topomap using MNE, adapting to any montage / channel configuration.
-
-        Parameters
-        ----------
-        values:
-            Data to plot. Accepted forms:
-
-            1) 1D array-like of shape (n_channels,)
-               - must provide `ch_names` with the same length
-
-            2) Mapping ``{channel_name: value}``
-               - `ch_names` is inferred from the mapping keys
-
-            3) pandas Series
-               - channel names come from the Series index
-
-        ch_names:
-            Channel names corresponding to `values` when `values` is array-like.
-
-        montage:
-            Montage definition:
-            - string name (e.g., "standard_1020", "standard_1005", ...)
-            - an MNE DigMontage instance
-
-        info:
-            Optional MNE Info. If provided, it is used as the basis.
-            Otherwise, an Info is created with `sfreq=1.0`.
-
-        ch_type:
-            Channel type when creating Info (default "eeg").
-
-        units:
-            Optional short label. If `axes` is provided, it's placed as the axes title.
-
-        vmin, vmax, cmap, sensors, outlines, sphere, axes, show, colorbar, res, extrapolate, image_interp:
-            Forwarded to `mne.viz.plot_topomap`.
-
-        Returns
-        -------
-        (im, cn)
-            Image and contour objects returned by MNE.
-
-        Raises
-        ------
-        ImportError
-            If `mne` is not installed.
-        ValueError
-            If channel names and values mismatch or channels are missing from the montage.
-
-        Tips
-        ----
-        - For non-standard EEG systems, create an MNE DigMontage with your exact channel positions
-          and pass it via `montage=...`.
         """
+
         if not tools.ensure_module("mne"):
             raise ImportError("mne is required for eeg_topomap but is not installed.")
 
@@ -978,7 +906,7 @@ class Analysis:
                 pass
             info_use = info_tmp
 
-                # MNE has changed the topomap API across versions.
+        # MNE has changed the topomap API across versions.
         # We therefore build keyword arguments dynamically based on the installed MNE.
         import inspect
 
@@ -1016,3 +944,9 @@ class Analysis:
             axes.set_title(units)
 
         return im, cn
+
+    # --------------
+    # MEG plotting
+    # --------------
+    def meg_surface(self):
+        print("MEG surface plotting is not yet implemented.")

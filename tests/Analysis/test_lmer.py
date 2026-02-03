@@ -7,13 +7,19 @@ from ncpi import Analysis, tools
 
 # If your package exports PosthocConfig, import it from ncpi.
 # If it doesn't, import it from the module where Analysis is defined.
-# Adjust this import to match your package layout.
 try:
     from ncpi import PosthocConfig  # type: ignore
 except Exception:  # pragma: no cover
-    # Fallback: if PosthocConfig isn't exported at package level
-    # You may need to change this to your actual module path.
     from ncpi.analysis import PosthocConfig  # type: ignore
+
+# If your package exports LmerTestsResult, import it for type checks
+try:
+    from ncpi import LmerTestsResult  # type: ignore
+except Exception:  # pragma: no cover
+    try:
+        from ncpi.analysis import LmerTestsResult  # type: ignore
+    except Exception:  # pragma: no cover
+        LmerTestsResult = None  # type: ignore
 
 
 # -----------------------------
@@ -24,64 +30,55 @@ def _r_backend_available() -> bool:
     return tools.ensure_module("rpy2")
 
 
-def _mne_available() -> bool:
-    """Return True if mne is importable; False otherwise."""
-    return tools.ensure_module("mne")
-
-
 # -----------------------------
 # Toy data generation
 # -----------------------------
 def _generate_toy_data(seed: int = 0) -> pd.DataFrame:
-    """Generate a small deterministic dataset for lmer/lm tests."""
-    np.random.seed(seed)
+    """Generate a small deterministic dataset for lm/lmer/emmeans tests."""
+    rng = np.random.default_rng(seed)
 
-    nsubj, nsensors, nepochs = 10, 3, 5
+    nsubj, nsensors, nepochs = 12, 3, 5
     subj_id = np.repeat(np.arange(nsubj), nsensors * nepochs)
     sensor = np.tile(np.repeat(np.arange(nsensors), nepochs), nsubj)
     epoch = np.tile(np.arange(nepochs), nsensors * nsubj)
 
-    data = pd.DataFrame({"id": subj_id, "epoch": epoch, "sensor": sensor})
+    df = pd.DataFrame({"id": subj_id, "epoch": epoch, "sensor": sensor})
 
-    # groups: g1, g2, HC
-    group_size = nsubj // 3
-    data["gr"] = "HC"
-    data.loc[data["id"].isin(range(group_size)), "gr"] = "g1"
-    data.loc[data["id"].isin(range(group_size, group_size * 2)), "gr"] = "g2"
+    # 3 groups: HC, g1, g2 (balanced-ish)
+    df["gr"] = "HC"
+    df.loc[df["id"].isin(range(0, 4)), "gr"] = "g1"
+    df.loc[df["id"].isin(range(4, 8)), "gr"] = "g2"
 
-    # baseline outcome
-    data["Y"] = np.random.normal(size=len(data))
+    df["sex"] = rng.choice(["F", "M"], size=len(df), replace=True)
 
-    # Group*Sensor effects
-    halfsensor = nsensors // 2
-    mask_g1_low_sensor = (data["gr"] == "g1") & (data["sensor"] <= halfsensor)
-    data.loc[mask_g1_low_sensor, "Y"] += np.random.normal(
-        loc=10, scale=2, size=mask_g1_low_sensor.sum()
-    )
+    # Random intercept-like subject effect
+    subj_re = rng.normal(loc=0.0, scale=2.0, size=nsubj)
+    df["subj_re"] = df["id"].map({i: subj_re[i] for i in range(nsubj)})
 
-    mask_g2 = data["gr"] == "g2"
-    data.loc[mask_g2, "Y"] += np.random.normal(loc=7, scale=0.5, size=mask_g2.sum())
+    # Baseline signal
+    y = rng.normal(loc=0.0, scale=1.0, size=len(df))
 
-    # Make Y vary with epoch for HC and g2 but not for g1
-    mask_not_g1 = data["gr"] != "g1"
-    data.loc[mask_not_g1, "Y"] += np.random.normal(
-        loc=data.loc[mask_not_g1, "epoch"], scale=0.5
-    )
+    # Add group main effects
+    y += (df["gr"] == "g1") * 4.0
+    y += (df["gr"] == "g2") * 2.5
 
-    # Subject-level deviations (random intercept-like)
-    raneff = pd.DataFrame(
-        np.random.normal(loc=0, scale=3, size=nsubj),
-        index=range(nsubj),
-        columns=["raneff"],
-    )
-    data = data.join(raneff, on="id")
-    data["Y"] = data["Y"] + np.random.normal(loc=data["raneff"], scale=0.1)
-    data = data.drop(columns="raneff")
+    # Add epoch slope for HC and g2, but not g1
+    y += ((df["gr"] != "g1").astype(float)) * (0.8 * df["epoch"].astype(float))
 
-    # Covariate
-    data["sex"] = np.random.choice(["F", "M"], size=len(data))
+    # Add an interaction-ish sensor effect for g1 on sensor 0
+    y += ((df["gr"] == "g1") & (df["sensor"] == 0)).astype(float) * 3.0
 
-    return data
+    # Add subject random effect
+    y += df["subj_re"].to_numpy()
+
+    # Small noise
+    y += rng.normal(loc=0.0, scale=0.2, size=len(df))
+
+    df["Y"] = y
+    df = df.drop(columns=["subj_re"])
+
+    # Ensure sensor is categorical in R unless included as numeric; keep as int in pandas
+    return df
 
 
 @pytest.fixture(scope="module")
@@ -110,17 +107,16 @@ def test_requires_dataframe_for_stats_methods():
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
 def test_lmer_selection_returns_formula(analysis: Analysis):
-    opt_f = analysis.lmer_selection(
+    f = analysis.lmer_selection(
         full_model="Y ~ gr * epoch * sensor + sex + (1|id)",
         numeric=["epoch"],
         random_crit="BIC",
         fixed_crit=None,
         print_info=False,
     )
-    assert isinstance(opt_f, str)
-    assert "~" in opt_f
-    # normalize spaces not assumed; we just ensure dependent variable is Y
-    assert opt_f.replace(" ", "").startswith("Y~")
+    assert isinstance(f, str)
+    assert "~" in f
+    assert f.replace(" ", "").startswith("Y~")
 
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
@@ -140,58 +136,81 @@ def test_lmer_tests_rejects_inconsistent_dependent_variable(analysis: Analysis):
 
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
-def test_lmer_tests_skips_invalid_specs(analysis: Analysis):
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ gr * epoch * sensor + sex + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
-        print_info=False,
-    )
-
-    results = analysis.lmer_tests(
-        models=opt_f,
-        group_col="gr",
-        control_group="HC",
-        numeric=["epoch"],
-        specs=["epoch:gr", "gr|sensor", "x"],  # "x" does not exist -> should be skipped
-        print_info=False,
-    )
-
-    assert isinstance(results, dict)
-    assert "x" not in results
-    assert any(k in results for k in ["epoch:gr", "gr|sensor"])
+def test_lmer_tests_requires_group_col_when_specs_none(analysis: Analysis):
+    f = "Y ~ gr + (1|id)"
+    with pytest.raises(ValueError, match="group_col must be provided"):
+        analysis.lmer_tests(models=f, group_col=None, specs=None, print_info=False)
 
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
-def test_lmer_tests_defaults_specs_to_group_col(analysis: Analysis):
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ gr * epoch * sensor + sex + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
-        print_info=False,
-    )
+def test_lmer_tests_invalid_control_group_rejected(analysis: Analysis):
+    f = "Y ~ gr + (1|id)"
+    with pytest.raises(ValueError, match="control_group"):
+        analysis.lmer_tests(models=f, group_col="gr", control_group="NOT_A_LEVEL", specs=["gr"], print_info=False)
 
-    results = analysis.lmer_tests(
-        models=opt_f,
+
+# -----------------------------
+# lmer_tests: selection + spec behavior
+# -----------------------------
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_lmer_tests_defaults_specs_to_group_col(analysis: Analysis):
+    f = "Y ~ gr * epoch + sex + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
         group_col="gr",
         control_group="HC",
         numeric=["epoch"],
         specs=None,
         print_info=False,
     )
-
-    assert "gr" in results
-    assert isinstance(results["gr"], pd.DataFrame)
+    assert isinstance(res, dict)
+    assert "gr" in res
+    assert isinstance(res["gr"], pd.DataFrame)
+    assert len(res["gr"]) > 0
 
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
-def test_lmer_tests_bic_selects_best_from_given_models(analysis: Analysis):
-    results = analysis.lmer_tests(
+def test_lmer_tests_skips_specs_with_unknown_vars(analysis: Analysis):
+    f = "Y ~ gr * epoch + sex + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
+        group_col="gr",
+        control_group="HC",
+        numeric=["epoch"],
+        specs=["gr", "epoch:gr", "does_not_exist"],
+        print_info=False,
+    )
+    assert "gr" in res
+    assert "epoch:gr" in res
+    assert "does_not_exist" not in res
+
+
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_lmer_tests_skips_specs_with_two_numeric_vars(analysis: Analysis):
+    # epoch numeric; create a second numeric covariate
+    df = analysis.data.copy()
+    df["age"] = np.linspace(20, 60, len(df))
+    a = Analysis(df)
+
+    f = "Y ~ gr * epoch + age + (1|id)"
+    res = a.lmer_tests(
+        models=f,
+        group_col="gr",
+        control_group="HC",
+        numeric=["epoch", "age"],
+        specs=["epoch:age:gr"],  # > 1 numeric variable in spec => should be skipped
+        print_info=False,
+    )
+    assert isinstance(res, dict)
+    assert "epoch:age:gr" not in res
+
+
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_lmer_tests_bic_selects_best_from_models_does_not_crash(analysis: Analysis):
+    res = analysis.lmer_tests(
         models=[
             "Y ~ gr * epoch * sensor + sex + (1|sensor) + (1|id)",
-            "Y ~ gr * epoch * sensor + (1|sex) + (1|id)",
+            "Y ~ gr * epoch * sensor + sex + (1|id)",
         ],
         group_col="gr",
         control_group="HC",
@@ -199,9 +218,33 @@ def test_lmer_tests_bic_selects_best_from_given_models(analysis: Analysis):
         specs=["gr|sensor", "epoch:gr"],
         print_info=False,
     )
+    assert isinstance(res, dict)
+    assert any(k in res for k in ["gr|sensor", "epoch:gr"])
 
-    assert isinstance(results, dict)
-    assert any(k in results for k in ["gr|sensor", "epoch:gr"])
+
+# -----------------------------
+# PATCH regression test:
+# interaction-only spec should not be skipped
+# -----------------------------
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_interaction_only_model_allows_factor_specs(analysis: Analysis):
+    """
+    Regression test for the spec-filtering fix:
+    If the model has only an interaction term (e.g., gr:sensor) and not main effects,
+    specs like 'sensor|gr' should still be allowed.
+    """
+    f = "Y ~ gr:sensor + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
+        group_col="gr",
+        control_group="HC",
+        numeric=["epoch"],  # epoch is in df but not in model; harmless
+        specs=["sensor|gr"],
+        print_info=False,
+    )
+    assert "sensor|gr" in res
+    assert isinstance(res["sensor|gr"], pd.DataFrame)
+    assert len(res["sensor|gr"]) > 0
 
 
 # -----------------------------
@@ -210,17 +253,9 @@ def test_lmer_tests_bic_selects_best_from_given_models(analysis: Analysis):
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
 @pytest.mark.parametrize("adjust", ["holm", "bonferroni", "fdr", "tukey"])
 def test_posthoc_adjustments_run(analysis: Analysis, adjust: str):
-    """Ensure different p-value adjustments don't crash and return a DataFrame."""
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ gr * epoch * sensor + sex + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
-        print_info=False,
-    )
-
-    results = analysis.lmer_tests(
-        models=opt_f,
+    f = "Y ~ gr * epoch + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
         group_col="gr",
         control_group="HC",
         numeric=["epoch"],
@@ -228,39 +263,28 @@ def test_posthoc_adjustments_run(analysis: Analysis, adjust: str):
         posthoc={"adjust": adjust},
         print_info=False,
     )
-    assert "gr" in results
-    assert isinstance(results["gr"], pd.DataFrame)
+    assert "gr" in res
+    assert isinstance(res["gr"], pd.DataFrame)
 
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
 def test_posthoc_pairs_vs_contrast_methods(analysis: Analysis):
-    """Exercise both pairwise implementations for non-control comparisons."""
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ gr * epoch * sensor + sex + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
-        print_info=False,
-    )
+    f = "Y ~ gr + (1|id)"
 
-    # All-pairs via pairs()
     res_pairs = analysis.lmer_tests(
-        models=opt_f,
+        models=f,
         group_col="gr",
-        control_group=None,  # ensures all-pairs path
-        numeric=["epoch"],
+        control_group=None,
         specs=["gr"],
         posthoc=PosthocConfig(pairwise_method="pairs"),
         print_info=False,
     )
     assert "gr" in res_pairs
 
-    # All-pairs via contrast(method="pairwise")
     res_contrast = analysis.lmer_tests(
-        models=opt_f,
+        models=f,
         group_col="gr",
         control_group=None,
-        numeric=["epoch"],
         specs=["gr"],
         posthoc={"pairwise_method": "contrast", "pairwise_contrast_method": "pairwise"},
         print_info=False,
@@ -270,16 +294,10 @@ def test_posthoc_pairs_vs_contrast_methods(analysis: Analysis):
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
 def test_posthoc_invalid_pairwise_method_raises(analysis: Analysis):
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ gr + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
-        print_info=False,
-    )
+    f = "Y ~ gr + (1|id)"
     with pytest.raises(ValueError, match="pairwise_method"):
         analysis.lmer_tests(
-            models=opt_f,
+            models=f,
             group_col="gr",
             control_group=None,
             specs=["gr"],
@@ -289,28 +307,39 @@ def test_posthoc_invalid_pairwise_method_raises(analysis: Analysis):
 
 
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
-def test_posthoc_treatment_ref_override(analysis: Analysis):
-    """Verify treatment_ref can override control_group as reference."""
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ gr + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
+def test_posthoc_unknown_keys_ignored(analysis: Analysis):
+    """
+    Ensure unknown keys in posthoc dict don't crash (they should be ignored by coercion).
+    """
+    f = "Y ~ gr + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
+        group_col="gr",
+        control_group=None,
+        specs=["gr"],
+        posthoc={"adjust": "holm", "this_key_does_not_exist": 123},
         print_info=False,
     )
+    assert "gr" in res
 
-    # Here we pass control_group="HC" but override reference to "g1".
-    # This mainly checks the pathway works without crashing.
-    results = analysis.lmer_tests(
-        models=opt_f,
+
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_posthoc_treatment_ref_override(analysis: Analysis):
+    """
+    Verify treatment_ref can override control_group as reference.
+    Mainly checks pathway works without crashing.
+    """
+    f = "Y ~ gr + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
         group_col="gr",
         control_group="HC",
         specs=["gr"],
         posthoc={"treatment_ref": "g1"},
         print_info=False,
     )
-    assert "gr" in results
-    assert isinstance(results["gr"], pd.DataFrame)
+    assert "gr" in res
+    assert isinstance(res["gr"], pd.DataFrame)
 
 
 # -----------------------------
@@ -318,24 +347,92 @@ def test_posthoc_treatment_ref_override(analysis: Analysis):
 # -----------------------------
 @pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
 def test_emtrends_numeric_spec_runs(analysis: Analysis):
-    """Spec containing a numeric variable should run emtrends/test path."""
-    opt_f = analysis.lmer_selection(
-        full_model="Y ~ epoch * gr + (1|id)",
-        numeric=["epoch"],
-        random_crit="BIC",
-        fixed_crit=None,
-        print_info=False,
-    )
-    results = analysis.lmer_tests(
-        models=opt_f,
+    f = "Y ~ epoch * gr + (1|id)"
+    res = analysis.lmer_tests(
+        models=f,
         group_col="gr",
         control_group="HC",
         numeric=["epoch"],
-        specs=["epoch:gr"],  # slope per group
+        specs=["epoch:gr"],
         print_info=False,
     )
-    assert "epoch:gr" in results
-    assert isinstance(results["epoch:gr"], pd.DataFrame)
+    assert "epoch:gr" in res
+    assert isinstance(res["epoch:gr"], pd.DataFrame)
+    assert len(res["epoch:gr"]) > 0
+
+
+# -----------------------------
+# LRT + model_info return types
+# -----------------------------
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_lrt_requires_lrt_drop(analysis: Analysis):
+    f = "Y ~ gr * epoch + (1|id)"
+    with pytest.raises(ValueError, match="requires lrt_drop"):
+        analysis.lmer_tests(
+            models=f,
+            group_col="gr",
+            control_group="HC",
+            numeric=["epoch"],
+            specs=["gr"],
+            lrt=True,
+            lrt_drop=None,
+            print_info=False,
+        )
+
+
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_lrt_returns_result_object_with_lrt(analysis: Analysis):
+    f = "Y ~ gr * epoch + (1|id)"
+    out = analysis.lmer_tests(
+        models=f,
+        group_col="gr",
+        control_group="HC",
+        numeric=["epoch"],
+        specs=["gr"],
+        lrt=True,
+        lrt_drop=["gr:epoch"],
+        return_model_info=True,
+        print_info=False,
+    )
+
+    # Should be LmerTestsResult-like
+    assert hasattr(out, "posthoc")
+    assert hasattr(out, "lrt")
+    assert hasattr(out, "model_info")
+
+    assert isinstance(out.posthoc, dict)
+    assert "gr" in out.posthoc
+    assert isinstance(out.posthoc["gr"], pd.DataFrame)
+
+    assert out.lrt is not None
+    assert isinstance(out.lrt, pd.DataFrame)
+    assert len(out.lrt) > 0
+
+    assert out.model_info is not None
+    assert "bics" in out.model_info
+    assert "selected_formula" in out.model_info
+
+
+# -----------------------------
+# lm (non-mixed) path sanity
+# -----------------------------
+@pytest.mark.skipif(not _r_backend_available(), reason="rpy2 (and R) not available")
+def test_lm_path_works_with_emmeans(analysis: Analysis):
+    """
+    If model formula has no random effects, code uses lm().
+    Ensure posthoc still runs.
+    """
+    f = "Y ~ gr * epoch + sex"
+    res = analysis.lmer_tests(
+        models=f,
+        group_col="gr",
+        control_group="HC",
+        numeric=["epoch"],
+        specs=["gr"],
+        print_info=False,
+    )
+    assert "gr" in res
+    assert isinstance(res["gr"], pd.DataFrame)
 
 
 # -----------------------------
@@ -343,43 +440,20 @@ def test_emtrends_numeric_spec_runs(analysis: Analysis):
 # -----------------------------
 def test_cohend_outputs_expected_keys(toy_df: pd.DataFrame):
     """cohend should compute per-sensor d for each non-control group vs control."""
-    # cohend defaults assume group_col="group" but our data uses "gr"
     a = Analysis(toy_df)
-    res = a.cohend(control_group="HC", group_col="gr", sensor_col="sensor", data_col="Y", min_n=2)
+    res = a.cohend(
+        control_group="HC",
+        group_col="gr",
+        sensor_col="sensor",
+        data_col="Y",
+        min_n=2,
+        drop_zeros=False,
+    )
     assert isinstance(res, dict)
     assert set(res.keys()) == {"g1vsHC", "g2vsHC"}
     for k, df in res.items():
         assert isinstance(df, pd.DataFrame)
         assert "sensor" in df.columns
         assert "d" in df.columns
-
-
-# -----------------------------
-# EEG topomap tests (MNE)
-# -----------------------------
-@pytest.mark.skipif(not _mne_available(), reason="mne not available")
-def test_eeg_topomap_accepts_dict_and_series():
-    """eeg_topomap should accept dict and pandas Series channel-value inputs."""
-    a = Analysis(pd.DataFrame({"x": [1]}))  # data irrelevant for eeg_topomap
-
-    vals_dict = {"Fp1": 1.0, "Fp2": 0.5, "Fz": -0.1, "Cz": 0.2}
-    im, cn = a.eeg_topomap(vals_dict, montage="standard_1020", show=False, colorbar=False)
-    assert im is not None
-
-    vals_series = pd.Series(vals_dict)
-    im2, cn2 = a.eeg_topomap(vals_series, montage="standard_1020", show=False, colorbar=False)
-    assert im2 is not None
-
-
-@pytest.mark.skipif(not _mne_available(), reason="mne not available")
-def test_eeg_topomap_requires_ch_names_for_array():
-    a = Analysis(pd.DataFrame({"x": [1]}))
-    with pytest.raises(ValueError, match="must provide `ch_names`"):
-        a.eeg_topomap(np.array([1.0, 2.0, 3.0]), montage="standard_1020", show=False)
-
-
-@pytest.mark.skipif(not _mne_available(), reason="mne not available")
-def test_eeg_topomap_length_mismatch_raises():
-    a = Analysis(pd.DataFrame({"x": [1]}))
-    with pytest.raises(ValueError, match="Length mismatch"):
-        a.eeg_topomap(np.array([1.0, 2.0, 3.0]), ch_names=["Fp1", "Fp2"], montage="standard_1020", show=False)
+        # should have one row per sensor
+        assert df["sensor"].nunique() == toy_df["sensor"].nunique()

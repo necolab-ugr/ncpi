@@ -26,7 +26,7 @@ PRED_RESULTS = os.path.join("..", "data")
 
 # Calculate new firing rates (True) or load them from file if they already exist (False).
 # If firing rates do not exist, they will not be plotted.
-COMPUTE_FIRING_RATE = True
+COMPUTE_FIRING_RATE = False
 
 # Path to saved firing rates
 FR_PATH = os.path.join(".", "data")

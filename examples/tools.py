@@ -1,5 +1,5 @@
 """
-Shared utilities for the example empirical-data pipelines.
+Shared utilities used by the example empirical-data pipelines.
 """
 
 from __future__ import annotations
@@ -13,6 +13,9 @@ import pandas as pd
 import ncpi
 from ncpi.tools import timer
 
+# ---------
+# Helpers
+# ---------
 
 def _features_to_2d_numpy(feat_list):
     """
@@ -222,9 +225,9 @@ def compute_features(method: str, df: pd.DataFrame) -> pd.DataFrame:
     raise ValueError(f"Unknown method: {method}")
 
 
-# ---------------------------
-# Inference model + prediction helpers
-# ---------------------------
+# -----------------------------
+# Inference model + predictions
+# -----------------------------
 
 _EEG_DEFAULT_SENSORS: List[str] = [
     "Fp1", "Fp2", "F3", "F4", "C3", "C4", "P3", "P4", "O1",
@@ -359,6 +362,7 @@ def compute_predictions(
     out = emp_data.copy()
     out["Predictions"] = np.nan  # initialization behavior
 
+    # --- LFP branch ---
     if data_kind == "LFP":
         _copy_assets_LFP(method=method, ML_model=ML_model, zenodo_dir_sim=zenodo_dir_sim)
 
