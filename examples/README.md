@@ -11,25 +11,23 @@ https://doi.org/10.1038/s41540-025-00527-9
 ---
 
 **Note**: `LFP_developing_brain/figures/LFP_predictions.py` and `EEG_AD/figures/EEG_predictions.py`  perform a Linear 
-Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` packages to be installed beforehand. In 
-the R environment, the following packages must also be installed:
+Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` packages to be installed beforehand 
+(e.g., ```conda install -c conda-forge r-base rpy2```). In the R environment, the following packages must also be 
+installed:
 
 
   - `lme4`  
   - `emmeans`
-  - `nlme`
 
   To install these packages in R, use:
 
   ```r
-  install.packages("lme4", dependencies = TRUE)
-  install.packages("emmeans", dependencies = TRUE)
-  install.packages("nlme", dependencies = TRUE)
+  install.packages(c("lme4", "emmeans"))
   ```
 
-  Or alternatively, with conda:
+  Or alternatively (if R packages fail to install), with conda:
   ```bash
-  conda install -c conda-forge r-lme4 r-emmeans r-nlme
+  conda install -c conda-forge r-lme4 r-emmeans
   ```
 
 
