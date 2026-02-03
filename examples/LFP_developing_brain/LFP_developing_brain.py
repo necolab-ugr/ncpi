@@ -15,7 +15,14 @@ if PARENT_DIR not in sys.path:
 import tools as shared_tools
 
 # sklearn models loaded in the EEG/LFP examples require scikit-learn ==1.3.2
-ensure_module("sklearn", "1.3.2")
+ensure_module(
+    "sklearn",
+    package="scikit-learn",
+    version_spec="==1.3.2",
+    upgrade=True,
+    reload_module=True,
+)
+
 
 # ---------------------------
 # User-config / constants
@@ -137,9 +144,6 @@ def main() -> None:
 
         # 4) Save
         shared_tools.save_data(emp_data, method)
-
-        # Restore scikit-learn to latest version
-        ensure_module("sklearn")
 
 
 if __name__ == "__main__":
