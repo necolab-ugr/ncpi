@@ -6,6 +6,7 @@ import tarfile
 import urllib.request
 from pathlib import Path
 import subprocess
+import tempfile
 import numpy as np
 import pytest
 from ncpi import FieldPotential
@@ -84,13 +85,44 @@ def _skip_if_missing_example_files():
 def _ensure_neuron_mechanisms(mod_dir):
     import neuron
 
-    mech_loaded = neuron.load_mechanisms(str(mod_dir))
-    if mech_loaded:
+    def _load_mechanisms(path):
+        try:
+            return neuron.load_mechanisms(str(path))
+        except RuntimeError as exc:
+            if "already exists: Exp2SynI" in str(exc):
+                return "duplicate_exp2syni"
+            raise
+
+    def _compile_without_exp2syni(source_dir):
+        source_dir = Path(source_dir)
+        mod_files = [mod for mod in source_dir.glob("*.mod") if mod.name != "exp2synI.mod"]
+        if not mod_files:
+            raise RuntimeError("No mod files available after excluding exp2synI.mod.")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp_mod_dir = Path(tmp_dir) / "mod"
+            tmp_mod_dir.mkdir()
+            for mod in mod_files:
+                shutil.copy(mod, tmp_mod_dir / mod.name)
+            subprocess.run(["nrnivmodl"], check=True, cwd=str(tmp_mod_dir))
+            mech_loaded = _load_mechanisms(tmp_mod_dir)
+            if mech_loaded is True:
+                return
+            raise RuntimeError(f"Failed to load NEURON mechanisms from {tmp_mod_dir}.")
+
+    mech_loaded = _load_mechanisms(mod_dir)
+    if mech_loaded is True:
+        return
+    if mech_loaded == "duplicate_exp2syni":
+        _compile_without_exp2syni(mod_dir)
         return
     subprocess.run(["nrnivmodl"], check=True, cwd=str(mod_dir))
-    mech_loaded = neuron.load_mechanisms(str(mod_dir))
-    if not mech_loaded:
-        raise RuntimeError(f"Failed to load NEURON mechanisms from {mod_dir}.")
+    mech_loaded = _load_mechanisms(mod_dir)
+    if mech_loaded is True:
+        return
+    if mech_loaded == "duplicate_exp2syni":
+        _compile_without_exp2syni(mod_dir)
+        return
+    raise RuntimeError(f"Failed to load NEURON mechanisms from {mod_dir}.")
 
 
 def test_compute_proxy_excitatory_key_selection():
