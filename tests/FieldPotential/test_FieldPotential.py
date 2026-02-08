@@ -89,8 +89,11 @@ def _ensure_neuron_mechanisms(mod_dir):
         try:
             return neuron.load_mechanisms(str(path))
         except RuntimeError as exc:
-            if "already exists: Exp2SynI" in str(exc):
-                return "duplicate_exp2syni"
+            msg = str(exc).lower()
+            if "already exists" in msg:
+                if "exp2syni" in msg:
+                    return "duplicate_exp2syni"
+                return True
             raise
 
     def _compile_without_exp2syni(source_dir):
