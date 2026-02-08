@@ -30,8 +30,8 @@ zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-zenodo_dir_sim = os.path.join("/home/pablomc", "zenodo_sim_files")
-zenodo_dir_emp = os.path.join("/home/pablomc", "zenodo_emp_files")
+zenodo_dir_sim = os.path.join("$HOME", "zenodo_sim_files")
+zenodo_dir_emp = os.path.join("$HOME", "zenodo_emp_files")
 
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization"]

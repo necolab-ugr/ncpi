@@ -1,168 +1,226 @@
+import inspect
 import os
+import subprocess
 import numpy as np
-import matplotlib.pyplot as plt
 from copy import deepcopy
 from ncpi import tools
+from ncpi import neuron_utils
 
 
 class FieldPotential:
-    def __init__(self, kernel=True, nyhead=False, MEEG=None, CDM_shape=15500):
+    """
+    Compute current dipole moments (CDM) and/or electrophysiological signals (LFP/EEG/MEG) from spiking network
+    simulations. Two possible workflows are supported:
+        1. Kernel-based CDM + LFP/EEG/MEG forward modeling
+        2. Direct LFP/EEG/MEG prediction from proxies
+    """
+
+    def __init__(self):
         """
-        Initialize the FieldPotential object.
+        Initialize the FieldPotential class with empty dictionaries for kernels and proxies,
+        and placeholders for dependencies.
+        """
+        self.kernels = dict()  # Dictionary to store kernels
+        self.proxies = dict()  # Dictionary to store proxies
+
+        # Dependencies for kernel computation
+        self.lfpykernels = None
+        self.neuron = None  # NEURON module for loading morphologies and mechanisms
+        self.h5py = None  # h5py module for reading simulation data
+        self.LFPy = None  # LFPy module required by lfpykernels
+
+        # Dependencies for EEG/MEG forward modeling
+        self.eegmegcalc = None
+
+        # NYHeadModel instance (to avoid reloading the heavy model multiple times)
+        self.nyhead = None
+
+        # Dictionary to cache EEG/MEG forward model classes
+        self._eegmegcalc_models = {}
+
+    #################################################################
+    ## Helper methods for loading dependencies and format handling ##
+    #################################################################
+
+    def _load_kernel_deps(self):
+        """
+        Load dependencies used for kernel computation.
+
+        This method lazily imports and caches modules on the instance:
+        `lfpykernels`, `LFPy`, `h5py`, and `neuron`.
+        """
+
+        if not tools.ensure_module("LFPy", package="LFPy"):
+            raise ImportError("LFPy is required for computing kernels but is not installed.")
+        self.LFPy = tools.dynamic_import("LFPy")
+
+        if not tools.ensure_module("lfpykernels", package="lfpykernels"):
+            raise ImportError("lfpykernels is required for computing kernels but is not installed.")
+        self.lfpykernels = tools.dynamic_import("lfpykernels")
+
+        if not tools.ensure_module("h5py", package="h5py"):
+            raise ImportError("h5py is required for computing kernels but is not installed.")
+        self.h5py = tools.dynamic_import("h5py")
+
+        if not tools.ensure_module("neuron", package="neuron"):
+            raise ImportError("NEURON is required for computing kernels but is not installed.")
+        self.neuron = tools.dynamic_import("neuron")
+
+
+    def _load_eegmegcalc_model(self, model_name):
+        """Load an EEG/MEG forward model class from lfpykit.eegmegcalc, with caching.
 
         Parameters
         ----------
-        kernel: bool
-            Choose to compute kernels.
-
-        nyhead: bool
-            Use the NYHeadModel for computing EEG.
-
-        MEEG: str
-            Prepare data structures for computing EEG or MEG signals. Options are:
-                'EEG': Compute EEG.
-                'MEG': Compute MEG.
-
-        CDM_shape: int
-            Number of time points in the CDM.
-        """
-
-        if kernel:
-            if not tools.ensure_module("lfpykernels", package="lfpykernels"):
-                raise ImportError("lfpykernels is required for computing kernels but is not installed.")
-            self.KernelApprox = tools.dynamic_import("lfpykernels", "KernelApprox")
-            self.GaussCylinderPotential = tools.dynamic_import("lfpykernels", "GaussCylinderPotential")
-            self.KernelApproxCurrentDipoleMoment = tools.dynamic_import("lfpykernels",
-                                                                        "KernelApproxCurrentDipoleMoment")
-
-            # LFPy (ensure explicit pip name)
-            if not tools.ensure_module("LFPy", package="LFPy"):
-                raise ImportError("LFPy is required for computing kernels but is not installed.")
-
-            # NEURON is often not reliably fixable by pip alone, but import-check is fine
-            if not tools.ensure_module("neuron", package="neuron", raise_on_error=False):
-                raise ImportError(
-                    "neuron (NEURON) is required for computing kernels but is not importable. "
-                    "You may need to install it via conda or platform-specific instructions."
-                )
-            self.neuron = tools.dynamic_import("neuron")
-
-            if not tools.ensure_module("h5py", package="h5py"):
-                raise ImportError("h5py is required for computing kernels but is not installed.")
-            self.h5py = tools.dynamic_import("h5py")
-
-            self.H_YX = dict()
-
-        if nyhead:
-            if not tools.ensure_module("lfpykit", package="lfpykit"):
-                raise ImportError("lfpykit is required for computing the NYHeadModel but is not installed.")
-            self.NYHeadModel = tools.dynamic_import("lfpykit.eegmegcalc", "NYHeadModel")
-            self.nyhead = self.NYHeadModel()
-
-        if MEEG is not None:
-            # Ensure LFPy even if kernel=False
-            if not tools.ensure_module("LFPy", package="LFPy"):
-                raise ImportError("LFPy is required for computing MEEG but is not installed.")
-            self.IHVCMEG = tools.dynamic_import("LFPy", "InfiniteHomogeneousVolCondMEG")
-
-        # Allocate memory for the transformation matrix and MEEG
-        if MEEG == 'EEG':
-            self.M = np.zeros((231,3))
-            self.MEEG = np.zeros((231,CDM_shape))
-        elif MEEG == 'MEG':
-            self.M = np.zeros((1,3,3))
-            self.MEEG = np.zeros((1,3,CDM_shape))
-
-
-    def create_kernel(self, MC_folder, output_path, params, biophys, dt, tstop, electrodeParameters=None, CDM=True):
-        """
-        Create kernels from multicompartment neuron network descriptions.
-
-        Parameters
-        ----------
-        MC_folder: str
-            Path to the folder containing the multicompartment neuron network descriptions.
-        output_path: str
-            Path to the output folder.
-        params: module
-            `<module 'example_network_parameters'>`
-        biophys: list
-            List of biophysical membrane properties.
-        dt: float
-            Time step.
-        tstop: float
-            Simulation time.
-        electrodeParameters: dict
-            Electrode parameters. If None, no LFP is computed.
-        CDM: bool
-            Compute the current dipole moment.
+        model_name: str
+            Name of the forward model class to load (e.g., "NYHeadModel", "FourSphereVolumeConductor",
+            "InfiniteVolumeConductor", "InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG").
 
         Returns
         -------
-        H_YX: dict
-            Dictionary containing the kernels.
+        model: class
+            The forward model class corresponding to model_name.
         """
 
-        # Check that folder exists
-        if not os.path.exists(MC_folder):
-            raise FileNotFoundError(f"{MC_folder} not found.")
+        # Check cache first to avoid repeated dynamic imports of lfpykit for multiple models
+        if model_name in self._eegmegcalc_models:
+            return self._eegmegcalc_models[model_name]
 
-        # Check that the output path exists
-        if not os.path.exists(output_path):
-            raise FileNotFoundError(f"{output_path} not found.")
+        # Check that lfpykit is available before attempting to import the eegmegcalc module
+        if not tools.ensure_module("lfpykit", package="lfpykit"):
+            raise ImportError("lfpykit is required for EEG/MEG forward models but is not installed.")
 
-        # Add some checks for the parameters?
+        # Dynamically import the eegmegcalc module from lfpykit and get the requested model class
+        if self.eegmegcalc is None:
+            self.eegmegcalc = tools.dynamic_import("lfpykit.eegmegcalc")
+        model = getattr(self.eegmegcalc, model_name, None)
+        if model is None:
+            raise ImportError(f"Unable to import EEG/MEG forward model '{model_name}'.")
+        self._eegmegcalc_models[model_name] = model
 
-        # Check that biophys is a list
+        return model
+
+
+    def _format_cdm(self, CDM):
+        """
+        Normalize a CDM input to a 3xN array with components in rows.
+
+        Parameters
+        ----------
+        CDM: array_like
+            Current dipole moment. Must be a 2D array shaped (3, N) or (N, 3).
+
+        Returns
+        -------
+        p: np.ndarray
+            Array shaped (3, N) with x/y/z components in rows.
+        """
+        cdm = np.asarray(CDM)
+        if cdm.ndim == 2:
+            if cdm.shape[0] == 3:
+                return cdm
+            if cdm.shape[1] == 3:
+                return cdm.T
+        raise ValueError("CDM must be a 2D array with 3 components.")
+
+
+    def _resolve_biophys(self, biophys):
+        """
+        Resolve biophysical setup entries into callables.
+
+        Parameters
+        ----------
+        biophys: list
+            A list of either callables, or strings naming functions in `ncpi.neuron_utils`.
+
+        Returns
+        -------
+        resolved: list
+            List of callables corresponding to the requested biophysical setup.
+        """
         if not isinstance(biophys, list):
             raise TypeError("biophys must be a list.")
+        resolved = []
+        for item in biophys:
+            if callable(item):
+                resolved.append(item)
+                continue
+            if isinstance(item, str):
+                func = getattr(neuron_utils, item, None)
+                if func is None:
+                    raise KeyError(f"Unknown biophys function '{item}'.")
+                resolved.append(func)
+                continue
+            raise TypeError(
+                "biophys entries must be callables or strings naming known biophys functions."
+            )
+        return resolved
 
-        # Check that dt is > 0
-        if dt <= 0:
-            raise ValueError("dt must be > 0.")
 
-        # Check that tstop is > 0
-        if tstop <= 0:
-            raise ValueError("tstop must be > 0.")
+    @staticmethod
+    def roll_with_zeros(arr, shift):
+        """
+        Shift a 1D array, padding exposed entries with zeros.
 
-        # Check that electrodeParameters is a dictionary
-        if electrodeParameters is not None and not isinstance(electrodeParameters, dict):
-            raise TypeError("electrodeParameters must be a dictionary.")
+        Parameters
+        ----------
+        arr: np.array
+            Array to be shifted.
+        shift: int
+            Number of positions to shift the array.
 
-        # Check that CDM is a boolean
-        if not isinstance(CDM, bool):
-            raise TypeError("CDM must be a boolean.")
+        Returns
+        -------
+        result: np.array
+            Shifted array.
+        """
+        result = np.zeros_like(arr)
+        if shift > 0:
+            result[shift:] = arr[:-shift]
+        elif shift < 0:
+            result[:shift] = arr[-shift:]
+        else:
+            result[:] = arr
+        return result
 
-        # Update paths of cellParameters and morphologies
-        params.cellParameters['templatefile'] = os.path.join(MC_folder, params.cellParameters['templatefile'])
-        params.morphologies = [os.path.join(MC_folder, m) for m in params.morphologies]
 
-        # Recompile mod files if needed
-        mech_loaded = self.neuron.load_mechanisms(os.path.join(MC_folder, 'mod'))
-        if not mech_loaded:
-            os.system(f'cd {os.path.join(MC_folder, "mod")} && nrnivmodl && cd -')
-            self.neuron.load_mechanisms(os.path.join(MC_folder, "mod"))
+    ############################################################
+    ## Main methods for kernel creation and M/EEG computation ##
+    ############################################################
 
-        # Presynaptic activation time
-        t_X = params.transient
+    def _build_kernel_probes(self, params, electrodeParameters=None, CDM=True, probes=None, cdm_probe=None):
+        """Create probe objects for kernel predictions.
 
-        # Synapse max. conductance (function, mean, st.dev., min.):
-        weights = [[params.MC_params['weight_EE'], params.MC_params['weight_IE']],
-                   [params.MC_params['weight_EI'], params.MC_params['weight_II']]]
+        Parameters
+        ----------
+        params: module
+            Module or object holding multicompartment network parameters.
+        electrodeParameters: dict
+            Electrode parameters. If None, no LFP probe is created.
+        CDM: bool
+            Whether to include a current dipole moment probe.
+        probes: list or None
+            Optional list of probe objects to use directly. If provided, this overrides
+            electrodeParameters and CDM settings.
+        cdm_probe: str, class, or object
+            CDM probe to use when CDM=True. Supported strings:
+            "KernelApproxCurrentDipoleMoment" and "CurrentDipoleMoment". If a class or
+            object is provided, it is used directly.
 
-        # # Define biophysical membrane properties
-        set_biophys = [globals()[func_name] for func_name in biophys]
+        Returns
+        -------
+        probes: list
+            List of probe objects to be used for kernel predictions.
+        """
+        if probes is not None:
+            return probes
 
-        # Class RecExtElectrode/PointSourcePotential parameters:
-        if electrodeParameters is not None:
-            for key in ['r', 'n', 'N', 'method']:
-                del electrodeParameters[key]
+        if self.lfpykernels is None:
+            self._load_kernel_deps()
 
-        # Predictor assuming planar disk source elements convolved with Gaussian
-        # along z-axis
         probes = []
         if electrodeParameters is not None:
-            gauss_cyl_potential = self.GaussCylinderPotential(
+            gauss_cyl_potential = self.lfpykernels.GaussCylinderPotential(
                 cell=None,
                 z=electrodeParameters['z'],
                 sigma=electrodeParameters['sigma'],
@@ -171,32 +229,248 @@ class FieldPotential:
             )
             probes.append(gauss_cyl_potential)
 
-
-        # Set up recording of current dipole moments.
         if CDM:
-            current_dipole_moment = self.KernelApproxCurrentDipoleMoment(cell=None)
+            if cdm_probe is None:
+                cdm_probe = "KernelApproxCurrentDipoleMoment"
+
+            if inspect.isclass(cdm_probe):
+                # Accept known probe classes from lfpykernels / lfpykit, but don't hard-depend on lfpykit here.
+                try:
+                    current_dipole_moment = cdm_probe(cell=None)
+                except TypeError:
+                    # Some probes may not take 'cell' kwarg
+                    current_dipole_moment = cdm_probe()
+            elif isinstance(cdm_probe, str):
+                if cdm_probe == "KernelApproxCurrentDipoleMoment":
+                    current_dipole_moment = self.lfpykernels.KernelApproxCurrentDipoleMoment(cell=None)
+                elif cdm_probe == "CurrentDipoleMoment":
+                    if not tools.ensure_module("lfpykit", package="lfpykit"):
+                        raise ImportError("lfpykit is required for CurrentDipoleMoment but is not installed.")
+                    CDP = tools.dynamic_import("lfpykit", "CurrentDipoleMoment")
+                    current_dipole_moment = CDP(cell=None)
+                else:
+                    raise ValueError(f"Unknown CDM probe '{cdm_probe}'.")
+            else:
+                current_dipole_moment = cdm_probe
             probes.append(current_dipole_moment)
 
+        return probes
+
+
+    def create_kernel(
+            self,
+            MC_folder,
+            params,
+            biophys,
+            dt,
+            tstop,
+            *,
+            output_sim_path=None,
+            electrodeParameters=None,
+            CDM=True,
+            probes=None,
+            cdm_probe=None,
+            mean_nu_X=None,
+            Vrest=None,
+            t_X=None,
+            tau=None,
+            g_eff=None,
+            n_ext=None,
+            weights=None,
+    ):
+        """
+        Create kernels from multicompartment neuron network descriptions.
+
+        Note: if using `output_sim_path` to load mean firing rates and resting potentials, ensure that simulations
+        of the same network configuration (cell parameters, morphologies, synapse parameters, etc.) were used to
+        generate the output simulation data. Mismatches in network configuration may lead to inaccurate kernels and
+        predictions.
+
+        Parameters
+        ----------
+        MC_folder: str
+            Path to the folder containing the multicompartment neuron model descriptions (cell parameters and
+            morphologies).
+        params: module
+            Module or object holding multicompartment network parameters
+            (e.g., an example_network_parameters-like script/module).
+        biophys: list
+            List of biophysical membrane properties.
+        dt: float
+            Time step.
+        tstop: float
+            Simulation time.
+        output_sim_path: str or None
+            Path to the output folder containing multicompartment network simulation outputs.
+            If None, both mean_nu_X and Vrest must be provided.
+        electrodeParameters: dict
+            Electrode parameters. If None, no LFP is computed.
+        CDM: bool
+            Compute the current dipole moment.
+        probes: list or None
+            Optional list of probe objects to use directly. If provided, this overrides
+            electrodeParameters and CDM settings.
+        cdm_probe: str or class or object
+            CDM probe to use when CDM=True. Supported strings:
+            "KernelApproxCurrentDipoleMoment" and "CurrentDipoleMoment".
+        mean_nu_X: dict or None
+            Optional mean firing rates per presynaptic population (Hz). Must be provided
+            together with Vrest if not using output_sim_path.
+        Vrest: float, dict, sequence, or None
+            Optional resting membrane potential. If dict, keys are population names.
+            Must be provided together with mean_nu_X if not using output_sim_path.
+        t_X: float or None
+            Optional presynaptic activation time. Defaults to params.transient.
+        tau: float or None
+            Optional kernel time lag. Defaults to params.tau.
+        g_eff: bool or None
+            If True, account for conductance effects in kernel computation. Defaults to params.MC_params['g_eff'].
+        n_ext: list or None
+            Optional list of external synapse counts per population. Defaults to params.MC_params['n_ext'].
+        weights: list or None
+            Optional 2x2 weight matrix to override params.MC_params weights. Defaults to [[weight_EE, weight_IE],
+            [weight_EI, weight_II]] from params.MC_params.
+        Returns
+        -------
+        kernels: dict
+            Dictionary containing the kernels keyed by "Y:X", where Y is the postsynaptic population and X is the
+            presynaptic population.
+        """
+
+        # Some basic sanity checks on inputs
+        if not os.path.exists(MC_folder):
+            raise FileNotFoundError(f"{MC_folder} not found.")
+
+        if output_sim_path is None:
+            if mean_nu_X is None or Vrest is None:
+                raise ValueError(
+                    "When output_sim_path is None, both mean_nu_X and Vrest must be provided."
+                )
+        else:
+            if (mean_nu_X is None) != (Vrest is None):
+                raise ValueError(
+                    "Provide both mean_nu_X and Vrest together, or omit both to load from output_sim_path."
+                )
+            if not os.path.exists(output_sim_path):
+                raise FileNotFoundError(f"{output_sim_path} not found.")
+
+        # Basic numeric sanity checks
+        if not isinstance(dt, (int, float)):
+            raise TypeError("dt must be a number.")
+        if dt <= 0:
+            raise ValueError("dt must be > 0.")
+        if not isinstance(tstop, (int, float)):
+            raise TypeError("tstop must be a number.")
+        if tstop <= 0:
+            raise ValueError("tstop must be > 0.")
+        if dt >= tstop:
+            raise ValueError("dt must be smaller than tstop.")
+
+        # Check that electrodeParameters is a dictionary with required keys
+        if electrodeParameters is not None:
+            if not isinstance(electrodeParameters, dict):
+                raise TypeError("electrodeParameters must be a dictionary.")
+            missing = [key for key in ("z", "sigma") if key not in electrodeParameters]
+            if missing:
+                raise KeyError(f"electrodeParameters missing required keys: {missing}.")
+
+        # Check that CDM is a boolean
+        if not isinstance(CDM, bool):
+            raise TypeError("CDM must be a boolean.")
+
+        # Load dependencies for kernel computation if not already loaded
+        if self.lfpykernels is None:
+            self._load_kernel_deps()
+
+        # Update paths of cellParameters and morphologies
+        cellParameters = deepcopy(params.cellParameters)
+        cellParameters['templatefile'] = os.path.join(MC_folder, cellParameters['templatefile'])
+        morphologies = [os.path.join(MC_folder, m) for m in params.morphologies]
+
+        # Recompile mod files if needed
+        mod_dir = os.path.join(MC_folder, "mod")
+        mech_loaded = self.neuron.load_mechanisms(mod_dir)
+        if not mech_loaded:
+            try:
+                subprocess.run(["nrnivmodl"], check=True, cwd=mod_dir)
+            except FileNotFoundError as exc:
+                raise RuntimeError("nrnivmodl not found; cannot build NEURON mechanisms.") from exc
+            self.neuron.load_mechanisms(mod_dir)
+
+        # Presynaptic activation time
+        if t_X is None:
+            t_X = getattr(params, "transient", None)
+        if t_X is None:
+            raise ValueError("t_X must be provided when params.transient is not available.")
+
+        # Synapse max. conductance (function, mean, st.dev., min.):
+        if weights is None:
+            weights = [[params.MC_params['weight_EE'], params.MC_params['weight_IE']],
+                       [params.MC_params['weight_EI'], params.MC_params['weight_II']]]
+
+        # Define biophysical membrane properties
+        set_biophys = self._resolve_biophys(biophys)
+
+        # Class RecExtElectrode/PointSourcePotential parameters:
+        if electrodeParameters is not None:
+            electrodeParameters = deepcopy(electrodeParameters)
+            for key in ['r', 'n', 'N', 'method']:
+                electrodeParameters.pop(key, None)
+
+        probes = self._build_kernel_probes(
+            params,
+            electrodeParameters,
+            CDM=CDM,
+            probes=probes,
+            cdm_probe=cdm_probe,
+        )
+
         # Compute average firing rate of presynaptic populations X
-        mean_nu_X = compute_mean_nu_X(params, output_path, params.transient)
+        if mean_nu_X is None:
+            mean_nu_X = neuron_utils.compute_nu_X(params, output_sim_path, params.transient)
+
+        if tau is None:
+            tau = getattr(params, "tau", None)
+        if tau is None:
+            raise ValueError("tau must be provided when params.tau is not available.")
+
+        if g_eff is None:
+            g_eff = params.MC_params.get("g_eff")
+        if n_ext is None:
+            n_ext = params.MC_params.get("n_ext")
+        if g_eff is None:
+            raise ValueError("g_eff must be provided when params.MC_params['g_eff'] is not available.")
+        if n_ext is None:
+            raise ValueError("n_ext must be provided when params.MC_params['n_ext'] is not available.")
+
+        def resolve_vrest(population_name):
+            if Vrest is None:
+                if output_sim_path is None:
+                    raise ValueError("output_sim_path is required to infer Vrest from somav.h5.")
+                with self.h5py.File(os.path.join(output_sim_path, "somav.h5"), "r") as f:
+                    return np.median(f[population_name][()][:, 200:])
+            if isinstance(Vrest, dict):
+                return Vrest[population_name]
+            if isinstance(Vrest, (list, tuple, np.ndarray)):
+                idx = params.population_names.index(population_name)
+                return Vrest[idx]
+            return Vrest
 
         # Compute kernels
         for i, (X, N_X) in enumerate(zip(params.population_names,
                                          params.population_sizes)):
             for j, (Y, N_Y, morphology) in enumerate(zip(params.population_names,
                                                          params.population_sizes,
-                                                         params.morphologies)):
+                                                         morphologies)):
                 # Extract median soma voltages from actual network simulation and
                 # assume this value corresponds to Vrest.
-                with self.h5py.File(os.path.join(output_path, 'somav.h5'
-                                            ), 'r') as f:
-                    Vrest = np.median(f[Y][()][:, 200:])
+                Vrest_Y = resolve_vrest(Y)
 
-                cellParameters = deepcopy(params.cellParameters)
+                cellParameters = deepcopy(cellParameters)
                 cellParameters.update(dict(
                     morphology=morphology,
                     custom_fun=set_biophys,
-                    custom_fun_args=[dict(Vrest=Vrest), dict(Vrest=Vrest)],
+                    custom_fun_args=[dict(Vrest=Vrest_Y), dict(Vrest=Vrest_Y)],
                 ))
 
                 # Some inputs must be lists
@@ -210,7 +484,7 @@ class FieldPotential:
                     for ii in range(len(params.population_names))]
 
                 # Create kernel approximator object
-                kernel = self.KernelApprox(
+                kernel = self.lfpykernels.KernelApprox(
                     X=params.population_names,
                     Y=Y,
                     N_X=np.array(params.population_sizes),
@@ -226,180 +500,466 @@ class FieldPotential:
                     synapsePositionArguments=synapsePositionArguments,
                     extSynapseParameters=params.extSynapseParameters,
                     nu_ext=1000. / params.netstim_interval,
-                    n_ext=params.MC_params['n_ext'][j],
+                    n_ext=n_ext[j],
                     nu_X=mean_nu_X,
                 )
 
-                # make kernel predictions
-                self.H_YX['{}:{}'.format(Y, X)] = kernel.get_kernel(
+                # get kernel and store in dictionary keyed by "Y:X"
+                self.kernels['{}:{}'.format(Y, X)] = kernel.get_kernel(
                     probes=probes,
-                    Vrest=Vrest, dt=dt, X=X, t_X=t_X, tau=params.tau,
-                    g_eff=params.MC_params['g_eff'],
+                    Vrest=Vrest_Y, dt=dt, X=X, t_X=t_X, tau=tau,
+                    g_eff=g_eff,
                 )
 
-        return self.H_YX
+        return self.kernels
 
 
-    def compute_MEEG(self, CDM, location=None, cMEG = False):
+    def compute_cdm_from_kernels(
+            self,
+            kernels,
+            spike_times,
+            dt,
+            tstop,
+            population_sizes=None,
+            transient=0.0,
+            probe='KernelApproxCurrentDipoleMoment',
+            component=2,
+            mode='same',
+            scale=1.0,
+            aggregate=None,
+    ):
         """
-        Compute EEG/MEG from a current dipole moment using the NYHeadModel (EEG) or a homogeneous, isotropic, linear
-        volume conductor model (MEG).
-
-        Warning: The MEG calculation has not yet been tested and is currently limited to use with a single
-        sensor location.
+        Compute the CDM from spike times and kernels via convolution.
 
         Parameters
         ----------
-        CDM: np.array
-            Current dipole moment
-        location: np.array
-            Location of the dipole moment
-        cMEG: bool
-            Compute MEG instead of EEG.
+        kernels: dict
+            Kernel dictionary keyed by "Y:X".
+        spike_times: dict
+            Spike times per presynaptic population.
+        dt: float
+            Time step in ms.
+        tstop: float
+            Simulation stop time in ms.
+        population_sizes: dict or None
+            Optional population sizes to normalize spike rates (Hz).
+        transient: float
+            Transient period to discard from spike times.
+        probe: str
+            Probe name to read from kernels.
+        component: int or None
+            Component to select (e.g., z-component). If None, use all components.
+        mode: str
+            Convolution mode ('same', 'full', 'valid').
+        scale: float
+            Optional scaling factor for the signal.
+        aggregate: str or None
+            If "sum", return an additional key "sum" with the total signal.
 
         Returns
         -------
-        all_MEEG: list of np.array
-            MEEG at the electrode/sensor locations
+        signals: dict
+            Dictionary mapping each kernel key (e.g., "Y:X") to the convolved signal. If
+            `aggregate="sum"`, an additional "sum" entry contains the sum across keys.
         """
 
-        debug = False
+        if dt <= 0:
+            raise ValueError("dt must be > 0.")
+        if tstop <= 0:
+            raise ValueError("tstop must be > 0.")
 
-        # Reformat the CDM to be a 3DxN array, where N is the number of time points
-        p = np.zeros((3, len(CDM)))
-        p[2, :] = CDM
+        if not isinstance(probe, str):
+            probe = probe.__name__ if inspect.isclass(probe) else probe.__class__.__name__
 
-        # If location is provided, compute MEEG at that location
-        if location is not None:
-            if cMEG == False:
-                # Set the dipole location
-                self.nyhead.set_dipole_pos(location)
+        rate_cache = {}
+        signals = {}
+        for key, kernel_dict in kernels.items():
+            if ":" not in key:
+                continue
+            _, X = key.split(":")
+            if X not in spike_times:
+                raise KeyError(f"Missing spike times for population {X}.")
 
-                # Get the transformation matrix
-                self.M = self.nyhead.get_transformation_matrix()
+            if X not in rate_cache:
+                times = np.asarray(spike_times[X])
+                times = times[times >= transient]
+                bins = np.arange(transient, tstop + dt, dt)
+                counts, _ = np.histogram(times, bins=bins)
+                rate = counts / (dt / 1000.0)
+                if population_sizes is not None and X in population_sizes:
+                    rate = rate / population_sizes[X]
+                rate_cache[X] = rate
 
-                # Rotate current dipole moment to be oriented along the normal vector of cortex
-                p = self.nyhead.rotate_dipole_to_surface_normal(p)
-
-                # Compute EEG
-                self.MEEG = self.M @ p  # (mV)
-
-                # Get the closest electrode idx to dipole location
-                dist, closest_elec_idx = self.nyhead.find_closest_electrode()
-                all_MEEG = self.MEEG[closest_elec_idx, :]
-
-            # Warning: this code snippet has not been tested yet!
+            if probe not in kernel_dict:
+                raise KeyError(f"Probe {probe} not found in kernel for {key}.")
+            kernel = kernel_dict[probe]
+            if kernel.ndim == 1:
+                kernel_sel = kernel
+                sig = np.convolve(rate_cache[X], kernel_sel, mode=mode) * scale
+            elif component is not None:
+                kernel_sel = kernel[component]
+                sig = np.convolve(rate_cache[X], kernel_sel, mode=mode) * scale
             else:
-                # Instantiate MEG object
-                meg = self.IHVCMEG(location)
+                sig = np.vstack([
+                    np.convolve(rate_cache[X], kernel[ch], mode=mode) * scale
+                    for ch in range(kernel.shape[0])
+                ])
 
-                # Get the transformation matrix
-                self.M = meg.get_transformation_matrix(location)
+            signals[key] = sig
 
-                # Compute the magnetic signal in a single sensor location
-                self.MEEG = self.M @ p
-                all_MEEG = self.MEEG[0]
+        if aggregate == "sum":
+            total = None
+            for sig in signals.values():
+                if total is None:
+                    total = np.array(sig, copy=True)
+                else:
+                    total = total + sig
+            signals["sum"] = total
 
-        # If location is not provided, place the dipole at the different locations of the 10-20 EEG setup. We assume
-        # that each dipole is working independently, i.e., the EEG at each electrode is computed separately.
-        elif location is None and cMEG == False:
-            all_MEEG = np.zeros((20,self.MEEG.shape[1]))
-            locations = [np.array([-25, 65, 0]), # Fp1
-                        np.array([25, 65, 0]),  # Fp2
-                        np.array([-50, 36, -10]), # F7
-                        np.array([-39, 36, 36]),  # F3
-                        np.array([-3, 36, 56]),  # Fz
-                        np.array([39, 36, 36]),  # F4
-                        np.array([50, 36, -10]),  # F8
-                        np.array([-68, -20, 0]),  # T3
-                        np.array([-46, -15, 48]),  # C3
-                        np.array([-3, -19, 76]),  # Cz
-                        np.array([46, -15, 48]),  # C4
-                        np.array([68, -20, 0]),  # T4
-                        np.array([-57, -61, -17]),  # T5
-                        np.array([-40, -55, 50]),  # P3
-                        np.array([-7, -52, 72]),  # Pz
-                        np.array([40, -55, 50]),  # P4
-                        np.array([57, -61, -17]),  # T6
-                        np.array([-32, -90, 18]),  # O1
-                        np.array([-3, -92, 20]),  # Oz
-                        np.array([32, -90, 18])]  # O2
+        return signals
 
-            labels = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'T3', 'C3', 'Cz',
-                      'C4', 'T4', 'T5', 'P3', 'Pz', 'P4', 'T6', 'O1', 'Oz', 'O2']
 
-            # Plot electrode positions
-            if debug:
-                x_lim = [-100, 100]
-                y_lim = [-130, 100]
-                z_lim = [-160, 120]
+    def _get_eeg_1020_locations(self):
+        """
+        Return default dipole locations for the NYHeadModel based on the EEG 10–20 system.
 
-                fig = plt.figure(figsize=(7.5, 3.), dpi=300)
-                ax1 = fig.add_axes([0.15, 0.15, 0.2, 0.7],
-                                   xlabel="x (mm)", ylabel='y (mm)', xlim=x_lim, ylim=y_lim)
-                ax2 = fig.add_axes([0.45, 0.15, 0.2, 0.7],
-                                   xlabel="x (mm)", ylabel='z (mm)', xlim=x_lim, ylim=z_lim)
-                ax3 = fig.add_axes([0.75, 0.15, 0.2, 0.7],
-                                   xlabel="y (mm)", ylabel='z (mm)', xlim=y_lim, ylim=z_lim)
+        Each dipole location is positioned inside the NYHeadModel such that it is as
+        close as possible to a corresponding EEG sensor from the 10–20 system. The
+        returned sensor labels indicate the EEG electrode associated with each dipole.
 
-                for i, location in enumerate(locations):
-                    # Set the dipole location
-                    self.nyhead.set_dipole_pos(location)
+        Returns
+        -------
+        locations : np.ndarray, shape (n_dipoles, 3)
+            Dipole positions in Cartesian coordinates (x, y, z) expressed in mm.
+        labels : list[str]
+            EEG 10–20 electrode labels. Each label corresponds to the EEG sensor for
+            which the associated dipole location is optimally placed to be closest
+            within the NYHeadModel.
+        """
 
-                    # Plot the head model and the dipole location
-                    if i == 0:
-                        threshold = 2
-                        xz_plane_idxs = np.where(np.abs(self.nyhead.cortex[1, :] - 0) < threshold)[0]
-                        xy_plane_idxs = np.where(np.abs(self.nyhead.cortex[2, :] - 0) < threshold)[0]
-                        yz_plane_idxs = np.where(np.abs(self.nyhead.cortex[0, :] - 25) < threshold)[0]
+        locations_mm = [
+            np.array([-25, 65, 0]),  # Fp1
+            np.array([25, 65, 0]),  # Fp2
+            np.array([-50, 36, -10]),  # F7
+            np.array([-39, 36, 36]),  # F3
+            np.array([-3, 36, 56]),  # Fz
+            np.array([39, 36, 36]),  # F4
+            np.array([50, 36, -10]),  # F8
+            np.array([-68, -20, 0]),  # T3
+            np.array([-46, -15, 48]),  # C3
+            np.array([-3, -19, 76]),  # Cz
+            np.array([46, -15, 48]),  # C4
+            np.array([68, -20, 0]),  # T4
+            np.array([-57, -61, -17]),  # T5
+            np.array([-40, -55, 50]),  # P3
+            np.array([-7, -52, 72]),  # Pz
+            np.array([40, -55, 50]),  # P4
+            np.array([57, -61, -17]),  # T6
+            np.array([-32, -90, 18]),  # O1
+            np.array([-3, -92, 20]),  # Oz
+            np.array([32, -90, 18]),  # O2
+        ]
+        labels = [
+            "Fp1", "Fp2", "F7", "F3", "Fz", "F4", "F8", "T3", "C3", "Cz",
+            "C4", "T4", "T5", "P3", "Pz", "P4", "T6", "O1", "Oz", "O2",
+        ]
+        return np.asarray(locations_mm), labels
 
-                        ax1.scatter(self.nyhead.cortex[0, xy_plane_idxs], self.nyhead.cortex[1, xy_plane_idxs], s=0.05, color = 'r')
-                        ax2.scatter(self.nyhead.cortex[0, xz_plane_idxs], self.nyhead.cortex[2, xz_plane_idxs], s=0.05, color = 'r')
-                        ax3.scatter(self.nyhead.cortex[1, yz_plane_idxs], self.nyhead.cortex[2, yz_plane_idxs], s=0.05, color = 'r')
 
-                    ax1.plot(self.nyhead.dipole_pos[0], self.nyhead.dipole_pos[1], 'o', ms=6, color='orange', zorder=1000)
-                    ax2.plot(self.nyhead.dipole_pos[0], self.nyhead.dipole_pos[2], 'o', ms=6, color='orange', zorder=1000)
-                    ax3.plot(self.nyhead.dipole_pos[1], self.nyhead.dipole_pos[2], 'o', ms=6, color='orange', zorder=1000)
+    def compute_MEEG(
+            self,
+            CDM,
+            dipole_locations=None,
+            sensor_locations=None,
+            model=None,
+            model_kwargs=None,
+            align_to_surface=True
+    ):
+        """
+        Compute EEG/MEG from current dipole moment time series using lfpykit forward models.
 
-                # Add labels
-                for i, txt in enumerate(labels):
-                    ax1.annotate(txt, (locations[i][0]+6, locations[i][1]), fontsize=6, color='k')
-                    ax2.annotate(txt, (locations[i][0]+6, locations[i][2]), fontsize=6, color='k')
-                    ax3.annotate(txt, (locations[i][1]+6, locations[i][2]), fontsize=6, color='k')
+        Parameters
+        ----------
+        CDM: np.ndarray
+            Current dipole moment time series. Must be an array shaped:
+            - (3, n_times) for a single dipole, or
+            - (n_dipoles, 3, n_times) for multiple dipoles.
+        dipole_locations: np.ndarray or None
+            Dipole locations matching CDM. Must be shaped:
+            - (3,) for a single dipole, or
+            - (n_dipoles, 3) for multiple dipoles.
+            Units: mm for NYHeadModel, µm for other models.
+        sensor_locations: np.ndarray or None
+            Sensor/electrode locations shaped (n_sensors, 3). Required for non-NYHead models and must be None for
+            NYHeadModel (which are automatically computed from dipole locations and the head model geometry).
+            Units: mm for NYHeadModel, µm for other models.
+        model: str or None
+            Forward model name. Supported values (see lfpykit forward models):
+            - NYHeadModel (EEG)
+            - FourSphereVolumeConductor (EEG)
+            - InfiniteVolumeConductor (EEG)
+            - InfiniteHomogeneousVolCondMEG (MEG)
+            - SphericallySymmetricVolCondMEG (MEG)
+        model_kwargs: dict or None
+            Optional keyword arguments forwarded to the forward model constructor.
+        align_to_surface: bool
+            NYHeadModel only. If True, rotate dipole moment to be aligned with the local surface normal of the
+            head model at the dipole location.
 
-                plt.show()
+        Returns
+        -------
+        meeg: np.ndarray
+            Summed contribution from all dipoles at each sensor/electrode.
+            - EEG models and NYHeadModel: (n_sensors, n_times)
+            - MEG models: (n_sensors, 3, n_times)
+        """
 
-            for ii,location in enumerate(locations):
-                # Set the dipole location
-                self.nyhead.set_dipole_pos(location)
+        if model is None:
+            model = "NYHeadModel"
+        if not isinstance(model, str):
+            raise TypeError("model must be a string name for the forward model.")
+        model_key = model
+        if model_key not in {
+            "NYHeadModel",
+            "FourSphereVolumeConductor",
+            "InfiniteVolumeConductor",
+            "InfiniteHomogeneousVolCondMEG",
+            "SphericallySymmetricVolCondMEG",
+        }:
+            raise ValueError(f"Unknown model '{model_key}'.")
 
-                # Get the transformation matrix
-                self.M = self.nyhead.get_transformation_matrix()
+        # Set default sensor locations according to examples provided in the documentation of lfpykit forward models.
+        # For InfiniteVolumeConductor, we reuse the default sensor locations from FourSphereVolumeConductor. Although
+        # InfiniteVolumeConductor is defined in terms of sensor positions r relative to the dipole (rather than
+        # absolute coordinates), the relative positions (sensor location minus dipole position) are computed
+        # later in _compute_eegmeg_from_cdm.
+        if sensor_locations is None and model_key != "NYHeadModel":
+            if model_key in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
+                sensor_locations = np.array([[0.0, 0.0, 90000.0]])
+            elif model_key in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}:
+                if model_key == "InfiniteHomogeneousVolCondMEG":
+                    sensor_locations = np.array([[10000.0, 0.0, 0.0]])
+                else:
+                    sensor_locations = np.array([[0.0, 0.0, 92000.0]])
 
-                # Rotate current dipole moment to be oriented along the normal vector of cortex
-                p = self.nyhead.rotate_dipole_to_surface_normal(p)
+        # Set default dipole locations according to documentation examples in lfpykit forward models.
+        if dipole_locations is None:
+            if model_key == "FourSphereVolumeConductor":
+                dipole_locations = np.array([0.0, 0.0, 78000.0])
+            elif model_key == "SphericallySymmetricVolCondMEG":
+                dipole_locations = np.array([0.0, 0.0, 90000.0])
+            else:
+                dipole_locations = np.zeros(3)
 
-                # Compute EEG
-                self.MEEG = self.M @ p  # (mV)
+        p_list, loc_list = self._normalize_cdm_and_locations(CDM, dipole_locations)
 
-                # Get the closest electrode idx to dipole location
-                dist, closest_elec_idx = self.nyhead.find_closest_electrode()
-                all_MEEG[ii,:] = self.MEEG[closest_elec_idx, :]
-
-            # Delete variables
-            # del p, dist, closest_elec_idx
-
+        if model_key != "NYHeadModel":
+            if sensor_locations is None:
+                raise ValueError("sensor_locations must be provided for this model.")
+            sensor_locations = np.asarray(sensor_locations, dtype=float)
+            if sensor_locations.ndim != 2 or sensor_locations.shape[1] != 3:
+                raise ValueError("sensor_locations must have shape (n_sensors, 3).")
         else:
-            raise ValueError("Configuration (location/cMEG) not recognized.")
+            if sensor_locations is not None:
+                sensor_locations = None
+                print("Warning: sensor_locations is ignored for NYHeadModel.")
+
+        total = None
+        for p_i, loc_i in zip(p_list, loc_list):
+            part = self._compute_eegmeg_from_cdm(
+                p_i,
+                dipole_location=loc_i,
+                model=model_key,
+                sensor_locations=sensor_locations,
+                model_kwargs=model_kwargs,
+                align_to_surface=align_to_surface,
+                return_all_electrodes=True,
+            )
+            total = part if total is None else total + part
+
+        return total
 
 
-        return all_MEEG
+    def _normalize_cdm_and_locations(self, CDM, dipole_locations):
+        """Normalize (possibly multi-dipole) CDM + locations into lists.
+
+        Parameters
+        ----------
+        CDM: np.ndarray
+            Current dipole moment time series shaped (3, n_times) or (n_dipoles, 3, n_times).
+        dipole_locations: np.ndarray or None
+            Dipole locations shaped (3,) or (n_dipoles, 3). If None, locations are set to zeros.
+
+        Returns
+        -------
+        p_list: list[np.ndarray]
+            List of arrays shaped (3, n_times)
+        loc_list: list
+            List of per-dipole locations (each a (3,) array_like).
+        """
+        cdm = np.asarray(CDM)
+        if cdm.dtype == object:
+            raise ValueError("CDM must be a numeric array shaped (3, n_times) or (n_dipoles, 3, n_times).")
+
+        if cdm.ndim == 2:
+            if 3 not in cdm.shape:
+                raise ValueError("CDM must be shaped (3, n_times) for a single dipole.")
+            if cdm.shape[0] != 3:
+                cdm = cdm.T
+            p_list = [cdm]
+            n_dip = 1
+        elif cdm.ndim == 3:
+            n_dip = cdm.shape[0]
+            if cdm.shape[1] == 3:
+                p_list = [cdm[i] for i in range(n_dip)]
+            elif cdm.shape[2] == 3:
+                p_list = [cdm[i].T for i in range(n_dip)]
+            else:
+                raise ValueError("CDM must be shaped (n_dipoles, 3, n_times) or (n_dipoles, n_times, 3).")
+        else:
+            raise ValueError("CDM must be shaped (3, n_times) or (n_dipoles, 3, n_times).")
+
+        # Normalize dipole locations into list
+        if dipole_locations is None:
+            dipole_locations = np.zeros((n_dip, 3)) if n_dip > 1 else np.zeros(3)
+
+        dip_arr = np.asarray(dipole_locations, dtype=float)
+        if dip_arr.dtype == object:
+            raise ValueError("dipole_locations must be a numeric array with shape (3,) or (n_dipoles, 3).")
+        if n_dip == 1:
+            if dip_arr.shape == (3,):
+                loc_list = [dip_arr]
+            elif dip_arr.shape == (1, 3):
+                loc_list = [dip_arr[0]]
+            else:
+                raise ValueError("dipole_locations must have shape (3,) for a single dipole.")
+        else:
+            if dip_arr.shape != (n_dip, 3):
+                raise ValueError("dipole_locations must have shape (n_dipoles, 3) to match CDM.")
+            loc_list = [dip_arr[i] for i in range(n_dip)]
+
+        p_list = [self._format_cdm(p_i) for p_i in p_list]
+        return p_list, loc_list
 
 
-    def compute_proxy(self, method, sim_data, sim_step):
+    def _compute_eegmeg_from_cdm(
+            self,
+            CDM,
+            dipole_location=None,
+            model="NYHeadModel",
+            sensor_locations=None,
+            model_kwargs=None,
+            align_to_surface=True,
+            return_all_electrodes=False
+    ):
+        """
+        Compute EEG/MEG from a single current dipole moment across all sensors using the selected forward model.
+
+        Notes
+        -----
+        - All forward models are linear in the dipole moment: output = M(dipole_location, sensors) @ p
+        - For MEG models in lfpykit, the output is a vector field with shape (n_sensors, 3, n_times)
+        - For NYHeadModel, sensor locations are fixed to the built-in 231 electrodes.
+
+        Parameters
+        ----------
+        CDM: array_like
+            Current dipole moment, accepted by :meth:`_format_cdm` (nA·µm).
+        dipole_location: array_like
+            Dipole location. Units: mm for NYHeadModel, µm for other models.
+        model: str
+            Forward model name.
+        sensor_locations: array_like
+            Required for all models except NYHeadModel. Shape (n_sensors, 3), units in µm.
+        model_kwargs: dict
+            Optional kwargs forwarded to model constructors.
+        align_to_surface: bool
+            NYHeadModel only. If True, rotate dipole moment to be aligned with the local surface normal of the
+            head model at the dipole location.
+        return_all_electrodes: bool
+            NYHeadModel only. If True, return the signal for all 231 built-in electrodes. If False, return only
+            the signal for the single electrode closest to the dipole location.
+
+        Returns
+        -------
+        meeg: np.ndarray
+            EEG/MEG signal at each sensor/electrode. Shape depends on model:
+            - EEG models and NYHeadModel: (n_sensors, n_times) or (n_times,) if return_all_electrodes=False
+            for NYHeadModel.
+            - MEG models: (n_sensors, 3, n_times)
+        """
+        p = self._format_cdm(CDM)
+        model_kwargs = model_kwargs or {}
+        if not isinstance(model, str):
+            raise TypeError("model must be a string name for the forward model.")
+        model_key = model
+
+        # --- NYHeadModel EEG ---
+        if model_key == "NYHeadModel":
+            if self.nyhead is None:
+                nyhead_model = self._load_eegmegcalc_model("NYHeadModel")
+                self.nyhead = nyhead_model(**model_kwargs) if model_kwargs else nyhead_model()
+            self.nyhead.set_dipole_pos(dipole_location)
+            M = self.nyhead.get_transformation_matrix()  # (231, 3)
+            p_use = self.nyhead.rotate_dipole_to_surface_normal(p) if align_to_surface else p
+            eeg = M @ p_use  # (231, n_times)
+            # Get the closest electrode idx to dipole location
+            if return_all_electrodes:
+                return eeg
+            else:
+                dist, closest_elec_idx = self.nyhead.find_closest_electrode()
+                return eeg[closest_elec_idx, :]
+
+        # --- All other models need numeric dipole location ---
+        if dipole_location is None:
+            raise ValueError("dipole_location must be provided for this model.")
+        dipole_location = np.asarray(dipole_location, dtype=float)
+
+        # Normalize sensor locations for non-NYHead models
+        if sensor_locations is None:
+            raise ValueError("sensor_locations must be provided for this model.")
+        sensor_locations = np.atleast_2d(np.asarray(sensor_locations, dtype=float))
+        if sensor_locations.ndim != 2 or sensor_locations.shape[1] != 3:
+            raise ValueError("sensor_locations must have shape (n_sensors, 3).")
+
+        # --- EEG models ---
+        if model_key == "FourSphereVolumeConductor":
+            FourSphere = self._load_eegmegcalc_model("FourSphereVolumeConductor")
+            model_obj = FourSphere(sensor_locations, **model_kwargs)
+            M = model_obj.get_transformation_matrix(dipole_location)  # (n_sensors, 3)
+            return M @ p  # (n_sensors, n_times)
+
+        if model_key == "InfiniteVolumeConductor":
+            InfiniteVol = self._load_eegmegcalc_model("InfiniteVolumeConductor")
+            model_obj = InfiniteVol(**model_kwargs)
+            r = sensor_locations - dipole_location  # displacement vectors (n_sensors, 3)
+            M = model_obj.get_transformation_matrix(r)  # (n_sensors, 3)
+            return M @ p  # (n_sensors, n_times)
+
+        # --- MEG models ---
+        if model_key == "InfiniteHomogeneousVolCondMEG":
+            IHVCMEG = self._load_eegmegcalc_model("InfiniteHomogeneousVolCondMEG")
+            model_obj = IHVCMEG(sensor_locations, **model_kwargs)
+            M = model_obj.get_transformation_matrix(dipole_location)  # (n_sensors, 3, 3)
+            return M @ p  # (n_sensors, 3, n_times)
+
+        if model_key == "SphericallySymmetricVolCondMEG":
+            SSVMEG = self._load_eegmegcalc_model("SphericallySymmetricVolCondMEG")
+            model_obj = SSVMEG(sensor_locations, **model_kwargs)
+            M = model_obj.get_transformation_matrix(dipole_location)  # (n_sensors, 3, 3)
+            return M @ p  # (n_sensors, 3, n_times)
+
+        raise ValueError(f"Unknown model '{model}'.")
+
+
+    ############################################################
+    ## Proxy-based methods for field potential estimation ######
+    ############################################################
+
+    def compute_proxy(self, method, sim_data, sim_step, *, excitatory_only=None):
         """
         Compute a proxy for the extracellular signal by combining variables directly measured from network simulations.
-        Warning: not tested yet!
+        Note: some methods require a valid sim_step to compute delays.
 
         Parameters
         ----------
@@ -416,11 +976,25 @@ class FieldPotential:
             - 'ERWS2': EEG reference weighted sum 2 (non-causal)
 
         sim_data: dict
-            Dictionary containing the simulation data. The keys are 'FR', 'AMPA', 'GABA', 'Vm', 'nu_ext'. Each key
-            contains a 2D array with the data for each neuron in the population.
+            Dictionary containing the simulation data. Expected keys depend on `method`:
+            - "FR": requires FR data (n_units, n_times)
+            - "AMPA": requires AMPA data (n_units, n_times)
+            - "GABA": requires GABA data (n_units, n_times)
+            - "Vm": requires Vm data (n_units, n_times)
+            - "I", "I_abs": requires AMPA and GABA data
+            - "LRWS", "ERWS1": requires AMPA and GABA data
+            - "ERWS2": requires AMPA, GABA, and nu_ext data
 
-        sim_step: float
-            Simulation time step in ms.
+            If `excitatory_only` is set, the method will prefer keys with suffixes:
+            - excitatory_only=True: "<KEY>_exc"
+            - excitatory_only=False: "<KEY>_all" or "<KEY>_total"
+            and fall back to "<KEY>" if the suffixed keys are not provided.
+
+        sim_step: float or None
+            Simulation time step in ms. Required for delay-based methods ("LRWS", "ERWS1", "ERWS2").
+        excitatory_only: bool or None
+            If provided, indicates whether inputs should be treated as excitatory-only. If None, the method will
+            use the base keys without any suffixes. This flag is used to select data keys, if present.
 
         Returns
         -------
@@ -428,467 +1002,62 @@ class FieldPotential:
             Proxy for the extracellular signal.
         """
 
+        def _select(key):
+            if excitatory_only is True:
+                candidates = [f"{key}_exc", key]
+            elif excitatory_only is False:
+                candidates = [f"{key}_all", f"{key}_total", key]
+            else:
+                candidates = [key]
+            for cand in candidates:
+                if cand in sim_data:
+                    return sim_data[cand]
+            raise KeyError(f"Missing data for '{key}' (tried {candidates}).")
+
+        if method in {"LRWS", "ERWS1", "ERWS2"}:
+            if sim_step is None:
+                raise ValueError(f"sim_step must be provided for proxy method '{method}'.")
+            if not isinstance(sim_step, (int, float)) or sim_step <= 0:
+                raise ValueError("sim_step must be a positive number (ms).")
+
         if method == 'FR':
-            proxy = np.mean(sim_data['FR'], axis = 0)
+            proxy = np.mean(_select('FR'), axis=0)
         elif method == 'AMPA':
-            proxy = np.sum(sim_data['AMPA'], axis = 0)
+            proxy = np.sum(_select('AMPA'), axis=0)
         elif method == 'GABA':
-            proxy = -np.sum(sim_data['GABA'], axis = 0)
+            proxy = -np.sum(_select('GABA'), axis=0)
         elif method == 'Vm':
-            proxy = np.sum(sim_data['Vm'], axis = 0)
+            proxy = np.sum(_select('Vm'), axis=0)
         elif method == 'I':
-            proxy = np.sum(sim_data['AMPA'] + sim_data['GABA'], axis = 0)
+            proxy = np.sum(_select('AMPA') + _select('GABA'), axis=0)
         elif method == 'I_abs':
-            proxy = np.sum(np.abs(sim_data['AMPA']) + np.abs(sim_data['GABA']), axis = 0)
+            proxy = np.sum(np.abs(_select('AMPA')) + np.abs(_select('GABA')), axis=0)
         elif method == 'LRWS':
             delay = int(6.0 / sim_step)
-            AMPA_delayed = np.array([roll_with_zeros(sim_data['AMPA'][i],delay) for i in range(sim_data['AMPA'].shape[0])])
-            proxy = np.sum(AMPA_delayed - 1.65 * sim_data['GABA'], axis=0)
+            ampa = _select('AMPA')
+            gaba = _select('GABA')
+            AMPA_delayed = np.array([self.roll_with_zeros(ampa[i], delay) for i in range(ampa.shape[0])])
+            proxy = np.sum(AMPA_delayed - 1.65 * gaba, axis=0)
         elif method == 'ERWS1':
             AMPA_delay = -int(0.9 / sim_step)
             GABA_delay = int(2.3 / sim_step)
-            AMPA_delayed = np.array([roll_with_zeros(sim_data['AMPA'][i],
-                                                     AMPA_delay) for i in range(sim_data['AMPA'].shape[0])])
-            GABA_delayed = np.array([roll_with_zeros(sim_data['GABA'][i],
-                                                     GABA_delay) for i in range(sim_data['GABA'].shape[0])])
+            ampa = _select('AMPA')
+            gaba = _select('GABA')
+            AMPA_delayed = np.array([self.roll_with_zeros(ampa[i], AMPA_delay) for i in range(ampa.shape[0])])
+            GABA_delayed = np.array([self.roll_with_zeros(gaba[i], GABA_delay) for i in range(gaba.shape[0])])
             proxy = np.sum(AMPA_delayed - 0.3 * GABA_delayed, axis=0)
         elif method == 'ERWS2':
-            coeff = [-0.6,  0.1, -0.4, -1.9,  0.6,  3.0 ,  1.4,  1.7,  0.2]
-            AMPA_delay = int(coeff[0] * np.power(sim_data['nu_ext'], -coeff[1]) + coeff[2])
-            GABA_delay = int(coeff[3] * np.power(sim_data['nu_ext'], -coeff[4]) + coeff[5])
-            alpha = coeff[6] * np.power(sim_data['nu_ext'], -coeff[7]) + coeff[8]
-            AMPA_delayed = np.array([roll_with_zeros(sim_data['AMPA'][i],
-                                                     AMPA_delay) for i in range(sim_data['AMPA'].shape[0])])
-            GABA_delayed = np.array([roll_with_zeros(sim_data['GABA'][i],
-                                                     GABA_delay) for i in range(sim_data['GABA'].shape[0])])
+            coeff = [-0.6, 0.1, -0.4, -1.9, 0.6, 3.0, 1.4, 1.7, 0.2]
+            nu_ext = _select('nu_ext')
+            AMPA_delay = int(coeff[0] * np.power(nu_ext, -coeff[1]) + coeff[2])
+            GABA_delay = int(coeff[3] * np.power(nu_ext, -coeff[4]) + coeff[5])
+            alpha = coeff[6] * np.power(nu_ext, -coeff[7]) + coeff[8]
+            ampa = _select('AMPA')
+            gaba = _select('GABA')
+            AMPA_delayed = np.array([self.roll_with_zeros(ampa[i], AMPA_delay) for i in range(ampa.shape[0])])
+            GABA_delayed = np.array([self.roll_with_zeros(gaba[i], GABA_delay) for i in range(gaba.shape[0])])
             proxy = np.sum(AMPA_delayed - alpha * GABA_delayed, axis=0)
         else:
             raise ValueError(f"Method {method} not recognized.")
 
         return proxy
-
-
-def roll_with_zeros(arr, shift):
-    """
-    Roll an array with zeros.
-    Parameters
-    ----------
-    arr: np.array
-        Array to be rolled.
-    shift: int
-        Number of positions to shift the array.
-    Returns
-    -------
-    result: np.array
-        Shifted array.
-
-    """
-    result = np.zeros_like(arr)
-    if shift > 0:
-        result[shift:] = arr[:-shift]
-    elif shift < 0:
-        result[:shift] = arr[-shift:]
-    else:
-        result[:] = arr
-    return result
-
-
-"""
-The following methods for setting up the neuron model were downloaded from the LFPykernels repository: 
-https://github.com/LFPy/LFPykernels/blob/main/examples/example_network_methods.py
-Copyright (C) 2021 https://github.com/espenhgn
-"""
-
-def set_active( cell, Vrest):
-    """Insert HH and Ih channels across cell sections
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('hh')
-        sec.insert('Ih')
-        if sec.name().rfind('soma') >= 0:
-            sec.gnabar_hh = 0.12
-            sec.gkbar_hh = 0.036
-            sec.gl_hh = 0.0003
-            sec.el_hh = -54.3
-            sec.ena = 50
-            sec.ek = -77
-
-            sec.gIhbar_Ih = 0.002
-
-        if sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            # set HH channel conductancesto 10% of default in apical dendrite
-            sec.gnabar_hh = 0.012
-            sec.gkbar_hh = 0.0036
-            sec.gl_hh = 0.0003
-            sec.el_hh = -54.3
-            sec.ena = 50
-            sec.ek = -77
-
-            # set higher Ih-conductance in apical dendrite
-            sec.gIhbar_Ih = 0.01
-
-
-def set_passive(cell, Vrest):
-    """Insert passive leak channel across sections
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.g_pas = 0.0003
-        sec.e_pas = Vrest
-
-
-def set_Ih( cell, Vrest):
-    """Insert passive leak and voltage-gated Ih across sections
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('Ih')
-        sec.e_pas = Vrest
-        sec.g_pas = 0.0003
-        if sec.name().rfind('soma') >= 0:
-            sec.gIhbar_Ih = 0.002
-        elif sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gIhbar_Ih = 0.01
-
-
-def set_Ih_linearized( cell, Vrest):
-    """Insert passive leak and linearized Ih.
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('Ih_linearized_v2')
-        sec.e_pas = Vrest
-        sec.g_pas = 0.0003
-        sec.V_R_Ih_linearized_v2 = Vrest
-        if sec.name().rfind('soma') >= 0:
-            sec.gIhbar_Ih_linearized_v2 = 0.002
-        elif sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gIhbar_Ih_linearized_v2 = 0.01
-
-
-def set_pas_hay2011( cell, Vrest):
-    """Insert passive leak as in Hay2011 model
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        if sec.name().rfind('soma') >= 0:
-            sec.g_pas = 0.0000338
-            sec.e_pas = -90
-
-        if sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.g_pas = 0.0000589
-            sec.e_pas = -90
-
-
-def set_active_hay2011( cell, Vrest):
-    """Insert passive leak, Ih, NaTa_t and SKv3_1 channels as in Hay 2011 model
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential (not used)
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('Ih')
-        sec.insert('NaTa_t')
-        sec.insert('SKv3_1')
-        sec.ena = 50
-        sec.ek = -85
-        if sec.name().rfind('soma') >= 0:
-            sec.gNaTa_tbar_NaTa_t = 2.04
-            sec.gSKv3_1bar_SKv3_1 = 0.693
-            sec.g_pas = 0.0000338
-            sec.e_pas = -90
-            sec.gIhbar_Ih = 0.0002
-
-        if sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gNaTa_tbar_NaTa_t = 0.0213
-            sec.gSKv3_1bar_SKv3_1 = 0.000261
-            sec.g_pas = 0.0000589
-            sec.e_pas = -90
-            sec.gIhbar_Ih = 0.0002 * 10
-
-
-def set_frozen_hay2011( cell, Vrest):
-    """Set passive leak and linear passive-frozen versions of Ih, NaTa_t and
-    SKv3_1 channels from Hay 2011 model
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('NaTa_t_frozen')
-        sec.insert('SKv3_1_frozen')
-        sec.insert('Ih_linearized_v2_frozen')
-        sec.e_pas = Vrest
-        sec.V_R_NaTa_t_frozen = Vrest
-        sec.V_R_SKv3_1_frozen = Vrest
-        sec.V_R_Ih_linearized_v2_frozen = Vrest
-        sec.ena = Vrest  # 50
-        sec.ek = Vrest  # -85
-        if sec.name().rfind('soma') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 2.04
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.693
-            sec.g_pas = 0.0000338
-            sec.gIhbar_Ih_linearized_v2_frozen = 0.0002
-        elif sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 0.0213
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.000261
-            sec.g_pas = 0.0000589
-            sec.gIhbar_Ih_linearized_v2_frozen = 0.0002 * 10
-
-
-def set_frozen_hay2011_no_Ih( cell, Vrest):
-    """
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('NaTa_t_frozen')
-        sec.insert('SKv3_1_frozen')
-        sec.e_pas = Vrest
-        sec.V_R_NaTa_t_frozen = Vrest
-        sec.V_R_SKv3_1_frozen = Vrest
-        sec.ena = Vrest  # 50
-        sec.ek = Vrest  # -85
-        if sec.name().rfind('soma') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 2.04
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.693
-            sec.g_pas = 0.0000338
-        elif sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 0.0213
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.000261
-            sec.g_pas = 0.0000589
-
-
-def set_Ih_hay2011( cell, Vrest):
-    """
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('NaTa_t_frozen')
-        sec.insert('SKv3_1_frozen')
-        sec.insert('Ih')
-        sec.e_pas = Vrest
-        sec.ena = Vrest  # 50
-        sec.V_R_NaTa_t_frozen = Vrest
-        sec.V_R_SKv3_1_frozen = Vrest
-        sec.ek = Vrest  # -85
-        if sec.name().rfind('soma') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 2.04
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.693
-            sec.g_pas = 0.0000338
-            sec.gIhbar_Ih = 0.0002
-        elif sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 0.0213
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.000261
-            sec.g_pas = 0.0000589
-            sec.gIhbar_Ih = 0.0002 * 10
-
-
-def set_Ih_linearized_hay2011( cell, Vrest):
-    """
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('NaTa_t_frozen')
-        sec.insert('SKv3_1_frozen')
-        sec.insert('Ih_linearized_v2')
-        sec.e_pas = Vrest
-        sec.V_R_Ih_linearized_v2 = Vrest
-        sec.V_R_NaTa_t_frozen = Vrest
-        sec.V_R_SKv3_1_frozen = Vrest
-        sec.ena = Vrest  # 50
-        sec.ek = Vrest  # -85
-
-        if sec.name().rfind('soma') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 2.04
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.693
-            sec.g_pas = 0.0000338
-            sec.gIhbar_Ih_linearized_v2 = 0.0002
-        elif sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gNaTa_tbar_NaTa_t_frozen = 0.0213
-            sec.gSKv3_1bar_SKv3_1_frozen = 0.000261
-            sec.g_pas = 0.0000589
-            sec.gIhbar_Ih_linearized_v2 = 0.0002 * 10
-
-
-def set_V_R_Ih_linearized_v2( cell, Vrest):
-    """
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-
-    import neuron
-
-    for sec in cell.template.all:
-        if neuron.h.ismembrane("Ih_linearized_v2", sec=sec):
-            sec.V_R_Ih_linearized_v2 = Vrest
-        elif neuron.h.ismembrane("Ih_linearized_v2_frozen", sec=sec):
-            sec.V_R_Ih_linearized_v2_frozen = Vrest
-
-
-def set_V_R( cell, Vrest):
-    """
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-
-    import neuron
-
-    ion_channels = [
-        "Ih_linearized_v2",
-        "Ih_linearized_v2_frozen",
-        "Ca_LVAst_frozen",
-        "Ca_HVA_frozen",
-        "SKv3_1_frozen",
-        "K_Tst_frozen",
-        "K_Pst_frozen",
-        "Nap_Et2_frozen",
-        "Nap_Et2_linearized",
-        "NaTa_t_frozen",
-        "Im_frozen"
-    ]
-    for sec in cell.template.all:
-        for ion in ion_channels:
-            if neuron.h.ismembrane(ion, sec=sec):
-                setattr(sec, f'V_R_{ion}', Vrest)
-
-
-def make_cell_uniform( cell, Vrest=-65):
-    """
-    Adjusts e_pas to enforce a uniform resting membrane potential at Vrest
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential
-    """
-
-    import neuron
-
-    neuron.h.t = 0
-    neuron.h.finitialize(Vrest)
-    neuron.h.fcurrent()
-    for sec in cell.allseclist:
-        for seg in sec:
-            seg.e_pas = seg.v
-            if neuron.h.ismembrane("na_ion", sec=sec):
-                seg.e_pas += seg.ina / seg.g_pas
-            if neuron.h.ismembrane("k_ion", sec=sec):
-                seg.e_pas += seg.ik / seg.g_pas
-            if neuron.h.ismembrane("ca_ion", sec=sec):
-                seg.e_pas += seg.ica / seg.g_pas
-            if neuron.h.ismembrane("Ih", sec=sec):
-                seg.e_pas += seg.ihcn_Ih / seg.g_pas
-            if neuron.h.ismembrane("Ih_z", sec=sec):
-                seg.e_pas += seg.ih_Ih_z / seg.g_pas
-            if neuron.h.ismembrane("Ih_linearized_v2_frozen", sec=sec):
-                seg.e_pas += seg.ihcn_Ih_linearized_v2_frozen / seg.g_pas
-            if neuron.h.ismembrane("Ih_linearized_v2", sec=sec):
-                seg.e_pas += seg.ihcn_Ih_linearized_v2 / seg.g_pas
-            if neuron.h.ismembrane("Ih_frozen", sec=sec):
-                seg.e_pas += seg.ihcn_Ih_frozen / seg.g_pas
-
-def compute_mean_nu_X( params, OUTPUTPATH, TRANSIENT=200.):
-    """
-    Return the population-averaged firing rate for each population X
-
-    Parameters
-    ----------
-    params: module
-        `<module 'example_network_parameters'>`
-    OUTPUTPATH: str
-        path to directory with `spikes.h5` file
-    TRANSIENT: float
-        startup transient duration
-
-    Returns
-    -------
-    nu_X: dict of floats
-        keys and values denote population names and firing rates, respectively.
-    """
-
-    import h5py
-
-    nu_X = dict()
-    for i, (X, N_X) in enumerate(zip(params.population_names,
-                                     params.population_sizes)):
-        with h5py.File(os.path.join(OUTPUTPATH, 'spikes.h5'), 'r') as f:
-            times = np.concatenate(f[X]['times'][()])
-            times = times[times >= TRANSIENT]
-            nu_X[X] = (times.size / N_X
-                       / (params.networkParameters['tstop'] - TRANSIENT)
-                       * 1000)
-    return nu_X
-

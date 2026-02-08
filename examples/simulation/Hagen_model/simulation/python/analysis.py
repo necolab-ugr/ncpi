@@ -17,7 +17,7 @@ zenodo_dw_mult = True
 zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
 
 # Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in neuron)
-zenodo_dir = os.path.join(os.sep, 'DATA', 'multicompartment_neuron_network')
+zenodo_dir = os.path.join("$HOME","multicompartment_neuron_network")
 
 # Download data
 if zenodo_dw_mult:
@@ -149,49 +149,61 @@ if __name__ == "__main__":
     potential = ncpi.FieldPotential()
     biophys = ['set_Ih_linearized_hay2011','make_cell_uniform']
     H_YX = potential.create_kernel(multicompartment_neuron_network_path,
-                                   output_path,
                                    module.KernelParams,
                                    biophys,
                                    dt,
                                    tstop,
+                                   output_sim_path=output_path,
                                    electrodeParameters=module.KernelParams.electrodeParameters,
                                    CDM=True)
 
-    # Compute LFP signals
+    # Compute LFP signals using FieldPotential helper
     probe = 'GaussCylinderPotential'
     LFP_data = dict(EE=[], EI=[], IE=[], II=[])
+    lfp_signals = potential.compute_cdm_from_kernels(
+        H_YX,
+        spike_times=times,
+        dt=dt,
+        tstop=tstop,
+        transient=transient,
+        probe=probe,
+        component=None,
+        mode='same',
+        scale=dt / 1000.0,  # match histogram-count scaling used below
+    )
 
     for X in P_X:
         for Y in P_X:
-            # Compute the firing rate
-            bins, spike_rate = get_spike_rate(times[X], transient, dt, tstop)
-            n_ch = H_YX[f'{X}:{Y}'][probe].shape[0]
+            key = f'{Y}:{X}'
+            n_ch = lfp_signals[key].shape[0]
             for ch in range(n_ch):
-                # LFP kernel at electrode 'ch'
-                kernel = H_YX[f'{X}:{Y}'][probe][ch, :]
-                # LFP signal
-                sig = np.convolve(spike_rate, kernel, 'same')
-                # Decimate signal (x10)
-                LFP_data[f'{X}{Y}'].append(ss.decimate(
-                    sig,
-                    q=10,
-                    zero_phase=True))
+                LFP_data[f'{X}{Y}'].append(
+                    ss.decimate(lfp_signals[key][ch], q=10, zero_phase=True)
+                )
 
-    # Compute CDM
+    # Compute CDM (z-component) using FieldPotential helper
     probe = 'KernelApproxCurrentDipoleMoment'
     CDM_data = dict(EE=[], EI=[], IE=[], II=[])
+    cdm_signals = potential.compute_cdm_from_kernels(
+        H_YX,
+        spike_times=times,
+        dt=dt,
+        tstop=tstop,
+        transient=transient,
+        probe=probe,
+        component=2,
+        mode='same',
+        scale=dt / 1000.0,  # match histogram-count scaling used below
+    )
 
     for X in P_X:
         for Y in P_X:
-            # Compute the firing rate
-            bins, spike_rate = get_spike_rate(times[X], transient, dt, tstop)
-            # Pick only the z-component of the CDM kernel
-            kernel = H_YX[f'{X}:{Y}'][probe][2, :]
-            # CDM
-            sig = np.convolve(spike_rate, kernel, 'same')
-            CDM_data[f'{X}{Y}'] = ss.decimate(sig,
-                                              q=10,
-                                              zero_phase=True)
+            key = f'{Y}:{X}'
+            CDM_data[f'{X}{Y}'] = ss.decimate(
+                cdm_signals[key],
+                q=10,
+                zero_phase=True
+            )
 
     # Plot spikes and firing rates
     fig = plt.figure(figsize=[6,5], dpi=300)

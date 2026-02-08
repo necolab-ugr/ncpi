@@ -23,8 +23,13 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
+    "h5py",
+    "neuron",
+    "packaging",
+    "requests",
     "scikit-learn==1.5.0",
     "sbi==0.24.0",
+    "tqdm",
     "torch",
     "pycatch22",
     "specparam",
@@ -35,41 +40,43 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-simulation = [
-    "lfpykernels"
-#    "LFPy",
-#    "lfpykit",
-#    "neuron"
-    # Omit `nest`, handled by Conda or Docker, if installing a pre-built NEST package.
-    # ---- conda install -c conda-forge nest-simulator=3.8
-]
-
-utils = [
-    "h5py",
-#    "pathos",
-    "tqdm",
-    "requests"]
-
-statistics = [
+analysis = [
     "rpy2",
-    "statsmodels"
 ]
-
-visualization = [
-    "seaborn",
+fieldpotential = [
+    "LFPy",
+    "lfpykernels",
+    "lfpykit",
+]
+meeg = [
     "mne",
-    "mpl_toolkits",
-    "pdf2image"
+]
+examples = [
+    "nest-simulator",
+    "pdf2image",
+    "seaborn",
+    "statsmodels",
+]
+tests = [
+    "pytest",
+    "LFPy",
+    "lfpykernels",
+    "lfpykit",
+    "mne",
+]
+all = [
+    "LFPy",
+    "lfpykernels",
+    "lfpykit",
+    "mne",
+    "rpy2",
+    "pytest",
+    "nest-simulator",
+    "pdf2image",
+    "seaborn",
+    "statsmodels",
 ]
 
-feats_hctsa = [
-    "matlab.engine",
-    "h5py"
-]
-
-feats_fEI_DFA = [
-    "PyAstronomy"
-]
 
 [project.urls]
 repository = "https://github.com/necolab-ugr/ncpi"

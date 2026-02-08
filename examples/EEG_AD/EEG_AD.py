@@ -30,7 +30,7 @@ else:
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 zenodo_dw_sim = True  # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
-zenodo_dir_sim = os.path.join("/home/pablomc", "zenodo_sim_files")
+zenodo_dir_sim = os.path.join("$HOME", "zenodo_sim_files")
 
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization"]
