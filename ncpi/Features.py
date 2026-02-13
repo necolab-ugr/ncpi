@@ -5,12 +5,29 @@ import scipy.signal as scipy_signal
 from scipy.stats import t as scipy_t
 from ncpi import tools
 
-
-### Worker helper functions ###
-_WORKER_FEATURES_OBJ = None
-
+#########################################################
+## Helper functions for DFA & fE/I feature computation ##
+#########################################################
 
 def _create_window_indices(length_signal, length_window, window_offset):
+    """Create a 2D array of indices for sliding windows.
+    Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+    Parameters
+    ----------
+    length_signal: int
+        Total length of the signal.
+    length_window: int
+        Length of each window.
+    window_offset: int
+        Step size between the starts of consecutive windows.
+
+    Returns
+    -------
+    all_window_index: np.ndarray
+        2D array of shape (num_windows, length_window) where each row contains the
+        indices for that window.
+    """
     window_starts = np.arange(0, length_signal - length_window, window_offset)
     num_windows = len(window_starts)
 
@@ -27,7 +44,34 @@ def _create_window_indices(length_signal, length_window, window_offset):
 def _generalized_esd(x, max_ols, alpha=0.05, full_output=False, ubvar=False):
     """
     Generalized ESD test for outliers.
-    Adapted from crosci/outliers.py (MIT).
+    Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+    Parameters
+    ----------
+    x: array-like
+        Input data.
+    max_ols: int
+        Maximum number of outliers to test for.
+    alpha: float
+        Significance level for the test (default: 0.05).
+    full_output: bool
+        If True, return additional diagnostic information (default: False).
+    ubvar: bool
+        If True, use unbiased variance estimator (ddof=1) instead of population estimator (
+        ddof=0) when computing standard deviation (default: False).
+
+    Returns
+    -------
+    num_outliers: int
+        Number of outliers detected.
+    outlier_indices: list
+        List of indices in `x` that are identified as outliers.
+    r_vals: list (optional)
+        List of test statistic values for each iteration (returned if full_output=True).
+    l_vals: list (optional)
+        List of critical values for each iteration (returned if full_output=True).
+    max_indices: list (optional)
+        List of indices of the maximum test statistic at each iteration (returned if full_output=True).
     """
     if max_ols < 1:
         raise ValueError(
@@ -71,10 +115,23 @@ def _generalized_esd(x, max_ols, alpha=0.05, full_output=False, ubvar=False):
     return 0, [], r_vals, l_vals, max_indices
 
 
+##########################################
+## Helper functions for multiprocessing ##
+##########################################
+
+_WORKER_FEATURES_OBJ = None
+
 def _features_worker_init(method, params):
     """
     Initializer that runs once per worker process.
     Creates a worker-local Features object to avoid pickling 'self'.
+
+    Parameters
+    ----------
+    method: str
+        Method to compute features (e.g., 'catch22', 'specparam', 'dfa', 'fEI').
+    params: dict
+        Dictionary containing the parameters for the feature computation.
     """
     global _WORKER_FEATURES_OBJ
     _WORKER_FEATURES_OBJ = Features(method=method, params=params)
@@ -83,6 +140,16 @@ def _features_worker_init(method, params):
 def _compute_one_feature(sample):
     """
     Compute features for a single sample using the worker-local Features object.
+
+    Parameters
+    ----------
+    sample: array-like
+        Input time-series data for a single sample.
+
+    Returns
+    -------
+    features: output of the feature computation method (e.g., array of catch22 features,
+    dict of specparam results, etc.)
     """
     global _WORKER_FEATURES_OBJ
 
@@ -131,7 +198,6 @@ def _compute_one_feature(sample):
         return _WORKER_FEATURES_OBJ.catch22(x)
 
     if _WORKER_FEATURES_OBJ.method == "specparam":
-        # specparam reads parameters from self.params via _resolve_param
         return _WORKER_FEATURES_OBJ.specparam(sample=x)
 
     if _WORKER_FEATURES_OBJ.method == "dfa":
@@ -142,6 +208,10 @@ def _compute_one_feature(sample):
 
     raise ValueError(f"Unknown method: {_WORKER_FEATURES_OBJ.method}")
 
+
+########################################
+## Main class for feature computation ##
+########################################
 
 class Features:
     """
@@ -226,10 +296,28 @@ class Features:
             self.tqdm = tools.dynamic_import("tqdm", "tqdm")
 
 
+    ##############################################
+    ## Helper functions for feature computation ##
+    ##############################################
+
     def _resolve_param(self, name, value, default=None):
         """
         Resolve a parameter value with priority:
         explicit argument > self.params[name] > default
+
+        Parameters
+        ----------
+        name: str
+            Name of the parameter to resolve.
+        value: any
+            Explicit value passed to the method (can be None).
+        default: any
+            Default value to use if neither explicit value nor self.params[name] is provided.
+
+        Returns
+        -------
+        resolved_value: any
+            The resolved parameter value based on the priority.
         """
         if value is not None:
             return value
@@ -237,6 +325,757 @@ class Features:
             return self.params[name]
         return default
 
+
+    def _ensure_mne(self):
+        """ Ensure that the MNE library is available for DFA/fEI computations. If not, raise an ImportError."""
+        if not tools.ensure_module("mne"):
+            raise ImportError(
+                "mne is required for DFA/fEI."
+            )
+        return tools.dynamic_import("mne")
+
+
+    def _as_2d(self, x):
+        """Ensure the input is a 2D array. If it's 1D, add a new axis.
+        Return the array and a flag indicating if it was originally 1D.
+
+        Parameters
+        ----------
+        x: array-like
+            Input data.
+
+        Returns
+        -------
+        x_2d: np.ndarray
+            2D array version of the input.
+        was_1d: bool
+            True if the original input was 1D, False if it was already 2D.
+        """
+        x = np.asarray(x)
+        if x.ndim == 1:
+            return x[np.newaxis, :], True
+        if x.ndim == 2:
+            return x, False
+        raise ValueError("`sample` must be a 1D or 2D array.")
+
+
+    def _get_frequency_bins(self, frequency_range):
+        """ Get frequency bins for spectral analysis based on the specified frequency range.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        frequency_range: list or tuple
+            A list or tuple containing the lower and upper bounds of the frequency range (in Hz).
+
+        Returns
+        -------
+        frequency_bins: list of lists
+            A list of frequency bins, where each bin is represented as a list [lower_bound, upper_bound].
+        """
+        assert frequency_range[0] >= 1.0 and frequency_range[1] <= 150.0, (
+            "The frequency range should cannot be less than 1 Hz or more than 150 Hz"
+        )
+
+        frequency_bin_delta = [1.0, 4.0]
+        frequency_range_full = [frequency_bin_delta[1], 150]
+        n_bins_full = 16
+
+        frequencies_full = np.logspace(
+            np.log10(frequency_range_full[0]),
+            np.log10(frequency_range_full[-1]),
+            n_bins_full,
+        )
+        frequencies = np.append(frequency_bin_delta[0], frequencies_full)
+        myfrequencies = frequencies[
+            np.where(
+                (np.round(frequencies, 4) >= frequency_range[0])
+                & (np.round(frequencies, 4) <= frequency_range[1])
+            )[0]
+        ]
+
+        frequency_bins = [
+            [myfrequencies[i], myfrequencies[i + 1]]
+            for i in range(len(myfrequencies) - 1)
+        ]
+
+        return frequency_bins
+
+
+    def _get_DFA_fitting_interval(self, frequency_interval):
+        """ Get the fitting interval for DFA based on the specified frequency interval.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        frequency_interval: list or tuple
+            A list or tuple containing the lower and upper bounds of the frequency interval (in Hz).
+
+        Returns
+        fit_interval: list
+            A list containing the lower and upper bounds of the fitting interval (in seconds).
+        """
+        upper_fit = 30
+        default_lower_fits = [
+            5.0,
+            5.0,
+            5.0,
+            3.981,
+            3.162,
+            2.238,
+            1.412,
+            1.122,
+            0.794,
+            0.562,
+            0.398,
+            0.281,
+            0.141,
+            0.1,
+            0.1,
+            0.1,
+        ]
+
+        frequency_bins = self._get_frequency_bins([1, 150])
+        idx_freq = np.where(
+            (np.array(frequency_bins)[:, 0] <= frequency_interval[0])
+        )[0][-1]
+
+        fit_interval = [default_lower_fits[idx_freq], upper_fit]
+
+        return fit_interval
+
+
+    def _compute_band_envelope(
+        self,
+        signal_matrix,
+        sampling_frequency,
+        frequency_range,
+        *,
+        filter_kwargs=None,
+        trim_seconds=1.0,
+        hilbert_n_fft=None,
+    ):
+        """Compute the amplitude envelope of a signal in a specified frequency band using bandpass filtering and
+        the Hilbert transform.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        signal_matrix: np.ndarray
+            2D array of shape (n_channels, n_timepoints) containing the input signal.
+        sampling_frequency: float
+            Sampling frequency of the input signal (in Hz).
+        frequency_range: list or tuple
+            A list or tuple containing the lower and upper bounds of the frequency range (in Hz) for bandpass filtering.
+        filter_kwargs: dict, optional
+            Additional keyword arguments to pass to the MNE filter_data function (default: None).
+        trim_seconds: float, optional
+            Number of seconds to trim from the start and end of the filtered signal to mitigate edge artifacts
+            (default: 1.0).
+        hilbert_n_fft: int, optional
+            Length of the FFT to use for the Hilbert transform. If None, the next fast length after the number of
+            timepoints is used (default: None).
+
+        Returns
+        -------
+        amplitude_envelope: np.ndarray
+            2D array of shape (n_channels, n_timepoints_trimmed) containing the amplitude envelope of the signal in the
+            specified frequency band, where n_timepoints_trimmed is the number of timepoints after trimming.
+        """
+
+        mne = self._ensure_mne()
+
+        fk = {
+            "filter_length": "auto",
+            "l_trans_bandwidth": "auto",
+            "h_trans_bandwidth": "auto",
+            "fir_window": "hamming",
+            "phase": "zero",
+            "fir_design": "firwin",
+            "pad": "reflect_limited",
+            "verbose": 0,
+        }
+        if filter_kwargs:
+            fk.update(dict(filter_kwargs))
+
+        filtered_signal = mne.filter.filter_data(
+            data=signal_matrix,
+            sfreq=sampling_frequency,
+            l_freq=frequency_range[0],
+            h_freq=frequency_range[1],
+            **fk,
+        )
+
+        trim = int(float(trim_seconds) * float(sampling_frequency))
+        if trim > 0:
+            if filtered_signal.shape[1] <= 2 * trim:
+                raise ValueError(
+                    "Signal is too short after trimming for filtering artifacts."
+                )
+            filtered_signal = filtered_signal[:, trim:-trim]
+
+        num_timepoints = filtered_signal.shape[1]
+        if hilbert_n_fft is None:
+            hilbert_n_fft = mne.filter.next_fast_len(num_timepoints)
+
+        analytic = scipy_signal.hilbert(filtered_signal, N=int(hilbert_n_fft), axis=-1)
+        analytic = analytic[..., :num_timepoints]
+        amplitude_envelope = np.abs(np.array(analytic))
+
+        return amplitude_envelope
+
+    def _resolve_sampling_frequency(self, sampling_frequency=None):
+        """Resolve the sampling frequency from the explicit argument or self.params.
+
+        Parameters
+        ----------
+        sampling_frequency: float or None
+            Explicit sampling frequency passed to the method. If None, will attempt to resolve from self.params.
+
+        Returns
+        -------
+        sampling_frequency: float or None
+            The resolved sampling frequency, or None if it cannot be resolved.
+        """
+        sampling_frequency = self._resolve_param("sampling_frequency", sampling_frequency)
+        if sampling_frequency is None:
+            sampling_frequency = self._resolve_param("fs", None)
+        return sampling_frequency
+
+
+    def _dfa_window_sizes(self, sampling_frequency, compute_interval):
+        """Compute window sizes for DFA based on the sampling frequency and fitting interval.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        sampling_frequency: float
+            Sampling frequency of the signal (in Hz).
+        compute_interval: list or tuple
+            A list or tuple containing the lower and upper bounds of the fitting interval (in seconds) for DFA.
+
+        Returns
+        ----------
+        window_sizes: np.ndarray
+            1D array of integer window sizes (in samples) to use for DFA, filtered to be within the compute_interval.
+        """
+        window_sizes = np.floor(np.logspace(-1, 3, 81) * sampling_frequency).astype(int)
+        window_sizes = np.sort(np.unique(window_sizes))
+        window_sizes = window_sizes[
+            (window_sizes >= compute_interval[0] * sampling_frequency)
+            & (window_sizes <= compute_interval[1] * sampling_frequency)
+        ]
+        return window_sizes
+
+
+    def _dfa_nan_output(self, length_signal):
+        """Generate a consistent NaN output structure for DFA features when computation cannot be performed.
+
+        Parameters
+        ----------
+        length_signal: int
+            Length of the input signal (in samples), used to determine the shape of window_sizes and fluctuations arrays.
+
+        Returns
+        ----------
+        output: dict
+            A dictionary containing NaN values for DFA features and appropriately shaped empty arrays for
+            window_sizes and fluctuations.
+        """
+        sampling_frequency = self._resolve_sampling_frequency(None)
+        compute_interval = self._resolve_param("compute_interval", None, None)
+        window_sizes = np.array([], dtype=int)
+        fluctuations = np.array([], dtype=float)
+
+        if sampling_frequency is not None and compute_interval is not None:
+            try:
+                window_sizes = self._dfa_window_sizes(float(sampling_frequency), compute_interval)
+                fluctuations = np.full(window_sizes.shape, np.nan, dtype=float)
+            except Exception:
+                window_sizes = np.array([], dtype=int)
+                fluctuations = np.array([], dtype=float)
+
+        return {
+            "dfa": np.nan,
+            "window_sizes": window_sizes,
+            "fluctuations": fluctuations,
+            "dfa_intercept": np.nan,
+        }
+
+
+    def _fei_nan_output(self, length_signal):
+        """Generate a consistent NaN output structure for fEI features when computation cannot be performed.
+
+        Parameters
+        ----------
+        length_signal: int
+            Length of the input signal (in samples), used to determine the shape of w_amp and w_dnf arrays.
+
+        Returns
+        ----------
+        output: dict
+            A dictionary containing NaN values for fEI features and appropriately shaped empty arrays for w_amp
+            and w_dnf.
+        """
+        sampling_frequency = self._resolve_sampling_frequency(None)
+        window_size_sec = self._resolve_param("window_size_sec", None, None)
+        window_overlap = self._resolve_param("window_overlap", None, 0.0)
+
+        num_windows = 0
+        if sampling_frequency is not None and window_size_sec is not None:
+            try:
+                window_size = int(float(window_size_sec) * float(sampling_frequency))
+                if window_size > 0:
+                    window_offset = int(np.floor(window_size * (1 - float(window_overlap))))
+                    if window_offset > 0:
+                        num_windows = len(np.arange(0, length_signal - window_size, window_offset))
+            except Exception:
+                num_windows = 0
+
+        w_amp = np.full((num_windows,), np.nan, dtype=float)
+        w_dnf = np.full((num_windows,), np.nan, dtype=float)
+
+        return {
+            "fEI_outliers_removed": np.nan,
+            "fEI_val": np.nan,
+            "num_outliers": np.nan,
+            "wAmp": w_amp,
+            "wDNF": w_dnf,
+        }
+
+
+    def _dfa_single(
+        self,
+        sample,
+        sampling_frequency,
+        fit_interval,
+        compute_interval,
+        overlap,
+    ):
+        """Compute DFA for a single 1D amplitude envelope using the Python implementation.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        sample: array-like
+            1D amplitude envelope signal.
+        sampling_frequency: float
+            Sampling frequency of the signal (in Hz).
+        fit_interval: list or tuple
+            Fitting interval (in seconds) for DFA.
+        compute_interval: list or tuple
+            Compute interval (in seconds) for DFA.
+        overlap: bool
+            Whether to use 50% window overlap.
+
+        Returns
+        -------
+        output: dict
+            Dictionary with keys: dfa, window_sizes, fluctuations, dfa_intercept.
+        """
+        if sampling_frequency is None:
+            raise ValueError("sampling_frequency (or fs) must be provided for DFA.")
+        if fit_interval is None or compute_interval is None:
+            raise ValueError("fit_interval and compute_interval must be provided for DFA.")
+
+        x = np.asarray(sample).squeeze()
+        if x.ndim != 1:
+            raise ValueError("`sample` must be a 1D array.")
+
+        fit_interval = [float(fit_interval[0]), float(fit_interval[1])]
+        compute_interval = [float(compute_interval[0]), float(compute_interval[1])]
+
+        if not (fit_interval[0] >= compute_interval[0] and fit_interval[1] <= compute_interval[1]):
+            raise ValueError("fit_interval should be included in compute_interval.")
+        if compute_interval[0] < 0.1 or compute_interval[1] > 1000:
+            raise ValueError("compute_interval should be between 0.1 and 1000 seconds.")
+        if compute_interval[1] / float(sampling_frequency) > x.shape[0]:
+            raise ValueError("compute_interval should not extend beyond the length of the signal.")
+
+        window_sizes = self._dfa_window_sizes(float(sampling_frequency), compute_interval)
+        fluctuations = np.full(window_sizes.shape, np.nan, dtype=float)
+        dfa_val = np.nan
+        dfa_intercept = np.nan
+
+        if window_sizes.size == 0 or np.max(window_sizes) > x.shape[0]:
+            return {
+                "dfa": dfa_val,
+                "window_sizes": window_sizes,
+                "fluctuations": fluctuations,
+                "dfa_intercept": dfa_intercept,
+            }
+
+        window_overlap = 0.5 if overlap else 0.0
+        window_offset = np.floor(window_sizes * (1 - window_overlap)).astype(int)
+        signal_profile = np.cumsum(x - np.mean(x))
+
+        for i_window_size, window_size in enumerate(window_sizes):
+            offset = int(window_offset[i_window_size])
+            if offset <= 0:
+                continue
+            all_window_index = _create_window_indices(x.shape[0], int(window_size), offset)
+            if all_window_index.size == 0:
+                continue
+            x_signal = signal_profile[all_window_index]
+            _, fluc, _, _, _ = np.polyfit(
+                np.arange(window_size), np.transpose(x_signal), deg=1, full=True
+            )
+            fluctuations[i_window_size] = np.mean(np.sqrt(fluc / window_size))
+
+        try:
+            fit_interval_first_window = np.argwhere(
+                window_sizes >= fit_interval[0] * sampling_frequency
+            )[0][0]
+            fit_interval_last_window = np.argwhere(
+                window_sizes <= fit_interval[1] * sampling_frequency
+            )[-1][0]
+        except Exception as e:
+            raise ValueError("fit_interval does not match any computed window sizes.") from e
+
+        if fit_interval_first_window > 0:
+            if (
+                np.abs(
+                    window_sizes[fit_interval_first_window - 1] / sampling_frequency
+                    - fit_interval[0]
+                )
+                <= fit_interval[0] / 100
+            ):
+                if np.abs(
+                    window_sizes[fit_interval_first_window - 1] / sampling_frequency
+                    - fit_interval[0]
+                ) < np.abs(
+                    window_sizes[fit_interval_first_window] / sampling_frequency
+                    - fit_interval[0]
+                ):
+                    fit_interval_first_window = fit_interval_first_window - 1
+
+        x_fit = np.log10(
+            window_sizes[fit_interval_first_window: fit_interval_last_window + 1]
+        )
+        y_fit = np.log10(
+            fluctuations[fit_interval_first_window: fit_interval_last_window + 1]
+        )
+        model = np.polyfit(x_fit, y_fit, 1)
+        dfa_intercept = model[1]
+        dfa_val = model[0]
+
+        return {
+            "dfa": dfa_val,
+            "window_sizes": window_sizes,
+            "fluctuations": fluctuations,
+            "dfa_intercept": dfa_intercept,
+        }
+
+
+    def _dfa_multichannel(
+        self,
+        signal_matrix,
+        sampling_frequency,
+        fit_interval,
+        compute_interval,
+        overlap,
+        bad_idxes=None,
+    ):
+        """Compute DFA for a multichannel amplitude envelope.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        signal_matrix: np.ndarray
+            2D array of shape (n_channels, n_timepoints) containing the amplitude envelope.
+        sampling_frequency: float
+            Sampling frequency of the signal (in Hz).
+        fit_interval: list or tuple
+            Fitting interval (in seconds) for DFA.
+        compute_interval: list or tuple
+            Compute interval (in seconds) for DFA.
+        overlap: bool
+            Whether to use 50% window overlap.
+        bad_idxes: list or None
+            Channel indices to ignore.
+
+        Returns
+        -------
+        output: dict
+            Dictionary with keys: DFA, window_sizes, fluctuations, dfa_intercept.
+        """
+        signal_matrix, _ = self._as_2d(signal_matrix)
+        num_chans, _ = np.shape(signal_matrix)
+        bad_idxes = [] if bad_idxes is None else list(bad_idxes)
+        channels_to_ignore = set(bad_idxes)
+
+        dfa_array = np.zeros(num_chans)
+        dfa_array[:] = np.nan
+        dfa_intercept = np.zeros(num_chans)
+        dfa_intercept[:] = np.nan
+
+        window_sizes = None
+        fluctuations = None
+
+        for ch_idx in range(num_chans):
+            if ch_idx in channels_to_ignore:
+                continue
+            out = self._dfa_single(
+                signal_matrix[ch_idx, :],
+                sampling_frequency=sampling_frequency,
+                fit_interval=fit_interval,
+                compute_interval=compute_interval,
+                overlap=overlap,
+            )
+            dfa_array[ch_idx] = out["dfa"]
+            dfa_intercept[ch_idx] = out["dfa_intercept"]
+
+            if window_sizes is None:
+                window_sizes = out["window_sizes"]
+                fluctuations = np.full((num_chans, window_sizes.shape[0]), np.nan, dtype=float)
+
+            fluc = out["fluctuations"]
+            if fluctuations is not None:
+                n = min(fluc.shape[0], fluctuations.shape[1])
+                fluctuations[ch_idx, :n] = fluc[:n]
+
+        if window_sizes is None:
+            window_sizes = np.array([], dtype=int)
+            fluctuations = np.empty((num_chans, 0), dtype=float)
+
+        return {
+            "DFA": dfa_array,
+            "window_sizes": window_sizes,
+            "fluctuations": fluctuations,
+            "dfa_intercept": dfa_intercept,
+        }
+
+
+    def _fei_single(
+        self,
+        sample,
+        sampling_frequency,
+        window_size_sec,
+        window_overlap,
+        dfa_value,
+        dfa_threshold,
+        dfa_fit_interval=None,
+        dfa_compute_interval=None,
+        dfa_overlap=None,
+    ):
+        """Compute fEI for a single 1D amplitude envelope using the Python implementation.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        sample: array-like
+            1D amplitude envelope signal.
+        sampling_frequency: float
+            Sampling frequency of the signal (in Hz).
+        window_size_sec: float
+            Window size in seconds.
+        window_overlap: float
+            Fractional overlap between windows in [0, 1).
+        dfa_value: float or None
+            DFA value for thresholding. If None, DFA is computed internally.
+        dfa_threshold: float
+            DFA threshold below which fEI is set to NaN.
+        dfa_fit_interval: list or tuple, optional
+            Fit interval for DFA if dfa_value is None.
+        dfa_compute_interval: list or tuple, optional
+            Compute interval for DFA if dfa_value is None.
+        dfa_overlap: bool, optional
+            Whether to use 50% overlap when computing DFA.
+
+        Returns
+        -------
+        output: dict
+            Dictionary with keys: fEI_outliers_removed, fEI_val, num_outliers, wAmp, wDNF, dfa.
+        """
+        if sampling_frequency is None:
+            raise ValueError("sampling_frequency (or fs) must be provided for fEI.")
+        if window_size_sec is None:
+            raise ValueError("window_size_sec must be provided for fEI.")
+
+        x = np.asarray(sample).squeeze()
+        if x.ndim != 1:
+            raise ValueError("`sample` must be a 1D array.")
+
+        window_size = int(float(window_size_sec) * float(sampling_frequency))
+        if window_size <= 0:
+            raise ValueError("window_size_sec must yield a positive window size.")
+        if not (0.0 <= float(window_overlap) < 1.0):
+            raise ValueError("window_overlap must be in [0, 1).")
+
+        window_offset = int(np.floor(window_size * (1 - float(window_overlap))))
+        if window_offset <= 0:
+            raise ValueError("window_overlap yields a non-positive window offset.")
+
+        all_window_index = _create_window_indices(x.shape[0], window_size, window_offset)
+        if all_window_index.size == 0:
+            return self._fei_nan_output(x.shape[0])
+
+        if np.min(x) == np.max(x):
+            return self._fei_nan_output(x.shape[0])
+
+        signal_profile = np.cumsum(x - np.mean(x))
+        w_original_amp = np.mean(x[all_window_index], axis=1)
+
+        x_amp = np.tile(np.transpose(w_original_amp[np.newaxis, :]), (1, window_size))
+        x_signal = signal_profile[all_window_index]
+        x_signal = np.divide(x_signal, x_amp)
+
+        _, fluc, _, _, _ = np.polyfit(
+            np.arange(window_size), np.transpose(x_signal), deg=1, full=True
+        )
+        w_dnf = np.sqrt(fluc / window_size)
+
+        fei_val = np.nan
+        fei_outliers_removed = np.nan
+        num_outliers = np.nan
+
+        if w_original_amp.size >= 2 and w_dnf.size >= 2:
+            fei_val = 1 - np.corrcoef(w_original_amp, w_dnf)[0, 1]
+
+            gesd_alpha = 0.05
+            max_outliers_percentage = 0.025
+            max_num_outliers = max(int(np.round(max_outliers_percentage * len(w_original_amp))), 2)
+
+            outlier_indexes_wamp = _generalized_esd(w_original_amp, max_num_outliers, gesd_alpha)[1]
+            outlier_indexes_wdnf = _generalized_esd(w_dnf, max_num_outliers, gesd_alpha)[1]
+            outlier_union = outlier_indexes_wamp + outlier_indexes_wdnf
+            num_outliers = len(outlier_union)
+            not_outlier_both = np.setdiff1d(np.arange(len(w_original_amp)), np.array(outlier_union))
+            if not_outlier_both.size >= 2:
+                fei_outliers_removed = 1 - np.corrcoef(
+                    w_original_amp[not_outlier_both], w_dnf[not_outlier_both]
+                )[0, 1]
+
+        if dfa_value is None:
+            if dfa_fit_interval is None or dfa_compute_interval is None:
+                raise ValueError(
+                    "dfa_value not provided; dfa_fit_interval and dfa_compute_interval are required."
+                )
+            if dfa_overlap is None:
+                dfa_overlap = True
+            dfa_out = self._dfa_single(
+                x,
+                sampling_frequency=sampling_frequency,
+                fit_interval=dfa_fit_interval,
+                compute_interval=dfa_compute_interval,
+                overlap=dfa_overlap,
+            )
+            dfa_value = float(dfa_out["dfa"])
+
+        if dfa_value <= float(dfa_threshold):
+            fei_val = np.nan
+            fei_outliers_removed = np.nan
+
+        return {
+            "fEI_outliers_removed": fei_outliers_removed,
+            "fEI_val": fei_val,
+            "num_outliers": num_outliers,
+            "wAmp": np.asarray(w_original_amp, dtype=float),
+            "wDNF": np.asarray(w_dnf, dtype=float),
+            "dfa": dfa_value,
+        }
+
+
+    def _fei_multichannel(
+        self,
+        signal_matrix,
+        sampling_frequency,
+        window_size_sec,
+        window_overlap,
+        dfa_array,
+        dfa_threshold,
+        bad_idxes=None,
+        dfa_fit_interval=None,
+        dfa_compute_interval=None,
+        dfa_overlap=None,
+    ):
+        """Compute fEI for a multichannel amplitude envelope.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
+
+        Parameters
+        ----------
+        signal_matrix: np.ndarray
+            2D array of shape (n_channels, n_timepoints) containing the amplitude envelope.
+        sampling_frequency: float
+            Sampling frequency of the signal (in Hz).
+        window_size_sec: float
+            Window size in seconds.
+        window_overlap: float
+            Fractional overlap between windows in [0, 1).
+        dfa_array: np.ndarray or None
+            DFA values per channel for thresholding. If None, DFA is computed internally per channel.
+        dfa_threshold: float
+            DFA threshold below which fEI is set to NaN.
+        bad_idxes: list or None
+            Channel indices to ignore.
+        dfa_fit_interval: list or tuple, optional
+            Fit interval for DFA if dfa_array is None.
+        dfa_compute_interval: list or tuple, optional
+            Compute interval for DFA if dfa_array is None.
+        dfa_overlap: bool, optional
+            Whether to use 50% overlap when computing DFA.
+
+        Returns
+        -------
+        output: dict
+            Dictionary with keys: fEI_outliers_removed, fEI_val, num_outliers, wAmp, wDNF.
+        """
+        signal_matrix, _ = self._as_2d(signal_matrix)
+        num_chans, length_signal = np.shape(signal_matrix)
+        bad_idxes = [] if bad_idxes is None else list(bad_idxes)
+        channels_to_ignore = set(bad_idxes)
+
+        window_size = int(float(window_size_sec) * float(sampling_frequency))
+        window_offset = int(np.floor(window_size * (1 - float(window_overlap))))
+        num_windows = 0
+        if window_size > 0 and window_offset > 0:
+            num_windows = len(np.arange(0, length_signal - window_size, window_offset))
+
+        fEI_val = np.full((num_chans, 1), np.nan, dtype=float)
+        fEI_outliers_removed = np.full((num_chans, 1), np.nan, dtype=float)
+        num_outliers = np.full((num_chans, 1), np.nan, dtype=float)
+        wAmp = np.full((num_chans, num_windows), np.nan, dtype=float)
+        wDNF = np.full((num_chans, num_windows), np.nan, dtype=float)
+
+        for ch_idx in range(num_chans):
+            if ch_idx in channels_to_ignore:
+                continue
+            dfa_value = None if dfa_array is None else float(dfa_array[ch_idx])
+            out = self._fei_single(
+                signal_matrix[ch_idx, :],
+                sampling_frequency=sampling_frequency,
+                window_size_sec=window_size_sec,
+                window_overlap=window_overlap,
+                dfa_value=dfa_value,
+                dfa_threshold=dfa_threshold,
+                dfa_fit_interval=dfa_fit_interval,
+                dfa_compute_interval=dfa_compute_interval,
+                dfa_overlap=dfa_overlap,
+            )
+
+            fEI_outliers_removed[ch_idx, 0] = out["fEI_outliers_removed"]
+            fEI_val[ch_idx, 0] = out["fEI_val"]
+            num_outliers[ch_idx, 0] = out["num_outliers"]
+
+            w_amp = out["wAmp"]
+            w_dnf = out["wDNF"]
+            n = min(w_amp.shape[0], wAmp.shape[1])
+            wAmp[ch_idx, :n] = w_amp[:n]
+            n = min(w_dnf.shape[0], wDNF.shape[1])
+            wDNF[ch_idx, :n] = w_dnf[:n]
+
+        return {
+            "fEI_outliers_removed": fEI_outliers_removed,
+            "fEI_val": fEI_val,
+            "num_outliers": num_outliers,
+            "wAmp": wAmp,
+            "wDNF": wDNF,
+        }
+
+
+    ######################################
+    ## Main feature computation methods ##
+    ######################################
 
     def catch22(self, sample):
         """
@@ -259,6 +1098,7 @@ class Features:
             raise RuntimeError("Unexpected output format from pycatch22.catch22_all")
 
         return result['values']
+
 
     def specparam(
             self,
@@ -290,6 +1130,57 @@ class Features:
           - metric_policy: {"reject", "flag"} (default: "reject")
             * reject -> return NaNs and valid=False
             * flag   -> keep results but set valid=False
+
+        Parameters
+        ----------
+        sample: array-like
+            1D array of time-series data. Mutually exclusive with freqs/power_spectrum.
+        freqs: array-like
+            1D array of frequency values corresponding to the power_spectrum. Mutually exclusive with sample.
+        power_spectrum: array-like
+            1D array of power values corresponding to the freqs. Mutually exclusive with sample.
+        fs: float
+            Sampling frequency of the time-series data (required if sample is passed).
+        freq_range: tuple or list
+            (fmin, fmax) frequency range (in Hz) to fit the model. Default is (1.0, 45.0).
+        welch_kwargs: dict
+            Additional keyword arguments to pass to scipy.signal.welch when computing the power spectrum from the
+            time series. Default is None (uses internal defaults).
+        model_kwargs: dict
+            Additional keyword arguments to pass to specparam.SpectralModel. Default is None (uses internal defaults).
+        select_peak: str
+            Strategy for selecting a single peak to report (in addition to all peaks):
+              - "all": do not select, leave selected_peaks empty and report all_peaks
+              - "max_pw": select the peak with maximum power
+              - "max_cf_in_range": select the peak with maximum center frequency within the freq_range
+            Default is "max_pw".
+        debug: bool
+            If True, print debug information and plots. Default is False.
+        metric_thresholds: dict
+            Optional dict of metric thresholds for quality control, e.g., {"gof_rsquared": 0.9}.
+            If provided, metrics will be compared against these thresholds.
+        metric_policy: str
+            Policy for handling metric threshold failures. One of:
+                - "reject": if any metric fails the threshold, return NaNs and valid=False
+                - "flag": if any metric fails the threshold, keep results but set valid=False
+                Default is "reject".
+
+        Returns
+        -------
+        out: dict
+            Dictionary containing the following keys:
+              - "aperiodic_params": array of aperiodic parameters (e.g., [offset, exponent])
+              - "peak_cf": center frequency of the selected peak (or NaN if no peak selected)
+              - "peak_pw": power of the selected peak (or NaN if no peak selected)
+              - "peak_bw": bandwidth of the selected peak (or NaN if no peak selected)
+              - "n_peaks": total number of peaks identified by specparam
+              - "selected_peaks": array of shape (num_selected_peaks, 3) with [CF, PW, BW] for each selected peak
+              - "all_peaks": array of shape (num_all_peaks, 3) with [CF, PW, BW] for all identified peaks
+              - "metrics": dict of fit metrics from specparam results
+              - "valid": bool indicating whether the fit passed metric thresholds (if provided)
+              - "thresholds": dict of metric thresholds used (only included if metric_thresholds was provided)
+              - "threshold_values": dict of actual metric values for the checked thresholds (only included if
+              metric_thresholds was provided)
         """
 
         # -------------------------
@@ -550,74 +1441,6 @@ class Features:
 
         return out
 
-
-    def _resolve_sampling_frequency(self, sampling_frequency=None):
-        sampling_frequency = self._resolve_param("sampling_frequency", sampling_frequency)
-        if sampling_frequency is None:
-            sampling_frequency = self._resolve_param("fs", None)
-        return sampling_frequency
-
-
-    def _dfa_window_sizes(self, sampling_frequency, compute_interval):
-        window_sizes = np.floor(np.logspace(-1, 3, 81) * sampling_frequency).astype(int)
-        window_sizes = np.sort(np.unique(window_sizes))
-        window_sizes = window_sizes[
-            (window_sizes >= compute_interval[0] * sampling_frequency)
-            & (window_sizes <= compute_interval[1] * sampling_frequency)
-        ]
-        return window_sizes
-
-
-    def _dfa_nan_output(self, length_signal):
-        sampling_frequency = self._resolve_sampling_frequency(None)
-        compute_interval = self._resolve_param("compute_interval", None, None)
-        window_sizes = np.array([], dtype=int)
-        fluctuations = np.array([], dtype=float)
-
-        if sampling_frequency is not None and compute_interval is not None:
-            try:
-                window_sizes = self._dfa_window_sizes(float(sampling_frequency), compute_interval)
-                fluctuations = np.full(window_sizes.shape, np.nan, dtype=float)
-            except Exception:
-                window_sizes = np.array([], dtype=int)
-                fluctuations = np.array([], dtype=float)
-
-        return {
-            "dfa": np.nan,
-            "window_sizes": window_sizes,
-            "fluctuations": fluctuations,
-            "dfa_intercept": np.nan,
-        }
-
-
-    def _fei_nan_output(self, length_signal):
-        sampling_frequency = self._resolve_sampling_frequency(None)
-        window_size_sec = self._resolve_param("window_size_sec", None, None)
-        window_overlap = self._resolve_param("window_overlap", None, 0.0)
-
-        num_windows = 0
-        if sampling_frequency is not None and window_size_sec is not None:
-            try:
-                window_size = int(float(window_size_sec) * float(sampling_frequency))
-                if window_size > 0:
-                    window_offset = int(np.floor(window_size * (1 - float(window_overlap))))
-                    if window_offset > 0:
-                        num_windows = len(np.arange(0, length_signal - window_size, window_offset))
-            except Exception:
-                num_windows = 0
-
-        w_amp = np.full((num_windows,), np.nan, dtype=float)
-        w_dnf = np.full((num_windows,), np.nan, dtype=float)
-
-        return {
-            "fEI_outliers_removed": np.nan,
-            "fEI_val": np.nan,
-            "num_outliers": np.nan,
-            "wAmp": w_amp,
-            "wDNF": w_dnf,
-        }
-
-
     def dfa(
         self,
         sample,
@@ -626,115 +1449,157 @@ class Features:
         fit_interval=None,
         compute_interval=None,
         overlap=None,
-        runtime=None,
+        frequency_range=None,
+        spectrum_range=None,
+        bad_idxes=None,
+        input_is_envelope=None,
+        filter_kwargs=None,
+        trim_seconds=None,
+        hilbert_n_fft=None,
     ):
         """
-        Compute DFA for a 1D signal (amplitude envelope).
+        Compute DFA from a time series sample using the Python implementation.
+        Note: ncpi does not provide a C runtime for DFA.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
 
-        Parameters follow crosci.biomarkers.DFA with a 1D input.
-        Only runtime="python" is supported.
+        If `frequency_range` or `spectrum_range` is provided, the method will:
+          1) band-pass filter the signal
+          2) compute amplitude envelope (Hilbert)
+          3) compute DFA on the envelope
+
+        Otherwise, the input is treated as an amplitude envelope.
+
+        Parameters
+        ----------
+        sample: array-like
+            Input time series. Can be 1D (single channel) or 2D (n_channels, n_timepoints).
+        sampling_frequency: float, optional
+            Sampling frequency of the signal (in Hz). Required for band/spectrum workflows.
+        fit_interval: list or tuple, optional
+            Fitting interval (in seconds) for DFA. Required when computing DFA on an envelope.
+        compute_interval: list or tuple, optional
+            Compute interval (in seconds) for DFA. Required when computing DFA on an envelope.
+        overlap: bool, optional
+            Whether to use 50% overlapping windows. Default True.
+        frequency_range: list or tuple, optional
+            Frequency range [low, high] in Hz for band-pass DFA. Mutually exclusive with spectrum_range.
+        spectrum_range: list or tuple, optional
+            Frequency range [low, high] in Hz for spectrum DFA (bins computed internally).
+        bad_idxes: list, optional
+            Channel indices to ignore in multichannel inputs.
+        input_is_envelope: bool, optional
+            Whether the input is already an amplitude envelope. Only used for metadata.
+        filter_kwargs: dict, optional
+            Extra keyword arguments for MNE filter_data.
+        trim_seconds: float, optional
+            Seconds trimmed from both ends after filtering to reduce edge artifacts.
+        hilbert_n_fft: int, optional
+            FFT length for Hilbert transform. If None, uses next_fast_len.
+
+        Returns
+        -------
+        out: dict
+            For 1D envelope input: keys `dfa`, `window_sizes`, `fluctuations`, `dfa_intercept`.
+            For multichannel envelope input: keys `DFA`, `window_sizes`, `fluctuations`, `dfa_intercept`.
+            For band input: multichannel envelope output plus `frequency_range`, `fit_interval`, `compute_interval`.
+            For spectrum input: keys `DFA`, `frequency_bins`.
         """
         sampling_frequency = self._resolve_sampling_frequency(sampling_frequency)
         fit_interval = self._resolve_param("fit_interval", fit_interval, None)
         compute_interval = self._resolve_param("compute_interval", compute_interval, None)
         overlap = self._resolve_param("overlap", overlap, True)
-        runtime = self._resolve_param("runtime", runtime, "python")
+        frequency_range = self._resolve_param("frequency_range", frequency_range, None)
+        spectrum_range = self._resolve_param("spectrum_range", spectrum_range, None)
+        bad_idxes = self._resolve_param("bad_idxes", bad_idxes, None)
+        input_is_envelope = self._resolve_param("input_is_envelope", input_is_envelope, True)
+        filter_kwargs = self._resolve_param("filter_kwargs", filter_kwargs, None)
+        trim_seconds = self._resolve_param("trim_seconds", trim_seconds, 1.0)
+        hilbert_n_fft = self._resolve_param("hilbert_n_fft", hilbert_n_fft, None)
+
+        if frequency_range is not None and spectrum_range is not None:
+            raise ValueError("Pass only one of `frequency_range` or `spectrum_range`.")
+
+        if frequency_range is None and spectrum_range is None:
+            x = np.asarray(sample).squeeze()
+            if x.ndim == 1:
+                return self._dfa_single(
+                    x,
+                    sampling_frequency=sampling_frequency,
+                    fit_interval=fit_interval,
+                    compute_interval=compute_interval,
+                    overlap=overlap,
+                )
+
+            out = self._dfa_multichannel(
+                x,
+                sampling_frequency=sampling_frequency,
+                fit_interval=fit_interval,
+                compute_interval=compute_interval,
+                overlap=overlap,
+                bad_idxes=bad_idxes,
+            )
+            out["input_is_envelope"] = bool(input_is_envelope)
+            return out
 
         if sampling_frequency is None:
             raise ValueError("sampling_frequency (or fs) must be provided for DFA.")
-        if fit_interval is None or compute_interval is None:
-            raise ValueError("fit_interval and compute_interval must be provided for DFA.")
 
-        x = np.asarray(sample).squeeze()
-        if x.ndim != 1:
-            raise ValueError("`sample` must be a 1D array.")
+        signal_matrix, _ = self._as_2d(sample)
 
-        fit_interval = [float(fit_interval[0]), float(fit_interval[1])]
-        compute_interval = [float(compute_interval[0]), float(compute_interval[1])]
+        if spectrum_range is not None:
+            frequency_bins = self._get_frequency_bins(spectrum_range)
+            num_chans = signal_matrix.shape[0]
+            dfa_matrix = np.full((num_chans, len(frequency_bins)), np.nan, dtype=float)
 
-        if not (fit_interval[0] >= compute_interval[0] and fit_interval[1] <= compute_interval[1]):
-            raise ValueError("fit_interval should be included in compute_interval.")
-        if compute_interval[0] < 0.1 or compute_interval[1] > 1000:
-            raise ValueError("compute_interval should be between 0.1 and 1000 seconds.")
-        if compute_interval[1] / float(sampling_frequency) > x.shape[0]:
-            raise ValueError("compute_interval should not extend beyond the length of the signal.")
+            for idx_frequency, freq_bin in enumerate(frequency_bins):
+                band_fit_interval = fit_interval or self._get_DFA_fitting_interval(freq_bin)
+                band_compute_interval = compute_interval or band_fit_interval
+                envelope = self._compute_band_envelope(
+                    signal_matrix,
+                    sampling_frequency,
+                    freq_bin,
+                    filter_kwargs=filter_kwargs,
+                    trim_seconds=trim_seconds,
+                    hilbert_n_fft=hilbert_n_fft,
+                )
+                out_band = self._dfa_multichannel(
+                    envelope,
+                    sampling_frequency=sampling_frequency,
+                    fit_interval=band_fit_interval,
+                    compute_interval=band_compute_interval,
+                    overlap=overlap,
+                    bad_idxes=bad_idxes,
+                )
+                dfa_matrix[:, idx_frequency] = out_band["DFA"]
 
-        window_sizes = self._dfa_window_sizes(float(sampling_frequency), compute_interval)
-        fluctuations = np.full(window_sizes.shape, np.nan, dtype=float)
-        dfa_val = np.nan
-        dfa_intercept = np.nan
-
-        if window_sizes.size == 0 or np.max(window_sizes) > x.shape[0]:
             return {
-                "dfa": dfa_val,
-                "window_sizes": window_sizes,
-                "fluctuations": fluctuations,
-                "dfa_intercept": dfa_intercept,
+                "DFA": dfa_matrix,
+                "frequency_bins": frequency_bins,
             }
 
-        if runtime != "python":
-            raise ValueError("runtime must be 'python' for DFA.")
-
-        window_overlap = 0.5 if overlap else 0.0
-        window_offset = np.floor(window_sizes * (1 - window_overlap)).astype(int)
-        signal_profile = np.cumsum(x - np.mean(x))
-
-        for i_window_size, window_size in enumerate(window_sizes):
-            offset = int(window_offset[i_window_size])
-            if offset <= 0:
-                continue
-            all_window_index = _create_window_indices(x.shape[0], int(window_size), offset)
-            if all_window_index.size == 0:
-                continue
-            x_signal = signal_profile[all_window_index]
-            _, fluc, _, _, _ = np.polyfit(
-                np.arange(window_size), np.transpose(x_signal), deg=1, full=True
-            )
-            fluctuations[i_window_size] = np.mean(np.sqrt(fluc / window_size))
-
-        try:
-            fit_interval_first_window = np.argwhere(
-                window_sizes >= fit_interval[0] * sampling_frequency
-            )[0][0]
-            fit_interval_last_window = np.argwhere(
-                window_sizes <= fit_interval[1] * sampling_frequency
-            )[-1][0]
-        except Exception as e:
-            raise ValueError("fit_interval does not match any computed window sizes.") from e
-
-        if fit_interval_first_window > 0:
-            if (
-                np.abs(
-                    window_sizes[fit_interval_first_window - 1] / sampling_frequency
-                    - fit_interval[0]
-                )
-                <= fit_interval[0] / 100
-            ):
-                if np.abs(
-                    window_sizes[fit_interval_first_window - 1] / sampling_frequency
-                    - fit_interval[0]
-                ) < np.abs(
-                    window_sizes[fit_interval_first_window] / sampling_frequency
-                    - fit_interval[0]
-                ):
-                    fit_interval_first_window = fit_interval_first_window - 1
-
-        x_fit = np.log10(
-            window_sizes[fit_interval_first_window: fit_interval_last_window + 1]
+        band_fit_interval = fit_interval or self._get_DFA_fitting_interval(frequency_range)
+        band_compute_interval = compute_interval or band_fit_interval
+        envelope = self._compute_band_envelope(
+            signal_matrix,
+            sampling_frequency,
+            frequency_range,
+            filter_kwargs=filter_kwargs,
+            trim_seconds=trim_seconds,
+            hilbert_n_fft=hilbert_n_fft,
         )
-        y_fit = np.log10(
-            fluctuations[fit_interval_first_window: fit_interval_last_window + 1]
-        )
-        model = np.polyfit(x_fit, y_fit, 1)
-        dfa_intercept = model[1]
-        dfa_val = model[0]
 
-        return {
-            "dfa": dfa_val,
-            "window_sizes": window_sizes,
-            "fluctuations": fluctuations,
-            "dfa_intercept": dfa_intercept,
-        }
+        out = self._dfa_multichannel(
+            envelope,
+            sampling_frequency=sampling_frequency,
+            fit_interval=band_fit_interval,
+            compute_interval=band_compute_interval,
+            overlap=overlap,
+            bad_idxes=bad_idxes,
+        )
+        out["frequency_range"] = frequency_range
+        out["fit_interval"] = band_fit_interval
+        out["compute_interval"] = band_compute_interval
+        return out
 
 
     def fEI(
@@ -746,122 +1611,238 @@ class Features:
         window_overlap=None,
         dfa_value=None,
         dfa_threshold=None,
-        runtime=None,
         dfa_fit_interval=None,
         dfa_compute_interval=None,
         dfa_overlap=None,
-        dfa_runtime=None,
+        frequency_range=None,
+        spectrum_range=None,
+        bad_idxes=None,
+        input_is_envelope=None,
+        filter_kwargs=None,
+        trim_seconds=None,
+        hilbert_n_fft=None,
     ):
         """
-        Compute fEI for a 1D signal (amplitude envelope).
+        Compute fEI from a time series sample using the Python implementation.
+        Note: ncpi does not provide a C runtime for fEI.
+        Adapted from crosci module (https://github.com/Critical-Brain-Dynamics/crosci/tree/main).
 
-        Parameters follow crosci.biomarkers.fEI with a 1D input.
-        Only runtime="python" is supported.
+        If `frequency_range` or `spectrum_range` is provided, the method will:
+          1) band-pass filter the signal
+          2) compute amplitude envelope (Hilbert)
+          3) compute DFA (for thresholding)
+          4) compute fEI on the envelope
+
+        Otherwise, the input is treated as an amplitude envelope.
+
+        Parameters
+        ----------
+        sample: array-like
+            Input time series. Can be 1D (single channel) or 2D (n_channels, n_timepoints).
+        sampling_frequency: float, optional
+            Sampling frequency of the signal (in Hz). Required for band/spectrum workflows.
+        window_size_sec: float, optional
+            Window size in seconds for fEI.
+        window_overlap: float, optional
+            Fractional overlap between windows in [0, 1). Default 0.0.
+        dfa_value: float, optional
+            DFA value for thresholding. Only valid for single-channel envelope input.
+        dfa_threshold: float, optional
+            DFA threshold below which fEI is set to NaN. Default 0.6.
+        dfa_fit_interval: list or tuple, optional
+            Fit interval (in seconds) to compute DFA internally when dfa_value is None.
+        dfa_compute_interval: list or tuple, optional
+            Compute interval (in seconds) to compute DFA internally when dfa_value is None.
+        dfa_overlap: bool, optional
+            Whether to use 50% overlapping windows for DFA. Default True.
+        frequency_range: list or tuple, optional
+            Frequency range [low, high] in Hz for band-pass fEI. Mutually exclusive with spectrum_range.
+        spectrum_range: list or tuple, optional
+            Frequency range [low, high] in Hz for spectrum fEI (bins computed internally).
+        bad_idxes: list, optional
+            Channel indices to ignore in multichannel inputs.
+        input_is_envelope: bool, optional
+            Whether the input is already an amplitude envelope. Only used for metadata.
+        filter_kwargs: dict, optional
+            Extra keyword arguments for MNE filter_data.
+        trim_seconds: float, optional
+            Seconds trimmed from both ends after filtering to reduce edge artifacts.
+        hilbert_n_fft: int, optional
+            FFT length for Hilbert transform. If None, uses next_fast_len.
+
+        Returns
+        -------
+        out: dict
+            For 1D envelope input: keys `fEI_outliers_removed`, `fEI_val`, `num_outliers`, `wAmp`, `wDNF`, `dfa`.
+            For multichannel envelope input: keys `fEI_outliers_removed`, `fEI_val`, `num_outliers`, `wAmp`, `wDNF`,
+            plus `DFA`.
+            For band input: multichannel envelope output plus `frequency_range`, `fit_interval`, `compute_interval`,
+            and `fEI` (outliers-removed).
+            For spectrum input: keys `DFA`, `fEI`, `frequency_bins`.
         """
         sampling_frequency = self._resolve_sampling_frequency(sampling_frequency)
         window_size_sec = self._resolve_param("window_size_sec", window_size_sec, None)
         window_overlap = self._resolve_param("window_overlap", window_overlap, 0.0)
-        runtime = self._resolve_param("runtime", runtime, "python")
         dfa_value = self._resolve_param("dfa_value", dfa_value, None)
         dfa_threshold = self._resolve_param("dfa_threshold", dfa_threshold, 0.6)
+        dfa_fit_interval = self._resolve_param("dfa_fit_interval", dfa_fit_interval, None)
+        dfa_compute_interval = self._resolve_param("dfa_compute_interval", dfa_compute_interval, None)
+        dfa_overlap = self._resolve_param("dfa_overlap", dfa_overlap, True)
+        frequency_range = self._resolve_param("frequency_range", frequency_range, None)
+        spectrum_range = self._resolve_param("spectrum_range", spectrum_range, None)
+        bad_idxes = self._resolve_param("bad_idxes", bad_idxes, None)
+        input_is_envelope = self._resolve_param("input_is_envelope", input_is_envelope, True)
+        filter_kwargs = self._resolve_param("filter_kwargs", filter_kwargs, None)
+        trim_seconds = self._resolve_param("trim_seconds", trim_seconds, 1.0)
+        hilbert_n_fft = self._resolve_param("hilbert_n_fft", hilbert_n_fft, None)
 
-        if sampling_frequency is None:
-            raise ValueError("sampling_frequency (or fs) must be provided for fEI.")
-        if window_size_sec is None:
-            raise ValueError("window_size_sec must be provided for fEI.")
+        if frequency_range is not None and spectrum_range is not None:
+            raise ValueError("Pass only one of `frequency_range` or `spectrum_range`.")
 
-        x = np.asarray(sample).squeeze()
-        if x.ndim != 1:
-            raise ValueError("`sample` must be a 1D array.")
+        if frequency_range is None and spectrum_range is None:
+            x = np.asarray(sample).squeeze()
+            if x.ndim == 1:
+                if dfa_value is None:
+                    if dfa_fit_interval is None:
+                        dfa_fit_interval = self._resolve_param("fit_interval", None, None)
+                    if dfa_compute_interval is None:
+                        dfa_compute_interval = self._resolve_param("compute_interval", None, None)
+                out = self._fei_single(
+                    x,
+                    sampling_frequency=sampling_frequency,
+                    window_size_sec=window_size_sec,
+                    window_overlap=window_overlap,
+                    dfa_value=dfa_value,
+                    dfa_threshold=dfa_threshold,
+                    dfa_fit_interval=dfa_fit_interval,
+                    dfa_compute_interval=dfa_compute_interval,
+                    dfa_overlap=dfa_overlap,
+                )
+                return out
 
-        window_size = int(float(window_size_sec) * float(sampling_frequency))
-        if window_size <= 0:
-            raise ValueError("window_size_sec must yield a positive window size.")
-        if not (0.0 <= float(window_overlap) < 1.0):
-            raise ValueError("window_overlap must be in [0, 1).")
-
-        window_offset = int(np.floor(window_size * (1 - float(window_overlap))))
-        if window_offset <= 0:
-            raise ValueError("window_overlap yields a non-positive window offset.")
-
-        all_window_index = _create_window_indices(x.shape[0], window_size, window_offset)
-        if all_window_index.size == 0:
-            return self._fei_nan_output(x.shape[0])
-
-        if np.min(x) == np.max(x):
-            return self._fei_nan_output(x.shape[0])
-
-        if runtime != "python":
-            raise ValueError("runtime must be 'python' for fEI.")
-
-        signal_profile = np.cumsum(x - np.mean(x))
-        w_original_amp = np.mean(x[all_window_index], axis=1)
-
-        x_amp = np.tile(np.transpose(w_original_amp[np.newaxis, :]), (1, window_size))
-        x_signal = signal_profile[all_window_index]
-        x_signal = np.divide(x_signal, x_amp)
-
-        _, fluc, _, _, _ = np.polyfit(
-            np.arange(window_size), np.transpose(x_signal), deg=1, full=True
-        )
-        w_dnf = np.sqrt(fluc / window_size)
-
-        fei_val = np.nan
-        fei_outliers_removed = np.nan
-        num_outliers = np.nan
-
-        if w_original_amp.size >= 2 and w_dnf.size >= 2:
-            fei_val = 1 - np.corrcoef(w_original_amp, w_dnf)[0, 1]
-
-            gesd_alpha = 0.05
-            max_outliers_percentage = 0.025
-            max_num_outliers = max(int(np.round(max_outliers_percentage * len(w_original_amp))), 2)
-
-            outlier_indexes_wamp = _generalized_esd(w_original_amp, max_num_outliers, gesd_alpha)[1]
-            outlier_indexes_wdnf = _generalized_esd(w_dnf, max_num_outliers, gesd_alpha)[1]
-            outlier_union = outlier_indexes_wamp + outlier_indexes_wdnf
-            num_outliers = len(outlier_union)
-            not_outlier_both = np.setdiff1d(np.arange(len(w_original_amp)), np.array(outlier_union))
-            if not_outlier_both.size >= 2:
-                fei_outliers_removed = 1 - np.corrcoef(
-                    w_original_amp[not_outlier_both], w_dnf[not_outlier_both]
-                )[0, 1]
-
-        if dfa_value is None:
-            dfa_fit_interval = self._resolve_param("dfa_fit_interval", dfa_fit_interval, None)
+            dfa_array = None
+            if dfa_value is not None:
+                raise ValueError("dfa_value must be None when providing a multi-channel sample.")
             if dfa_fit_interval is None:
                 dfa_fit_interval = self._resolve_param("fit_interval", None, None)
-            dfa_compute_interval = self._resolve_param("dfa_compute_interval", dfa_compute_interval, None)
             if dfa_compute_interval is None:
                 dfa_compute_interval = self._resolve_param("compute_interval", None, None)
-            dfa_overlap = self._resolve_param("dfa_overlap", dfa_overlap, True)
-            dfa_runtime = self._resolve_param("dfa_runtime", dfa_runtime, runtime)
-
-            if dfa_fit_interval is None or dfa_compute_interval is None:
-                raise ValueError(
-                    "dfa_value not provided; dfa_fit_interval and dfa_compute_interval are required."
-                )
-            dfa_out = self.dfa(
+            dfa_out = self._dfa_multichannel(
                 x,
                 sampling_frequency=sampling_frequency,
                 fit_interval=dfa_fit_interval,
                 compute_interval=dfa_compute_interval,
                 overlap=dfa_overlap,
-                runtime=dfa_runtime,
+                bad_idxes=bad_idxes,
             )
-            dfa_value = float(dfa_out["dfa"])
+            dfa_array = dfa_out["DFA"]
+            fei_out = self._fei_multichannel(
+                x,
+                sampling_frequency=sampling_frequency,
+                window_size_sec=window_size_sec,
+                window_overlap=window_overlap,
+                dfa_array=dfa_array,
+                dfa_threshold=dfa_threshold,
+                bad_idxes=bad_idxes,
+                dfa_fit_interval=dfa_fit_interval,
+                dfa_compute_interval=dfa_compute_interval,
+                dfa_overlap=dfa_overlap,
+            )
+            fei_out["DFA"] = dfa_array
+            fei_out["input_is_envelope"] = bool(input_is_envelope)
+            return fei_out
 
-        if dfa_value <= float(dfa_threshold):
-            fei_val = np.nan
-            fei_outliers_removed = np.nan
+        if sampling_frequency is None:
+            raise ValueError("sampling_frequency (or fs) must be provided for fEI.")
 
-        return {
-            "fEI_outliers_removed": fei_outliers_removed,
-            "fEI_val": fei_val,
-            "num_outliers": num_outliers,
-            "wAmp": np.asarray(w_original_amp, dtype=float),
-            "wDNF": np.asarray(w_dnf, dtype=float),
-        }
+        signal_matrix, _ = self._as_2d(sample)
+
+        if spectrum_range is not None:
+            frequency_bins = self._get_frequency_bins(spectrum_range)
+            num_chans = signal_matrix.shape[0]
+            dfa_matrix = np.full((num_chans, len(frequency_bins)), np.nan, dtype=float)
+            fei_matrix = np.full((num_chans, len(frequency_bins)), np.nan, dtype=float)
+
+            for idx_frequency, freq_bin in enumerate(frequency_bins):
+                band_fit_interval = dfa_fit_interval or self._get_DFA_fitting_interval(freq_bin)
+                band_compute_interval = dfa_compute_interval or band_fit_interval
+                envelope = self._compute_band_envelope(
+                    signal_matrix,
+                    sampling_frequency,
+                    freq_bin,
+                    filter_kwargs=filter_kwargs,
+                    trim_seconds=trim_seconds,
+                    hilbert_n_fft=hilbert_n_fft,
+                )
+                dfa_out = self._dfa_multichannel(
+                    envelope,
+                    sampling_frequency=sampling_frequency,
+                    fit_interval=band_fit_interval,
+                    compute_interval=band_compute_interval,
+                    overlap=dfa_overlap,
+                    bad_idxes=bad_idxes,
+                )
+                dfa_array = dfa_out["DFA"]
+                fei_out = self._fei_multichannel(
+                    envelope,
+                    sampling_frequency=sampling_frequency,
+                    window_size_sec=window_size_sec,
+                    window_overlap=window_overlap,
+                    dfa_array=dfa_array,
+                    dfa_threshold=dfa_threshold,
+                    bad_idxes=bad_idxes,
+                    dfa_fit_interval=band_fit_interval,
+                    dfa_compute_interval=band_compute_interval,
+                    dfa_overlap=dfa_overlap,
+                )
+                dfa_matrix[:, idx_frequency] = dfa_array
+                fei_matrix[:, idx_frequency] = np.squeeze(fei_out["fEI_outliers_removed"])
+
+            return {
+                "DFA": dfa_matrix,
+                "fEI": fei_matrix,
+                "frequency_bins": frequency_bins,
+            }
+
+        band_fit_interval = dfa_fit_interval or self._get_DFA_fitting_interval(frequency_range)
+        band_compute_interval = dfa_compute_interval or band_fit_interval
+        envelope = self._compute_band_envelope(
+            signal_matrix,
+            sampling_frequency,
+            frequency_range,
+            filter_kwargs=filter_kwargs,
+            trim_seconds=trim_seconds,
+            hilbert_n_fft=hilbert_n_fft,
+        )
+
+        dfa_out = self._dfa_multichannel(
+            envelope,
+            sampling_frequency=sampling_frequency,
+            fit_interval=band_fit_interval,
+            compute_interval=band_compute_interval,
+            overlap=dfa_overlap,
+            bad_idxes=bad_idxes,
+        )
+        dfa_array = dfa_out["DFA"]
+
+        fei_out = self._fei_multichannel(
+            envelope,
+            sampling_frequency=sampling_frequency,
+            window_size_sec=window_size_sec,
+            window_overlap=window_overlap,
+            dfa_array=dfa_array,
+            dfa_threshold=dfa_threshold,
+            bad_idxes=bad_idxes,
+            dfa_fit_interval=band_fit_interval,
+            dfa_compute_interval=band_compute_interval,
+            dfa_overlap=dfa_overlap,
+        )
+        fei_out["DFA"] = dfa_array
+        fei_out["fEI"] = np.squeeze(fei_out["fEI_outliers_removed"])
+        fei_out["frequency_range"] = frequency_range
+        fei_out["fit_interval"] = band_fit_interval
+        fei_out["compute_interval"] = band_compute_interval
+        return fei_out
 
     # def hctsa(self, samples, hctsa_folder, workers=32):
     #     """

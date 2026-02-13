@@ -150,7 +150,6 @@ def test_compute_features_dfa_outputs_list_of_dicts():
             "fit_interval": [1, 3],
             "compute_interval": [1, 3],
             "overlap": True,
-            "runtime": "python",
         },
     )
 
@@ -171,7 +170,6 @@ def test_compute_features_fei_outputs_list_of_dicts():
             "sampling_frequency": 100.0,
             "window_size_sec": 1.0,
             "window_overlap": 0.5,
-            "runtime": "python",
             "dfa_value": 1.0,
         },
     )

@@ -1,5 +1,6 @@
 import numpy as np
 import numpy.ma as np_ma
+import pytest
 from scipy.stats import t as scipy_t
 
 from ncpi.Features import Features
@@ -208,7 +209,6 @@ def test_dfa_parity_against_reference_demo():
             "fit_interval": fit_interval,
             "compute_interval": compute_interval,
             "overlap": overlap,
-            "runtime": "python",
         },
     )
     out = feat.dfa(amplitude_envelope[0])
@@ -261,7 +261,6 @@ def test_fei_parity_against_reference_demo():
             "sampling_frequency": sampling_frequency,
             "window_size_sec": window_size_sec,
             "window_overlap": window_overlap,
-            "runtime": "python",
             "dfa_value": float(dfa_val),
         },
     )
@@ -280,3 +279,124 @@ def test_fei_parity_against_reference_demo():
     assert np.isclose(
         out["num_outliers"], num_outliers, rtol=1e-7, atol=1e-7, equal_nan=True
     )
+
+
+def test_dfa_multichannel_envelope_schema():
+    sampling_frequency = 250
+    fit_interval = [5, 30]
+    compute_interval = [5, 30]
+    overlap = True
+
+    signal = _make_demo_signal(
+        num_channels=3,
+        num_seconds=40,
+        sampling_frequency=sampling_frequency,
+        seed=10,
+    )
+    amplitude_envelope = signal
+
+    feat = Features(
+        method="dfa",
+        params={
+            "sampling_frequency": sampling_frequency,
+            "fit_interval": fit_interval,
+            "compute_interval": compute_interval,
+            "overlap": overlap,
+        },
+    )
+    out = feat.dfa(amplitude_envelope)
+
+    assert "DFA" in out
+    assert "window_sizes" in out
+    assert "fluctuations" in out
+    assert "dfa_intercept" in out
+    assert out["DFA"].shape == (3,)
+    assert out["fluctuations"].shape[0] == 3
+
+
+def test_fei_multichannel_envelope_schema():
+    sampling_frequency = 250
+    fit_interval = [5, 30]
+    compute_interval = [5, 30]
+    overlap = True
+    window_size_sec = 5
+    window_overlap = 0.8
+
+    signal = _make_demo_signal(
+        num_channels=3,
+        num_seconds=40,
+        sampling_frequency=sampling_frequency,
+        seed=11,
+    )
+    amplitude_envelope = signal
+
+    feat = Features(
+        method="fEI",
+        params={
+            "sampling_frequency": sampling_frequency,
+            "window_size_sec": window_size_sec,
+            "window_overlap": window_overlap,
+            "fit_interval": fit_interval,
+            "compute_interval": compute_interval,
+            "overlap": overlap,
+        },
+    )
+    out = feat.fEI(amplitude_envelope)
+
+    assert "fEI_outliers_removed" in out
+    assert "fEI_val" in out
+    assert "num_outliers" in out
+    assert "wAmp" in out
+    assert "wDNF" in out
+    assert "DFA" in out
+    assert out["fEI_outliers_removed"].shape[0] == 3
+    assert out["wAmp"].shape[0] == 3
+
+
+def test_dfa_band_smoke():
+    pytest.importorskip("mne")
+
+    sampling_frequency = 250
+    signal = _make_demo_signal(
+        num_channels=2,
+        num_seconds=40,
+        sampling_frequency=sampling_frequency,
+        seed=12,
+    )
+
+    feat = Features(method="dfa", params={"sampling_frequency": sampling_frequency})
+    out = feat.dfa(signal, frequency_range=[8, 16])
+
+    assert "DFA" in out
+    assert "frequency_range" in out
+    assert "fit_interval" in out
+    assert "compute_interval" in out
+    assert out["DFA"].shape == (2,)
+
+
+def test_fei_spectrum_smoke():
+    pytest.importorskip("mne")
+
+    sampling_frequency = 250
+    signal = _make_demo_signal(
+        num_channels=2,
+        num_seconds=40,
+        sampling_frequency=sampling_frequency,
+        seed=13,
+    )
+
+    feat = Features(
+        method="fEI",
+        params={
+            "sampling_frequency": sampling_frequency,
+            "window_size_sec": 5,
+            "window_overlap": 0.8,
+        },
+    )
+    out = feat.fEI(signal, spectrum_range=[1, 45])
+
+    assert "DFA" in out
+    assert "fEI" in out
+    assert "frequency_bins" in out
+    assert out["DFA"].shape[0] == 2
+    assert out["fEI"].shape[0] == 2
