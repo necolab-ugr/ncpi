@@ -31,6 +31,20 @@ def _assert_specparam_schema(d):
         assert key in d
 
 
+def _assert_dfa_schema(d):
+    """Minimal schema check for dfa output dict."""
+    assert isinstance(d, dict)
+    for key in ["dfa", "window_sizes", "fluctuations", "dfa_intercept"]:
+        assert key in d
+
+
+def _assert_fei_schema(d):
+    """Minimal schema check for fEI output dict."""
+    assert isinstance(d, dict)
+    for key in ["fEI_outliers_removed", "fEI_val", "num_outliers", "wAmp", "wDNF"]:
+        assert key in d
+
+
 # ======================================================================================
 # Core compute_features behavior (method-agnostic)
 # ======================================================================================
@@ -125,6 +139,48 @@ def test_compute_features_specparam_outputs_list_of_dicts():
         _assert_specparam_schema(d)
         # basic type sanity
         assert np.asarray(d["aperiodic_params"]).ndim == 1
+
+
+def test_compute_features_dfa_outputs_list_of_dicts():
+    samples = _make_samples(n_samples=2, n_points=512, seed=4)
+    f = Features(
+        method="dfa",
+        params={
+            "sampling_frequency": 100.0,
+            "fit_interval": [1, 3],
+            "compute_interval": [1, 3],
+            "overlap": True,
+        },
+    )
+
+    out = f.compute_features(samples, n_jobs=1, chunksize=1, start_method="spawn")
+
+    assert isinstance(out, list)
+    assert len(out) == len(samples)
+    for d in out:
+        _assert_dfa_schema(d)
+        assert np.asarray(d["window_sizes"]).ndim == 1
+
+
+def test_compute_features_fei_outputs_list_of_dicts():
+    samples = _make_samples(n_samples=2, n_points=1000, seed=5)
+    f = Features(
+        method="fEI",
+        params={
+            "sampling_frequency": 100.0,
+            "window_size_sec": 1.0,
+            "window_overlap": 0.5,
+            "dfa_value": 1.0,
+        },
+    )
+
+    out = f.compute_features(samples, n_jobs=1, chunksize=1, start_method="spawn")
+
+    assert isinstance(out, list)
+    assert len(out) == len(samples)
+    for d in out:
+        _assert_fei_schema(d)
+        assert np.asarray(d["wAmp"]).ndim == 1
 
 
 # ======================================================================================
