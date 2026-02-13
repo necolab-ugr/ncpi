@@ -948,5 +948,283 @@ class Analysis:
     # --------------
     # MEG plotting
     # --------------
-    def meg_surface(self):
-        print("MEG surface plotting is not yet implemented.")
+    def meg_surface(
+        self,
+        region_values: Mapping[str, float] | Sequence[Tuple[str, float]] | Sequence[float],
+        *,
+        atlas: Optional[str] = None,
+        region_coords: Optional[Mapping[str, Sequence[float]]] = None,
+        subjects_dir: Optional[str] = None,
+        surface: str = "inflated",
+        hemisphere: str = "both",
+        sphere_radius: float = 1.0,
+        n_surface: int = 40,
+        cmap: str = "coolwarm",
+        vmin: Optional[float] = None,
+        vmax: Optional[float] = None,
+        alpha: float = 0.9,
+        title: Optional[str] = None,
+        show: bool = True,
+        ax=None,
+    ):
+        """Plot a simple 3D MEG surface using region values.
+
+        If `atlas="desikan"`, this maps values to the Desikan-Killiany parcellation
+        on the fsaverage surface (requires `mne`). Otherwise, a spherical surface is
+        used with inverse-distance interpolation.
+
+        Parameters
+        ----------
+        region_values:
+            Mapping of region_name -> value, sequence of (region_name, value), or
+            a sequence of 68 values when atlas="desikan" (ordered by label name within
+            hemisphere: all LH labels then all RH labels).
+        atlas:
+            Optional atlas name. Supported: "desikan".
+        region_coords:
+            Optional mapping from region_name to (x, y, z) coordinates (used when atlas is None).
+        subjects_dir:
+            FreeSurfer subjects directory for fsaverage (optional when atlas="desikan";
+            if None, fsaverage is fetched via MNE).
+        surface:
+            Surface name for fsaverage (e.g., "inflated", "pial", "white") when atlas="desikan".
+        hemisphere:
+            "lh", "rh", or "both" (used when atlas="desikan").
+        sphere_radius:
+            Radius of the spherical surface.
+        n_surface:
+            Number of points per surface dimension (controls mesh resolution).
+        cmap:
+            Matplotlib colormap name.
+        vmin, vmax:
+            Color scale limits. If None, derived from interpolated values.
+        alpha:
+            Surface alpha (transparency).
+        title:
+            Optional plot title.
+        show:
+            Whether to show the plot immediately.
+        ax:
+            Optional existing 3D axis to plot into.
+
+        Returns
+        -------
+        fig, ax:
+            Matplotlib figure and axis handles.
+        """
+        import hashlib
+        import warnings
+        import matplotlib.pyplot as plt
+        from matplotlib import cm
+        from matplotlib.colors import Normalize
+
+        if region_values is None:
+            raise ValueError("region_values must be provided.")
+
+        if atlas is None:
+            if isinstance(region_values, Mapping):
+                region_dict = dict(region_values)
+            else:
+                region_dict = dict(region_values)
+
+            if len(region_dict) == 0:
+                raise ValueError("region_values is empty.")
+
+            if region_coords is None:
+                warnings.warn(
+                    "region_coords not provided; using synthetic coordinates derived from region names.",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+                region_coords = {}
+
+            names = list(region_dict.keys())
+            values = np.asarray([float(region_dict[n]) for n in names], dtype=float)
+
+            coords = []
+            for name in names:
+                if name in region_coords:
+                    xyz = np.asarray(region_coords[name], dtype=float).reshape(-1)
+                    if xyz.shape[0] != 3:
+                        raise ValueError(f"region_coords['{name}'] must be a 3D coordinate.")
+                    coords.append(xyz)
+                else:
+                    h = hashlib.md5(name.encode("utf-8")).hexdigest()
+                    u = int(h[:8], 16) / 0xFFFFFFFF
+                    v = int(h[8:16], 16) / 0xFFFFFFFF
+                    theta = 2.0 * np.pi * u
+                    phi = np.arccos(2.0 * v - 1.0)
+                    x = sphere_radius * np.sin(phi) * np.cos(theta)
+                    y = sphere_radius * np.sin(phi) * np.sin(theta)
+                    z = sphere_radius * np.cos(phi)
+                    coords.append(np.array([x, y, z], dtype=float))
+
+            coords = np.asarray(coords, dtype=float)
+
+            u = np.linspace(0.0, 2.0 * np.pi, n_surface)
+            v = np.linspace(0.0, np.pi, n_surface)
+            uu, vv = np.meshgrid(u, v)
+            x = sphere_radius * np.cos(uu) * np.sin(vv)
+            y = sphere_radius * np.sin(uu) * np.sin(vv)
+            z = sphere_radius * np.cos(vv)
+
+            mesh = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1)
+            pts = coords
+
+            d = np.linalg.norm(mesh[:, None, :] - pts[None, :, :], axis=2)
+            eps = 1e-6
+            d = np.maximum(d, eps)
+            w = 1.0 / (d ** 2)
+            v_interp = (w * values[None, :]).sum(axis=1) / w.sum(axis=1)
+            v_interp = v_interp.reshape(x.shape)
+
+            if vmin is None:
+                vmin = float(np.nanmin(v_interp))
+            if vmax is None:
+                vmax = float(np.nanmax(v_interp))
+
+            norm = Normalize(vmin=vmin, vmax=vmax)
+            colors = cm.get_cmap(cmap)(norm(v_interp))
+
+            if ax is None:
+                fig = plt.figure(figsize=(6, 6))
+                ax = fig.add_subplot(111, projection="3d")
+            else:
+                fig = ax.figure
+
+            ax.plot_surface(
+                x,
+                y,
+                z,
+                facecolors=colors,
+                rstride=1,
+                cstride=1,
+                linewidth=0,
+                antialiased=False,
+                alpha=alpha,
+            )
+            ax.set_box_aspect([1, 1, 1])
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_zticks([])
+
+            mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
+            mappable.set_array(v_interp)
+            fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+
+            if title:
+                ax.set_title(title)
+
+            if show:
+                plt.show()
+
+            return fig, ax
+
+        if atlas.lower() != "desikan":
+            raise ValueError("Only atlas='desikan' is supported currently.")
+
+        if hemisphere not in {"lh", "rh", "both"}:
+            raise ValueError("hemisphere must be one of {'lh','rh','both'}.")
+
+        if not tools.ensure_module("mne"):
+            raise ImportError("mne is required for atlas-based MEG surface plotting.")
+        mne = tools.dynamic_import("mne")
+
+        if subjects_dir is None:
+            subjects_dir = mne.datasets.fetch_fsaverage(verbose=False)
+
+        labels = mne.read_labels_from_annot(
+            subject="fsaverage",
+            parc="aparc",
+            subjects_dir=subjects_dir,
+        )
+
+        def _is_valid_label(label):
+            name = label.name.lower()
+            return ("unknown" not in name) and ("corpuscallosum" not in name)
+
+        labels = [lab for lab in labels if _is_valid_label(lab)]
+        labels_lh = sorted([lab for lab in labels if lab.hemi == "lh"], key=lambda x: x.name)
+        labels_rh = sorted([lab for lab in labels if lab.hemi == "rh"], key=lambda x: x.name)
+        label_order = labels_lh + labels_rh
+
+        if isinstance(region_values, Mapping):
+            region_dict = dict(region_values)
+            values = []
+            for lab in label_order:
+                if lab.name in region_dict:
+                    values.append(float(region_dict[lab.name]))
+                else:
+                    raise ValueError(f"Missing value for label '{lab.name}'.")
+            values = np.asarray(values, dtype=float)
+        elif isinstance(region_values, Sequence):
+            values = np.asarray(region_values, dtype=float)
+        else:
+            raise ValueError("region_values must be a mapping or a sequence.")
+
+        if values.shape[0] != len(label_order):
+            raise ValueError(
+                f"Expected {len(label_order)} values for atlas='desikan', got {values.shape[0]}."
+            )
+
+        if vmin is None:
+            vmin = float(np.nanmin(values))
+        if vmax is None:
+            vmax = float(np.nanmax(values))
+
+        norm = Normalize(vmin=vmin, vmax=vmax)
+        cmap_obj = cm.get_cmap(cmap)
+
+        if ax is None:
+            fig = plt.figure(figsize=(8, 6))
+            ax = fig.add_subplot(111, projection="3d")
+        else:
+            fig = ax.figure
+
+        def _plot_hemi(hemi, labels_hemi, vals_hemi):
+            surf_path = os.path.join(subjects_dir, "surf", f"{hemi}.{surface}")
+            if not os.path.exists(surf_path):
+                raise ValueError(f"Surface file not found: {surf_path}")
+            verts, faces = mne.read_surface(surf_path)
+
+            data = np.full((verts.shape[0],), np.nan, dtype=float)
+            for lab, val in zip(labels_hemi, vals_hemi):
+                data[lab.vertices] = val
+
+            face_vals = np.nanmean(data[faces], axis=1)
+            face_vals = np.where(np.isfinite(face_vals), face_vals, vmin)
+            face_colors = cmap_obj(norm(face_vals))
+
+            ax.plot_trisurf(
+                verts[:, 0],
+                verts[:, 1],
+                verts[:, 2],
+                triangles=faces,
+                facecolors=face_colors,
+                linewidth=0.0,
+                antialiased=False,
+                alpha=alpha,
+                shade=False,
+            )
+
+        if hemisphere in {"lh", "both"}:
+            _plot_hemi("lh", labels_lh, values[: len(labels_lh)])
+        if hemisphere in {"rh", "both"}:
+            _plot_hemi("rh", labels_rh, values[len(labels_lh):])
+
+        ax.set_box_aspect([1, 1, 1])
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_zticks([])
+
+        mappable = cm.ScalarMappable(norm=norm, cmap=cmap_obj)
+        mappable.set_array(values)
+        fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+
+        if title:
+            ax.set_title(title)
+
+        if show:
+            plt.show()
+
+        return fig, ax

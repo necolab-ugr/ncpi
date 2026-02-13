@@ -23,24 +23,18 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "scikit-learn==1.5.0",
-    "sbi==0.24.0",
-    "torch",
     "matplotlib",
     "numpy",
+    "pycatch22",
     "packaging",
     "pandas",
     "requests",
     "scipy",
+    "specparam",
     "tqdm"
 ]
 
 [project.optional-dependencies]
-# Feature extraction (python-only) dependencies
-features = [
-    "pycatch22",
-    "specparam",
-]
 # hctsa (MATLAB backend) dependencies
 hctsa = [
     "h5py",
@@ -50,6 +44,7 @@ hctsa = [
 # Statistical analysis (R via rpy2)
 analysis = [
     "rpy2",
+    "mne",
 ]
 # Field potential / kernel workflows
 fieldpotential = [
@@ -78,12 +73,10 @@ tests = [
     "matlabengine",
     "mne",
     "neuron",
-    "pycatch22",
     "pytest",
     "rpy2",
     "scikit-learn==1.5.0",
     "sbi==0.24.0",
-    "specparam",
     "torch",
 ]
 # Everything (union of optional deps)
@@ -97,13 +90,11 @@ all = [
     "neuron",
     "nest-simulator",
     "pdf2image",
-    "pycatch22",
     "pytest",
     "rpy2",
     "scikit-learn==1.5.0",
     "seaborn",
     "sbi==0.24.0",
-    "specparam",
     "statsmodels",
     "torch",
 ]

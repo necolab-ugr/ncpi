@@ -3,6 +3,7 @@ import pytest
 
 import scipy.signal as scipy_signal
 
+specparam = pytest.importorskip("specparam")
 from specparam import SpectralModel
 from specparam.sim import sim_power_spectrum
 from specparam.sim.utils import set_random_seed
