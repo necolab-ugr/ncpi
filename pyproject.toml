@@ -23,14 +23,17 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
+    "scikit-learn==1.5.0",
+    "sbi==0.24.0",
+    "torch",
+    "pycatch22",
+    "specparam",
     "matplotlib",
     "numpy",
-    "pycatch22",
     "packaging",
     "pandas",
     "requests",
     "scipy",
-    "specparam",
     "tqdm"
 ]
 
@@ -58,6 +61,7 @@ fieldpotential = [
 meeg = [
     "mne",
 ]
+
 # Example notebooks/scripts
 examples = [
     "pdf2image",
@@ -88,7 +92,6 @@ all = [
     "matlabengine",
     "mne",
     "neuron",
-    "nest-simulator",
     "pdf2image",
     "pytest",
     "rpy2",
