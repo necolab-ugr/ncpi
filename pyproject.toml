@@ -23,58 +23,89 @@ classifiers = [
 requires-python = ">=3.10"
 
 dependencies = [
-    "h5py",
-    "neuron",
-    "packaging",
-    "requests",
     "scikit-learn==1.5.0",
     "sbi==0.24.0",
-    "tqdm",
     "torch",
-    "pycatch22",
-    "specparam",
-    "numpy",
-    "pandas",
-    "scipy",
     "matplotlib",
+    "numpy",
+    "packaging",
+    "pandas",
+    "requests",
+    "scipy",
+    "tqdm"
 ]
 
 [project.optional-dependencies]
+# Feature extraction (python-only) dependencies
+features = [
+    "pycatch22",
+    "specparam",
+]
+# hctsa (MATLAB backend) dependencies
+hctsa = [
+    "h5py",
+    "matlabengine",
+]
+
+# Statistical analysis (R via rpy2)
 analysis = [
     "rpy2",
 ]
+# Field potential / kernel workflows
 fieldpotential = [
     "LFPy",
     "lfpykernels",
     "lfpykit",
+    "h5py",
+    "neuron",
 ]
+# M/EEG utilities (band/spectrum DFA/fEI)
 meeg = [
     "mne",
 ]
+# Example notebooks/scripts
 examples = [
-    "nest-simulator",
     "pdf2image",
     "seaborn",
     "statsmodels",
 ]
+# Test dependencies (includes optional backends)
 tests = [
+    "LFPy",
+    "h5py",
+    "lfpykernels",
+    "lfpykit",
+    "matlabengine",
+    "mne",
+    "neuron",
+    "pycatch22",
     "pytest",
-    "LFPy",
-    "lfpykernels",
-    "lfpykit",
-    "mne",
-]
-all = [
-    "LFPy",
-    "lfpykernels",
-    "lfpykit",
-    "mne",
     "rpy2",
-    "pytest",
+    "scikit-learn==1.5.0",
+    "sbi==0.24.0",
+    "specparam",
+    "torch",
+]
+# Everything (union of optional deps)
+all = [
+    "h5py",
+    "LFPy",
+    "lfpykernels",
+    "lfpykit",
+    "matlabengine",
+    "mne",
+    "neuron",
     "nest-simulator",
     "pdf2image",
+    "pycatch22",
+    "pytest",
+    "rpy2",
+    "scikit-learn==1.5.0",
     "seaborn",
+    "sbi==0.24.0",
+    "specparam",
     "statsmodels",
+    "torch",
 ]
 
 

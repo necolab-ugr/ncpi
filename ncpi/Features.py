@@ -5,9 +5,9 @@ import scipy.signal as scipy_signal
 from scipy.stats import t as scipy_t
 from ncpi import tools
 
-#########################################################
-## Helper functions for DFA & fE/I feature computation ##
-#########################################################
+############################################################
+## DFA/fEI Core Helpers (windowing, outlier detection)    ##
+############################################################
 
 def _create_window_indices(length_signal, length_window, window_offset):
     """Create a 2D array of indices for sliding windows.
@@ -115,9 +115,9 @@ def _generalized_esd(x, max_ols, alpha=0.05, full_output=False, ubvar=False):
     return 0, [], r_vals, l_vals, max_indices
 
 
-##########################################
-## Helper functions for multiprocessing ##
-##########################################
+################################################
+## Multiprocessing Helpers (worker lifecycle) ##
+################################################
 
 _WORKER_FEATURES_OBJ = None
 
@@ -209,9 +209,9 @@ def _compute_one_feature(sample):
     raise ValueError(f"Unknown method: {_WORKER_FEATURES_OBJ.method}")
 
 
-########################################
-## Main class for feature computation ##
-########################################
+#########################################
+## Features Class (public API surface) ##
+#########################################
 
 class Features:
     """
@@ -235,8 +235,10 @@ class Features:
             raise ValueError("The method must be a string.")
 
         # Check if the method is valid
-        if method not in ['catch22', 'specparam', 'dfa', 'fEI']:
-            raise ValueError("Invalid method. Please use 'catch22', 'specparam', 'dfa', or 'fEI'.")
+        if method not in ['catch22', 'specparam', 'dfa', 'fEI', 'hctsa']:
+            raise ValueError(
+                "Invalid method. Please use 'catch22', 'specparam', 'dfa', 'fEI', or 'hctsa'."
+            )
 
         # Check if params is a dictionary
         if params is not None and not isinstance(params, dict):
@@ -269,21 +271,23 @@ class Features:
             self._crosci_run_dfa = None
             self._crosci_run_fei = None
 
-        # elif method == 'hctsa':
-        #     # Check if MATLAB engine for Python is installed but do not try to install it
-        #     if not tools.ensure_module("matlab", raise_on_error=False):
-        #         raise ImportError("MATLAB Engine for Python is required (provides 'matlab' and 'matlab.engine').")
-        #
-        #     matlab_engine = tools.dynamic_import("matlab.engine", raise_on_error=False)
-        #
-        #     if matlab_engine is None:
-        #         raise ImportError("MATLAB Engine is not importable as 'matlab.engine'.")
-        #     if not tools.ensure_module("h5py"):
-        #         raise ImportError("h5py is required ...")
-        #
-        #     self.matlab = tools.dynamic_import("matlab")
-        #     self.matlabengine = matlab_engine
-        #     self.h5py = tools.dynamic_import("h5py")
+        elif method == 'hctsa':
+            matlab_engine = tools.dynamic_import("matlab.engine", raise_on_error=False)
+            if matlab_engine is None:
+                raise ImportError(
+                    "MATLAB Engine for Python is required (module 'matlab.engine'). "
+                    "Install it from your MATLAB distribution at "
+                    "<MATLAB_ROOT>/extern/engines/python, or via a compatible "
+                    "`matlabengine` pip package (e.g., `pip install \"matlabengine==24.2.2\"`) "
+                    "depending on your MATLAB distribution (do not use the PyPI 'matlab' stub)."
+                )
+
+            if not tools.ensure_module("h5py"):
+                raise ImportError("h5py is required for reading HCTSA.mat outputs.")
+
+            self.matlab = tools.dynamic_import("matlab")
+            self.matlabengine = matlab_engine
+            self.h5py = tools.dynamic_import("h5py")
 
         # Use stdlib multiprocessing
         self.multiprocessing = tools.dynamic_import("multiprocessing")
@@ -523,6 +527,7 @@ class Features:
         amplitude_envelope = np.abs(np.array(analytic))
 
         return amplitude_envelope
+
 
     def _resolve_sampling_frequency(self, sampling_frequency=None):
         """Resolve the sampling frequency from the explicit argument or self.params.
@@ -1844,112 +1849,164 @@ class Features:
         fei_out["compute_interval"] = band_compute_interval
         return fei_out
 
-    # def hctsa(self, samples, hctsa_folder, workers=32):
-    #     """
-    #     Compute hctsa features.
-    #
-    #     Parameters
-    #     ----------
-    #     samples: ndarray/list of shape (n_samples, times-series length)
-    #         A set of samples of time-series data.
-    #     hctsa_folder: str
-    #         Folder where hctsa is installed.
-    #     workers: int
-    #         Number of MATLAB workers of the parallel pool.
-    #
-    #     Returns
-    #     -------
-    #     feats: list of shape (n_samples, n_features)
-    #         hctsa features.
-    #
-    #     Debugging
-    #     ---------
-    #     This function has been debugged by approximating results shown
-    #     in https://github.com/benfulcher/hctsaTutorial_BonnEEG.
-    #     """
-    #
-    #     feats = []
-    #
-    #     # start Matlab engine
-    #     print("\n--> Starting Matlab engine ...")
-    #     eng = self.matlabengine.start_matlab()
-    #
-    #     try:
-    #         # Remove hctsa file
-    #         if os.path.isfile(os.path.join(hctsa_folder, 'HCTSA.mat')):
-    #             os.remove(os.path.join(hctsa_folder, 'HCTSA.mat'))
-    #
-    #         # Change to hctsa folder
-    #         eng.cd(hctsa_folder)
-    #
-    #         # Startup hctsa script
-    #         print("\n--> hctsa startup ...")
-    #         st = eng.startup(nargout=0)
-    #         print(st)
-    #
-    #         # Check if samples is a list and convert it to a numpy array
-    #         if isinstance(samples, list):
-    #             samples = np.array(samples)
-    #
-    #         # Create the input variables in Matlab
-    #         eng.eval(f'timeSeriesData = cell(1,{samples.shape[0]});', nargout=0)
-    #         eng.eval(f'labels = cell(1,{samples.shape[0]});', nargout=0)
-    #         eng.eval(f'keywords = cell(1,{samples.shape[0]});', nargout=0)
-    #
-    #         # Transfer time-series data to Matlab workspace
-    #         for s in range(samples.shape[0]):
-    #             eng.workspace['aux'] = self.matlab.double(list(samples[s]))
-    #             eng.eval('timeSeriesData{1,%s} = aux;' % (s + 1), nargout=0)
-    #
-    #         # Fill in the other 2 Matlab structures with the index of the sample
-    #         for s in range(samples.shape[0]):
-    #             eng.eval('labels{1,%s} = \'%s\';' % (str(s + 1), str(s + 1)), nargout=0)
-    #             eng.eval('keywords{1,%s} = \'%s\';' % (str(s + 1), str(s + 1)), nargout=0)
-    #
-    #         # Save variables into a mat file
-    #         eng.eval('save INP_ccpi_ts.mat timeSeriesData labels keywords;', nargout=0)
-    #
-    #         # Load mat file
-    #         eng.eval('load INP_ccpi_ts.mat;', nargout=0)
-    #
-    #         # Initialize an hctsa calculation
-    #         print("\n--> hctsa TS_Init ...")
-    #         eng.TS_Init('INP_ccpi_ts.mat',
-    #                     'hctsa',
-    #                     self.matlab.logical([False, False, False]),
-    #                     nargout=0)
-    #
-    #         # Open a parallel pool of a specific size
-    #         if workers > 1:
-    #             eng.parpool(workers)
-    #
-    #         # Compute features
-    #         print("\n--> hctsa TS_Compute ...")
-    #         # eng.TS_Compute(matlab.logical([True]),nargout = 0)
-    #         eng.eval('TS_Compute(true);', nargout=0)
-    #
-    #         # Load hctsa file
-    #         f = self.h5py.File(os.path.join(hctsa_folder, 'HCTSA.mat'), 'r')
-    #         TS_DataMat = np.array(f.get('TS_DataMat'))
-    #         # TS_Quality = np.array(f.get('TS_Quality'))
-    #
-    #         # Create the array of features to return
-    #         print(f'\n--> Formatting {TS_DataMat.shape[0]} features...')
-    #         for s in range(samples.shape[0]):
-    #             feats.append(list(TS_DataMat[:, s]))
-    #
-    #         # Stop Matlab engine
-    #         print("\n--> Stopping Matlab engine ...")
-    #         eng.quit()
-    #
-    #     except Exception as e:
-    #         print(f"An error occurred: {e}")
-    #         # Stop Matlab engine
-    #         print("\n--> Stopping Matlab engine ...")
-    #         eng.quit()
-    #         raise e
-    #
-    #     return feats
+
+    def hctsa(self, samples, hctsa_folder, workers=None, return_meta=False):
+        """
+        Compute hctsa features using the MATLAB implementation.
+
+        Parameters
+        ----------
+        samples: ndarray | list
+            Input samples. Either a 2D array of shape (n_samples, n_timepoints) or
+            a list of 1D arrays.
+        hctsa_folder: str
+            Path to the hctsa folder (must contain the hctsa startup script).
+        workers: int | None
+            Number of MATLAB workers for the parallel pool. If None, no parpool is created.
+        return_meta: bool
+            If True, return a dict with additional metadata. If False, return a list
+            of feature vectors per sample.
+
+        Returns
+        -------
+        features: list | dict
+            If return_meta is False, returns a list of feature vectors (one per sample).
+            If return_meta is True, returns a dict with keys:
+            - "features": list of feature vectors per sample
+            - "feature_matrix": np.ndarray of shape (n_samples, n_valid_features)
+            - "valid_feature_mask": boolean mask over all computed features
+            - "num_valid_features": int
+            - "num_total_features": int
+        """
+        if hctsa_folder is None:
+            raise ValueError(
+                "hctsa_folder must be provided. Make sure hctsa is installed and its setup "
+                "instructions have been followed."
+            )
+        if not os.path.isdir(hctsa_folder):
+            raise ValueError(f"hctsa_folder does not exist: {hctsa_folder}")
+
+        if not hasattr(self, "matlab") or not hasattr(self, "matlabengine") or not hasattr(self, "h5py"):
+            matlab_engine = tools.dynamic_import("matlab.engine", raise_on_error=False)
+            if matlab_engine is None:
+                raise ImportError(
+                    "MATLAB Engine for Python is required (module 'matlab.engine'). "
+                    "Install it from your MATLAB distribution at "
+                    "<MATLAB_ROOT>/extern/engines/python, or via a compatible "
+                    "`matlabengine` pip package (e.g., `pip install \"matlabengine==24.2.2\"`) "
+                    "depending on your MATLAB distribution (do not use the PyPI 'matlab' stub)."
+                )
+            if not tools.ensure_module("h5py"):
+                raise ImportError("h5py is required for reading HCTSA.mat outputs.")
+            self.matlab = tools.dynamic_import("matlab")
+            self.matlabengine = matlab_engine
+            self.h5py = tools.dynamic_import("h5py")
+
+        if isinstance(samples, np.ndarray):
+            if samples.ndim == 1:
+                samples_list = [samples]
+            elif samples.ndim == 2:
+                samples_list = [samples[i, :] for i in range(samples.shape[0])]
+            else:
+                raise ValueError("samples must be 1D or 2D.")
+        else:
+            samples_list = list(samples)
+
+        n_samples = len(samples_list)
+        if n_samples == 0:
+            empty = [] if not return_meta else {
+                "features": [],
+                "feature_matrix": np.empty((0, 0), dtype=float),
+                "valid_feature_mask": np.array([], dtype=bool),
+                "num_valid_features": 0,
+                "num_total_features": 0,
+            }
+            return empty
+
+        eng = self.matlabengine.start_matlab()
+
+        try:
+            hctsa_mat = os.path.join(hctsa_folder, "HCTSA.mat")
+            if os.path.isfile(hctsa_mat):
+                os.remove(hctsa_mat)
+
+            eng.cd(hctsa_folder)
+            eng.startup(nargout=0)
+
+            eng.eval(f"timeSeriesData = cell(1,{n_samples});", nargout=0)
+            eng.eval(f"labels = cell(1,{n_samples});", nargout=0)
+            eng.eval(f"keywords = cell(1,{n_samples});", nargout=0)
+
+            for s_idx, s in enumerate(samples_list, start=1):
+                s_arr = np.asarray(s).squeeze()
+                if s_arr.ndim != 1:
+                    raise ValueError("Each sample must be 1D.")
+                eng.workspace["aux"] = self.matlab.double(list(map(float, s_arr.tolist())))
+                eng.eval(f"timeSeriesData{{1,{s_idx}}} = aux;", nargout=0)
+                eng.eval(f"labels{{1,{s_idx}}} = '{s_idx}';", nargout=0)
+                eng.eval(f"keywords{{1,{s_idx}}} = '{s_idx}';", nargout=0)
+
+            inp_mat = "INP_ncpi_ts.mat"
+            inp_mat_path = os.path.join(hctsa_folder, inp_mat)
+            if os.path.isfile(inp_mat_path):
+                os.remove(inp_mat_path)
+            eng.eval(f"save('{inp_mat}','timeSeriesData','labels','keywords');", nargout=0)
+            eng.eval(f"load('{inp_mat}');", nargout=0)
+
+            eng.TS_Init(inp_mat, "hctsa", self.matlab.logical([False, False, False]), nargout=0)
+
+            if workers is not None and int(workers) > 1:
+                n_workers = int(workers)
+                eng.eval(
+                    f"p = gcp('nocreate'); if isempty(p), parpool({n_workers}); end",
+                    nargout=0,
+                )
+
+            eng.eval("TS_Compute(true);", nargout=0)
+
+            with self.h5py.File(hctsa_mat, "r") as f:
+                ts_data = np.array(f.get("TS_DataMat"))
+                ts_quality = f.get("TS_Quality")
+                ts_quality = np.array(ts_quality) if ts_quality is not None else None
+
+            if ts_data.ndim != 2:
+                raise RuntimeError("Unexpected TS_DataMat shape in HCTSA.mat.")
+
+            if ts_data.shape[1] == n_samples:
+                data = ts_data
+            elif ts_data.shape[0] == n_samples:
+                data = ts_data.T
+            else:
+                data = ts_data
+
+            valid_mask = np.isfinite(data).all(axis=1)
+
+            if ts_quality is not None:
+                tq = ts_quality
+                if tq.shape != data.shape and tq.T.shape == data.shape:
+                    tq = tq.T
+                if tq.shape == data.shape:
+                    valid_mask &= (tq == 0).all(axis=1)
+
+            data_valid = data[valid_mask, :]
+            features = [data_valid[:, s].tolist() for s in range(data_valid.shape[1])]
+
+            if return_meta:
+                return {
+                    "features": features,
+                    "feature_matrix": data_valid.T,
+                    "valid_feature_mask": valid_mask,
+                    "num_valid_features": int(np.sum(valid_mask)),
+                    "num_total_features": int(data.shape[0]),
+                }
+
+            return features
+
+        finally:
+            try:
+                eng.quit()
+            except Exception:
+                pass
 
 
     def compute_features(self, samples, n_jobs=None, chunksize=None, start_method="spawn"):
@@ -1975,12 +2032,23 @@ class Features:
             - specparam: list of dicts
             - dfa: list of dicts
             - fEI: list of dicts
+            - hctsa: list of feature vectors (uses MATLAB backend)
         """
         # Materialize as list once (so we know length and can iterate multiple times if needed)
         samples_list = list(samples) if not isinstance(samples, np.ndarray) else list(samples)
         n = len(samples_list)
         if n == 0:
             return []
+
+        if self.method == "hctsa":
+            hctsa_folder = self.params.get("hctsa_folder", None)
+            if hctsa_folder is None:
+                raise ValueError(
+                    "hctsa_folder must be provided in params for hctsa. "
+                    "Make sure hctsa is installed and its setup instructions have been followed."
+                )
+            workers = n_jobs if n_jobs is not None else (os.cpu_count() or 1)
+            return self.hctsa(samples_list, hctsa_folder=hctsa_folder, workers=workers)
 
         # Determine number of processes
         if n_jobs is None:

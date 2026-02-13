@@ -58,12 +58,24 @@ the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed (
 conda install -c conda-forge nest-simulator=3.8
  ```
 
-Similarly, to compute field potentials using the kernel method, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) 
-package must be installed via pip:
+Optional dependencies by class:
+- `Features`: `pycatch22` (catch22), `specparam` (spectral features), `mne` (band/spectrum DFA/fEI), MATLAB Engine for Python + `h5py` + the hctsa repo (hctsa feature set; set `hctsa_folder` to the repo path).
+- `FieldPotential`: `LFPy`, `lfpykernels`, `neuron`, `h5py` (kernel workflow) and `lfpykit` (EEG/MEG forward models).
+- `Analysis`: `rpy2` plus R packages `lme4`, `emmeans`, and `buildmer` (depending on analysis methods used).
+- `Simulation` examples: `nest-simulator` for LIF network simulations.
 
+Install extras via pip (as needed):
 ```bash
-pip install LFPykernels
+pip install "ncpi[meeg]"
+pip install "ncpi[fieldpotential]"
+pip install "ncpi[analysis]"
+pip install "ncpi[all]"
 ```
+
+For hctsa, follow the hctsa installation instructions (https://github.com/benfulcher/hctsa), and install the MATLAB
+Engine for Python either from your MATLAB distribution (`<MATLAB_ROOT>/extern/engines/python`) or via a compatible
+`matlabengine` pip package (e.g., `pip install "matlabengine==24.2.2"`). Then pass the hctsa repo path as
+`hctsa_folder`.
 
 If you encounter a binary incompatibility between your installed NumPy and scikit-learn packages after installing NEST—
 for example, an error like *numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, 
