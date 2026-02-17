@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html class="" lang="es">
+
+<head>
+	{% block head %}
+	<meta charset="utf-8" />
+	<meta content="width=device-width, initial-scale=1.0" name="viewport" />
+
+	<title>{% block title %}{% endblock %} - ncpi</title>
+
+	<!-- My main CSS file -->
+	<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+	{% block extra_css %}{% endblock %}
+
+	<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+	<link href="https://fonts.googleapis.com" rel="preconnect" />
+	<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" />
+	<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&amp;display=swap"
+		rel="stylesheet" />
+	<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" rel="stylesheet" />
+	<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"/>
+	<script id="tailwind-config">
+		tailwind.config = {
+			darkMode: "class",
+			theme: {
+				extend: {
+					colors: {
+						"primary": "#1337ec",
+						"background-light": "#f6f6f8",
+						"background-dark": "#101322",
+					},
+					fontFamily: {
+						"display": ["Space Grotesk"]
+					},
+					borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+				},
+			},
+		}
+	</script>
+	<style>
+		.material-symbols-outlined {
+			font-variation-settings:
+				'FILL' 0,
+				'wght' 400,
+				'GRAD' 0,
+				'opsz' 24
+		}
+	</style>
+	{% endblock %}
+</head>
+
+
+<body class="bg-background-light dark:bg-background-dark font-display text-gray-800 dark:text-gray-200">
+	<div class="relative flex min-h-screen w-full flex-col">
+		<div class="flex h-full grow flex-col">
+			<div class="mx-auto w-full max-w-screen-2xl px-4 py-5 sm:px-6 lg:px-8">
+				<div class="flex flex-col flex-1">
+
+					<header class="flex items-center justify-between whitespace-nowrap border-b border-gray-200/50 dark:border-white/10 px-4 py-4 sm:px-6">
+						{% block header %}
+						<a class="flex items-center gap-3 text-gray-900 dark:text-white" href="{{url_for('dashboard')}}">
+							<img alt="ncpi logo" class="h-8 w-8"
+								src="{{url_for('static', filename='images/ncpi_logo.png')}}" />
+							<h2 class="text-lg font-bold tracking-tight">ncpi</h2>
+						</a>
+						<div class="flex flex-1 items-center justify-end gap-4 sm:gap-6">
+							<nav class="items-center gap-6 text-sm font-medium sm:flex">
+								<a class="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-primary transition-colors"
+									href="{{url_for('dashboard')}}">Dashboard</a>
+								<a class="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-primary transition-colors"
+									href="#">Documentation</a>
+								<a class="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-primary transition-colors"
+									href="#">Help</a>
+							</nav>
+							<button id="darkModeToggle"
+								class="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg text-gray-600 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-white/10">
+								<span id="darkModeIcon" class="material-symbols-outlined">dark_mode</span>
+							</button>
+						</div>
+						{% endblock %}
+					</header>
+
+
+					<main class="flex-1 py-10 sm:py-16">
+						<!-- Alert messages -->
+						{% with messages = get_flashed_messages() %}
+						{% if messages %}
+							{% for message in messages %}
+							<div class="flash-container max-w-4xl mx-auto bg-red-100 border border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300 px-4 py-3 mb-8 rounded relative" role="alert">
+								<strong class="font-bold">Error:</strong>
+								<span class="block sm:inline">{{ message }}</span>
+								<span class="absolute top-0 bottom-0 right-0 px-4 py-3">
+									<svg class="close-button fill-current h-6 w-6 text-red-500 dark:text-red-400" role="button"
+										xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+										<title>Close</title>
+										<path
+											d="M14.348 14.849a1.2 1.2 0 0 1-1.697 0L10 11.819l-2.651 3.029a1.2 1.2 0 1 1-1.697-1.697l2.758-3.15-2.759-3.152a1.2 1.2 0 1 1 1.697-1.697L10 8.183l2.651-3.031a1.2 1.2 0 1 1 1.697 1.697l-2.758 3.152 2.758 3.15a1.2 1.2 0 0 1 0 1.698z" />
+									</svg>
+								</span>
+							</div>
+							{% endfor %}
+						{% endif %}
+						{% endwith %}
+
+						<!-- Main content -->
+						{% block content %}
+						{% endblock %}
+					</main>
+
+
+					<footer	class="flex flex-col gap-6 px-5 py-10 text-center border-t border-gray-200/50 dark:border-white/10 mt-auto">
+						{% block footer %}
+						<div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
+							<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+								href="#">About</a>
+							<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+								href="#">Contact</a>
+							<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+								href="#">Privacy Policy</a>
+						</div>
+						<div class="flex justify-center gap-6">
+							<a class="text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+								href="#">
+								<svg aria-hidden="true" class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+									<path clip-rule="evenodd"
+										d="M12 2C6.477 2 2 6.477 2 12c0 4.418 2.865 8.165 6.839 9.49.5.092.682-.217.682-.482 0-.237-.009-.868-.014-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.031-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.03 1.595 1.03 2.688 0 3.848-2.338 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.001 10.001 0 0022 12c0-5.523-4.477-10-10-10z"
+										fill-rule="evenodd"></path>
+								</svg>
+							</a>
+							<a class="text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+								href="#">
+								<svg aria-hidden="true" class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+									<path
+										d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z">
+									</path>
+								</svg>
+							</a>
+							<a class="text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+								href="#">
+								<svg aria-hidden="true" class="h-6 w-6" fill="currentColor" viewBox="0 0 24 24">
+									<path
+										d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z">
+									</path>
+								</svg>
+							</a>
+						</div>
+						<p class="text-sm text-gray-500 dark:text-gray-400">© 2025 ncpi Project. All Rights Reserved.
+						</p>
+						{% endblock %}
+					</footer>
+
+					<!-- My main JS files -->
+					<script src="{{ url_for('static', filename='js/darkModeToggle.js') }}"></script>
+					<!-- Handling of alert messages -->
+					<script src="{{ url_for('static', filename='js/alertMessages.js') }}"></script>
+					<!-- Block for page-specific JavaScript -->
+					{% block scripts %}{% endblock %}
+				</div>
+			</div>
+		</div>
+	</div>
+
+</body>
+
+</html>

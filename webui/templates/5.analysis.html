@@ -1,0 +1,529 @@
+{% extends "base.html" %}
+{% block title %}Analysis{% endblock %}
+
+<!-- Main color for simulation page: purple -->
+{% block head %}
+{{ super() }}
+
+<script>
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#2C097F",
+                    "primary-dark": "#A78BFA", // Lighter purple for dark mode
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px" }
+            }
+        }
+    };
+</script>
+<style>
+    body {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+</style>
+
+{% endblock %}
+
+
+
+{% block content %}
+<div x-data="{ 
+            activeTab: 'load-data', 
+            plotEEG: window.plotEEG,
+            isUploaded(id) { return this.uploads[id] !== undefined; },
+            getFileName(id) { return this.uploads[id]?.name || ''; }, 
+            selectedMethod: '', // Track the selected method
+            methods: {
+                'Lmer': 'Linear mixed-effects model (lmer) for analyzing data with repeated measures or nested structures.',
+                'Cohen': 'Cohen’s d for measuring the effect size between two means.',
+            }
+        }">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white">Analysis Module Configuration
+        </h1>
+        <p class="mt-2 text-slate-600 dark:text-slate-400">Select your data source and configure the analysis
+            parameters to begin.</p>
+
+        <!-- Menu tabs -->
+        <div class="mt-8 border-b border-slate-200 dark:border-slate-700">
+            <nav aria-label="Tabs" class="-mb-px flex space-x-8">
+                <button @click="activeTab = 'load-data'" type="button"
+                    :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'load-data', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'load-data' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Load data</button>
+                <button @click="activeTab = 'statistical-configuration'" type="button"
+                    :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'statistical-configuration', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'statistical-configuration' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Statistical analysis configuration</button>
+                <button @click="activeTab = 'plot-eeg'" type="button"
+                    :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'plot-eeg', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'plot-eeg' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Plot EEG</button>
+            </nav>
+        </div>
+
+        <!-- Form action -->
+        <form action="{{ url_for('start_computation_redirect', computation_type='analysis')}} " method="POST" enctype="multipart/form-data">  
+            <!-- Tab contents -->
+            <div class="mt-12 space-y-8">
+                <!-- Load Data Tab -->
+                <div x-show="activeTab === 'load-data'" x-cloak>
+                    <section
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Data file selection</h3>
+                        <div
+                            class="mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 py-10">
+                            <div class="text-center">
+                                <span class="material-icons text-4xl text-slate-400 mx-auto">upload_file</span>
+                                <div class="mt-4 flex text-sm leading-6 text-slate-600 dark:text-slate-400">
+                                    <label
+                                        class="relative cursor-pointer rounded-md bg-white dark:bg-transparent font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 dark:focus-within:ring-offset-slate-900 hover:text-indigo-500 dark:text-primary-dark"
+                                        for="file-upload">
+                                        <span>Drag &amp; drop your file here</span>
+                                        <input class="sr-only" id="file-upload" name="file-upload" type="file"
+                                            @change="handleFileUpload($event)" />
+                                    </label>
+                                </div>
+                                <p class="text-xs leading-5 text-slate-500 dark:text-slate-500">or</p>
+                                <button @click="document.getElementById('file-upload').click()"
+                                    class="mt-2 rounded-md bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700"
+                                    type="button">Browse file</button>
+                            </div>
+                        </div>
+                        <!-- Upload status indicator -->
+                        <div x-show="isUploaded('file-upload')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                            <span class="material-symbols-outlined">check_circle</span>
+                            <span>Data uploaded successfully</span>
+                            <span x-show="getFileName('file-upload')" class="font-semibold">(<span x-text="getFileName('file-upload')"></span>)</span>
+                        </div>
+                    </section>
+
+                    <!-- Select Method options -->
+                    <section
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Statistical analysis method
+                        </h3>
+                        <div class="mt-4 space-y-4">
+                            <template :key="methodName" x-for="(description, methodName) in methods">
+                                <div class="relative flex items-start">
+                                    <div class="flex h-6 items-center">
+                                        <input :id="'method-' + methodName" :value="methodName" x-model="selectedMethod"
+                                            class="h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                            name="method" type="radio" />
+                                    </div>
+                                    <div class="ml-3 text-sm leading-6">
+                                        <label :for="'method-' + methodName" class="font-medium text-slate-900 dark:text-white" x-text="methodName"
+                                            :class="{ 'border-primary bg-primary/5': selectedMethod === methodName }"></label>
+                                        <p class="text-slate-500 dark:text-slate-400" x-text="description"></p>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+                    </section>
+                    <!-- Method selection options -->
+                    <section disabled
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Method used to plot
+                        </h3>
+                        <div class="mt-4 space-y-4">
+                            <div class="relative flex items-start">
+                                <div class="flex h-6 items-center">
+                                    <input checked="" value="catch22"
+                                        class="h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                        id="catch22" name="method-plot" type="radio"  />
+                                </div>
+                                <div class="ml-3 text-sm leading-6">
+                                    <label for="catch22" class="font-medium text-slate-900 dark:text-white"
+                                        class="border-primary bg-primary/5">Catch22</label>
+                                </div>
+                            </div>
+                            <div class="relative flex items-start">
+                                <div class="flex h-6 items-center">
+                                    <input checked="" value="power_spectrum_parameterization_1"
+                                        class="h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                        id="power_spectrum_parameterization_1" name="method-plot" type="radio"  />
+                                </div>
+                                <div class="ml-3 text-sm leading-6">
+                                    <label for="power_spectrum_parameterization_1" class="font-medium text-slate-900 dark:text-white"
+                                        class="border-primary bg-primary/5">Power spectrum parameterization</label>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+
+                <!-- Statistical analysis configuration -->
+                <div x-show="activeTab === 'statistical-configuration'" class="mt-12 space-y-8" x-cloak>
+
+                    <!-- Show message if no method selected -->
+                    <div x-show="!selectedMethod" class="text-center py-8">
+                        <p class="text-gray-500">Please select a method in the previous tab first.</p>
+                        <button @click="activeTab = 'load-data'" type="button"
+                            class="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">
+                            Go Back to Select Method
+                        </button>
+                    </div>
+
+                    <section x-show="selectedMethod && selectedMethod === 'Lmer'"
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Linear mixed-effects model (lmer)
+                            configuration</h2>
+                        <div class="mt-6 border-t border-slate-200 dark:border-slate-700 pt-6">
+                            <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Analysis configuration</h3>
+                            <div class="mt-6 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="control-group">Control group</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="control-group" name="control-group">
+                                            <option>HC</option>
+                                            <option>ADMOD</option>
+                                            <option>ADSEV</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="data-analyzed">Data to be analyzed</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="data-analyzed" name="data-analyzed">
+                                            <option>Y</option>
+                                            <option>X</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6">
+                                    <label
+                                        class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300">Other
+                                        columns to be analyzed</label>
+                                    <div class="mt-2 flex flex-wrap gap-x-6 gap-y-4">
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="col-id" name="columns" type="checkbox" value="ID" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="col-id">ID</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="col-group" name="columns" type="checkbox" value="Group" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="col-group">Group</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="col-epoch" name="columns" type="checkbox" value="Epoch" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="col-epoch">Epoch</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="col-sensor" name="columns" type="checkbox" value="Sensor" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="col-sensor">Sensor</label></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="models-analysis">Models to be used for the analysis</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6 font-mono"
+                                            id="models-analysis" name="models-analysis">
+                                            <option value="mod00">mod00: Y ~ Group * Sensor + (1 | ID)</option>
+                                            <option value="mod01">mod01: Y ~ Group * Sensor</option>
+                                            <option value="mod02">mod02: Y ~ Group + Sensor + (1 | ID)</option>
+                                            <option value="mod03">mod03: Y ~ Group + Sensor</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6">
+                                    <label
+                                        class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300">Models
+                                        to be evaluated using BIC</label>
+                                    <div class="mt-2 flex flex-wrap gap-x-6 gap-y-4">
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="bic-mod00" name="bic-models" type="checkbox" value="mod00" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="bic-mod00">mod00</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="bic-mod01" name="bic-models" type="checkbox" value="mod01" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="bic-mod01">mod01</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="bic-mod02" name="bic-models" type="checkbox" value="mod02" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="bic-mod02">mod02</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="bic-mod03" name="bic-models" type="checkbox" value="mod03" /></div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="bic-mod03">mod03</label></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6">
+                                    <label
+                                        class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300">Models
+                                        that will undergo an ANOVA test after BIC selection</label>
+                                    <div class="mt-2 flex flex-wrap gap-x-6 gap-y-4">
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="anova-mod00" name="anova-models" type="checkbox" value="mod00" />
+                                            </div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="anova-mod00">mod00</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="anova-mod01" name="anova-models" type="checkbox" value="mod01" />
+                                            </div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="anova-mod01">mod01</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="anova-mod02" name="anova-models" type="checkbox" value="mod02" />
+                                            </div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="anova-mod02">mod02</label></div>
+                                        </div>
+                                        <div class="relative flex items-start">
+                                            <div class="flex h-6 items-center"><input
+                                                    class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                    id="anova-mod03" name="anova-models" type="checkbox" value="mod03" />
+                                            </div>
+                                            <div class="ml-3 text-sm leading-6"><label
+                                                    class="font-medium text-slate-700 dark:text-slate-300"
+                                                    for="anova-mod03">mod03</label></div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="r-spec">Specifications for R</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6 font-mono"
+                                            id="r-spec" name="r-spec" placeholder="~Group" type="text" />
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <section x-show="selectedMethod && selectedMethod === 'Cohen'"
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Cohen’s d configuration</h2>
+                        <div class="mt-6 border-t border-slate-200 dark:border-slate-700 pt-6">
+                            <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Analysis configuration</h3>
+                            <div class="mt-6 grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="control-group">Control group</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="control-group" name="control-group">
+                                            <option>HC</option>
+                                            <option>ADMOD</option>
+                                            <option>ADSEV</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="data-analyzed">Data to be analyzed</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="data-analyzed" name="data-analyzed">
+                                            <option>Y</option>
+                                            <option>X</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="models-analysis">Models to be used for the analysis</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6 font-mono"
+                                            id="models-analysis" name="models-analysis">
+                                            <option value="mod00">mod00: Y ~ Group * Sensor + (1 | ID)</option>
+                                            <option value="mod01">mod01: Y ~ Group * Sensor</option>
+                                            <option value="mod02">mod02: Y ~ Group + Sensor + (1 | ID)</option>
+                                            <option value="mod03">mod03: Y ~ Group + Sensor</option>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Plot EEG tab content -->
+                <div class="mt-12 space-y-8" x-show="activeTab === 'plot-eeg'" x-cloak>
+                    <section
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">EEG topographic plot</h2>
+                        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">Generate a topographical plot of EEG data
+                            using the 10-20 electrode placement system, visualizing activity from 19 or 20 electrodes.</p>
+                        <div class="mt-6 border-t border-slate-200 dark:border-slate-700 pt-6">
+                            <div class="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="head-radius">Radius of the head circumference</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="head-radius" name="head-radius" type="text" value="0.6" />
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="head-pos-x">Position of the head on the x-axis</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="head-pos-x" name="head-pos-x" type="text" value="0.0" />
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="electrode-size">Size of the electrodes</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="electrode-size" name="electrode-size" type="text" value="0.6" />
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="min-plot-val">Minimum value used for plotting</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="min-plot-val" name="min-plot-val" type="text" value="-6.0" />
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="max-plot-val">Maximum value used for plotting</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="max-plot-val" name="max-plot-val" type="text" value="6.0" />
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-6 flex items-center pt-2">
+                                    <div class="relative flex items-start">
+                                        <div class="flex h-6 items-center">
+                                            <input checked=""
+                                                class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                id="show-colorbar" name="show-colorbar" type="checkbox" value="true" />
+                                        </div>
+                                        <div class="ml-3 text-sm leading-6">
+                                            <label class="font-medium text-slate-900 dark:text-slate-300"
+                                                for="show-colorbar">Show the colorbar label</label>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+
+
+            <!-- Navigation Buttons -->
+            <div class="mt-10 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <!-- Previous/Return Button -->
+                <template x-if="activeTab === 'load-data'">
+                    <a href="{{ url_for('dashboard') }}"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                        <span class="material-symbols-outlined">arrow_back</span>
+                        Return to ncpi dashboard
+                    </a>
+                </template>
+
+                <template x-if="activeTab !== 'load-data'">
+                    <button type="button"
+                        @click="if (activeTab === 'statistical-configuration') { activeTab = 'load-data' } else if (activeTab === 'plot-eeg') { activeTab = 'statistical-configuration' }"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                        <span class="material-symbols-outlined">arrow_back</span>
+                        Back step
+                    </button>
+                </template>
+
+                <!-- Next/Compute Button -->
+                <template x-if="activeTab === 'plot-eeg' && isUploaded('file-upload')">
+                    <button type="submit" @click="plotEEG()"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                        Plot EEG predictions
+                    </button>
+                </template>
+
+                <template x-if="activeTab !== 'plot-eeg'">
+                    <button type="button"
+                        @click="if (activeTab === 'load-data') { activeTab = 'statistical-configuration' } else if (activeTab === 'statistical-configuration') { activeTab = 'plot-eeg' }"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                        Next step
+                        <span class="material-symbols-outlined">arrow_forward</span>
+                    </button>
+                </template>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<!-- Menu tab navigation -->
+<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<!-- Handle of file uploads script -->
+<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+{% endblock %}

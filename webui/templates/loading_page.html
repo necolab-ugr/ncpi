@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}Computing...{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}')">
+    <div class="flex items-center gap-6">
+        <div x-show="progress < 100" class="flex flex-col items-center gap-6 text-center">
+            <div class="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-primary dark:border-primary"></div>
+        </div>
+        <div x-show="progress === 100" class="text-primary dark:text-primary text-4xl">✅</div>
+        <div x-show="error" class="flex flex-col items-center gap-6 text-center">
+            <div class="text-red-500 dark:text-red-400 text-4xl">❌</div>
+        </div>
+        <div class="flex flex-col gap-2">
+            <p x-text="error ? 'Computation Failed' : (progress < 100 ? 'Computing {{ computation_type }}' : 'Computation Complete!')" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
+            <p x-text="error ? 'An error occurred during computation.' : (progress < 100 ? 'Please wait while the computation is in progress...' : 'Your results are ready.')" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
+        </div>
+    </div>
+    <div class="w-64 mt-4">
+        <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div class="h-full bg-primary transition-all duration-500 ease-out" 
+                    :style="`width: ${progress}%`"
+                    :class="error ? 'bg-red-500' : 'bg-primary'"></div>
+        </div>
+        <p class="mt-2 text-sm text-text-light-secondary dark:text-[#929bc9]">
+            Progress: <span x-text="progress + '%'"></span>
+        </p>
+        <p class="text-sm text-text-light-secondary dark:text-[#929bc9]">
+            Elapsed: <span x-text="elapsedTime"></span> | 
+            Remaining: <span x-text="estimatedTimeRemaining"></span>
+        </p>
+
+        <!-- Error message section - only shows when error exists -->
+        <div x-show="error" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+            <p class="text-sm font-medium text-red-700 dark:text-red-300">
+                Error: <span x-text="error"></span>
+            </p>
+        </div>
+    </div>
+    <div class="flex justify-end gap-4 mt-10 pt-6">
+        <button :disabled="progress < 100 || hasBeenClicked"
+                @click="hasBeenClicked = true; window.location.href = `{{url_for('download_results', job_id=job_id, computation_type=computation_type )}}`"
+                :class="progress < 100 || hasBeenClicked
+                ? 'px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/50 bg-gray-200 dark:bg-[#2d3358] rounded-lg cursor-not-allowed opacity-50'
+                : 'px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg shadow-md hover:bg-primary-dark transition-colors'">
+            Save results
+        </button>
+    </div>
+    <p x-show="hasBeenClicked" class="text-sm text-text-light-secondary dark:text-[#929bc9]">
+        ✅ Results have already been downloaded
+    </p>
+</div>
+
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Helper function for time formatting
+function formatTime(seconds) {
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.floor(seconds % 60);
+    return `${minutes.toString().padStart(2, '0')}:${remainingSeconds.toString().padStart(2, '0')}`;
+}
+
+// Alpine.js component for the loading page
+document.addEventListener('alpine:init', () => {
+    Alpine.data('loadingApp', (initialJobId) => ({
+        jobId: initialJobId,
+        progress: 0,
+        elapsedTime: '00:00',
+        estimatedTimeRemaining: 'Calculating...',
+        hasBeenClicked : false,
+        error: null, 
+        
+        init() {
+            this.startTime = Date.now();
+            this.pollStatus(); // Start polling immediately when the page loads
+        },
+
+        pollStatus() {
+            // Calculate elapsed time (updated with every poll)
+            const elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000);
+            this.elapsedTime = formatTime(elapsedSeconds);
+
+            fetch(`/status/${this.jobId}`)
+                .then(response => response.json())
+                .then(data => {
+                    this.progress = data.progress;
+                    
+                    if (data.status === 'finished') {
+                        this.progress = 100; // Finalize display
+                        this.estimatedTimeRemaining = '00:00';
+                        console.log('Computation finished. Save results button active.');
+                        // Polling stops automatically here as it doesn't set a new timeout
+
+                    } else if (data.status === 'in_progress') {
+                        
+                        if (data.estimated_time_remaining) {
+                            const remainingMs = data.estimated_time_remaining * 1000 - Date.now();
+                            // Check if estimate time remaining has passed
+                            if (remainingMs < 0) {
+                                this.estimatedTimeRemaining = 'It\'s taking longer than expected. Please wait... It may take up to 4 minutes more';
+                            } else {
+                                const remainingSeconds = Math.floor(remainingMs / 1000);
+                                this.estimatedTimeRemaining = formatTime(remainingSeconds);
+                            }
+
+                        } else {
+                            this.estimatedTimeRemaining = 'Calculating...';
+                        }
+                        // Poll again after 1 second (simplest polling interval)
+                        setTimeout(() => this.pollStatus(), 1500); 
+
+                    } else { // Failed
+                        this.estimatedTimeRemaining = 'Failed';
+                        this.error = data.error;  // Set error message
+                        this.progress = data.progress || 0;
+                        // Polling stops on failure
+                    }
+                })
+                .catch(error => {
+                    console.error("Error polling status:", error);
+                    // Retry polling after a longer delay on network error
+                    setTimeout(() => this.pollStatus(), 5000); 
+                });
+        },
+    }));
+});
+</script>
+<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+{% endblock %}

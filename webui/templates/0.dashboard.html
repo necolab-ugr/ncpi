@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+
+<!-- Main content of the dashboard page -->
+{% block content %}
+						<div class="flex flex-col items-center gap-4 text-center px-4">
+							<img alt="NCPI Logo" class="h-32 w-32 mb-4"
+								src="{{url_for('static', filename='images/ncpi_logo.png')}}" />
+							<h1
+								class="text-4xl font-black tracking-tighter text-gray-900 dark:text-white sm:text-5xl lg:text-6xl">
+								Welcome to ncpi library</h1>
+							<h2
+								class="text-xl sm:text-2xl lg:text-3xl font-semibold tracking-tight text-gray-600 dark:text-gray-400 -mt-2">
+								<span class="text-primary">N</span>eural <span class="text-primary">C</span>ircuit <span
+									class="text-primary">P</span>arameter <span class="text-primary">I</span>nference
+							</h2>
+							<p class="max-w-2xl text-base text-gray-500 dark:text-gray-400 sm:text-lg mt-4">Select a
+								module to begin your neural data analysis workflow.</p>
+						</div>
+
+						<div class="mt-12 grid grid-cols-1 gap-6 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+								href="{{url_for('simulation')}}">
+								<div
+									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
+									<!-- <span class="material-symbols-outlined !text-3xl">psychology</span> -->
+									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Simulation module w transparency.png')}}" alt="Neuron simulation" class="h-31 w-31 object-contain"/>
+								</div>
+								<div class="flex flex-col gap-1 items-center justify-center">
+									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Simulation</h2>
+									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Generate simulated neural data
+										to test your hypotheses.</p>
+								</div>
+							</a>
+							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+								href="{{url_for('field_potential')}}">
+								<div
+									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
+									<!-- <span class="material-symbols-outlined !text-3xl">waves</span> -->
+									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Field Potential module w transparency.png')}}" alt="EEG signals" class="h-29 w-28 object-contain"/>
+								</div>
+								<div class="flex flex-col gap-1 items-center">
+									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Field Potential</h2>
+									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Process and analyze local field
+										potentials from raw signals.</p>
+								</div>
+							</a>
+							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+								href="{{url_for('features')}}">
+								<div
+									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
+									<!-- <span class="material-symbols-outlined !text-3xl">analytics</span> -->
+									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Features module w transparency.png')}}" alt="Feature extraction" class="h-31 w-31 object-contain"/>
+								</div>
+								<div class="flex flex-col gap-1 items-center ">
+									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Features</h2>
+									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Extract key features and
+										patterns from neural signals.</p>
+								</div>
+							</a>
+							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+								href="{{url_for('inference')}}">
+								<div
+									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
+									<!-- <span class="material-symbols-outlined !text-3xl">share</span> -->
+									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Inference module w transparency.png')}}" alt="Inference" class="h-31 w-31 object-contain"/>
+								</div>
+								<div class="flex flex-col gap-1 items-center ">
+									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Inference</h2>
+									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Perform statistical inference
+										and build predictive models.</p>
+								</div>
+							</a>
+							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+								href="{{url_for('analysis')}}">
+								<div
+									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
+									<!-- <span class="material-symbols-outlined !text-3xl">query_stats</span> -->
+									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Analysis module w transparency.png')}}" alt="Analysis" class="h-31 w-31 object-contain"/>
+								</div>
+								<div class="flex flex-col gap-1 items-center ">
+									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Analysis</h2>
+									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Visualize and interpret the
+										results of your analysis.</p>
+								</div>
+							</a>
+						</div>
+						<div class="relative px-0 max-w-9xl mx-auto">
+							<div class="pipeline-rail absolute top-[5px] left-[10%] right-[10%] -z-0"></div>
+							<div class="grid grid-cols-5 relative z-10">
+								<div class="flex flex-col items-center">
+									<div class="pipeline-node bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)]"></div>
+									<div class="mt-4 text-center">
+										<span
+											class="block text-[13px] font-bold uppercase tracking-wider text-green-600 dark:text-green-500">Data
+											uploaded</span>
+										<span
+											class="block text-[10px] text-slate-400 dark:text-slate-500 mt-1 uppercase font-medium">Ready</span>
+									</div>
+								</div>
+								<div class="flex flex-col items-center">
+									<div class="pipeline-node bg-slate-300 dark:bg-slate-700"></div>
+									<div class="mt-4 text-center">
+										<span class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">No
+											data</span>
+										<span
+											class="block text-[10px] text-slate-400/60 dark:text-slate-600/60 mt-1 uppercase font-medium italic">Pending</span>
+									</div>
+								</div>
+								<div class="flex flex-col items-center">
+									<div class="pipeline-node bg-slate-300 dark:bg-slate-700"></div>
+									<div class="mt-4 text-center space-y-0.5">
+										<span class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">No
+											sim features</span>
+										<span class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">No
+											emp features</span>
+									</div>
+								</div>
+								<div class="flex flex-col items-center">
+									<div class="pipeline-node bg-slate-300 dark:bg-slate-700"></div>
+									<div class="mt-4 text-center space-y-0.5">
+										<span class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">No
+											models</span>
+										<span class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">No
+											predictions</span>
+									</div>
+								</div>
+								<div class="flex flex-col items-center">
+									<div class="pipeline-node bg-slate-300 dark:bg-slate-700"></div>
+									<div class="mt-4 text-center">
+										<span
+											class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">Awaiting
+											inference</span>
+										<span
+											class="block text-[10px] text-slate-400/60 dark:text-slate-600/60 mt-1 uppercase font-medium italic">Idle</span>
+									</div>
+								</div>
+							</div>
+						</div>
+{% endblock %}

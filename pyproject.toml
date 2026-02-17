@@ -34,7 +34,9 @@ dependencies = [
     "pandas",
     "requests",
     "scipy",
-    "tqdm"
+    "tqdm",
+    "flask",
+    "pyarrow"
 ]
 
 [project.optional-dependencies]

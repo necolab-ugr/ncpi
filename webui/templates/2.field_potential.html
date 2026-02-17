@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+{% block title %}Field Potential{% endblock %}
+
+<!-- Main color for simulation page: red -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#EA2831",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                    "text-light-primary": "#1f2937",
+                    "text-light-secondary": "#6b7280",
+                    "border-light": "#e5e7eb",
+                    "container-light": "#ffffff"
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+<style>
+    :root {
+        --checkbox-tick-svg: url('data:image/svg+xml,%3csvg viewBox=%270 0 16 16%27 fill=%27rgb(255,255,255)%27 xmlns=%27http://www.w3.org/2000/svg%27%3e%3cpath d=%27M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z%27/%3e%3c/svg%3e');
+    }
+
+    .dark:root {
+        --checkbox-tick-svg: url('data:image/svg+xml,%3csvg viewBox=%270 0 16 16%27 fill=%27rgb(255,255,255)%27 xmlns=%27http://www.w3.org/2000/svg%27%3e%3cpath d=%27M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z%27/%3e%3c/svg%3e');
+    }
+
+    html:not(.dark) :root {
+        --checkbox-tick-svg: url('data:image/svg+xml,%3csvg viewBox=%270 0 16 16%27 fill=%27rgb(255,255,255)%27 xmlns=%27http://www.w3.org/2000/svg%27%3e%3cpath d=%27M12.207 4.793a1 1 0 010 1.414l-5 5a1 1 0 01-1.414 0l-2-2a1 1 0 011.414-1.414L6.5 9.086l4.293-4.293a1 1 0 011.414 0z%27/%3e%3c/svg%3e');
+    }
+</style>
+{% endblock %}
+
+<!-- Main content of the field potential page -->
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="flex flex-wrap justify-between gap-3 mb-8">
+        <div class="flex min-w-72 flex-col gap-3">
+            <p class="text-text-light-primary dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">
+                Module Configuration: Field Potential</p>
+            <p class="text-text-light-secondary dark:text-[#929bc9] text-base font-normal leading-normal">
+                Set parameters for the FieldPotential analysis module.</p>
+        </div>
+    </div>
+
+    
+    <div class="bg-container-light dark:bg-[#111422] rounded-xl border border-border-light dark:border-[#323b67]/50 p-6"
+        x-data="{ activeTab: 'load' }">
+
+        <!-- Menu tabs -->
+        <div class="mb-6 border-b border-border-light dark:border-[#323b67]/50">
+            <nav aria-label="Tabs" class="flex -mb-px space-x-6">
+                <button
+                    :class="{ 'border-primary text-primary dark:text-white': activeTab === 'load', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'load' }"
+                    @click="activeTab = 'load'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                    Load simulation data
+                </button>
+                <button
+                    :class="{ 'border-primary text-primary dark:text-white': activeTab === 'signal', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'signal' }"
+                    @click="activeTab = 'signal'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                    Signal configuration
+                </button>
+                <button
+                    :class="{ 'border-primary text-primary dark:text-white': activeTab === 'kernel', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'kernel' }"
+                    @click="activeTab = 'kernel'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                    Compute options
+                </button>
+                <button
+                    :class="{ 'border-primary text-primary dark:text-white': activeTab === 'meeg', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'meeg' }"
+                    @click="activeTab = 'meeg'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                    M/EEG Computation Options
+                </button>
+            </nav>
+        </div>
+
+
+        <!-- Tab contents -->
+        <div class="space-y-8 pt-6">
+
+            <!-- Load Data Tab -->
+            <div x-show="activeTab === 'load'">
+                <div class="flex flex-col gap-3">
+                    <input class="hidden"
+                                    type="file" accept=".csv" />
+                    <button
+                        class=" flex items-center gap-3 w-fit text-sm font-semibold text-white bg-primary rounded-lg hover:bg-primary/90 px-5 py-2.5">
+                        <span class="material-symbols-outlined">upload</span>
+                        <span>Load simulation data</span>
+                    </button>
+                    <!-- Selected file display (optional) -->
+                    <div id="selected-files" class="mt-2 text-sm text-primary dark:text-primary/80 hidden">
+                        <span class="font-medium">Selected:</span> <span id="file-names">No file chosen</span>
+                    </div>
+
+                    <p class="text-sm text-text-light-secondary dark:text-[#929bc9]">Load simulation data
+                        from the simulation module. E.g: Spikes.</p>
+                </div>
+            </div>
+
+            <!-- Signal configuration Tab -->
+            <div style="display: none;" x-show="activeTab === 'signal'">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                    <div class="flex flex-col gap-4">
+                        <div class="flex flex-col gap-4">
+                            <h2
+                                class="text-text-light-primary dark:text-white text-lg font-bold leading-tight tracking-[-0.015em]">
+                                Compute option</h2>
+                            <div class="flex flex-col gap-3">
+                                <label class="flex items-start gap-x-3 cursor-pointer">
+                                    <input checked=""
+                                        class="w-4 h-4 mt-1 text-primary bg-transparent border-gray-300 dark:border-[#323b67] focus:ring-primary dark:focus:ring-offset-background-dark"
+                                        name="compute-option" type="radio" />
+                                    <div>
+                                        <p
+                                            class="text-text-light-primary dark:text-white text-base font-normal leading-normal">
+                                            Enable Kernel</p>
+                                        <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Choose to
+                                            compute kernels.</p>
+                                    </div>
+                                </label>
+                                <label class="flex items-start gap-x-3 cursor-pointer">
+                                    <input
+                                        class="w-4 h-4 mt-1 text-primary bg-transparent border-gray-300 dark:border-[#323b67] focus:ring-primary dark:focus:ring-offset-background-dark"
+                                        name="compute-option" type="radio" />
+                                    <div>
+                                        <p
+                                            class="text-text-light-primary dark:text-white text-base font-normal leading-normal">
+                                            Compute proxy</p>
+                                        <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Compute a
+                                            proxy for the extracellular signal by combining variables directly measured
+                                            from network simulations. <span class="font-bold">Warning: not tested
+                                                yet!</span></p>
+                                    </div>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex flex-col gap-6">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="cdm-shape">Current dipole moment (CDM) shape</label>
+                            <input
+                                class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                id="cdm-shape" type="number" value="15500" />
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Number of time points
+                                in the current dipole moment (CDM).</p>
+                        </div>
+                        <div class="flex flex-col">
+                            <label class="flex items-center gap-x-3 cursor-pointer">
+                                <input
+                                    class="h-5 w-5 rounded border-gray-300 dark:border-[#323b67] border-2 bg-transparent dark:bg-transparent text-primary checked:bg-primary checked:border-primary checked:bg-[image:--checkbox-tick-svg] focus:ring-0 focus:ring-offset-0 focus:border-primary focus:outline-none"
+                                    type="checkbox" />
+                                <p class="text-text-light-primary dark:text-white text-base font-normal leading-normal">
+                                    Enable nyhead</p>
+                            </label>
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1 pl-8">Use the
+                                NYHeadModel for computing EEG.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-8">
+                    <h2
+                        class="text-text-light-primary dark:text-white text-lg font-bold leading-tight tracking-[-0.015em] pb-2">
+                        Signal Type</h2>
+                    <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mb-2">Prepare data structures for
+                        computing EEG or MEG signals.</p>
+                    <div class="flex items-center gap-6 pt-2">
+                        <label class="flex items-center gap-x-2 cursor-pointer">
+                            <input
+                                class="w-4 h-4 text-primary bg-transparent border-gray-300 dark:border-[#323b67] focus:ring-primary dark:focus:ring-offset-background-dark"
+                                name="signal-type" type="radio" />
+                            <span class="text-text-light-primary dark:text-white text-base">EEG</span>
+                        </label>
+                        <label class="flex items-center gap-x-2 cursor-pointer">
+                            <input
+                                class="w-4 h-4 text-primary bg-transparent border-gray-300 dark:border-[#323b67] focus:ring-primary dark:focus:ring-offset-background-dark"
+                                name="signal-type" type="radio" />
+                            <span class="text-text-light-primary dark:text-white text-base">MEG</span>
+                        </label>
+                        <label class="flex items-center gap-x-2 cursor-pointer">
+                            <input checked=""
+                                class="w-4 h-4 text-primary bg-transparent border-gray-300 dark:border-[#323b67] focus:ring-primary dark:focus:ring-offset-background-dark"
+                                name="signal-type" type="radio" />
+                            <span class="text-text-light-primary dark:text-white text-base">None</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Compute options Tab -->
+            <div style="display: none;" x-show="activeTab === 'kernel'">
+                <div class="space-y-6">
+                    <h2 class="text-lg font-bold text-text-light-primary dark:text-white tracking-[-0.015em]">Kernel
+                        creation options</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="mc_folder">Multicompartment neuron network folder</label>
+                            <label
+                                class="flex items-center gap-3 w-full cursor-pointer bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#232948] transition-colors">
+                                <span
+                                    class="material-symbols-outlined text-text-light-secondary dark:text-[#929bc9]">folder_open</span>
+                                <span class="text-base text-text-light-primary dark:text-white">Choose folder</span>
+                                <input class="hidden" directory="" id="mc_folder" type="file" webkitdirectory="" />
+                            </label>
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Path to the folder
+                                containing the multicompartment neuron network descriptions</p>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="output_path">Path to the output folder</label>
+                            <label
+                                class="flex items-center gap-3 w-full cursor-pointer bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#232948] transition-colors">
+                                <span
+                                    class="material-symbols-outlined text-text-light-secondary dark:text-[#929bc9]">folder_open</span>
+                                <span class="text-base text-text-light-primary dark:text-white">Choose folder</span>
+                                <input class="hidden" directory="" id="output_path" type="file" webkitdirectory="" />
+                            </label>
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Specify an output path
+                                in your computer</p>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="biophys">Biophysical membrane properties</label>
+                            <label
+                                class="flex items-center gap-3 w-full cursor-pointer bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] rounded-lg px-3 py-2 hover:bg-gray-100 dark:hover:bg-[#232948] transition-colors">
+                                <span
+                                    class="material-symbols-outlined text-text-light-secondary dark:text-[#929bc9]">upload_file</span>
+                                <span class="text-base text-text-light-primary dark:text-white">Upload file</span>
+                                <input class="hidden" id="biophys" type="file" />
+                            </label>
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">List of biophysical
+                                membrane properties. No default value. If you want to specify its content, you will have
+                                to upload a file.</p>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium" for="dt">Time
+                                step</label>
+                            <input
+                                class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                id="dt" step="any" type="number" />
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Time step</p>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="tstop">Simulation time</label>
+                            <input
+                                class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                id="tstop" step="any" type="number" />
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Simulation time</p>
+                        </div>
+                        <div
+                            class="flex flex-col gap-2 md:col-span-2 border border-border-light dark:border-[#323b67]/50 rounded-lg p-4">
+                            <h3 class="text-base font-semibold text-text-light-primary dark:text-white">Electrode
+                                parameters</h3>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 mt-2">
+                                <div class="flex flex-col gap-2">
+                                    <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                        for="z">z</label>
+                                    <input
+                                        class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                        id="z" step="any" type="number" />
+                                </div>
+                                <div class="flex flex-col gap-2">
+                                    <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                        for="sigma">sigma</label>
+                                    <input
+                                        class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                        id="sigma" step="any" type="number" />
+                                </div>
+                            </div>
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-4">Electrode parameters.
+                                If not specified, LFP is not computed.</p>
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="cdm-checkbox">Current dipole moment</label>
+                            <label class="flex items-center gap-x-3 cursor-pointer mt-1">
+                                <input checked=""
+                                    class="h-5 w-5 rounded border-gray-300 dark:border-[#323b67] border-2 bg-transparent dark:bg-transparent text-primary checked:bg-primary checked:border-primary checked:bg-[image:--checkbox-tick-svg] focus:ring-0 focus:ring-offset-0 focus:border-primary focus:outline-none"
+                                    type="checkbox" />
+                                <p class="text-text-light-primary dark:text-white text-base font-normal leading-normal">
+                                    Compute the current dipole moment.</p>
+                            </label>
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1"></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- M/EEG Computation options Tab -->
+            <div style="display: none;" x-show="activeTab === 'meeg'">
+                <div class="space-y-6">
+                    <p class="text-text-light-secondary dark:text-[#929bc9] text-sm">Compute EEG/MEG from a current
+                        dipole moment using the NYHeadModel (EEG) or a homogeneous, isotropic, linear volume conductor
+                        model (MEG). Warning: The MEG calculation has not yet been tested and is currently limited to
+                        use with a single sensor location. Returns all_MEEG: list of np.array. MEEG at the
+                        electrode/sensor locations.</p>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="cdm_meeg">Current dipole moment (CDM)</label>
+                            <input
+                                class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                id="cdm_meeg" type="text" />
+                        </div>
+                        <div class="flex flex-col gap-2">
+                            <label class="text-text-light-primary dark:text-white text-sm font-medium"
+                                for="location">Location</label>
+                            <input
+                                class="w-full bg-gray-50 dark:bg-[#1e243a] border border-border-light dark:border-[#323b67] text-text-light-primary dark:text-white rounded-lg focus:ring-primary focus:border-primary px-3 py-2 text-base"
+                                id="location" type="text" />
+                            <p class="text-sm text-text-light-secondary dark:text-[#929bc9] mt-1">Location of the dipole
+                                moment</p>
+                        </div>
+                        <div class="flex flex-col gap-2 md:col-span-2">
+                            <label class="flex items-center gap-x-3 cursor-pointer mt-1">
+                                <input
+                                    class="h-5 w-5 rounded border-gray-300 dark:border-[#323b67] border-2 bg-transparent dark:bg-transparent text-primary checked:bg-primary checked:border-primary checked:bg-[image:--checkbox-tick-svg] focus:ring-0 focus:ring-offset-0 focus:border-primary focus:outline-none"
+                                    type="checkbox" />
+                                <p class="text-text-light-primary dark:text-white text-base font-normal leading-normal">
+                                    Compute MEG instead of EEG</p>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Navigation buttons -->
+        <div
+            class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
+            <!-- Previous/Return Button -->
+            <template x-if="activeTab === 'load'">
+                <a href="{{ url_for('dashboard') }}"
+                    class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                    Return to ncpi dashboard
+                </a>
+            </template>
+            <template x-if="activeTab !== 'load'">
+                <button
+                    @click="if (activeTab === 'signal') { activeTab = 'load' } else if (activeTab === 'kernel') { activeTab = 'signal' } else if (activeTab === 'meeg') { activeTab = 'kernel' }"
+                    class="px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/80 bg-transparent rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 border border-border-light dark:border-white/20">Back
+                    step</button>
+            </template>
+
+            <!-- Next/Continue Button -->
+            <template x-if="activeTab === 'meeg'">
+                <button @click="computeFieldPotential()"
+                    class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                    Compute field potential
+                    <span class="material-symbols-outlined">arrow_forward</span>
+                </button>
+            </template>
+            <template x-if="activeTab !== 'meeg'">
+                <button
+                    @click="if (activeTab === 'load') { activeTab = 'signal' } else if (activeTab === 'signal') { activeTab = 'kernel' } else if (activeTab === 'kernel') { activeTab = 'meeg' }"
+                    class="px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg hover:bg-primary/90">Continue
+                    configuration</button>
+            </template>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+{% block scripts %}
+<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+{% endblock %}
