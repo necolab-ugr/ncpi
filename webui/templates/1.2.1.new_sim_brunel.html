@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}New simulation{% endblock %}
+
+<!-- Main color for simulation page: yellow -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#FAC638",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+{% endblock %}
+
+
+<!-- Main content of the simulation page -->
+{% block content %}
+
+<!-- Parameter template (hidden) -->
+<template id="parameter-section">
+    <section class="parameter-section">
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Simulation control parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Total
+                        simulation time (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="simulation_time" />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation
+                        resolution (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="simulation_resolution"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Random
+                        seed</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="random_seed" />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Number of
+                        threads</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="num_threads" min="1"/>
+                </label>
+            </div>
+        </section>
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Network structure parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Population
+                        name</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="text" data-param="population_name"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Population
+                        size</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="text" data-param="population_size"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Neuron
+                        model name</span>
+                    <select
+                        class="param-input form-select rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        disabled="" data-param="neuron_model_name">
+                        <option selected="" value="iaf_psc_exp">iaf_psc_exp</option>
+                    </select>
+                </label>
+            </div>
+        </section>
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Connection parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Connection
+                        rule</span>
+                    <select
+                        class="param-input form-select rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        disabled="" data-param="connection_rule">
+                        <option selected="" value="pairwise_bernouilli">Pairwise Bernouilli</option>
+                    </select>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Connection
+                        probability (%)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="connection_probability"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Target
+                        indegree</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="target_indegree"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic
+                        weight (pA)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="text" data-param="synaptic_weight"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic
+                        delay (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        readonly="" type="number" data-param="synaptic_delay"/>
+                </label>
+                <div class="flex items-center gap-3 pt-6">
+                    <input checked=""
+                        class="param-input form-checkbox h-5 w-5 rounded border-slate-400 dark:border-slate-600 bg-background-light dark:bg-slate-800 text-primary focus:ring-primary"
+                        disabled="" id="autapses" type="checkbox" data-param="allow_autapses" checked/>
+                    <label class="text-slate-800 dark:text-white text-sm font-medium" for="autapses">Allow
+                        autapses</label>
+                </div>
+            </div>
+        </section>
+    </section>
+</template>
+
+
+<!-- Container where input parameters will be appended with their default values -->    
+<div id="parameter-container">    
+</div>
+
+
+
+<!-- Action buttons -->
+<div class="flex justify-between items-center gap-4 p-4 mt-6">
+    <div class="flex justify-start gap-4 p-4 mt-6">
+        <a
+            href="{{url_for('dashboard')}}" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-transparent text-slate-800 dark:text-white text-base font-bold leading-normal tracking-[0.015em] border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">
+            <span class="truncate">Back to the dashboard</span>
+        </a>
+
+        <a
+            href="{{url_for('simulation')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+            <span class="material-symbols-outlined text-lg">arrow_back</span>
+            Back to simulation options
+        </a>
+    </div>
+    <a
+        class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+        <span class="truncate">Run trial simulation</span>
+    </a>
+</div>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+    {{ super() }} <!-- import base.html scripts -->
+
+    <!-- Simulation-specific JavaScript -->
+    <script src="{{ url_for('static', filename='js/simulation.js') }}"></script>
+
+{% endblock %} > 

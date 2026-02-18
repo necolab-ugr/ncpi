@@ -1,0 +1,724 @@
+{% extends "base.html" %}
+{% block title %}Features{% endblock %}
+
+<!-- Main color for simulation page: blue -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#1337ec",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+
+<style>
+    [x-cloak] {
+        display: none !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- DFA method configuration parameters (template) -->
+<template id="dfa-config-template">
+    <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Configuration of DFA</h2>
+    <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                for="amplitude-envelope-dfa">Amplitude envelope for all channels
+                (signal)</label>
+            <input
+                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
+                disabled="" id="amplitude-envelope-dfa" name="amplitude-envelope-dfa"
+                type="text" value="From previous step" />
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                for="sampling-frequency-dfa">Sampling frequency of the signal</label>
+            <input
+                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                id="sampling-frequency-dfa" name="sampling-frequency-dfa" type="text"
+                value="1000" />
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                for="interval-dfa-computed">Interval over which DFA is computed (in
+                sec)</label>
+            <div class="mt-1 flex items-center space-x-2">
+                <input
+                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                    type="text" value="4" />
+                <span class="text-slate-500 dark:text-slate-400">-</span>
+                <input
+                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                    type="text" value="100" />
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                for="interval-dfa-fit">Interval over which the DFA exponent is fit (in
+                sec)</label>
+            <div class="mt-1 flex items-center space-x-2">
+                <input
+                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                    type="text" value="10" />
+                <span class="text-slate-500 dark:text-slate-400">-</span>
+                <input
+                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                    type="text" value="100" />
+            </div>
+            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">If empty, it will be
+                the same as the DFA computation interval</p>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                for="ignored-channels">Ignored channels</label>
+            <div class="mt-1 flex items-center space-x-4">
+                <span
+                    class="text-sm font-medium text-slate-700 dark:text-slate-300">Ignore</span>
+                <div class="flex items-center space-x-4">
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-1" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-1">1</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-2" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-2">2</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-3" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-3">3</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-4" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-4">4</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-5" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-5">5</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-6" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-6">6</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-7" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-7">7</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-8" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-8">8</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-9" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-9">9</label>
+                    </div>
+                    <div class="flex items-center">
+                        <input
+                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
+                            id="ignore-10" name="ignore-channels" type="checkbox" />
+                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
+                            for="ignore-10">10</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</template>
+
+
+<!-- Main content -->
+<div x-data="{ 
+            activeTab: 'load-data', 
+            computeFeatures: window.computeFeatures,
+            uploads: {},
+            isUploaded(id) { return this.uploads[id] !== undefined; },
+            getFileName(id) { return this.uploads[id]?.name || ''; },
+            selectedMethod: '', // Track the selected method
+            methods: [
+                {
+                    key: 'catch22',
+                    label: 'Catch22: a collection of 22 time-series features (CAnonical Time-series CHaracteristics)',
+                    value: 'catch22'
+                }, 
+                {
+                    key: 'Power spectrum parameterization',
+                    label: 'Power spectrum parameterization using the FOOOF algorithm',
+                    value: 'power_spectrum_parameterization'
+                },
+                {
+                    key: 'fEI',
+                    label: 'fEI: Functional excitation-inhibition ratio & DFA: Detrended fluctuation analysis',
+                    value: 'fEI'
+                },
+                {
+                    key: 'DFA',
+                    label: 'DFA: Detrended fluctuation analysis',
+                    value: 'DFA'
+                },
+                {
+                    key: 'hctsa',
+                    label: 'hctsa: Highly comparative time-series analysis',
+                    value: 'hctsa'
+                }
+            ]
+    }">
+    <div class="max-w-5xl mx-auto">
+        <div class="pb-8">
+            <h1 class="text-[#34495E] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em] min-w-72">
+                Module Configuration: Features</h1>
+        </div>
+
+        <!-- Menu tabs -->
+        <div class="border-b border-gray-200 dark:border-[#323b67]">
+            <nav aria-label="Tabs" class="-mb-px flex space-x-6">
+                <button @click="activeTab = 'load-data'"
+                    :class="{ 'border-primary text-primary': activeTab === 'load-data', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'load-data' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Load data</button>
+                <button @click="activeTab = 'select-method'"
+                    :class="{ 'border-primary text-primary': activeTab === 'select-method', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'select-method' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Select Method</button>
+                <button @click="activeTab = 'configure-method'"
+                    :class="{ 'border-primary text-primary': activeTab === 'configure-method', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'configure-method' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Configure method</button>
+            </nav>
+        </div>
+
+        <!-- Form action -->
+        <form action="{{ url_for('start_computation_redirect', computation_type='features')}} " method="POST" enctype="multipart/form-data">
+            <!-- Tab contents -->
+            <div class="pt-8">
+                
+                <!-- Load Data Tab -->
+                <div x-show="activeTab === 'load-data'" x-cloak>
+                    <div
+                        class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-8 flex flex-col items-center text-center">
+                        <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
+                        <button type="button"
+                            @click="document.getElementById('data-file').click()"
+                            class="flex items-center justify-center gap-2 h-12 px-6 bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                            <span class="material-symbols-outlined">upload_file</span>
+                            Load data
+                        </button>
+
+                        <!-- Upload status indicator -->
+                        <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                            <span class="material-symbols-outlined">check_circle</span>
+                            <span>Data uploaded successfully</span>
+                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                        </div>
+                        
+                        <p class="mt-4 text-sm text-gray-600 dark:text-gray-400 max-w-sm">You can extract features from
+                            simulation as well as from empirical data.</p>
+                    </div>
+                </div>
+
+
+                <!-- Select Method Tab -->
+                <div x-show="activeTab === 'select-method'" x-cloak>
+                    <div class="pt-8">
+                        <div class="bg-white border border-gray-200 rounded-xl p-6 dark:bg-[#111422] dark:border-[#323b67]">
+                            <h2 class="text-[#34495E] text-[22px] font-bold leading-tight tracking-[-0.015em] mb-4 transition-colors dark:focus:ring-offset-background-dark dark:text-gray-400">
+                                Select Method</h2>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 dark:bg-[#111422] dark:border-[#323b67]">
+                                <template :key="method.key" x-for="method in methods">
+                                    <label
+                                        class="flex items-center p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors dark:bg-[#111422] dark:border-[#323b67] dark:hover:border-gray-500 dark:hover:bg-white/10"
+                                        :class="{ 'border-primary bg-primary/5': selectedMethod === method.key }">
+                                        <input :value="method.value" x-model="selectedMethod"
+                                            class="form-radio h-4 w-4 text-primary focus:ring-primary/50 border-gray-300 bg-background-light"
+                                            name="select-method" type="radio" />
+                                        <span class="ml-3 text-sm font-medium text-[#34495E] dark:text-gray-400" x-text="method.label"></span>
+                                    </label>
+                                </template>
+                            </div>
+                            <!-- Visual indicator of selection -->
+                            <div class="mt-4 p-3 dark:bg-gray-800 bg-gray-50 rounded-lg" x-show="selectedMethod">
+                                <p class="text-sm text-gray-600 dark:text-gray-300">
+                                    Selected: <span class="font-semibold text-primary dark:text-primary-300"
+                                        x-text="methods.find(m => m.value === selectedMethod)?.label"></span>
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+                <!-- Configure Method Tab -->
+                <div x-show="activeTab === 'configure-method'" x-cloak>
+                    <h1 class="text-[#34495E] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">
+                        Method
+                        Configuration: <span x-text="methods.find(m => m.value === selectedMethod)?.label"></span></h1>
+
+                    <!-- Show message if no method selected -->
+                    <div x-show="!selectedMethod" class="text-center py-8">
+                        <p class="text-gray-500">Please select a method in the previous tab first.</p>
+                        <button @click="activeTab = 'select-method'" type="button"
+                            class="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">
+                            Go Back to Select Method
+                        </button>
+                    </div>
+
+                    <!-- Catch22 Configuration -->
+                    <div x-show="selectedMethod === 'catch22'" x-cloak>
+                        <p class="mt-2 mb-6 text-gray-600 dark:text-gray-300">Configuration of the method Catch22: a
+                            collection of 22 time-series features (Canonical Time-series CHaracteristics)</p>
+                        <div class="space-y-8">
+                            <section
+                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <div class="flex items-center gap-4">
+                                    <h2
+                                        class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
+                                        catch22 parameters</h2>
+                                </div>
+                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-4">
+                                    <!-- Conditional message based on upload status -->
+                                    <template x-if="isUploaded('data-file')">
+                                        <div
+                                            class="bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium px-4 py-3 rounded-lg flex items-center gap-2">
+                                            <span class="material-symbols-outlined">check_circle</span>
+                                            <span>Data was already loaded.</span>
+                                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                                        </div>
+                                    </template>
+                                    
+                                    <template x-if="!isUploaded('data-file')">
+                                        <div class="mb-6">
+                                            <div
+                                                class="bg-yellow-100 dark:bg-yellow-900/50 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 text-sm font-medium px-4 py-3 rounded-lg flex items-center gap-2">
+                                                <span class="material-symbols-outlined">warning</span>
+                                                <span>No data loaded yet. Please go back to the "Load data" tab to upload your data.</span>
+                                            </div>
+                                            <button @click="activeTab = 'load-data'" type="button"
+                                                class="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">
+                                                Go Back to Load Data
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+
+                    <!-- Power Spectrum Configuration -->
+                    <div x-show="selectedMethod === 'power_spectrum_parameterization'" x-cloak>
+                        <p class="mt-2 mb-6 text-gray-500 dark:text-gray-400">Configuration of the method Power spectrum
+                            parameterization, using the FOOOF algorithm</p>
+                        <div class="space-y-8">
+                            <section
+                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <h2
+                                    class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
+                                    Input parameters</h2>
+                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="flex flex-col min-w-40 flex-1 md:col-span-2">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Sampling frequency</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <p 
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] h-10 p-[15px] text-base font-normal leading-normal focus:border-primary/50 placeholder:text-gray-400 dark:placeholder:text-[#929bc9]"
+                                                    >
+                                                    Sampling frequency detected in the loaded data
+                                                </p>
+                                            </div>
+                                        </label>
+                                        <label class="flex flex-col min-w-40 flex-1">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Minimum frequency for the power spectrum fit</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input id="min-freq-power" name="min-freq-power" type="number"
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    value="5.0" />
+                                            </div>
+                                        </label>
+                                        <label class="flex flex-col min-w-40 flex-1">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Maximum frequency for the power spectrum fit</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input id="max-freq-power" name="max-freq-power" type="number"
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    value="45.0" />
+                                            </div>
+                                        </label>
+                                        <label class="flex flex-col min-w-40 flex-1 md:col-span-2">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Threshold for the r squared value</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input id="threshold-r" name="threshold-r-power" type="number"
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    value="0.9" />
+                                            </div>
+                                        </label>
+                                    </div>
+                                </div>
+                            </section>
+                            <section
+                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <h2
+                                    class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
+                                    Parameters for the FOOOF algorithm</h2>
+                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="flex flex-col min-w-40 flex-1">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Peak threshold</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input id="peak-threshold" name="peak-threshold-foof" type="number"
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    value="1.0" />
+                                            </div>
+                                        </label>
+                                        <label class="flex flex-col min-w-40 flex-1">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Minimum peak height</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input id="min-peak-height" name="min-peak-height-foof" type="number"
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    value="0.0" />
+                                            </div>
+                                        </label>
+                                        <label class="flex flex-col min-w-40 flex-1 md:col-span-2">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Maximum number of peaks</p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input id="max-peak-number" name="max-peak-number-foof" type="number"
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    value="5" />
+                                            </div>
+                                        </label>
+                                        <div class="md:col-span-2">
+                                            <p
+                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
+                                                Peak width limits</p>
+                                            <div class="grid grid-cols-2 gap-4">
+                                                <label class="flex flex-col min-w-40 flex-1">
+                                                    <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                        <span
+                                                            class="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 dark:border-[#323b67] bg-gray-50 dark:bg-[#232948] text-gray-500 dark:text-gray-400 text-sm">Min</span>
+                                                        <input id="peak-width-min" name="peak-width-min-foof" type="number"
+                                                            class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-none rounded-r-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                            value="10.0" />
+                                                    </div>
+                                                </label>
+                                                <label class="flex flex-col min-w-40 flex-1">
+                                                    <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                        <span
+                                                            class="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 dark:border-[#323b67] bg-gray-50 dark:bg-[#232948] text-gray-500 dark:text-gray-400 text-sm">Max</span>
+                                                        <input id="peak-width-max" name="peak-width-max-foof" type="number"
+                                                            class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-none rounded-r-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                            value="50.0" />
+                                                    </div>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+
+
+                    <!-- fEI Configuration -->
+                    <div x-show="selectedMethod === 'fEI'" x-cloak>
+                        <p class="mt-2 mb-6 text-gray-500 dark:text-gray-400">Configuration of the method fEI: Functional
+                            excitation-inhibition ratio & DFA: Detrended fluctuation analysis</p>
+                        <div class="mt-12 space-y-12">
+                            <div x-html="document.getElementById('dfa-config-template').innerHTML"></div>
+
+                            <section>
+                                <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Configuration of fEI</h2>
+                                <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            for="amplitude-envelope-fei">Amplitude envelope for all channels
+                                            (signal)</label>
+                                        <input
+                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
+                                            disabled="" id="amplitude-envelope-fei" name="amplitude-envelope-fei"
+                                            type="text" value="From previous step" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            for="sampling-frequency-fei">Sampling frequency of the signal</label>
+                                        <input
+                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                                            id="sampling-frequency-fei" name="sampling-frequency-fei" type="text"
+                                            value="1000" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            for="window-size">Window size in seconds</label>
+                                        <input
+                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                                            id="window-size" name="window-size" type="text" value="2.0" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                                            for="fraction-overlap">Fraction of overlap between windows (0-1)</label>
+                                        <input
+                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
+                                            id="fraction-overlap" name="fraction-overlap" type="text" value="0.5" />
+                                    </div>
+                                </div>
+                            </section>
+                            <section
+                                class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                                <h3 class="text-md font-semibold text-slate-900 dark:text-white">DFA Values and Ignored
+                                    Channels</h3>
+                                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Values for each channel used
+                                    for thresholding fEI. Check 'Ignore' to exclude a channel from the computation.</p>
+                                <div class="mt-6 overflow-x-auto">
+                                    <div class="grid grid-cols-10 gap-4 min-w-[600px]">
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            1</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            2</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            3</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            4</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            5</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            6</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            7</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            8</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            9</div>
+                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
+                                            10</div>
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="1.12" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="0.98" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="1.05" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="1.21" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="1.03" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="1.15" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" value="0.99" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" />
+                                        <input
+                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
+                                            type="text" />
+                                        <label
+                                            class="col-span-10 mt-4 text-sm font-medium text-slate-700 dark:text-slate-300">Ignore</label>
+                                        <input
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input checked=""
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input checked=""
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input checked=""
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                        <input checked=""
+                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                            type="checkbox" />
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+
+                    <!-- DFA Configuration -->
+                    <div x-show="selectedMethod === 'DFA'" x-cloak>
+                        <div x-html="document.getElementById('dfa-config-template').innerHTML"></div>
+                    </div>
+
+                    <!-- hctsa Configuration -->
+                    <div x-show="selectedMethod === 'hctsa'" x-cloak>
+                        <p class="mt-2 mb-6 mt-2 text-gray-600 dark:text-gray-300">Configuration of the method hctsa: Highly
+                            comparative time-series analysis</p>
+                        <div class="space-y-8">
+                            <section
+                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <div class="flex items-center gap-4">
+                                    <h2
+                                        class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
+                                        hctsa parameters</h2>
+                                </div>
+                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-6">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                            for="time-series-data">A set of samples of time-series data</label>
+                                        <div class="mt-1">
+                                            <input
+                                                class="block w-full rounded-md border-gray-300 dark:border-[#323b67] bg-gray-100 dark:bg-[#232948]/50 shadow-sm focus:border-primary focus:ring-primary sm:text-sm text-gray-500 dark:text-gray-400 cursor-not-allowed"
+                                                disabled="" id="time-series-data" name="time-series-data" type="text"
+                                                value="loaded from the data" />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                            for="hctsa-folder">Folder where hctsa is installed</label>
+                                        <div class="mt-1 flex rounded-md shadow-sm">
+                                            <div class="relative flex flex-grow items-stretch focus-within:z-10">
+                                                <input
+                                                    class="block w-full rounded-none rounded-l-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] focus:border-primary focus:ring-primary sm:text-sm"
+                                                    id="hctsa-folder" name="hctsa-folder"
+                                                    placeholder="Select a folder..." type="text" />
+                                            </div>
+                                            <button
+                                                class="relative -ml-px inline-flex items-center space-x-2 rounded-r-md border border-gray-300 dark:border-[#323b67] bg-gray-50 dark:bg-[#232948] px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#323b67] focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
+                                                type="button">
+                                                <span class="material-symbols-outlined text-lg">folder_open</span>
+                                                <span>Browse</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                            for="matlab-workers">Number of Matlab workers of the parallel pool</label>
+                                        <div class="mt-1">
+                                            <input
+                                                class="block w-full rounded-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
+                                                id="matlab-workers" name="matlab-workers" placeholder="32"
+                                                type="number" />
+                                        </div>
+                                    </div>
+                                </div>
+                            </section>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+
+
+
+            <!-- Navigation Buttons -->
+            <div class="mt-10 flex flex-col sm:flex-row justify-between items-center gap-4">
+                <!-- Previous/Return Button -->
+                <template x-if="activeTab === 'load-data'">
+                    <a href="{{ url_for('dashboard') }}"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                        <span class="material-symbols-outlined">arrow_back</span>
+                        Return to ncpi dashboard
+                    </a>
+                </template>
+
+                <template x-if="activeTab !== 'load-data'">
+                    <button type="button"
+                        @click="if (activeTab === 'select-method') { activeTab = 'load-data' } else if (activeTab === 'configure-method') { activeTab = 'select-method' }"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                        <span class="material-symbols-outlined">arrow_back</span>
+                        Back step
+                    </button>
+                </template>
+
+                <!-- Next/Compute Button -->
+                <template x-if="activeTab === 'configure-method' && isUploaded('data-file')">
+                    <button type="submit" x-show="selectedMethod" 
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                        Compute features
+                        <span class="material-symbols-outlined">arrow_forward</span>
+                    </button>
+                </template>
+
+                <template x-if="activeTab !== 'configure-method'">
+                    <button type="button"
+                        @click="if (activeTab === 'load-data') { activeTab = 'select-method' } else if (activeTab === 'select-method') { activeTab = 'configure-method' }"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                        Next step
+                        <span class="material-symbols-outlined">arrow_forward</span>
+                    </button>
+                </template>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<!-- Menu tab navigation -->
+<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<!-- Handle of file uploads script -->
+<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+{% endblock %}

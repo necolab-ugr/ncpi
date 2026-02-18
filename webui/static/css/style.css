@@ -1,0 +1,39 @@
+.hidden {
+    display: none !important;
+}
+
+/* Add transitions for smooth effect */
+#ncpi-config-section,
+#custom-config-section {
+    transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.hidden {
+    opacity: 0;
+    transform: translateY(-10px);
+    pointer-events: none;
+    position: absolute;
+    height: 0;
+    overflow: hidden;
+}
+
+.module-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.module-card:hover {
+    transform: translateY(-8px);
+}
+.pipeline-rail {
+    height: 1px;
+    background: #e2e8f0;
+}
+.dark .pipeline-rail {
+    background: #1e293b;
+}
+.pipeline-node {
+    width: 10px;
+    height: 10px;
+    border-radius: 9999px;
+    position: relative;
+    z-index: 10;
+}

@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}New simulation{% endblock %}
+
+<!-- Main color for simulation page: yellow -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#FAC638",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+{% endblock %}
+
+<!-- Main content of the simulation page -->
+{% block content %}
+
+<div class="flex flex-col gap-3 text-center mb-4">
+    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure New Simulation</p>
+    <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-2xl mx-auto">
+        Choose a template or provide your own script to start your neural network simulation.
+    </p>
+</div>
+<div class="flex flex-col gap-6 w-full max-w-[800px] mx-auto">
+    <div
+        class="group relative flex flex-col md:flex-row items-center gap-8 p-8 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary transition-all duration-300 shadow-sm overflow-hidden">
+        <a href="{{url_for('new_sim_brunel')}}" class="flex flex-1 flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
+                    <span class="material-symbols-outlined text-3xl">hub</span>
+                </div>
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Random Balanced Networks (Brunel)</h3>
+            </div>
+            <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
+                A standard model for studying the dynamics of connected networks of excitatory and inhibitory
+                neurons.
+            </p>
+            <div class="pt-2">
+                <button
+                    class="flex items-center justify-center px-8 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-105 transition-all shadow-sm">
+                    Configure simulation
+                </button>
+            </div>
+        </a>
+        <a href="{{url_for('new_sim_brunel')}}"
+            class="w-48 h-48 relative bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-800">
+
+            <img src="{{url_for('static', filename='images/dad212477-fig-0001-m.png')}}" alt="Brunel" class="h-31 w-31 object-contain"/>
+
+            <!-- <div class="absolute inset-0 opacity-20">
+                <svg class="w-full h-full" viewBox="0 0 100 100">
+                    <circle class="text-slate-400" cx="50" cy="50" fill="none" r="40" stroke="currentColor"
+                        stroke-width="0.5"></circle>
+                </svg>
+            </div>
+            <div class="relative flex items-center justify-center gap-4">
+                <div class="flex flex-col items-center gap-2">
+                    <div class="schematic-dot bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
+                    <div class="text-[10px] font-bold text-blue-500 uppercase tracking-tighter">Exc</div>
+                </div>
+                <div class="w-12 h-px bg-gradient-to-r from-blue-500 via-slate-300 to-red-500"></div>
+                <div class="flex flex-col items-center gap-2">
+                    <div class="schematic-dot bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
+                    <div class="text-[10px] font-bold text-red-500 uppercase tracking-tighter">Inh</div>
+                </div>
+            </div> -->
+        </a>
+    </div>
+    <div
+        class="group relative flex flex-col md:flex-row items-center gap-8 p-8 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary transition-all duration-300 shadow-sm overflow-hidden">
+        <a href="{{url_for('new_sim_custom')}}" class="flex flex-1 flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <div
+                    class="flex items-center justify-center w-12 h-12 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 group-hover:bg-primary/10 group-hover:text-primary transition-colors">
+                    <span class="material-symbols-outlined text-3xl">terminal</span>
+                </div>
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Custom simulation scripts</h3>
+            </div>
+            <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
+                Upload your own Python scripts that run your simulation.
+            </p>
+            <div class="pt-2">
+                <button
+                    class="flex items-center justify-center px-8 py-3 bg-primary  border-slate-200 dark:border-slate-700 text-slate-700 dark:text-white font-bold rounded-lg hover:border-primary dark:hover:border-primary transition-all shadow-sm">
+                    Upload scripts
+                </button>
+            </div>
+        </a>
+        <a href="{{url_for('new_sim_custom')}}" 
+            class="w-48 h-48 relative bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-800">
+            <div class="text-slate-400 dark:text-slate-700 font-mono text-xs absolute top-4 left-4 select-none">
+                def network():<br />  nest.Create(...)
+            </div>
+            <div class="relative flex flex-col items-center">
+                <svg class="w-20 h-20 text-slate-400 group-hover:text-primary transition-colors" fill="currentColor"
+                    viewBox="0 0 24 24">
+                    <path
+                        d="M14.25.75c-4.908 0-4.608 2.118-4.608 2.118l.003 2.17h4.721v.696H8.038v-.001S5.32 5.713 5.32 10.588c0 4.875 2.36 4.608 2.36 4.608h1.409v-1.98s-.01-2.433 2.364-2.433h4.634s2.412-.048 2.412-2.364V5.41s.215-4.66-4.249-4.66zm-2.91 1.76a.795.795 0 1 1 0 1.589.795.795 0 0 1 0-1.589zm.41 11.135c4.908 0 4.608-2.118 4.608-2.118l-.003-2.17H11.63v-.696h6.328v.001s2.718.02 2.718-4.855c0-4.875-2.36-4.608-2.36-4.608h-1.409v1.98s.01 2.433-2.364 2.433h-4.634s-2.412.048-2.412 2.364V12.04s-.215 4.66 4.249 4.66zm2.91-1.76a.795.795 0 1 1 0-1.589.795.795 0 0 1 0 1.589z">
+                    </path>
+                </svg>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- Action buttons -->
+<div class="mt-auto pt-6 flex flex-wrap gap-4 border-t border-slate-200 dark:border-slate-800">
+    <a
+        href="{{url_for('dashboard')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+        <span class="material-symbols-outlined text-lg">dashboard</span>
+        Back to the dashboard
+    </a>
+    <a
+        href="{{url_for('simulation')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+        <span class="material-symbols-outlined text-lg">arrow_back</span>
+        Back to simulation options
+    </a>
+</div>
+
+{% endblock %}
+
