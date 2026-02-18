@@ -188,6 +188,24 @@ class LIF_network(object):
         nest.Simulate(tstop)
 
 
+def _simulate_with_progress(tstop, dt):
+    if tstop <= 0:
+        return
+    # Aim for ~50 progress updates, align to dt
+    step = max(dt, tstop / 50.0)
+    step = max(dt, round(step / dt) * dt)
+    sim_time = 0.0
+    while sim_time < tstop:
+        remaining = tstop - sim_time
+        this_step = step if remaining > step else remaining
+        if this_step <= 0:
+            break
+        nest.Simulate(this_step)
+        sim_time += this_step
+        pct = int(min(100, round((sim_time / tstop) * 100)))
+        print(f"PROGRESS:{pct}", flush=True)
+
+
 if __name__ == "__main__":
     # Read the script file path from sys.argv[1]
     script_path = sys.argv[1]
@@ -222,7 +240,7 @@ if __name__ == "__main__":
     # Simulation
     print('\nSimulating...\n', end=' ', flush=True)
     tac = time.time()
-    network.simulate(tstop)
+    _simulate_with_progress(tstop, dt)
     toc = time.time()
     print(f'The simulation took {toc - tac} seconds.\n', end=' ', flush=True)
 

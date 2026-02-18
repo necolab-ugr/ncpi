@@ -49,7 +49,7 @@
             <div class="mb-10">
                 <h1 class="text-4xl font-black leading-tight tracking-tight mb-2">Simulation Configuration: Load
                     Data</h1>
-                <p class="text-slate-500 dark:text-slate-400 text-lg">Select and upload your neural dataset files.
+                <p class="text-slate-500 dark:text-slate-400 text-lg">Select and upload your simulation files.
                 </p>
             </div>
             <div class="flex flex-col gap-6 flex-grow mb-12">
@@ -58,7 +58,7 @@
                     <div class="flex items-center justify-between">
                         <h3 class="text-lg font-bold flex items-center gap-2">
                             <span class="material-symbols-outlined text-primary">analytics</span>
-                            Load spikes (X)
+                            Load simulation output files (spike times, gids, ...)
                         </h3>
                         <button
                             class="text-xs font-semibold text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
@@ -66,46 +66,35 @@
                         </button>
                     </div>
 
-                    <!-- Hidden file input -->
-                    <input type="file" id="spikeFileInput" class="hidden" accept=".pkl" />
-                    <!-- Drop zone -->
-                    <div onclick="document.getElementById('spikeFileInput').click()"
-                        class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
-                        <span
-                            class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">upload_file</span>
-                        <p class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Drag and drop
-                            spikes file or click to browse</p>
-                    </div>
-                </div>
-                <div
-                    class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-4">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-lg font-bold flex items-center gap-2">
-                            <span class="material-symbols-outlined text-primary">tune</span>
-                            Load theta (features)
-                        </h3>
-                        <button
-                            class="text-xs font-semibold text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
-                            <span class="material-symbols-outlined text-sm">delete</span> Clear
-                        </button>
-                    </div>
-
-                    <!-- Hidden file input -->
-                    <input type="file" id="thetaFileInput" class="hidden" accept=".pkl" />
-                    <!-- Drop zone -->
-                    <div onclick="document.getElementById('thetaFileInput').click()"
-                        class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
-                        <span
-                            class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">file_present</span>
-                        <p class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Drag and drop
-                            features file or click to browse</p>
-                    </div>
+                    <form id="simulationUploadForm" action="{{ url_for('upload_sim_files') }}" method="POST" enctype="multipart/form-data">
+                        <!-- Hidden file input -->
+                        <input type="file" id="spikeFileInput" name="simulation_files" class="hidden" accept=".pkl" multiple />
+                        <!-- Drop zone -->
+                        <div id="spikeDropZone" onclick="document.getElementById('spikeFileInput').click()"
+                            class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
+                            <span
+                                class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">upload_file</span>
+                            <p class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Drag and drop
+                                simulation output files or click to browse</p>
+                            <div id="selectedFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected files</span>
+                                <div id="selectedFilesList" class="mt-2"></div>
+                            </div>
+                        </div>
+                    </form>
                 </div>
                 <div class="mt-8 flex justify-end">
+                    {% if has_simulation_pkl %}
                     <a href="{{url_for('field_potential')}}"
                         class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
                         Continue to Field Potential
                     </a>
+                    {% else %}
+                    <span
+                        class="bg-slate-200 text-slate-500 px-10 py-3 rounded-lg font-bold text-lg cursor-not-allowed select-none">
+                        Continue to Field Potential
+                    </span>
+                    {% endif %}
                 </div>
             </div>
             <div class="mt-auto pt-6 flex flex-wrap gap-4 border-t border-slate-200 dark:border-slate-800">
@@ -131,14 +120,28 @@
                     class="bg-slate-100 dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
                     <div class="flex items-center gap-4">
                         <div class="relative flex">
+                            {% if has_simulation_pkl %}
+                            <span class="material-symbols-outlined text-green-500 text-3xl">check_circle</span>
+                            {% else %}
                             <span
                                 class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-20"></span>
                             <span class="material-symbols-outlined text-primary text-3xl">hourglass_empty</span>
+                            {% endif %}
                         </div>
                         <div>
+                            {% if has_simulation_pkl %}
+                            <p class="text-sm font-bold text-green-600 dark:text-green-500">Status: Files detected</p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Simulation output files are ready.</p>
+                            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                {% for filename in simulation_pkl_files %}
+                                <span class="block">{{ filename }}</span>
+                                {% endfor %}
+                            </div>
+                            {% else %}
                             <p class="text-sm font-bold">Status: Awaiting files</p>
                             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Please select files to
                                 continue</p>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
@@ -157,19 +160,82 @@
                         <span class="material-symbols-outlined text-primary shrink-0">grid_on</span>
                         <div>
                             <h5 class="text-sm font-bold mb-1">Data Structure</h5>
-                            <p class="text-sm text-slate-500 dark:text-slate-400">The Spikes (X) file should contain
-                                the spike recordings and the events of the spikes.</p>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">Output files from the simulation should be saved as
+                                <span class="block">.pkl files (for example: times.pkl, gids.pkl, tstop.pkl, dt.pkl, network.pkl).</span>
+                            </p>
                         </div>
                     </div>
                 </div>
             </div>
             <div
                 class="pt-10 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400 leading-relaxed">
-                <p>Once both files are successfully uploaded and validated, the field potential configuration module will become
+                <p>Once the files are successfully uploaded and validated, the field potential configuration module will become
                     accessible.</p>
             </div>
         </div>
     </aside>
 </div>
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const uploadForm = document.getElementById('simulationUploadForm');
+    const spikeFileInput = document.getElementById('spikeFileInput');
+    const spikeDropZone = document.getElementById('spikeDropZone');
+
+    const submitIfReady = () => {
+        if (spikeFileInput.files && spikeFileInput.files.length > 0) {
+            uploadForm.submit();
+        }
+    };
+
+    const renderSelectedFiles = (files) => {
+        const selectedFiles = document.getElementById('selectedFiles');
+        const selectedFilesList = document.getElementById('selectedFilesList');
+        selectedFilesList.innerHTML = '';
+        Array.from(files).forEach((file) => {
+            const line = document.createElement('span');
+            line.className = 'block';
+            line.textContent = file.name;
+            selectedFilesList.appendChild(line);
+        });
+        selectedFiles.classList.remove('hidden');
+    };
+
+    const setInputFiles = (files) => {
+        const dataTransfer = new DataTransfer();
+        Array.from(files).forEach((file) => dataTransfer.items.add(file));
+        spikeFileInput.files = dataTransfer.files;
+    };
+
+    spikeFileInput.addEventListener('change', () => {
+        renderSelectedFiles(spikeFileInput.files);
+        submitIfReady();
+    });
+
+    ['dragenter', 'dragover'].forEach((eventName) => {
+        spikeDropZone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            spikeDropZone.classList.add('border-primary');
+        });
+    });
+
+    ['dragleave', 'drop'].forEach((eventName) => {
+        spikeDropZone.addEventListener(eventName, (event) => {
+            event.preventDefault();
+            spikeDropZone.classList.remove('border-primary');
+        });
+    });
+
+    spikeDropZone.addEventListener('drop', (event) => {
+        const files = event.dataTransfer.files;
+        if (!files || files.length === 0) {
+            return;
+        }
+        setInputFiles(files);
+        renderSelectedFiles(files);
+        submitIfReady();
+    });
+</script>
 {% endblock %}

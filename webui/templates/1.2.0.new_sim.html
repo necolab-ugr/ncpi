@@ -28,9 +28,9 @@
 {% block content %}
 
 <div class="flex flex-col gap-3 text-center mb-4">
-    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure New Simulation</p>
+    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure a New Simulation</p>
     <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-2xl mx-auto">
-        Choose a template or provide your own script to start your neural network simulation.
+        Choose a model template or provide your own scripts to start your neural network simulation.
     </p>
 </div>
 <div class="flex flex-col gap-6 w-full max-w-[800px] mx-auto">
@@ -41,16 +41,15 @@
                 <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
                     <span class="material-symbols-outlined text-3xl">hub</span>
                 </div>
-                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Random Balanced Networks (Brunel)</h3>
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Random balanced network (Brunel model)</h3>
             </div>
             <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
-                A standard model for studying the dynamics of connected networks of excitatory and inhibitory
-                neurons.
+                A recurrently connected network model of excitatory and inhibitory populations implemented with LIF neurons.
             </p>
             <div class="pt-2">
                 <button
                     class="flex items-center justify-center px-8 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-105 transition-all shadow-sm">
-                    Configure simulation
+                    Configure model
                 </button>
             </div>
         </a>
@@ -80,6 +79,31 @@
     </div>
     <div
         class="group relative flex flex-col md:flex-row items-center gap-8 p-8 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary transition-all duration-300 shadow-sm overflow-hidden">
+        <a href="{{url_for('new_sim_four_area')}}" class="flex flex-1 flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
+                    <span class="material-symbols-outlined text-3xl">hub</span>
+                </div>
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Four-area cortical network model</h3>
+            </div>
+            <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
+                Four coupled cortical areas, each built from the above LIF local circuit and representing frontal, temporal,
+                parietal, and occipital cortex.
+            </p>
+            <div class="pt-2">
+                <button
+                    class="flex items-center justify-center px-8 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-105 transition-all shadow-sm">
+                    Configure model
+                </button>
+            </div>
+        </a>
+        <a href="{{url_for('new_sim_four_area')}}"
+            class="w-64 h-40 relative bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-800">
+            <img src="{{url_for('static', filename='images/four_area_model.png')}}" alt="Four-area network" class="w-full h-full object-contain p-2"/>
+        </a>
+    </div>
+    <div
+        class="group relative flex flex-col md:flex-row items-center gap-8 p-8 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary transition-all duration-300 shadow-sm overflow-hidden">
         <a href="{{url_for('new_sim_custom')}}" class="flex flex-1 flex-col gap-4">
             <div class="flex items-center gap-3">
                 <div
@@ -89,7 +113,7 @@
                 <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Custom simulation scripts</h3>
             </div>
             <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
-                Upload your own Python scripts that run your simulation.
+                Upload your own Python scripts to define and simulate your LIF network model.
             </p>
             <div class="pt-2">
                 <button
@@ -130,4 +154,3 @@
 </div>
 
 {% endblock %}
-

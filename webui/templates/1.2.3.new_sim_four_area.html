@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}New simulation{% endblock %}
+
+<!-- Main color for simulation page: yellow -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#FAC638",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+{% endblock %}
+
+
+<!-- Main content of the simulation page -->
+{% block content %}
+
+<div class="flex flex-col gap-3 text-center mb-6">
+    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure a Four-Area Simulation</p>
+    <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-2xl mx-auto">
+        Multi-area LIF network model with four coupled cortical areas and inter-area excitatory connections.
+    </p>
+</div>
+
+<!-- Parameter template (hidden) -->
+<template id="parameter-section">
+    <section class="parameter-section">
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Simulation parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation time
+                        tstop (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" step="any" data-param="tstop" />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Time step
+                        dt (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" step="any" data-param="dt"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Threads
+                        local_num_threads</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" min="1" step="1" data-param="local_num_threads" />
+                </label>
+            </div>
+        </section>
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Network</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Areas
+                        areas</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="areas"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Populations
+                        X</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Population
+                        sizes N_X</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="N_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane
+                        capacitance C_m_X</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="C_m_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane
+                        time constant tau_m_X (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="tau_m_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Resting
+                        potential E_L_X (mV)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="E_L_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Neuron
+                        model</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="model"/>
+                </label>
+            </div>
+        </section>
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Connectivity</h2>
+            <div class="flex flex-col gap-6">
+                <div class="px-4">
+                    <h3 class="text-slate-800 dark:text-white text-lg font-semibold leading-tight">
+                        Recurrent connectivity</h3>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
+                            J_EE (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="J_EE"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
+                            J_IE (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="J_IE"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
+                            J_EI (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="J_EI"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
+                            J_II (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="J_II"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local connection
+                            probability matrix C_YX</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="C_YX"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
+                            matrix J_YX (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="J_YX"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local delay
+                            matrix delay_YX (ms)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="delay_YX"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local synaptic
+                            time constants tau_syn_YX (ms)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="tau_syn_YX"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">External
+                            indegree n_ext</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="n_ext"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">External
+                            rate nu_ext (Hz)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="nu_ext"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">External
+                            weight J_ext (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="J_ext"/>
+                    </label>
+                </div>
+                <div class="px-4 pt-2">
+                    <h3 class="text-slate-800 dark:text-white text-lg font-semibold leading-tight">
+                        Inter-area connectivity</h3>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
+                            scale inter_area_scale</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="inter_area_scale"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
+                            probability inter_area_p</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="inter_area_p"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
+                            delay inter_area_delay (ms)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="number" step="any" data-param="inter_area_delay"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
+                            C_YX</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="inter_area.C_YX"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
+                            J_YX (pA)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="inter_area.J_YX"/>
+                    </label>
+                    <label class="flex flex-col gap-2">
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
+                            delay_YX (ms)</span>
+                        <input
+                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                            type="text" data-param="inter_area.delay_YX"/>
+                    </label>
+                </div>
+            </div>
+        </section>
+    </section>
+</template>
+
+
+<form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='four_area') }}">
+    <!-- Container where input parameters will be appended with their default values -->
+    <div id="parameter-container">
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex justify-between items-center gap-4 p-4 mt-6">
+        <div class="flex justify-start gap-4 p-4 mt-6">
+            <a
+                href="{{url_for('dashboard')}}" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-transparent text-slate-800 dark:text-white text-base font-bold leading-normal tracking-[0.015em] border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <span class="truncate">Back to the dashboard</span>
+            </a>
+
+            <a
+                href="{{url_for('simulation')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                <span class="material-symbols-outlined text-lg">arrow_back</span>
+                Back to simulation options
+            </a>
+        </div>
+        <button type="submit"
+            class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+            <span class="truncate">Run trial simulation</span>
+        </button>
+    </div>
+</form>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+    {{ super() }} <!-- import base.html scripts -->
+
+    <!-- Simulation-specific JavaScript -->
+    <script src="{{ url_for('static', filename='js/simulation_four_area.js') }}"></script>
+
+{% endblock %} > 
