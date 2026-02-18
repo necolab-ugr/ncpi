@@ -70,7 +70,11 @@ LFP data."*
 
 ### 🔵 `simulation/`
 
-> **Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
+This folder contains **two types of LIF network models**:
+- **`Hagen_model/`**: single-area LIF network model.
+- **`four_area_cortical_model/`**: multi-area (four-area) LIF network model.
+
+> **Note:** To run examples that include simulations of the LIF network models (e.g., in `Hagen_model/figures/example_full_pipeline.py`), 
 > the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST 
 > package with:
 >
@@ -139,6 +143,19 @@ response to varying external input values."*
 
 - **`RepeatedKFold.py`**  
   Trains inverse models on simulation data using repeated K-fold cross-validation.
+
+---
+
+#### Simulation Code (`four_area_cortical_model/simulation/`)
+
+- **`params/`**  
+  Contains parameter sets used to run simulations of the four-area cortical model.
+
+- **`python/`**  
+  Contains the main Python scripts to configure the network, run simulations, and perform analysis.
+
+- **`example_model_simulation.py`**  
+  Example script demonstrating how to simulate the four-area cortical model.
 
 
 ---
