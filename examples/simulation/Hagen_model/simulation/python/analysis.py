@@ -17,7 +17,9 @@ zenodo_dw_mult = True
 zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
 
 # Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in neuron)
-zenodo_dir = os.path.join("$HOME","multicompartment_neuron_network")
+zenodo_dir = os.path.expandvars(os.path.expanduser(
+    os.path.join("$HOME", "multicompartment_neuron_network")
+))
 
 # Download data
 if zenodo_dw_mult:
@@ -138,11 +140,11 @@ if __name__ == "__main__":
         N_X = LIF_params['N_X']
 
     # Simulation output from the multicompartment neuron network model
-    output_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network', 'output',
+    output_path = os.path.join(zenodo_dir, 'output',
                                'adb947bfb931a5a8d09ad078a6d256b0')
 
     # Path to the data files of the multicompartment neuron models
-    multicompartment_neuron_network_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network')
+    multicompartment_neuron_network_path = zenodo_dir
 
     # Compute the kernel
     print('Computing the kernel...')
