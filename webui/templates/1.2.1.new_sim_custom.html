@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}New simulation{% endblock %}
+
+<!-- Main color for simulation page: yellow -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#FAC638",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+{% endblock %}
+
+<!-- Main content of the simulation page -->
+{% block content %}
+
+<form id="custom-simulation-form" method="POST" action="{{ url_for('run_trial_simulation_custom') }}" enctype="multipart/form-data">
+    <!-- Upload section (hidden) -->
+    <div id="upload-section">
+        <section id="custom-upload" class="upload-section config-content flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Upload custom configuration</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Network
+                        parameters</span>
+                    <input
+                        name="network_params_file"
+                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
+                        type="file" required />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Network
+                        implementation (.py)</span>
+                    <input
+                        name="network_py_file"
+                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
+                        type="file" required />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation
+                        parameters</span>
+                    <input
+                        name="simulation_params_file"
+                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
+                        type="file" required />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation
+                        implementation (.py)</span>
+                    <input
+                        name="simulation_py_file"
+                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
+                        type="file" required />
+                </label>
+            </div>
+        </section>
+    </div>
+
+    <!-- Action buttons -->
+    <div class="flex justify-between items-center gap-4 p-4 mt-6">
+        <div class="flex justify-start gap-4 p-4 mt-6">
+            <a
+                href="{{url_for('dashboard')}}" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-transparent text-slate-800 dark:text-white text-base font-bold leading-normal tracking-[0.015em] border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <span class="truncate">Back to the dashboard</span>
+            </a>
+
+            <a
+                href="{{url_for('simulation')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                <span class="material-symbols-outlined text-lg">arrow_back</span>
+                Back to simulation options
+            </a>
+        </div>
+        <button type="submit"
+            class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+            <span class="truncate">Run trial simulation</span>
+        </button>
+    </div>
+</form>
+
+{% endblock %}

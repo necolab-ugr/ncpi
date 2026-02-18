@@ -39,6 +39,12 @@
         </div>
     </div>
     <div class="flex justify-end gap-4 mt-10 pt-6">
+        {% if computation_type == 'simulation' %}
+        <a x-show="progress >= 100" href="{{url_for('field_potential')}}"
+            class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+            Continue to Field Potential
+        </a>
+        {% else %}
         <button :disabled="progress < 100 || hasBeenClicked"
                 @click="hasBeenClicked = true; window.location.href = `{{url_for('download_results', job_id=job_id, computation_type=computation_type )}}`"
                 :class="progress < 100 || hasBeenClicked
@@ -46,10 +52,13 @@
                 : 'px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg shadow-md hover:bg-primary-dark transition-colors'">
             Save results
         </button>
+        {% endif %}
     </div>
+    {% if computation_type != 'simulation' %}
     <p x-show="hasBeenClicked" class="text-sm text-text-light-secondary dark:text-[#929bc9]">
         ✅ Results have already been downloaded
     </p>
+    {% endif %}
 </div>
 
 
