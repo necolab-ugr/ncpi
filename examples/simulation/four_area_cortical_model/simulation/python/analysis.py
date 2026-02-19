@@ -199,7 +199,7 @@ if __name__ == "__main__":
 
         # Compute CDM (z-component) using FieldPotential helper
         probe = 'KernelApproxCurrentDipoleMoment'
-        cdm_signals = potential.compute_cdm_from_kernels(
+        cdm_signals = potential.compute_cdm_lfp_from_kernels(
             H_YX,
             spike_times=area_times,
             dt=dt,

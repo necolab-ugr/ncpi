@@ -292,8 +292,9 @@ class FieldPotential:
             Path to the folder containing the multicompartment neuron model descriptions (cell parameters and
             morphologies).
         params: module
-            Module or object holding multicompartment network parameters
-            (e.g., an example_network_parameters-like script/module).
+            Module or object defining all multicompartment network parameters, including population properties
+            (names, sizes, morphologies), connectivity (probabilities, patterns), synaptic weights, and related
+            simulation settings.
         biophys: list
             List of biophysical membrane properties.
         dt: float
@@ -327,9 +328,11 @@ class FieldPotential:
             If True, account for conductance effects in kernel computation. Defaults to params.MC_params['g_eff'].
         n_ext: list or None
             Optional list of external synapse counts per population. Defaults to params.MC_params['n_ext'].
-        weights: list or None
-            Optional 2x2 weight matrix to override params.MC_params weights. Defaults to [[weight_EE, weight_IE],
-            [weight_EI, weight_II]] from params.MC_params.
+        weights: list, dict, or None
+            Optional weight matrix override. For multiple populations, provide an (N_pre x N_post) matrix
+            (rows = presynaptic populations, columns = postsynaptic populations) or a dict keyed by
+            ("pre", "post") tuples or "pre:post" strings. If None, defaults to params.MC_params weights
+            when available.
         Returns
         -------
         kernels: dict
@@ -403,10 +406,73 @@ class FieldPotential:
         if t_X is None:
             raise ValueError("t_X must be provided when params.transient is not available.")
 
+        def _default_weights():
+            mc = getattr(params, "MC_params", {})
+            if "weights" in mc:
+                return mc["weights"]
+            if "weight_matrix" in mc:
+                return mc["weight_matrix"]
+            if all(k in mc for k in ("weight_EE", "weight_IE", "weight_EI", "weight_II")):
+                return [[mc["weight_EE"], mc["weight_IE"]],
+                        [mc["weight_EI"], mc["weight_II"]]]
+            return None
+
+        def _normalize_weights(weights_in):
+            pop_names = list(params.population_names)
+            n = len(pop_names)
+            default = _default_weights()
+
+            if weights_in is None:
+                if default is None:
+                    raise ValueError("weights must be provided when no defaults are available in params.MC_params.")
+                return np.asarray(default, dtype=float)
+
+            if isinstance(weights_in, dict):
+                if default is not None:
+                    matrix = np.asarray(default, dtype=float)
+                    if matrix.shape != (n, n):
+                        matrix = np.full((n, n), np.nan, dtype=float)
+                else:
+                    matrix = np.full((n, n), np.nan, dtype=float)
+
+                for key, value in weights_in.items():
+                    if isinstance(key, (list, tuple)) and len(key) == 2:
+                        pre, post = key
+                    elif isinstance(key, str):
+                        if ":" in key:
+                            pre, post = key.split(":", 1)
+                        elif "," in key:
+                            pre, post = key.split(",", 1)
+                        else:
+                            raise ValueError(
+                                f"Invalid weight key '{key}'. Use 'pre:post' or ('pre','post')."
+                            )
+                    else:
+                        raise ValueError(
+                            f"Invalid weight key type '{type(key)}'. Use 'pre:post' or ('pre','post')."
+                        )
+                    pre = str(pre).strip()
+                    post = str(post).strip()
+                    if pre not in pop_names or post not in pop_names:
+                        raise KeyError(f"Unknown population in weights key '{pre}:{post}'.")
+                    matrix[pop_names.index(pre), pop_names.index(post)] = float(value)
+
+                if np.isnan(matrix).any():
+                    missing = []
+                    for pre in pop_names:
+                        for post in pop_names:
+                            if np.isnan(matrix[pop_names.index(pre), pop_names.index(post)]):
+                                missing.append(f"{pre}:{post}")
+                    raise ValueError(f"Missing weights for: {', '.join(missing)}")
+                return matrix
+
+            matrix = np.asarray(weights_in, dtype=float)
+            if matrix.ndim != 2 or matrix.shape != (n, n):
+                raise ValueError(f"weights must be a {n}x{n} matrix.")
+            return matrix
+
         # Synapse max. conductance (function, mean, st.dev., min.):
-        if weights is None:
-            weights = [[params.MC_params['weight_EE'], params.MC_params['weight_IE']],
-                       [params.MC_params['weight_EI'], params.MC_params['weight_II']]]
+        weights = _normalize_weights(weights)
 
         # Define biophysical membrane properties
         set_biophys = self._resolve_biophys(biophys)
@@ -514,7 +580,7 @@ class FieldPotential:
         return self.kernels
 
 
-    def compute_cdm_from_kernels(
+    def compute_cdm_lfp_from_kernels(
             self,
             kernels,
             spike_times,
@@ -529,7 +595,7 @@ class FieldPotential:
             aggregate=None,
     ):
         """
-        Compute the CDM from spike times and kernels via convolution.
+        Compute the CDM/LFP from spike times and kernels via convolution.
 
         Parameters
         ----------
@@ -958,48 +1024,72 @@ class FieldPotential:
 
     def compute_proxy(self, method, sim_data, sim_step, *, excitatory_only=None):
         """
-        Compute a proxy for the extracellular signal by combining variables directly measured from network simulations.
-        Note: some methods require a valid sim_step to compute delays.
+        Compute a 1D proxy of the extracellular signal from simulation output variables.
+
+        This method combines time series measured directly in simulations (e.g., firing
+        rates, synaptic currents, membrane potentials) into a single proxy signal with
+        shape ``(n_times,)``. Some proxy definitions use fixed or data-dependent temporal
+        delays and therefore require a valid simulation time step ``sim_step`` (in ms).
 
         Parameters
         ----------
-        method: str
-            Method to compute the proxy. Options are:
-            - 'FR': firing rate averaged over all neurons in the population.
-            - 'AMPA': sum of AMPA currents.
-            - 'GABA': sum of GABA currents.
-            - 'Vm': sum of membrane potentials.
-            - 'I': sum of synaptic currents.
-            - 'I_abs': sum of their absolute values.
-            - 'LRWS': LFP reference weighted sum.
-            - 'ERWS1': EEG reference weighted sum 1 (non-causal)
-            - 'ERWS2': EEG reference weighted sum 2 (non-causal)
+        method : str
+            Proxy definition to use. Supported values:
 
-        sim_data: dict
-            Dictionary containing the simulation data. Expected keys depend on `method`:
-            - "FR": requires FR data (n_units, n_times)
-            - "AMPA": requires AMPA data (n_units, n_times)
-            - "GABA": requires GABA data (n_units, n_times)
-            - "Vm": requires Vm data (n_units, n_times)
-            - "I", "I_abs": requires AMPA and GABA data
-            - "LRWS", "ERWS1": requires AMPA and GABA data
-            - "ERWS2": requires AMPA, GABA, and nu_ext data
+            Simple aggregates
+                - ``"FR"``     : Mean firing rate across units.
+                - ``"AMPA"``   : Sum of AMPA currents across units.
+                - ``"GABA"``   : Negative sum of GABA currents across units (sign convention).
+                - ``"Vm"``     : Sum of membrane potentials across units.
+                - ``"I"``      : Sum of synaptic currents, ``AMPA + GABA``.
+                - ``"I_abs"``  : Sum of absolute synaptic currents,
+                                 ``|AMPA| + |GABA|``.
 
-            If `excitatory_only` is set, the method will prefer keys with suffixes:
-            - excitatory_only=True: "<KEY>_exc"
-            - excitatory_only=False: "<KEY>_all" or "<KEY>_total"
-            and fall back to "<KEY>" if the suffixed keys are not provided.
+            Weighted-sum proxies with delays
+                - ``"LRWS"``   : LFP reference weighted sum (requires ``sim_step``).
+                - ``"ERWS1"``  : EEG reference weighted sum 1 (non-causal; requires ``sim_step``).
+                - ``"ERWS2"``  : EEG reference weighted sum 2 with data-dependent delays
+                                 (non-causal; requires ``sim_step`` and ``nu_ext``).
 
-        sim_step: float or None
-            Simulation time step in ms. Required for delay-based methods ("LRWS", "ERWS1", "ERWS2").
-        excitatory_only: bool or None
-            If provided, indicates whether inputs should be treated as excitatory-only. If None, the method will
-            use the base keys without any suffixes. This flag is used to select data keys, if present.
+        sim_data : Mapping[str, np.ndarray]
+            Container of simulation outputs keyed by variable name. Arrays are expected
+            to be shaped ``(n_units, n_times)`` for population/unit-resolved quantities,
+            and scalars/0D arrays for parameters such as ``nu_ext`` (if used).
+
+            Required keys depend on ``method``:
+
+            - ``"FR"``     : ``"FR"``
+            - ``"AMPA"``   : ``"AMPA"``
+            - ``"GABA"``   : ``"GABA"``
+            - ``"Vm"``     : ``"Vm"``
+            - ``"I"``,
+              ``"I_abs"``  : ``"AMPA"`` and ``"GABA"``
+            - ``"LRWS"``,
+              ``"ERWS1"``  : ``"AMPA"`` and ``"GABA"``
+            - ``"ERWS2"``  : ``"AMPA"``, ``"GABA"``, and ``"nu_ext"``
+
+            If ``excitatory_only`` is provided, the method will *prefer* suffixed keys
+            when present and fall back to the base key otherwise:
+
+            - ``excitatory_only is True``  : tries ``"<KEY>_exc"`` then ``"<KEY>"``
+            - ``excitatory_only is False`` : tries ``"<KEY>_all"``, ``"<KEY>_total"``,
+                                             then ``"<KEY>"``
+            - ``excitatory_only is None``  : uses only ``"<KEY>"``
+
+        sim_step : float or None
+            Simulation time step in milliseconds. Must be a positive number for
+            delay-based proxies (``"LRWS"``, ``"ERWS1"``, ``"ERWS2"``). Ignored by the
+            other methods.
+
+        excitatory_only : bool or None, optional (keyword-only)
+            Controls the key-selection preference described in ``sim_data``. This flag
+            does not change the mathematical definition of each proxy; it only selects
+            which input arrays are used when multiple variants are provided.
 
         Returns
         -------
-        proxy: np.array
-            Proxy for the extracellular signal.
+        proxy : np.ndarray
+            Proxy time series with shape ``(n_times,)``.
         """
 
         def _select(key):

@@ -416,7 +416,7 @@ def test_create_kernel_pairing_lfpykernels_example():
         np.testing.assert_allclose(kernels[key][probe_name], arr, rtol=1e-7, atol=1e-9)
 
 
-def test_compute_cdm_from_kernels_matches_manual_convolution():
+def test_compute_cdm_lfp_from_kernels_matches_manual_convolution():
     fp = FieldPotential()
     kernels = {"E:E": {"KernelApproxCurrentDipoleMoment": np.array([0.0, 1.0, 0.5])}}
     spike_times = {"E": np.array([1.0, 2.0, 2.0])}
@@ -426,7 +426,7 @@ def test_compute_cdm_from_kernels_matches_manual_convolution():
     counts, _ = np.histogram(spike_times["E"], bins=bins)
     rate = counts / (dt / 1000.0)
     expected = np.convolve(rate, kernels["E:E"]["KernelApproxCurrentDipoleMoment"], mode="same")
-    result = fp.compute_cdm_from_kernels(
+    result = fp.compute_cdm_lfp_from_kernels(
         kernels,
         spike_times,
         dt=dt,

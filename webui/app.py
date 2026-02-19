@@ -4,6 +4,8 @@ import shutil
 import subprocess
 import ast
 import threading
+import glob
+from collections import deque
 
 # Folder for temporary files > 5 GB
 # Set BEFORE any flask imports if possible
@@ -47,6 +49,7 @@ executor = ThreadPoolExecutor(max_workers=5)
 # Dictionary to store job progress/results (job_id: status_dict)
 # NOTE: This dictionary is volatile and will reset if the server restarts.
 job_status = {}
+MAX_OUTPUT_LINES = 200
 
 
 HAGEN_DEFAULTS = {
@@ -207,6 +210,10 @@ def _estimate_duration_seconds(form, defaults, model_type):
 def _run_process_with_progress(cmd, cwd, job_status, job_id, estimate_seconds):
     output_lines = []
     progress_seen = threading.Event()
+    output_buffer = deque(maxlen=MAX_OUTPUT_LINES)
+
+    if job_id in job_status:
+        job_status[job_id].setdefault("output", "")
 
     process = subprocess.Popen(
         cmd,
@@ -244,6 +251,9 @@ def _run_process_with_progress(cmd, cwd, job_status, job_id, estimate_seconds):
         for line in iter(process.stdout.readline, ""):
             output_lines.append(line)
             _maybe_update_progress(line)
+            output_buffer.append(line)
+            if job_id in job_status:
+                job_status[job_id]["output"] = "".join(output_buffer)
         process.stdout.close()
 
     reader_thread = threading.Thread(target=_reader, daemon=True)
@@ -432,10 +442,29 @@ def dashboard():
         )
     else:
         simulation_pkl_files = []
+    temp_dir = tempfile.gettempdir()
+    fp_dirs = [
+        os.path.join("/tmp", "field_potential_proxy"),
+        os.path.join("/tmp", "field_potential_kernel"),
+        os.path.join("/tmp", "field_potential_meeg"),
+        os.path.join(temp_dir, "field_potential_proxy"),
+        os.path.join(temp_dir, "field_potential_kernel"),
+        os.path.join(temp_dir, "field_potential_meeg"),
+    ]
+    field_potential_files = []
+    for fp_dir in fp_dirs:
+        if not os.path.isdir(fp_dir):
+            continue
+        for root, _, files in os.walk(fp_dir):
+            for name in files:
+                if name.endswith(".pkl"):
+                    field_potential_files.append(name)
     return render_template(
         "0.dashboard.html",
         simulation_pkl_files=simulation_pkl_files,
         has_simulation_pkl=bool(simulation_pkl_files),
+        field_potential_files=sorted(set(field_potential_files)),
+        has_field_potential_data=bool(field_potential_files),
     )
 
 # Simulation configuration page
@@ -492,6 +521,32 @@ def clear_simulation_data():
                     os.remove(path)
                 except OSError:
                     pass
+    return redirect(url_for('dashboard'))
+
+@app.route("/clear_field_potential_data", methods=["POST"])
+def clear_field_potential_data():
+    temp_dir = tempfile.gettempdir()
+    fp_dirs = [
+        os.path.join("/tmp", "field_potential_proxy"),
+        os.path.join("/tmp", "field_potential_kernel"),
+        os.path.join("/tmp", "field_potential_meeg"),
+        os.path.join(temp_dir, "field_potential_proxy"),
+        os.path.join(temp_dir, "field_potential_kernel"),
+        os.path.join(temp_dir, "field_potential_meeg"),
+    ]
+    for fp_dir in fp_dirs:
+        if not os.path.isdir(fp_dir):
+            continue
+        for root, _, files in os.walk(fp_dir):
+            for name in files:
+                if not name.endswith(".pkl"):
+                    continue
+                path = os.path.join(root, name)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
     return redirect(url_for('dashboard'))
 
 @app.route("/new_sim")
@@ -696,6 +751,7 @@ def run_trial_simulation(model_type):
         "results": None,
         "error": False,
         "progress_mode": "manual",
+        "output": "",
     }
 
     executor.submit(
@@ -747,6 +803,7 @@ def run_trial_simulation_custom():
         "results": None,
         "error": False,
         "progress_mode": "manual",
+        "output": "",
     }
 
     executor.submit(
@@ -765,11 +822,84 @@ def field_potential():
 
 @app.route("/field_potential_kernel")
 def field_potential_kernel():
-    return render_template("2.1.field_potential_kernel.html")
+    mc_models_default = os.path.expandvars(
+        os.path.expanduser(os.path.join("$HOME", "multicompartment_neuron_network"))
+    )
+    mc_outputs_default = os.path.join(
+        mc_models_default, "output", "adb947bfb931a5a8d09ad078a6d256b0"
+    )
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    kernel_params_default = os.path.join(
+        repo_root,
+        "examples",
+        "simulation",
+        "Hagen_model",
+        "simulation",
+        "params",
+        "analysis_params.py",
+    )
+    default_dir = "/tmp/simulation_data"
+    default_paths = {
+        "times": os.path.join(default_dir, "times.pkl"),
+        "gids": os.path.join(default_dir, "gids.pkl"),
+        "vm": os.path.join(default_dir, "vm.pkl"),
+        "ampa": os.path.join(default_dir, "ampa.pkl"),
+        "gaba": os.path.join(default_dir, "gaba.pkl"),
+        "nu_ext": os.path.join(default_dir, "nu_ext.pkl"),
+        "population_sizes": os.path.join(default_dir, "population_sizes.pkl"),
+    }
+    default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
+    kernel_output_root = "/tmp/field_potential_kernel"
+    preferred_cdm = []
+    for fname in ("kernel_approx_cdm.pkl", "current_dipole_moment.pkl"):
+        preferred_cdm.extend(glob.glob(os.path.join(kernel_output_root, "*", fname)))
+    fallback_cdm = []
+    for fname in ("gauss_cylinder_potential.pkl",):
+        fallback_cdm.extend(glob.glob(os.path.join(kernel_output_root, "*", fname)))
+    default_cdm_path = None
+    if preferred_cdm:
+        default_cdm_path = max(preferred_cdm, key=os.path.getmtime)
+    elif fallback_cdm:
+        default_cdm_path = max(fallback_cdm, key=os.path.getmtime)
+    default_meeg = {
+        "cdm": default_cdm_path,
+        "cdm_exists": bool(default_cdm_path and os.path.exists(default_cdm_path)),
+    }
+    if default_meeg["cdm"]:
+        default_meeg["cdm_name"] = os.path.basename(default_meeg["cdm"])
+    else:
+        default_meeg["cdm_name"] = ""
+    requested_tab = request.args.get("tab", "")
+    allowed_tabs = {"create_kernel", "cdm_computation", "meeg"}
+    initial_tab = requested_tab if requested_tab in allowed_tabs else "create_kernel"
+    return render_template(
+        "2.1.field_potential_kernel.html",
+        mc_models_default=mc_models_default,
+        mc_outputs_default=mc_outputs_default,
+        kernel_params_default=kernel_params_default,
+        default_sim=default_sim,
+        default_sim_paths=default_paths,
+        default_meeg=default_meeg,
+        initial_tab=initial_tab,
+    )
 
 @app.route("/field_potential_proxy")
 def field_potential_proxy():
-    return render_template("2.2.field_potential_proxy.html")
+    default_dir = "/tmp/simulation_data"
+    default_paths = {
+        "times": os.path.join(default_dir, "times.pkl"),
+        "gids": os.path.join(default_dir, "gids.pkl"),
+        "vm": os.path.join(default_dir, "vm.pkl"),
+        "ampa": os.path.join(default_dir, "ampa.pkl"),
+        "gaba": os.path.join(default_dir, "gaba.pkl"),
+        "nu_ext": os.path.join(default_dir, "nu_ext.pkl"),
+    }
+    default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
+    return render_template(
+        "2.2.field_potential_proxy.html",
+        default_sim=default_sim,
+        default_sim_paths=default_paths,
+    )
 
 # Features configuration page
 @app.route("/features", methods=["GET", "POST"])
@@ -791,7 +921,7 @@ def analysis():
 def start_computation_redirect(computation_type):
     """Starts the background job and redirects to the status page."""
     # Allowed function names to redirect to
-    allowed_functions = {'features', 'inference', 'analysis'}
+    allowed_functions = {'features', 'inference', 'analysis', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}
 
     if computation_type not in allowed_functions:
         return f"Type of computation is not valid", 400
@@ -807,7 +937,7 @@ def start_computation_redirect(computation_type):
     uploaded_files = [f for f in files.values() if f.filename]
 
     # First check if ANY files were uploaded. If at least one file was uploaded
-    if len(uploaded_files) == 0:
+    if len(uploaded_files) == 0 and computation_type not in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
         # Flash an error message
         flash('No files uploaded, please try again.', 'error')
         return redirect(request.referrer)
@@ -829,6 +959,12 @@ def start_computation_redirect(computation_type):
 
     if computation_type == 'analysis':
         estimated_time_remaining = time.time() + 10 # 15 seconds of estimated time remaining
+    if computation_type == 'field_potential_proxy':
+        estimated_time_remaining = time.time() + 30
+    if computation_type == 'field_potential_kernel':
+        estimated_time_remaining = time.time() + 60
+    if computation_type == 'field_potential_meeg':
+        estimated_time_remaining = time.time() + 30
 
     # Unique id for job
     job_id = str(uuid.uuid4())
@@ -837,6 +973,9 @@ def start_computation_redirect(computation_type):
     file_paths = {}
     for i, file_key in enumerate(request.files):
         file = request.files[file_key]
+        if not file or not file.filename:
+            if computation_type in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
+                continue
         unique_filename = f"{computation_type}_{file_key}_{i}_{job_id}_{file.filename}" # E.g. features_ data_file_ 0_ 444961cc-5b72-43fc-b87e-3f4c8304ecdd_ df_inputIn_features_lfp.pkl
         file_path = os.path.join(temp_uploaded_files, unique_filename)
         # Ensure directory exists
@@ -856,7 +995,8 @@ def start_computation_redirect(computation_type):
         "start_time": time.time(),
         "estimated_time_remaining": estimated_time_remaining,
         "results": None,
-        "error": False
+        "error": False,
+        "output": "",
     }
 
     # Submit the long-running task according to the computation type
@@ -913,6 +1053,7 @@ def get_status(job_id):
         "elapsed_time": int(time.time() - status["start_time"]),
         "estimated_time_remaining": status["estimated_time_remaining"],
         "error": status.get("error", False),
+        "output": status.get("output", ""),
     })
 
 
@@ -930,38 +1071,52 @@ def download_results(job_id):
     # Retrieve the stored DataFrame
     output_df_path = status["results"] 
 
-    # Remove file after downloading it
-    @after_this_request
-    def cleanup(response):
-        try:
-            if os.path.exists(output_df_path):
-                os.remove(output_df_path)
-                app.logger.info(f"Cleaned up {output_df_path}")
-        except Exception as e:
-            app.logger.error(f"Error removing file {output_df_path}: {e}")
-        return response
+    # Remove file after downloading it (keep proxy outputs in /tmp)
+    if computation_type != 'field_potential_proxy':
+        @after_this_request
+        def cleanup(response):
+            try:
+                if os.path.exists(output_df_path):
+                    os.remove(output_df_path)
+                    app.logger.info(f"Cleaned up {output_df_path}")
+            except Exception as e:
+                app.logger.error(f"Error removing file {output_df_path}: {e}")
+            return response
 
-    if computation_type != 'analysis':
-        output_df = compute_utils.read_df_file(output_df_path)
-
-        # Create an in-memory byte stream (io.BytesIO)
-        output = io.BytesIO()
-        # Save the DataFrame to Pickle in the in-memory stream
-        output_df.to_pickle(output)
-        output.seek(0)
-
-        # Use send_file to trigger the download
-        return send_file(
-            output,
-            mimetype='application/python-pickle',
-            as_attachment=True,
-            download_name=f'{computation_type}_results_{job_id}_output.pkl'
-        )
-
-    else: # computation_type == 'analysis'
+    if computation_type == 'analysis':
         return send_file(
             f'{temp_uploaded_files}/LFP_predictions.png',
             mimetype='image/png',
             as_attachment=True,
             download_name='LFP_predictions.png'
         )
+    if computation_type == 'field_potential_proxy':
+        return send_file(
+            output_df_path,
+            mimetype='application/python-pickle',
+            as_attachment=True,
+            download_name=f'{computation_type}_results_{job_id}_proxy.pkl'
+        )
+    if computation_type in {'field_potential_kernel', 'field_potential_meeg'}:
+        return send_file(
+            output_df_path,
+            mimetype='application/python-pickle',
+            as_attachment=True,
+            download_name=f'{computation_type}_results_{job_id}.pkl'
+        )
+
+    output_df = compute_utils.read_df_file(output_df_path)
+
+    # Create an in-memory byte stream (io.BytesIO)
+    output = io.BytesIO()
+    # Save the DataFrame to Pickle in the in-memory stream
+    output_df.to_pickle(output)
+    output.seek(0)
+
+    # Use send_file to trigger the download
+    return send_file(
+        output,
+        mimetype='application/python-pickle',
+        as_attachment=True,
+        download_name=f'{computation_type}_results_{job_id}_output.pkl'
+    )

@@ -162,7 +162,7 @@ if __name__ == "__main__":
     # Compute LFP signals using FieldPotential helper
     probe = 'GaussCylinderPotential'
     LFP_data = dict(EE=[], EI=[], IE=[], II=[])
-    lfp_signals = potential.compute_cdm_from_kernels(
+    lfp_signals = potential.compute_cdm_lfp_from_kernels(
         H_YX,
         spike_times=times,
         dt=dt,
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     # Compute CDM (z-component) using FieldPotential helper
     probe = 'KernelApproxCurrentDipoleMoment'
     CDM_data = dict(EE=[], EI=[], IE=[], II=[])
-    cdm_signals = potential.compute_cdm_from_kernels(
+    cdm_signals = potential.compute_cdm_lfp_from_kernels(
         H_YX,
         spike_times=times,
         dt=dt,
