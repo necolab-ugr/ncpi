@@ -763,6 +763,14 @@ def run_trial_simulation_custom():
 def field_potential():
     return render_template("2.field_potential.html")
 
+@app.route("/field_potential_kernel")
+def field_potential_kernel():
+    return render_template("2.1.field_potential_kernel.html")
+
+@app.route("/field_potential_proxy")
+def field_potential_proxy():
+    return render_template("2.2.field_potential_proxy.html")
+
 # Features configuration page
 @app.route("/features", methods=["GET", "POST"])
 def features():

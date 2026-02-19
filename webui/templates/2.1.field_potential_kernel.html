@@ -1,0 +1,496 @@
+{% extends "base.html" %}
+{% block title %}Field Potential kernel{% endblock %}
+
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#EA2831",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                    "text-light-primary": "#1f2937",
+                    "text-light-secondary": "#6b7280",
+                    "border-light": "#e5e7eb",
+                    "container-light": "#ffffff"
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+<style type="text/tailwindcss">
+    @layer base {
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    }
+    .form-card {
+        @apply bg-white dark:bg-[#1e1e1e] rounded-2xl p-6 border border-slate-100 dark:border-slate-800 shadow-sm hover:shadow-md transition-shadow duration-300 h-full;
+    }
+    .input-group {
+        @apply flex flex-col gap-1.5 mb-5;
+    }
+    .input-label {
+        @apply text-sm font-bold text-slate-800 dark:text-slate-200;
+    }
+    .input-subtext {
+        @apply text-xs text-slate-500 dark:text-slate-400 leading-normal mb-1;
+    }
+    .input-field {
+        @apply w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/50 focus:border-primary outline-none transition-all;
+    }
+    .checkbox-wrapper {
+        @apply flex items-start gap-3 p-3 rounded-lg border border-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors cursor-pointer;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="bg-container-light dark:bg-[#111422] rounded-xl border border-border-light dark:border-[#323b67]/50 p-6"
+    x-data="{ activeTab: 'create_kernel' }">
+
+    <!-- Menu tabs -->
+    <div class="mb-6 border-b border-border-light dark:border-[#323b67]/50">
+        <nav aria-label="Tabs" class="flex -mb-px space-x-6">
+            <button
+                :class="{ 'border-primary text-primary dark:text-white': activeTab === 'create_kernel', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'create_kernel' }"
+                @click="activeTab = 'create_kernel'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                Create kernel
+            </button>
+            <button
+                :class="{ 'border-primary text-primary dark:text-white': activeTab === 'cdm_computation', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'cdm_computation' }"
+                @click="activeTab = 'cdm_computation'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                Current dipole moment
+            </button>
+            <button
+                :class="{ 'border-primary text-primary dark:text-white': activeTab === 'meeg', 'border-transparent text-text-light-secondary hover:text-text-light-primary hover:border-gray-300 dark:hover:text-white dark:hover:border-gray-500': activeTab !== 'meeg' }"
+                @click="activeTab = 'meeg'" class="px-1 py-3 text-sm font-medium border-b-2 whitespace-nowrap">
+                M/EEG Computation Options
+            </button>
+        </nav>
+    </div>
+
+
+    <!-- Tab contents -->
+    <div class="space-y-8 pt-6">
+        <!-- Create Kernel Tab -->
+        <div x-show="activeTab === 'create_kernel'">
+            <div class="flex flex-col gap-2 py-2">
+                <h1 class="text-slate-900 dark:text-white text-3xl font-black leading-tight tracking-tight">Kernel Creation
+                    configuration</h1>
+            </div>
+            <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+                <section class="form-card">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-lg">
+                            <span class="material-symbols-outlined">folder_open</span>
+                        </div>
+                        <h3 class="text-lg font-bold">1. Core Paths</h3>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="input-group">
+                            <label class="input-label">Multicompartment neuron models folder</label>
+                            <p class="input-subtext">Folder containing your MC neuron model descriptions
+                                (cell parameters and morphologies).</p>
+                            <div class="relative">
+                                <input class="input-field pr-10" placeholder="/path/to/mc_folder/" type="text" />
+                                <span
+                                    class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer hover:text-primary">folder</span>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Multicompartment network parameters</label>
+                            <div class="relative">
+                                <input class="input-field pr-10" placeholder="/path/to/network_parameters/" type="text" />
+                                <span
+                                    class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer hover:text-primary">folder</span>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Multicompartment network simulation outputs</label>
+                            <p class="input-subtext">Folder containing MC network simulation outputs. If not specified, both Mean firing rates (mean_nu_X) and Resting membrane potential
+                                (Vrest) must be provided.</p>
+                            <div class="relative">
+                                <input class="input-field pr-10" placeholder="/path/to/mc_network/simulation_outputs/" type="text" />
+                                <span
+                                    class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer hover:text-primary">folder</span>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+                <section class="form-card">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="p-2 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg">
+                            <span class="material-symbols-outlined">psychology</span>
+                        </div>
+                        <h3 class="text-lg font-bold">2. Physics and Conductance</h3>
+                    </div>
+                    <div class="space-y-4">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="input-group !mb-0">
+                                <label class="input-label">Biophysical membrane properties</label>
+                                <p class="input-subtext">File containing a list of biophysical membrane properties.</p>
+                                <div class="relative">
+                                    <input class="input-field pr-10" placeholder="biophys_list.json" type="text" />
+                                    <span
+                                        class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer">attach_file</span>
+                                </div>
+                            </div>
+                            <div class="input-group !mb-0">
+                                <label class="input-label">Current Dipole Moment Probe</label>
+                                <p class="input-subtext"><br/><br/>
+                                </p>
+                                <select class="input-field appearance-none">
+                                    <option>Kernel Approx Current Dipole Moment</option>
+                                    <option>Current Dipole Moment</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="input-group !mb-0">
+                            <label class="input-label">Mean Firing Rates (JSON/Dictionary)</label>
+                            <p class="input-subtext">Mean firing rates (Hz) per population. Required if "Multicompartment network simulation outputs" is blank.
+                            </p>
+                            <div class="relative">
+                                <input class="input-field pr-10" placeholder="/path/to/mean_firing_rates" type="text" />
+                                <span
+                                    class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer hover:text-primary">folder</span>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div class="input-group !mb-0">
+                                <label class="input-label">Resting membrane Potential (Vrest)</label>
+                                <p class="input-subtext">Required if Multicompartment network simulation outputs is blank.</p>
+                                <div class="flex gap-2">
+                                    <input class="input-field w-24" step="0.1" type="number" value="-70" />
+                                    <div class="relative flex-1">
+                                        <input class="input-field pr-8" placeholder="" type="text" />
+                                        <span
+                                            class="material-symbols-outlined absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">folder</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="input-group !mb-0">
+                                <label class="input-label">External Synapse Counts per population (n_ext)</label>
+                                <p class="input-subtext"></p>
+                                <div class="relative">
+                                    <input class="input-field pr-10" placeholder="list.json" type="text" />
+                                    <span
+                                        class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer">attach_file</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2">
+                            <label class="checkbox-wrapper">
+                                <div class="flex items-center h-5">
+                                    <input checked="" class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                        type="checkbox" />
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-semibold">Compute Current Dipole Moment</span>
+                                    <span class="text-[10px] text-slate-500"></span>
+                                </div>
+                            </label>
+                            <label class="checkbox-wrapper">
+                                <div class="flex items-center h-5">
+                                    <input class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                        type="checkbox" />
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-semibold">Account for Conductance effects</span>
+                                    <span class="text-[10px] text-slate-500"></span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </section>
+                <section class="form-card">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="p-2 bg-emerald-50 dark:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 rounded-lg">
+                            <span class="material-symbols-outlined">timer</span>
+                        </div>
+                        <h3 class="text-lg font-bold">3. Temporal Settings</h3>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
+                        <div class="input-group">
+                            <label class="input-label">Time Step (dt)</label>
+                            <p class="input-subtext">Simulation time step in ms.</p>
+                            <input class="input-field" step="0.01" type="number" value="0.1" />
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Stop Time (tstop)</label>
+                            <p class="input-subtext">Total simulation stop time in ms.</p>
+                            <input class="input-field" type="number" value="1000" />
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Presynaptic Activation Time (t_X)</label>
+                            <p class="input-subtext"></p>
+                            <input class="input-field" step="0.1" type="number" value="0.0" />
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Kernel Time Lag (tau)</label>
+                            <p class="input-subtext"></p>
+                            <input class="input-field" step="0.1" type="number" value="2.0" />
+                        </div>
+                    </div>
+                </section>
+                <section class="form-card">
+                    <div class="flex items-center gap-3 mb-6">
+                        <div class="p-2 bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 rounded-lg">
+                            <span class="material-symbols-outlined">sensors</span>
+                        </div>
+                        <h3 class="text-lg font-bold">4. LFP Settings</h3>
+                    </div>
+                    <div class="space-y-1">
+                        <div class="input-group">
+                            <label class="input-label">Electrode Parameters</label>
+                            <p class="input-subtext">LFP electrode settings (z and sigma). Leave blank if not computing LFP.</p>
+                            <div class="grid grid-cols-2 gap-3">
+                                <div class="relative">
+                                    <span
+                                        class=" text-[13px] font-bold text-slate-400">Z:</span>
+                                    <input class="input-field pl-8" placeholder="0.0" type="text" />
+                                </div>
+                                <div class="relative">
+                                    <span
+                                        class="text-[13px] font-bold text-slate-400">σ:</span>
+                                    <input class="input-field pl-8" placeholder="0.3" type="text" />
+                                </div>
+                            </div>
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label">Weight Matrix (2x2)</label>
+                            <p class="input-subtext">Custom 2x2 weight matrix to override default network weights.</p>
+                            <div
+                                class="grid grid-cols-2 gap-2 max-w-[200px] mx-auto p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-dashed border-slate-300">
+                                <input class="input-field !py-1 text-center" step="0.1" type="number" value="1.0" />
+                                <input class="input-field !py-1 text-center" step="0.1" type="number" value="-1.0" />
+                                <input class="input-field !py-1 text-center" step="0.1" type="number" value="1.0" />
+                                <input class="input-field !py-1 text-center" step="0.1" type="number" value="-1.0" />
+                            </div>
+                        </div>
+                    </div>
+                </section>
+            </div>
+        </div>
+
+
+        <!-- CDM configuration Tab -->
+        <div style="display: none;" x-show="activeTab === 'cdm_computation'">
+            <div class="w-full ">
+                <div class="mb-4">
+                    <h1 class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-tight">Current dipole
+                        moment computation</h1>
+                    <p class="text-slate-500 dark:text-slate-400 text-lg">Configure the parameters for the current dipole moment
+                        calculation.</p>
+                </div>
+                <form
+                    class="space-y-8 bg-white dark:bg-[#111422] p-8 md:p-10 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                        <div class="">
+                            <div class="gap-4 items-start">
+                                <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1" for="spike-times">Spike
+                                    Times</label>
+                                <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">The spike times per presynaptic
+                                    population.</p>
+                                <label
+                                    class="flex flex-col items-center justify-center w-full h-24 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 dark:border-slate-700 transition-colors">
+                                    <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                                        <span class="material-symbols-outlined text-slate-400 mb-2">upload_file</span>
+                                        <p class="text-sm text-slate-500 dark:text-slate-400 font-medium">Click to upload <span
+                                                class="text-primary font-bold">.pkl</span> file</p>
+                                    </div>
+                                    <input accept=".pkl" class="hidden" id="spike-times" type="file" />
+                                </label>
+                            </div>
+                            <hr class="border-slate-100 dark:border-slate-800" />
+                        </div>
+                        <div class="">
+                            <div class="gap-4 items-start">
+                                <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1"
+                                    for="pop-sizes">Population Sizes</label>
+                                <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Optional population sizes used to
+                                    normalize the spike rates.</p>
+                            
+                                <label
+                                    class="flex flex-col items-center justify-center w-full h-24 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 dark:border-slate-700 transition-colors">
+                                    <div class="flex items-center gap-2">
+                                        <span class="material-symbols-outlined text-slate-400">description</span>
+                                        <p class="text-sm text-slate-500 dark:text-slate-400">Upload <span
+                                                class="text-primary font-bold">JSON</span> or Dictionary file</p>
+                                    </div>
+                                    <input accept=".json" class="hidden" id="pop-sizes" type="file" />
+                                </label>
+                            </div>
+                            <hr class="border-slate-100 dark:border-slate-800" />
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8">
+                        <div>
+                            <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1"
+                                for="transient-time">Transient Time</label>
+                            <input
+                                class="block w-full rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary sm:text-sm h-11"
+                                id="transient-time" step="0.1" type="number" value="0.0" />
+                            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Transient period to discard from spike times
+                                (in ms).</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1"
+                                for="component">Component</label>
+                            <input
+                                class="block w-full rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary sm:text-sm h-11"
+                                id="component" placeholder="None" type="number" value="2" />
+                            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Specific component to select (e.g., 2 is
+                                z-component). If None, use all.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1"
+                                for="conv-mode">Convolution Mode</label>
+                            <select
+                                class="block w-full rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary sm:text-sm h-11"
+                                id="conv-mode">
+                                <option selected="" value="same">same</option>
+                                <option value="full">full</option>
+                                <option value="valid">valid</option>
+                            </select>
+                            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Math mode for convolution.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1" for="signal-scale">Signal
+                                Scale</label>
+                            <input
+                                class="block w-full rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary sm:text-sm h-11"
+                                id="signal-scale" step="0.1" type="number" value="1.0" />
+                            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Factor to scale the final output signal.</p>
+                        </div>
+                    </div>
+                    <hr class="border-slate-100 dark:border-slate-800" />
+                    <div class="flex items-start gap-3">
+                        <div class="flex h-5 items-center">
+                            <input
+                                class="h-5 w-5 rounded border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-primary focus:ring-primary"
+                                id="add-sum" name="add-sum" type="checkbox" />
+                        </div>
+                        <div class="text-sm">
+                            <label class="font-bold text-slate-700 dark:text-slate-200" for="add-sum">Add key 'sum' to
+                                output</label>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Add an additional key "sum" with the total
+                                combined signal across all populations.</p>
+                        </div>
+                    </div>
+                    
+                </form>
+            </div>
+        </div>
+        
+        <!-- M/EEG Computation options Tab -->
+        <div style="display: none;" x-show="activeTab === 'meeg'">
+            <h1 class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-tight mb-2">Compute MEG/EEG</h1>
+            <p class="text-slate-500 dark:text-slate-400 text-lg"></p>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                <div class="space-y-2">
+                    <div class="md:col-span-1">
+                        <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1" for="forward-model">Forward
+                            Model</label>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Choose the appropriate head model for
+                            EEG or MEG.</p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <select
+                            class="block w-full rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary sm:text-sm h-11"
+                            id="forward-model">
+                            <option selected="" value="NYHeadModel">NYHead Model (EEG)</option>
+                            <option value="FourSphereVolumeConductor">Four Sphere Volume Conductor (EEG)</option>
+                            <option value="InfiniteVolumeConductor">Infinite Volume Conductor (EEG)</option>
+                            <option value="InfiniteHomogeneousVolCondMEG">Infinite Homogeneous Volume Conductor MEG (MEG)</option>
+                            <option value="SphericallySymmetricVolCondMEG">Spherically Symmetric Volume Conductor MEG (MEG)</option>
+                        </select>
+                        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400 leading-tight"></p>
+                    </div>
+                </div>
+                <div class="space-y-2">
+                    <div class="md:col-span-1">
+                        <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1"
+                            for="advanced-settings">Advanced Model Settings</label>
+                        <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Optional keyword arguments for the
+                            chosen forward model.</p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <label
+                            class="flex flex-col items-center justify-center w-full h-32 border-2 border-slate-300 border-dashed rounded-lg cursor-pointer bg-slate-50 dark:bg-slate-900/50 hover:bg-slate-100 dark:hover:bg-slate-800 dark:border-slate-700 transition-colors">
+                            <div class="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4">
+                                <span class="material-symbols-outlined text-slate-400 mb-2">settings_input_component</span>
+                                <p class="text-sm text-slate-500 dark:text-slate-400 font-medium">Click to upload <span
+                                        class="text-primary font-bold">JSON</span> or Dictionary file</p>
+                                <p class="text-[10px] text-slate-400 mt-1">Default value: None</p>
+                            </div>
+                            <input accept=".json,.txt" class="hidden" id="advanced-settings" type="file" />
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <hr class="border-slate-100 dark:border-slate-800" />
+            <div class="flex items-start gap-4">
+                <div class="flex h-6 items-center">
+                    <input checked=""
+                        class="h-5 w-5 rounded border-slate-300 dark:border-slate-700 dark:bg-slate-900 text-primary focus:ring-primary"
+                        id="align-surface" name="align-surface" type="checkbox" />
+                </div>
+                <div class="text-sm">
+                    <label class="font-bold text-slate-700 dark:text-slate-200" for="align-surface">Align to Surface</label>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Rotates the dipole moment to align with the local
+                        surface normal of the head model at the dipole location.</p>
+                </div>
+            </div>
+            <hr class="border-slate-100 dark:border-slate-800" />
+        </div>
+    </div>
+
+    <!-- Navigation buttons -->
+    <div
+        class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
+        <!-- Previous/Return Button -->
+        <template x-if="activeTab === 'create_kernel'">
+            <a href="{{ url_for('dashboard') }}"
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                <span class="material-symbols-outlined">arrow_back</span>
+                Return to ncpi dashboard
+            </a>
+        </template>
+        <template x-if="activeTab !== 'create_kernel'">
+            <button
+                @click="if (activeTab === 'cdm_computation') { activeTab = 'create_kernel' } else if (activeTab === 'meeg') { activeTab = 'cdm_computation' }"
+                class="px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/80 bg-transparent rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 border border-border-light dark:border-white/20">Back
+                step</button>
+        </template>
+
+        <!-- Next/Continue Button -->
+        <template x-if="activeTab === 'meeg'">
+            <button @click="computeFieldPotential()"
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                Compute field potential
+                <span class="material-symbols-outlined">arrow_forward</span>
+            </button>
+        </template>
+        <template x-if="activeTab !== 'meeg'">
+            <button
+                @click="if (activeTab === 'create_kernel') { activeTab = 'cdm_computation' } else if (activeTab === 'cdm_computation') { activeTab = 'meeg' }"
+                class="px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg hover:bg-primary/90">Continue
+                configuration</button>
+        </template>
+    </div>
+</div>
+{% endblock %}
+
+
+{% block scripts %}
+<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+{% endblock %}
