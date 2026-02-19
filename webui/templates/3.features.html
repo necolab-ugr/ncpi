@@ -31,141 +31,6 @@
 {% endblock %}
 
 {% block content %}
-<!-- DFA method configuration parameters (template) -->
-<template id="dfa-config-template">
-    <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Configuration of DFA</h2>
-    <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-        <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                for="amplitude-envelope-dfa">Amplitude envelope for all channels
-                (signal)</label>
-            <input
-                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
-                disabled="" id="amplitude-envelope-dfa" name="amplitude-envelope-dfa"
-                type="text" value="From previous step" />
-        </div>
-        <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                for="sampling-frequency-dfa">Sampling frequency of the signal</label>
-            <input
-                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                id="sampling-frequency-dfa" name="sampling-frequency-dfa" type="text"
-                value="1000" />
-        </div>
-        <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                for="interval-dfa-computed">Interval over which DFA is computed (in
-                sec)</label>
-            <div class="mt-1 flex items-center space-x-2">
-                <input
-                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                    type="text" value="4" />
-                <span class="text-slate-500 dark:text-slate-400">-</span>
-                <input
-                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                    type="text" value="100" />
-            </div>
-        </div>
-        <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                for="interval-dfa-fit">Interval over which the DFA exponent is fit (in
-                sec)</label>
-            <div class="mt-1 flex items-center space-x-2">
-                <input
-                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                    type="text" value="10" />
-                <span class="text-slate-500 dark:text-slate-400">-</span>
-                <input
-                    class="block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                    type="text" value="100" />
-            </div>
-            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">If empty, it will be
-                the same as the DFA computation interval</p>
-        </div>
-        <div>
-            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                for="ignored-channels">Ignored channels</label>
-            <div class="mt-1 flex items-center space-x-4">
-                <span
-                    class="text-sm font-medium text-slate-700 dark:text-slate-300">Ignore</span>
-                <div class="flex items-center space-x-4">
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-1" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-1">1</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-2" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-2">2</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-3" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-3">3</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-4" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-4">4</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-5" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-5">5</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-6" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-6">6</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-7" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-7">7</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-8" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-8">8</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-9" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-9">9</label>
-                    </div>
-                    <div class="flex items-center">
-                        <input
-                            class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 text-primary focus:ring-primary bg-white dark:bg-slate-800"
-                            id="ignore-10" name="ignore-channels" type="checkbox" />
-                        <label class="ml-2 text-sm text-slate-600 dark:text-slate-400"
-                            for="ignore-10">10</label>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</template>
-
-
 <!-- Main content -->
 <div x-data="{ 
             activeTab: 'load-data', 
@@ -181,24 +46,9 @@
                     value: 'catch22'
                 }, 
                 {
-                    key: 'Power spectrum parameterization',
-                    label: 'Power spectrum parameterization using the FOOOF algorithm',
+                    key: 'Spectral parameterization',
+                    label: 'Spectral parameterization: Specparam, formerly FOOOF, to parameterize neural power spectra',
                     value: 'power_spectrum_parameterization'
-                },
-                {
-                    key: 'fEI',
-                    label: 'fEI: Functional excitation-inhibition ratio & DFA: Detrended fluctuation analysis',
-                    value: 'fEI'
-                },
-                {
-                    key: 'DFA',
-                    label: 'DFA: Detrended fluctuation analysis',
-                    value: 'DFA'
-                },
-                {
-                    key: 'hctsa',
-                    label: 'hctsa: Highly comparative time-series analysis',
-                    value: 'hctsa'
                 }
             ]
     }">
@@ -235,7 +85,12 @@
                 <div x-show="activeTab === 'load-data'" x-cloak>
                     <div
                         class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-8 flex flex-col items-center text-center">
-                        <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
+                        <div class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                            <span class="material-symbols-outlined">check_circle</span>
+                            <span>Available data is ready for the computation</span>
+                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                        </div>
+                        <!-- <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
                         <button type="button"
                             @click="document.getElementById('data-file').click()"
                             class="flex items-center justify-center gap-2 h-12 px-6 bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
@@ -244,14 +99,14 @@
                         </button>
 
                         <!-- Upload status indicator -->
-                        <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                        <!-- <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
                             <span class="material-symbols-outlined">check_circle</span>
                             <span>Data uploaded successfully</span>
                             <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
-                        </div>
+                        </div> 
                         
                         <p class="mt-4 text-sm text-gray-600 dark:text-gray-400 max-w-sm">You can extract features from
-                            simulation as well as from empirical data.</p>
+                            simulation as well as from empirical data.</p> -->
                     </div>
                 </div>
 
@@ -342,10 +197,9 @@
                         </div>
                     </div>
 
-                    <!-- Power Spectrum Configuration -->
+                    <!-- Spectral parameterization Configuration -->
                     <div x-show="selectedMethod === 'power_spectrum_parameterization'" x-cloak>
-                        <p class="mt-2 mb-6 text-gray-500 dark:text-gray-400">Configuration of the method Power spectrum
-                            parameterization, using the FOOOF algorithm</p>
+                        <p class="mt-2 mb-6 text-gray-500 dark:text-gray-400">Configuration of the method Spectral parameterization to parameterize neural power spectra </p>
                         <div class="space-y-8">
                             <section
                                 class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
@@ -466,209 +320,7 @@
                             </section>
                         </div>
                     </div>
-
-
-                    <!-- fEI Configuration -->
-                    <div x-show="selectedMethod === 'fEI'" x-cloak>
-                        <p class="mt-2 mb-6 text-gray-500 dark:text-gray-400">Configuration of the method fEI: Functional
-                            excitation-inhibition ratio & DFA: Detrended fluctuation analysis</p>
-                        <div class="mt-12 space-y-12">
-                            <div x-html="document.getElementById('dfa-config-template').innerHTML"></div>
-
-                            <section>
-                                <h2 class="text-2xl font-bold text-slate-900 dark:text-white">Configuration of fEI</h2>
-                                <div class="mt-8 grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                                    <div>
-                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                            for="amplitude-envelope-fei">Amplitude envelope for all channels
-                                            (signal)</label>
-                                        <input
-                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-slate-50 dark:bg-slate-700 text-slate-500 dark:text-slate-400"
-                                            disabled="" id="amplitude-envelope-fei" name="amplitude-envelope-fei"
-                                            type="text" value="From previous step" />
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                            for="sampling-frequency-fei">Sampling frequency of the signal</label>
-                                        <input
-                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                                            id="sampling-frequency-fei" name="sampling-frequency-fei" type="text"
-                                            value="1000" />
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                            for="window-size">Window size in seconds</label>
-                                        <input
-                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                                            id="window-size" name="window-size" type="text" value="2.0" />
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                            for="fraction-overlap">Fraction of overlap between windows (0-1)</label>
-                                        <input
-                                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800"
-                                            id="fraction-overlap" name="fraction-overlap" type="text" value="0.5" />
-                                    </div>
-                                </div>
-                            </section>
-                            <section
-                                class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                                <h3 class="text-md font-semibold text-slate-900 dark:text-white">DFA Values and Ignored
-                                    Channels</h3>
-                                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Values for each channel used
-                                    for thresholding fEI. Check 'Ignore' to exclude a channel from the computation.</p>
-                                <div class="mt-6 overflow-x-auto">
-                                    <div class="grid grid-cols-10 gap-4 min-w-[600px]">
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            1</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            2</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            3</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            4</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            5</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            6</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            7</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            8</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            9</div>
-                                        <div class="text-center text-sm font-medium text-slate-500 dark:text-slate-400">
-                                            10</div>
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="1.12" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="0.98" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="1.05" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="1.21" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="1.03" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="1.15" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" value="0.99" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" />
-                                        <input
-                                            class="w-full text-center rounded-md border-slate-300 dark:border-slate-600 shadow-sm sm:text-sm bg-white dark:bg-slate-800"
-                                            type="text" />
-                                        <label
-                                            class="col-span-10 mt-4 text-sm font-medium text-slate-700 dark:text-slate-300">Ignore</label>
-                                        <input
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input checked=""
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input checked=""
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input checked=""
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                        <input checked=""
-                                            class="justify-self-center h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" />
-                                    </div>
-                                </div>
-                            </section>
-                        </div>
-                    </div>
-
-                    <!-- DFA Configuration -->
-                    <div x-show="selectedMethod === 'DFA'" x-cloak>
-                        <div x-html="document.getElementById('dfa-config-template').innerHTML"></div>
-                    </div>
-
-                    <!-- hctsa Configuration -->
-                    <div x-show="selectedMethod === 'hctsa'" x-cloak>
-                        <p class="mt-2 mb-6 mt-2 text-gray-600 dark:text-gray-300">Configuration of the method hctsa: Highly
-                            comparative time-series analysis</p>
-                        <div class="space-y-8">
-                            <section
-                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <div class="flex items-center gap-4">
-                                    <h2
-                                        class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
-                                        hctsa parameters</h2>
-                                </div>
-                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-6">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                                            for="time-series-data">A set of samples of time-series data</label>
-                                        <div class="mt-1">
-                                            <input
-                                                class="block w-full rounded-md border-gray-300 dark:border-[#323b67] bg-gray-100 dark:bg-[#232948]/50 shadow-sm focus:border-primary focus:ring-primary sm:text-sm text-gray-500 dark:text-gray-400 cursor-not-allowed"
-                                                disabled="" id="time-series-data" name="time-series-data" type="text"
-                                                value="loaded from the data" />
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                                            for="hctsa-folder">Folder where hctsa is installed</label>
-                                        <div class="mt-1 flex rounded-md shadow-sm">
-                                            <div class="relative flex flex-grow items-stretch focus-within:z-10">
-                                                <input
-                                                    class="block w-full rounded-none rounded-l-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] focus:border-primary focus:ring-primary sm:text-sm"
-                                                    id="hctsa-folder" name="hctsa-folder"
-                                                    placeholder="Select a folder..." type="text" />
-                                            </div>
-                                            <button
-                                                class="relative -ml-px inline-flex items-center space-x-2 rounded-r-md border border-gray-300 dark:border-[#323b67] bg-gray-50 dark:bg-[#232948] px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#323b67] focus:border-primary focus:outline-none focus:ring-1 focus:ring-primary"
-                                                type="button">
-                                                <span class="material-symbols-outlined text-lg">folder_open</span>
-                                                <span>Browse</span>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                                            for="matlab-workers">Number of Matlab workers of the parallel pool</label>
-                                        <div class="mt-1">
-                                            <input
-                                                class="block w-full rounded-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-sm focus:border-primary focus:ring-primary sm:text-sm"
-                                                id="matlab-workers" name="matlab-workers" placeholder="32"
-                                                type="number" />
-                                        </div>
-                                    </div>
-                                </div>
-                            </section>
-                        </div>
-                    </div>
                 </div>
-
             </div>
 
 
