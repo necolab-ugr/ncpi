@@ -65,28 +65,24 @@ class Inference:
             raise TypeError("hyperparams must be a dict or None.")
         self.hyperparams = hyperparams
 
-        # Init sklearn stuff (and build cache once)
-        self._init_sklearn_modules()
-        self._ensure_sklearn_regressor_cache()
-
         # Decide backend using registry-style checks
         if model in self.SBI_MODELS:
             self.backend = "sbi"
-        elif model in self._SKLEARN_REGRESSORS:
-            self.backend = "sklearn"
-        else:
-            valid_sklearn = sorted(self._SKLEARN_REGRESSORS.keys())
-            raise ValueError(
-                f"'{model}' is not valid. Use a sklearn regressor or an SBI model from {list(self.SBI_MODELS)}.\n"
-                f"Example sklearn regressors: {valid_sklearn[:10]}{' ...' if len(valid_sklearn) > 10 else ''}"
-            )
-
-        self.model_name = model
-
-        # Import SBI only if needed
-        if self.backend == "sbi":
+            self.model_name = model
             self._init_sbi_modules()
         else:
+            self.backend = "sklearn"
+            self.model_name = model
+            self._init_sklearn_modules()
+            self._ensure_sklearn_regressor_cache()
+
+            if model not in self._SKLEARN_REGRESSORS:
+                valid_sklearn = sorted(self._SKLEARN_REGRESSORS.keys())
+                raise ValueError(
+                    f"'{model}' is not valid. Use a sklearn regressor or an SBI model from {list(self.SBI_MODELS)}.\n"
+                    f"Example sklearn regressors: {valid_sklearn[:10]}{' ...' if len(valid_sklearn) > 10 else ''}"
+                )
+                
             self._set_sbi_attrs_to_none()
 
         # Training data
@@ -273,37 +269,54 @@ class Inference:
 
     def initialize_sbi(self, hyperparams: dict):
         """
-        Initialize a sbi inference trainer (NPE / NLE / NRE) using the provided hyperparameters.
+        Initialize an sbi inference trainer (NPE / NLE / NRE) from a configuration dict.
 
-        Required:
-          - prior: torch.distributions.Distribution (or Distribution-like supported by sbi)
+        Required
+        --------
+        prior:
+            A torch.distributions.Distribution (or Distribution-like object supported by sbi).
 
-        Optional:
-          - estimator: callable builder returned by sbi.neural_nets.*_nn(...) OR None
-              If None, sbi will use its internal default estimator (recommended to start).
-          - estimator_kwargs: dict forwarded to the default builder for the chosen method
-              NPE -> posterior_nn, NLE -> likelihood_nn, NRE -> classifier_nn
-          - inference_kwargs: dict forwarded to NPE/NLE/NRE constructor (e.g. device="cpu")
-          - build_posterior_kwargs: dict stored on self for later build_posterior() call
+        Optional
+        --------
+        inference_kwargs:
+            Dict forwarded to the NPE/NLE/NRE constructor (e.g., show_progress_bars).
+
+        estimator (advanced):
+            A callable density-estimator/classifier builder (e.g., the object returned by
+            sbi.neural_nets.posterior_nn / likelihood_nn / classifier_nn). If provided, it
+            will be used directly.
+
+        estimator_kwargs (recommended):
+            Declarative network configuration used to build the estimator *inside* this method.
+            Expected keys:
+                - "estimator": str, e.g. "nsf", "maf", "mdn" (default: "nsf")
+                - plus any kwargs accepted by the corresponding sbi builder, e.g.
+                hidden_features, num_transforms, embedding_net, etc.
+
+        build_posterior_kwargs:
+            Dict stored on self for later calls to inference.build_posterior(...).
         """
-
+        # Ensure this instance is configured for SBI.
         if self.backend != "sbi":
             raise ValueError("initialize_sbi() is only valid when backend='sbi'.")
 
         if not isinstance(hyperparams, dict):
             raise TypeError("hyperparams must be a dict.")
+
+        # Prior is mandatory for SBI.
         prior = hyperparams.get("prior", None)
         if prior is None:
-            raise ValueError("Missing required key: hyperparams['prior'].")
+            raise ValueError("Missing required hyperparams['prior'].")
 
+        # Select SBI method and its corresponding class (NPE/NLE/NRE).
         model_key = self.model_name  # "NPE" | "NLE" | "NRE"
         if not self.SBI_REGISTRY or model_key not in self.SBI_REGISTRY:
             raise RuntimeError(
                 "SBI modules not initialized. Construct with an SBI model so _init_sbi_modules() runs."
             )
-
         inference_cls = self.SBI_REGISTRY[model_key]
 
+        # Optional configs.
         inference_kwargs = hyperparams.get("inference_kwargs", {}) or {}
         estimator_kwargs = hyperparams.get("estimator_kwargs", {}) or {}
         build_posterior_kwargs = hyperparams.get("build_posterior_kwargs", {}) or {}
@@ -315,32 +328,45 @@ class Inference:
         if not isinstance(build_posterior_kwargs, dict):
             raise TypeError("hyperparams['build_posterior_kwargs'] must be a dict if provided.")
 
-        # Either user provides a ready-to-use estimator builder (flexible interface),
-        # or we build one using the canonical sbi builders.
-        estimator = hyperparams.get("estimator", None)
-        if estimator is not None and not callable(estimator):
-            raise TypeError("hyperparams['estimator'] must be callable (or None).")
+        # ------------------------------------------------------------------
+        # Build the estimator:
+        #   - If user provides a callable estimator builder, use it directly.
+        #   - Otherwise, build it from 'estimator_kwargs' using sbi's canonical builders.
+        # ------------------------------------------------------------------
+        estimator_callable = hyperparams.get("estimator", None)
 
-        # If user didn’t provide estimator or estimator_kwargs, choose defaults.
-        if estimator is None:
-            if model_key in ("NPE", "NLE"):
-                estimator = "maf"
+        if callable(estimator_callable):
+            builder = estimator_callable
+        else:
+            # Work on a copy to avoid mutating the caller's dict.
+            ekw = dict(estimator_kwargs)
+            estimator_name = ekw.pop("estimator", "nsf")
+
+            if not isinstance(estimator_name, str):
+                raise TypeError("estimator must be a string like 'nsf', 'maf', or 'mdn'.")
+
+            if model_key == "NPE":
+                builder = self.posterior_nn(model=estimator_name, **ekw)
+            elif model_key == "NLE":
+                builder = self.likelihood_nn(model=estimator_name, **ekw)
             elif model_key == "NRE":
-                estimator = "resnet"
+                builder = self.classifier_nn(model=estimator_name, **ekw)
             else:
                 raise ValueError(f"Unsupported SBI model '{model_key}'.")
 
-        # Instantiate the trainer with the correct keyword per method.
+        # ------------------------------------------------------------------
+        # Instantiate the inference trainer with the correct keyword argument.
+        # ------------------------------------------------------------------
         if model_key in ("NPE", "NLE"):
-            inference = inference_cls(prior=prior, density_estimator=estimator, **inference_kwargs)
-        elif model_key == "NRE":
-            inference = inference_cls(prior=prior, classifier=estimator, **inference_kwargs)
-        else:
-            raise ValueError(f"Unsupported SBI model '{model_key}'.")
+            inference = inference_cls(prior=prior, density_estimator=builder, **inference_kwargs)
+        else:  # NRE
+            inference = inference_cls(prior=prior, classifier=builder, **inference_kwargs)
 
+        # Cache build_posterior kwargs for later posterior construction.
         self._sbi_build_posterior_kwargs = build_posterior_kwargs
 
         return inference
+
 
 
     def train(
@@ -414,22 +440,12 @@ class Inference:
         if X.shape[0] != Y.shape[0]:
             raise ValueError(f"features/theta row mismatch: {X.shape[0]} vs {Y.shape[0]}.")
 
-        finite_mask = np.isfinite(X).all(axis=1) & np.isfinite(Y).all(axis=1)
-        if not np.any(finite_mask):
-            raise ValueError("All rows contain NaN/Inf in features or parameters; nothing to train on.")
-        X = X[finite_mask]
-        Y = Y[finite_mask]
-
         # --------- Scale (do not mutate self.features) ----------
         fitted_scaler = None
         if scaler is not None:
             fitted_scaler = scaler
             fitted_scaler.fit(X)
             X = fitted_scaler.transform(X)
-
-        # CV splitter used only for param_grid
-        rkf = self.RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
-        total_folds = n_splits * n_repeats
 
         # =============== SKLEARN ===============
         if self.backend == "sklearn":
@@ -445,6 +461,9 @@ class Inference:
             base_model = RegressorClass(**base_params)
 
             if param_grid is not None:
+                # CV splitter used only for param_grid
+                rkf = self.RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
+                total_folds = n_splits * n_repeats
                 print("Starting hyperparameter search with cross-validation...")
                 if not isinstance(param_grid, list) or not all(isinstance(d, dict) for d in param_grid):
                     raise ValueError("param_grid must be a list of dicts.")
@@ -530,6 +549,9 @@ class Inference:
             base_cfg = dict(self.hyperparams)
 
             if param_grid is not None:
+                # CV splitter used only for param_grid
+                rkf = self.RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
+                total_folds = n_splits * n_repeats
                 print("Starting hyperparameter search with cross-validation...")
                 if not isinstance(param_grid, list) or not all(isinstance(d, dict) for d in param_grid):
                     raise ValueError("param_grid must be a list of dicts.")
@@ -607,10 +629,13 @@ class Inference:
 
                 inf = self.initialize_sbi(base_cfg)
                 inf.append_simulations(Y_t, X_t)
-                de = inf.train(**train_params)
+                density_estimator = inf.train(**train_params)
+                
+                build_kwargs = getattr(self, "_sbi_build_posterior_kwargs", {}) or {}
+                posterior = inf.build_posterior(density_estimator, **build_kwargs)
 
-                model = inf
-                density_estimator = de
+                model = posterior
+                
 
         else:
             raise RuntimeError(f"Unknown backend '{self.backend}'.")
@@ -631,6 +656,8 @@ class Inference:
             with open(os.path.join(result_dir, "density_estimator.pkl"), "wb") as f:
                 pickle.dump(density_estimator, f)
             print(f"Density estimator saved at '{result_dir}/density_estimator.pkl'")
+            with open(os.path.join(result_dir, "inference.pkl"), "wb") as f:
+                pickle.dump(self, f)
 
         return model
 
@@ -652,15 +679,19 @@ class Inference:
           - if loaded model.pkl is a list -> average predictions across all members
           - if loaded model.pkl is a single model -> return its prediction
 
-        Returns a Python list containing:
-          - sklearn: per-row list[float] for multi-output or float for scalar output
-          - sbi: per-row np.ndarray (theta_dim,)
-          - invalid rows -> NaN row (list of NaNs or np.nan)
+        Returns
+        -------
+        sklearn:
+            list where each element is float (scalar) or list[float] (multi-output), invalid rows -> nan_row
+        sbi:
+            np.ndarray of posterior samples:
+            - shape (S, B, theta_dim) for B valid rows (batch sampling),
+            - invalid rows are NOT included (fast path). If you need alignment to original indices,
+                handle it outside this function.
         """
 
         model_path = os.path.join(result_dir, "model.pkl")
         scaler_path = os.path.join(result_dir, "scaler.pkl")
-        density_estimator_path = os.path.join(result_dir, "density_estimator.pkl")
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model not found at '{model_path}'. Train first.")
@@ -668,9 +699,16 @@ class Inference:
         with open(model_path, "rb") as f:
             model = pickle.load(f)
 
-        if scaler is None and os.path.exists(scaler_path):
+        if scaler is True:
+            if not os.path.exists(scaler_path):
+                raise FileNotFoundError(
+                    "scaler=True but scaler.pkl not found in result_dir."
+                )
             with open(scaler_path, "rb") as f:
                 scaler = pickle.load(f)
+        else:
+            scaler = None
+
 
         # -------- Infer expected number of features (for 1D input disambiguation) --------
         expected_n_features = None
@@ -765,176 +803,77 @@ class Inference:
 
             return [p if p is not None else nan_row for p in preds]
 
-        # ---------------- SBI ----------------
+        # ---------------- SBI: posterior sampling (NO MEANS) ----------------
         if self.backend != "sbi":
             raise RuntimeError(f"Unknown backend '{self.backend}'.")
 
-        if not os.path.exists(density_estimator_path):
-            raise FileNotFoundError(f"density_estimator.pkl not found at '{density_estimator_path}'.")
-
-        with open(density_estimator_path, "rb") as f:
-            density_estimator = pickle.load(f)
+        posterior = model  # model.pkl stores the posterior directly
 
         # Apply scaler for SBI here (no workers)
         if scaler is not None and np.any(finite_mask):
             X2 = X.copy()
             X2[finite_mask] = scaler.transform(X[finite_mask])
             X = X2
+            finite_mask = np.isfinite(X).all(axis=1)
 
-        # Re-check finiteness after scaling
-        finite_mask = np.isfinite(X).all(axis=1)
-
-        out = [nan_row for _ in range(n)]
+        # Fast path
         if not np.any(finite_mask):
-            return out
+            return np.empty((0,))
 
-        # Choose samples count
         if num_posterior_samples is None:
-            if isinstance(self.hyperparams, dict):
-                num_posterior_samples = int(self.hyperparams.get("num_samples", 5000))
-            else:
-                num_posterior_samples = 5000
+            num_posterior_samples = 500
         if num_posterior_samples <= 0:
             raise ValueError("num_posterior_samples must be > 0.")
 
         torch = self.torch
-        build_kwargs = getattr(self, "_sbi_build_posterior_kwargs", {}) or {}
-
-        # Build posterior(s)
-        if isinstance(model, list):
-            if not isinstance(density_estimator, list) or len(density_estimator) != len(model):
-                raise ValueError("Ensemble SBI requires density_estimator to be a list matching model length.")
-            posteriors = [model[i].build_posterior(density_estimator[i], **build_kwargs) for i in range(len(model))]
-        else:
-            posteriors = model.build_posterior(density_estimator, **build_kwargs)
 
         Xf = X[finite_mask]
-        Xf_t = torch.from_numpy(Xf.astype(np.float32))
+        if Xf.dtype != np.float32:
+            Xf = Xf.astype(np.float32, copy=False)
+        Xf_t = torch.from_numpy(Xf)
 
-        def posterior_mean_single(posterior_obj, x_single_t):
-            # x_single_t: shape [1, D]
-            s = posterior_obj.sample(
-                (num_posterior_samples,),
-                x=x_single_t,
-                show_progress_bars=False
-            )  # [S, 1, theta_dim] or [S, theta_dim] depending on posterior
-            s = s.reshape(s.shape[0], -1) if s.ndim == 2 else s[:, 0, :]  # -> [S, theta_dim]
-            return s.mean(dim=0)  # [theta_dim]
+        B = Xf_t.shape[0]
+        if sbi_batch_size is None or sbi_batch_size <= 0:
+            sbi_batch_size = B
 
-        means = []
-        for i in range(Xf_t.shape[0]):
-            xi = Xf_t[i:i + 1]  # [1, D]
-            if isinstance(posteriors, list):
-                mm = [posterior_mean_single(p, xi) for p in posteriors]
-                mean_i = torch.stack(mm, dim=0).mean(dim=0)
-            else:
-                mean_i = posterior_mean_single(posteriors, xi)
-            means.append(mean_i.detach().cpu().numpy())
+        with torch.no_grad():
+            chunks = []
 
-        means = np.stack(means, axis=0)  # [n_finite, theta_dim]
+            for i in range(0, B, sbi_batch_size):
+                xb = Xf_t[i:i + sbi_batch_size]  # shape (b, D)
+                b = xb.shape[0]
 
-        finite_idx = np.where(finite_mask)[0]
-        for k, idx in enumerate(finite_idx):
-            out[idx] = means[k]
+                if b == 1:
+                    # EXACTAMENTE el mismo comportamiento que:
+                    # posterior.sample((S,), x=x_tensor) con x_tensor de una sola observación
+                    sb = posterior.sample(
+                        (num_posterior_samples,),
+                        x=xb,
+                        show_progress_bars=True,
+                    )
+                    # DirectPosterior suele devolver (S, theta_dim) aquí.
+                    # Lo convertimos a (S, 1, theta_dim) para poder concatenar por batch.
+                    if sb.ndim == 2:
+                        sb = sb.unsqueeze(1)  # (S, 1, theta_dim)
 
-        return out
+                else:
+                    # Para múltiples observaciones: usar sample_batched()
+                    sb = posterior.sample_batched(
+                        (num_posterior_samples,),
+                        x=xb,
+                        show_progress_bars=True,
+                    )  # (S, b, theta_dim)
+
+                chunks.append(sb)
+
+            samples = torch.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]  # (S, B, theta_dim)
+
+        # Si el input original era UNA sola x, devolvemos lo mismo que posterior.sample((S,), x=...)
+        # (es decir, (S, theta_dim) en vez de (S, 1, theta_dim))
+        if X.shape[0] == 1 and np.isfinite(X).all():
+            return samples[:, 0, :].detach().cpu().numpy()
+
+        return samples.detach().cpu().numpy()
 
 
-    def sample_posterior(
-            self,
-            x,
-            *,
-            num_samples: int = 10_000,
-            result_dir: str = "data",
-            scaler=None,
-            cache_posterior: bool = False,
-    ):
-        """
-        Sample from the posterior for a single observation x (SBI only).
 
-        Parameters
-        ----------
-        x : array-like
-            Shape (n_features,) or (1, n_features)
-        num_samples : int
-            Number of posterior samples.
-        result_dir : str
-            Where model.pkl / density_estimator.pkl are stored.
-        scaler : fitted transformer or None
-            If None, will load scaler.pkl if present.
-        cache_posterior : bool
-            If True, pickles posterior.pkl (optional; off by default to avoid side effects).
-
-        Returns
-        -------
-        np.ndarray
-            If single posterior: shape (num_samples, theta_dim)
-            If ensemble posterior list: shape (num_samples * n_members, theta_dim) stacked
-        """
-        if self.backend != "sbi":
-            raise ValueError("sample_posterior() is only valid for backend='sbi'.")
-
-        if num_samples <= 0:
-            raise ValueError("num_samples must be > 0.")
-
-        model_path = os.path.join(result_dir, "model.pkl")
-        scaler_path = os.path.join(result_dir, "scaler.pkl")
-        density_estimator_path = os.path.join(result_dir, "density_estimator.pkl")
-
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model not found at '{model_path}'. Train first.")
-        if not os.path.exists(density_estimator_path):
-            raise FileNotFoundError(f"Density estimator not found at '{density_estimator_path}'. Train first.")
-
-        with open(model_path, "rb") as f:
-            model = pickle.load(f)
-
-        with open(density_estimator_path, "rb") as f:
-            density_estimator = pickle.load(f)
-
-        if scaler is None and os.path.exists(scaler_path):
-            with open(scaler_path, "rb") as f:
-                scaler = pickle.load(f)
-
-        # Normalize x to (1, n_features)
-        x_np = np.asarray(x)
-        if x_np.ndim == 0:
-            x_np = x_np.reshape(1, 1)
-        elif x_np.ndim == 1:
-            x_np = x_np.reshape(1, -1)
-        elif x_np.ndim != 2 or x_np.shape[0] != 1:
-            raise ValueError(f"x must be shape (n_features,) or (1, n_features), got {x_np.shape}.")
-
-        if not np.isfinite(x_np).all():
-            raise ValueError("x contains NaN/Inf; cannot sample posterior.")
-
-        if scaler is not None:
-            x_np = scaler.transform(x_np)
-
-        torch = self.torch
-        x_t = torch.from_numpy(x_np.astype(np.float32))
-
-        build_kwargs = getattr(self, "_sbi_build_posterior_kwargs", {}) or {}
-
-        # Build posterior(s)
-        if isinstance(model, list):
-            if not isinstance(density_estimator, list) or len(density_estimator) != len(model):
-                raise ValueError("If model is a list, density_estimator must be a list of same length.")
-            posterior = [model[i].build_posterior(density_estimator[i], **build_kwargs) for i in range(len(model))]
-        else:
-            posterior = model.build_posterior(density_estimator, **build_kwargs)
-
-        if cache_posterior:
-            with open(os.path.join(result_dir, "posterior.pkl"), "wb") as f:
-                pickle.dump(posterior, f)
-            print(f"Posterior saved at '{result_dir}/posterior.pkl'")
-
-        # Draw samples
-        if isinstance(posterior, list):
-            # Stack samples from ensemble members
-            samples = [p.sample((num_samples,), x=x_t, show_progress_bars=False).detach().cpu().numpy()
-                       for p in posterior]
-            return np.vstack(samples)
-        else:
-            samples = posterior.sample((num_samples,), x=x_t, show_progress_bars=False)
-            return samples.detach().cpu().numpy()
