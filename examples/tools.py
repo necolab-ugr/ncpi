@@ -367,7 +367,7 @@ def compute_predictions(
         _copy_assets_LFP(method=method, ML_model=ML_model, zenodo_dir_sim=zenodo_dir_sim)
 
         X_emp = _features_to_2d_numpy(out["Features"])
-        predictions = inference.predict(X_emp)
+        predictions = inference.predict(X_emp, scaler=True)
         out["Predictions"] = [list(p) if isinstance(p, (list, np.ndarray)) else [p] for p in predictions]
         return out
 
@@ -389,7 +389,7 @@ def compute_predictions(
             continue
 
         X_emp = _features_to_2d_numpy(sensor_df["Features"])
-        predictions = inference.predict(X_emp)
+        predictions = inference.predict(X_emp, scaler=True)
         sensor_df["Predictions"] = [list(p) if isinstance(p, (list, np.ndarray)) else [p] for p in predictions]
 
         # Write back into out
