@@ -803,20 +803,19 @@ class Inference:
 
             return [p if p is not None else nan_row for p in preds]
 
-        # ---------------- SBI: posterior sampling (NO MEANS) ----------------
+        # ---------------- SBI: posterior sampling  ----------------
         if self.backend != "sbi":
             raise RuntimeError(f"Unknown backend '{self.backend}'.")
 
-        posterior = model  # model.pkl stores the posterior directly
+        # In the SBI path, model.pkl stores the posterior object directly
+        posterior = model
 
-        # Apply scaler for SBI here (no workers)
         if scaler is not None and np.any(finite_mask):
             X2 = X.copy()
             X2[finite_mask] = scaler.transform(X[finite_mask])
             X = X2
             finite_mask = np.isfinite(X).all(axis=1)
 
-        # Fast path
         if not np.any(finite_mask):
             return np.empty((0,))
 
@@ -836,40 +835,39 @@ class Inference:
         if sbi_batch_size is None or sbi_batch_size <= 0:
             sbi_batch_size = B
 
+        # Batched posterior sampling 
         with torch.no_grad():
             chunks = []
 
             for i in range(0, B, sbi_batch_size):
-                xb = Xf_t[i:i + sbi_batch_size]  # shape (b, D)
+                xb = Xf_t[i:i + sbi_batch_size]  
                 b = xb.shape[0]
 
                 if b == 1:
-                    # EXACTAMENTE el mismo comportamiento que:
-                    # posterior.sample((S,), x=x_tensor) con x_tensor de una sola observación
+                    # Match the exact behavior of:
+                    # posterior.sample((S,), x=x_tensor) for a single observation
                     sb = posterior.sample(
                         (num_posterior_samples,),
                         x=xb,
                         show_progress_bars=True,
                     )
-                    # DirectPosterior suele devolver (S, theta_dim) aquí.
-                    # Lo convertimos a (S, 1, theta_dim) para poder concatenar por batch.
+                    # DirectPosterior typically returns (S, theta_dim) in this case.
+                    # Convert to (S, 1, theta_dim) to allow concatenation across batches.
                     if sb.ndim == 2:
-                        sb = sb.unsqueeze(1)  # (S, 1, theta_dim)
+                        sb = sb.unsqueeze(1) 
 
                 else:
-                    # Para múltiples observaciones: usar sample_batched()
+                    # Multiple observations: use batched sampling
                     sb = posterior.sample_batched(
                         (num_posterior_samples,),
                         x=xb,
                         show_progress_bars=True,
-                    )  # (S, b, theta_dim)
+                    )  
 
                 chunks.append(sb)
 
-            samples = torch.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]  # (S, B, theta_dim)
+            samples = torch.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]
 
-        # Si el input original era UNA sola x, devolvemos lo mismo que posterior.sample((S,), x=...)
-        # (es decir, (S, theta_dim) en vez de (S, 1, theta_dim))
         if X.shape[0] == 1 and np.isfinite(X).all():
             return samples[:, 0, :].detach().cpu().numpy()
 
