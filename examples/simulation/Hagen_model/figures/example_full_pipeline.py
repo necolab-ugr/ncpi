@@ -196,7 +196,7 @@ def main():
 
                 # Compute CDM using the FieldPotential helper
                 probe = 'KernelApproxCurrentDipoleMoment'
-                cdm_signals = potential.compute_cdm_from_kernels(
+                cdm_signals = potential.compute_cdm_lfp_from_kernels(
                     H_YX,
                     spike_times=times,
                     dt=dt,
