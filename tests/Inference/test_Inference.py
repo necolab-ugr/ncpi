@@ -138,6 +138,9 @@ def test_sbi_train_predict_and_sample(tmp_result_dir, sbi_model):
         # default num_samples used by predict() if not passed
         "num_samples": 200,
     }
+    if sbi_model == "NRE":
+        # NRE classifier_nn does not support flow-based estimators like "nsf"
+        hyper["estimator_kwargs"] = {"estimator": "mlp"}
 
     inf = Inference(sbi_model, hyperparams=hyper)
     inf.add_simulation_data(X, Y)
@@ -160,16 +163,13 @@ def test_sbi_train_predict_and_sample(tmp_result_dir, sbi_model):
         sbi_eval_batch_size=8,
     )
 
-    # Predict posterior mean for multiple observations (must return one theta per row)
-    preds = inf.predict(X[:4], result_dir=tmp_result_dir, num_posterior_samples=30, sbi_batch_size=8)
-    assert isinstance(preds, list)
-    assert len(preds) == 4
-    for p in preds:
-        p = np.asarray(p)
-        assert p.shape == (2,)
-        assert np.all(np.isfinite(p))
-
-    # Sample posterior for a single observation
-    samples = inf.sample_posterior(X[0], num_samples=40, result_dir=tmp_result_dir)
-    assert samples.shape == (40, 2)
+    # Predict posterior samples for multiple observations
+    samples = inf.predict(X[:4], result_dir=tmp_result_dir, num_posterior_samples=30, sbi_batch_size=8)
+    assert isinstance(samples, np.ndarray)
+    assert samples.shape == (30, 4, 2)
     assert np.all(np.isfinite(samples))
+
+    # Sample posterior for a single observation (returns S x theta_dim)
+    samples1 = inf.predict(X[0], result_dir=tmp_result_dir, num_posterior_samples=40, sbi_batch_size=8)
+    assert samples1.shape == (40, 2)
+    assert np.all(np.isfinite(samples1))
