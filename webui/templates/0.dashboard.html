@@ -80,8 +80,7 @@
 								</div>
 								<div class="flex flex-col gap-1 items-center ">
 									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Analysis</h2>
-									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Visualize and interpret the
-										results of your analysis.</p>
+									<p class="text-sm text-gray-500 dark:text-gray-400 text-center">Visualize and interpret your workflow results.</p>
 								</div>
 							</a>
 						</div>
@@ -165,13 +164,32 @@
 									</div>
 								</div>
 								<div class="flex flex-col items-center">
-									<div class="pipeline-node bg-slate-300 dark:bg-slate-700"></div>
+									<div class="pipeline-node {% if has_analysis_data %}bg-green-500 shadow-[0_0_12px_rgba(34,197,94,0.6)]{% else %}bg-slate-300 dark:bg-slate-700{% endif %}"></div>
 									<div class="mt-4 text-center">
+										{% if has_analysis_data %}
+										<span class="block text-[13px] font-bold uppercase tracking-wider text-green-600 dark:text-green-500">Data
+											loaded</span>
 										<span
-											class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">Awaiting
-											inference</span>
+											class="block text-[10px] text-slate-400 dark:text-slate-500 mt-1 uppercase font-medium">Ready</span>
+										<div class="mt-2 text-[10px] text-slate-500 dark:text-slate-400">
+											{% for filename in analysis_data_files %}
+											<span class="block">{{ filename }}</span>
+											{% endfor %}
+										</div>
+										<form class="mt-3" action="{{ url_for('clear_analysis_data') }}" method="POST">
+											<button
+												class="text-[10px] font-semibold uppercase tracking-wider text-red-600 dark:text-red-500 border border-red-200 dark:border-red-700/60 rounded-md px-2 py-1 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+												type="submit">
+												Clear analysis data
+											</button>
+										</form>
+										{% else %}
 										<span
-											class="block text-[10px] text-slate-400/60 dark:text-slate-600/60 mt-1 uppercase font-medium italic">Idle</span>
+											class="block text-[13px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-600">No
+											data</span>
+										<span
+											class="block text-[10px] text-slate-400/60 dark:text-slate-600/60 mt-1 uppercase font-medium italic">Pending</span>
+										{% endif %}
 									</div>
 								</div>
 							</div>
