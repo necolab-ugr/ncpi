@@ -20,7 +20,9 @@ zenodo_dw_mult = True
 zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
 
 # Zenodo directory where the data is stored (must be an absolute path to correctly load morphologies in NEURON)
-zenodo_dir = os.path.join("$HOME","multicompartment_neuron_network")
+zenodo_dir = os.path.expandvars(os.path.expanduser(
+    os.path.join("$HOME", "multicompartment_neuron_network")
+))
 
 # Set to True to run new simulations of the LIF network model, or False to load precomputed results from a pickle file
 # located in a 'data' folder.

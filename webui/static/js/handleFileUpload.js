@@ -18,8 +18,13 @@ function handleFileUpload(event) {
                 // Store info about uploaded files
                 component.uploads[inputId] = {
                     name: file.name,
-                    uploaded: true
+                    uploaded: false
                 };
+
+                // Allow page-specific hooks (no-op unless defined)
+                if (typeof component.onFileSelected === 'function') {
+                    component.onFileSelected(file, inputId);
+                }
 
                 // Force Alpine to re-evaluate (if needed)
                 component.$nextTick && component.$nextTick();

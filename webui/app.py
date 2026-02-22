@@ -5,6 +5,7 @@ import subprocess
 import ast
 import threading
 import glob
+import base64
 from collections import deque
 
 # Folder for temporary files > 5 GB
@@ -459,12 +460,23 @@ def dashboard():
             for name in files:
                 if name.endswith(".pkl"):
                     field_potential_files.append(name)
+    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    if os.path.isdir(analysis_data_dir):
+        analysis_data_files = sorted(
+            f for f in os.listdir(analysis_data_dir)
+            if (f.endswith(".pkl") or f.endswith(".pickle"))
+            and os.path.isfile(os.path.join(analysis_data_dir, f))
+        )
+    else:
+        analysis_data_files = []
     return render_template(
         "0.dashboard.html",
         simulation_pkl_files=simulation_pkl_files,
         has_simulation_pkl=bool(simulation_pkl_files),
         field_potential_files=sorted(set(field_potential_files)),
         has_field_potential_data=bool(field_potential_files),
+        analysis_data_files=analysis_data_files,
+        has_analysis_data=bool(analysis_data_files),
     )
 
 # Simulation configuration page
@@ -914,7 +926,1056 @@ def inference():
 # Analysis configuration page
 @app.route("/analysis")
 def analysis():
-    return render_template("5.analysis.html")
+    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    if os.path.isdir(analysis_data_dir):
+        analysis_data_files = sorted(
+            f for f in os.listdir(analysis_data_dir)
+            if (f.endswith(".pkl") or f.endswith(".pickle"))
+            and os.path.isfile(os.path.join(analysis_data_dir, f))
+        )
+    else:
+        analysis_data_files = []
+    return render_template(
+        "5.analysis.html",
+        analysis_data_files=analysis_data_files,
+        has_analysis_data=bool(analysis_data_files),
+    )
+
+
+def _analysis_data_path():
+    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    if not os.path.isdir(analysis_data_dir):
+        return None
+    candidates = []
+    for name in os.listdir(analysis_data_dir):
+        if not (name.endswith(".pkl") or name.endswith(".pickle")):
+            continue
+        path = os.path.join(analysis_data_dir, name)
+        if os.path.isfile(path):
+            candidates.append(path)
+    if not candidates:
+        return None
+    return max(candidates, key=os.path.getmtime)
+
+
+def _analysis_plot_error(message, status=400, log_output=""):
+    return (
+        render_template(
+            "analysis_plot_result.html",
+            title="Analysis plot",
+            subtitle="Plotting failed.",
+            error=message,
+            image_data=None,
+            log_output=log_output,
+        ),
+        status,
+    )
+
+
+def _render_analysis_plot(title, subtitle, image_bytes, log_output=""):
+    encoded = base64.b64encode(image_bytes).decode("ascii")
+    return render_template(
+        "analysis_plot_result.html",
+        title=title,
+        subtitle=subtitle,
+        error=None,
+        image_data=encoded,
+        log_output=log_output,
+    )
+
+
+def _find_column(df, candidates):
+    lower_map = {str(c).lower(): c for c in df.columns}
+    for cand in candidates:
+        if cand in df.columns:
+            return cand
+        cand_lower = str(cand).lower()
+        if cand_lower in lower_map:
+            return lower_map[cand_lower]
+    return None
+
+
+def _pick_value_column(df, exclude):
+    preferred = ["Predictions", "prediction", "predictions", "Y", "y", "value", "Value", "Values", "data", "Data"]
+    for cand in preferred:
+        if cand in df.columns and cand not in exclude:
+            return cand
+    numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c not in exclude]
+    if numeric_cols:
+        return numeric_cols[0]
+    return None
+
+
+@app.route("/analysis/columns", methods=["POST"])
+def analysis_columns():
+    upload = request.files.get("dataframe")
+    if upload is None or upload.filename == "":
+        return jsonify({"error": "No dataframe file uploaded."}), 400
+
+    filename = secure_filename(upload.filename)
+    if not filename:
+        return jsonify({"error": "Invalid filename."}), 400
+
+    file_extension = os.path.splitext(filename)[1].lower()
+    if file_extension not in {".pkl", ".pickle"}:
+        return jsonify({"error": "Only .pkl/.pickle files are supported."}), 400
+
+    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    os.makedirs(analysis_data_dir, exist_ok=True)
+    for existing in os.listdir(analysis_data_dir):
+        if not (existing.endswith(".pkl") or existing.endswith(".pickle")):
+            continue
+        existing_path = os.path.join(analysis_data_dir, existing)
+        if os.path.isfile(existing_path):
+            try:
+                os.remove(existing_path)
+            except OSError:
+                pass
+    temp_path = os.path.join(analysis_data_dir, filename)
+    upload.save(temp_path)
+
+    try:
+        df = compute_utils.read_df_file(temp_path)
+        columns = [str(col) for col in df.columns]
+        return jsonify({"columns": columns})
+    except Exception as exc:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/analysis/columns/current", methods=["GET"])
+def analysis_columns_current():
+    data_path = _analysis_data_path()
+    if data_path is None:
+        return jsonify({"error": "No analysis dataframe found."}), 404
+    try:
+        df = compute_utils.read_df_file(data_path)
+        columns = [str(col) for col in df.columns]
+        return jsonify({"columns": columns})
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/analysis/column_values", methods=["GET"])
+def analysis_column_values():
+    data_path = _analysis_data_path()
+    if data_path is None:
+        return jsonify({"error": "No analysis dataframe found."}), 404
+    column = request.args.get("column")
+    if not column:
+        return jsonify({"error": "Column is required."}), 400
+    try:
+        df = compute_utils.read_df_file(data_path)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    if column not in df.columns:
+        return jsonify({"error": f'Column "{column}" not found in the dataframe.'}), 400
+
+    series = df[column].dropna()
+    values = series.tolist()
+    if not values:
+        return jsonify({"values": []})
+
+    has_complex = any(isinstance(v, (list, tuple, dict, set, np.ndarray)) for v in values)
+    if has_complex:
+        unique_vals = sorted({str(v) for v in values})
+        return jsonify({"values": unique_vals})
+
+    numeric = []
+    non_numeric = []
+    for v in values:
+        try:
+            numeric.append(float(v))
+        except (TypeError, ValueError):
+            non_numeric.append(v)
+
+    if numeric and not non_numeric:
+        unique_vals = sorted(set(numeric))
+        out = [str(v) for v in unique_vals]
+    else:
+        unique_vals = sorted({str(v) for v in values})
+        out = unique_vals
+    return jsonify({"values": out})
+
+
+@app.route("/analysis/plot/boxplot", methods=["POST"])
+def analysis_plot_boxplot():
+    log_buffer = io.StringIO()
+    def _log(message):
+        print(message, file=log_buffer)
+    def _plot_error(message, status=400):
+        return _analysis_plot_error(message, status=status, log_output=log_buffer.getvalue())
+
+    data_path = _analysis_data_path()
+    if data_path is None:
+        return _plot_error("No analysis dataframe found. Upload a .pkl file first.")
+
+    group_col = request.form.get("boxplot_group_by")
+    if not group_col:
+        return _plot_error("Select a grouping column for the x-axis.")
+
+    try:
+        df = compute_utils.read_df_file(data_path)
+    except Exception as exc:
+        return _plot_error(str(exc))
+    _log("Loaded dataframe.")
+
+    if group_col not in df.columns:
+        return _plot_error(f'Grouping column "{group_col}" not found in the dataframe.')
+
+    value_col = request.form.get("boxplot_value_col")
+    if not value_col:
+        return _plot_error("Select a y-axis variable for the boxplot.")
+    if value_col not in df.columns:
+        return _plot_error(f'Value column "{value_col}" not found in the dataframe.')
+
+    def _parse_float(value, default):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _parse_color(value, default):
+        if value is None:
+            return default
+        text = str(value).strip()
+        if not text:
+            return default
+        if "," in text:
+            parts = [p.strip() for p in text.split(",")]
+            if len(parts) in (3, 4):
+                try:
+                    return tuple(float(p) for p in parts)
+                except ValueError:
+                    pass
+        return text
+
+    showfliers = request.form.get("boxplot_showfliers") is not None
+    box_width = _parse_float(request.form.get("boxplot_width"), 0.5)
+    line_width = _parse_float(request.form.get("boxplot_linewidth"), 0.5)
+    median_color = _parse_color(request.form.get("boxplot_median_color"), "red")
+    median_linewidth = _parse_float(request.form.get("boxplot_median_linewidth"), 0.8)
+    box_edge_width = _parse_float(request.form.get("boxplot_box_edge_width"), 0.2)
+    box_facecolor = _parse_color(request.form.get("boxplot_facecolor"), "none")
+    colormap_name = request.form.get("boxplot_colormap", "viridis")
+    colormap_alpha = _parse_float(request.form.get("boxplot_color_alpha"), 0.35)
+    if colormap_alpha is None or not (0.0 <= colormap_alpha <= 1.0):
+        colormap_alpha = 0.35
+    show_cohend = request.form.get("boxplot_show_cohend") is not None
+    control_group_raw = request.form.get("boxplot_control_group") if show_cohend else None
+    control_group_raw = control_group_raw.strip() if control_group_raw else ""
+    if show_cohend and not control_group_raw:
+        return _plot_error("Provide a control group to compute Cohen's d.")
+    _log(f"Boxplot settings: group_col={group_col}, value_col={value_col}, show_cohend={show_cohend}.")
+
+    df_use = df[[group_col, value_col]].copy()
+    groups = [g for g in df_use[group_col].dropna().unique().tolist()]
+    if not groups:
+        return _plot_error("No groups found for the selected grouping column.")
+    def _match_control_group(items, raw_value):
+        if not raw_value:
+            return None
+        for item in items:
+            if str(item) == raw_value:
+                return item
+        try:
+            raw_num = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+        for item in items:
+            try:
+                if float(item) == raw_num:
+                    return item
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _maybe_sort_groups(items):
+        if not items:
+            return items, None
+        numeric_values = []
+        for idx, item in enumerate(items):
+            if isinstance(item, (int, float, np.integer, np.floating)):
+                if pd.isna(item):
+                    return items, None
+                numeric_values.append((float(item), idx, item))
+                continue
+            try:
+                value = float(str(item))
+            except (TypeError, ValueError):
+                return items, None
+            if np.isnan(value):
+                return items, None
+            numeric_values.append((value, idx, item))
+        numeric_values.sort(key=lambda row: (row[0], row[1]))
+        return [row[2] for row in numeric_values], numeric_values
+
+    def _infer_vector_length(values):
+        lengths = set()
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, float) and np.isnan(v):
+                continue
+            if isinstance(v, (list, tuple, np.ndarray)):
+                arr = np.asarray(v)
+                if arr.ndim == 0:
+                    lengths.add(1)
+                else:
+                    lengths.add(arr.size)
+            else:
+                lengths.add(1)
+        if not lengths:
+            return 0, None
+        if len(lengths) == 1:
+            return lengths.pop(), None
+        if 1 in lengths:
+            return None, "mixed scalars and vectors"
+        return None, "inconsistent vector lengths"
+
+    vector_len, length_error = _infer_vector_length(df_use[value_col])
+    if vector_len is None:
+        return _plot_error(
+            f'Value column "{value_col}" has {length_error}. Use a column with consistent lengths.'
+        )
+    if vector_len == 0:
+        return _plot_error(f'Value column "{value_col}" contains no data to plot.')
+
+    groups, numeric_sort = _maybe_sort_groups(groups)
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        return _plot_error(f"Matplotlib is required for plotting: {exc}", status=500)
+    _log("Matplotlib initialized.")
+
+    def _coerce_scalar(value):
+        if isinstance(value, (list, tuple, np.ndarray)):
+            arr = np.asarray(value)
+            if arr.ndim == 0:
+                try:
+                    return float(arr)
+                except (TypeError, ValueError):
+                    return None
+            flat = arr.ravel()
+            if flat.size != 1:
+                return None
+            try:
+                return float(flat[0])
+            except (TypeError, ValueError):
+                return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _coerce_vector(value, length):
+        if not isinstance(value, (list, tuple, np.ndarray)):
+            return None
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            return None
+        flat = arr.ravel()
+        if flat.size != length:
+            return None
+        try:
+            return flat.astype(float)
+        except (TypeError, ValueError):
+            return None
+
+    def _add_cohen_bar(ax, d_map, control_value, group_values):
+        if not d_map:
+            return
+        labels = []
+        values = []
+        for g in group_values:
+            if g == control_value:
+                continue
+            val = d_map.get(g)
+            if val is None:
+                continue
+            try:
+                if np.isnan(val):
+                    continue
+            except TypeError:
+                pass
+            labels.append(str(g))
+            values.append(float(val))
+        if not values:
+            return
+        inset = ax.inset_axes([1.12, 0.10, 0.30, 0.80], transform=ax.transAxes)
+        inset.set_facecolor("white")
+        inset.patch.set_alpha(0.95)
+        y = np.arange(len(values))
+        colors = ["#F97316" if v >= 0 else "#2563EB" for v in values]
+        inset.barh(y, values, color=colors, edgecolor="#0F172A", linewidth=0.3)
+        inset.axvline(0, color="#0F172A", linewidth=0.6)
+        inset.set_yticks(y)
+        inset.set_yticklabels(labels, fontsize=7)
+        inset.tick_params(axis="x", labelsize=7)
+        inset.set_title("Cohen's d", fontsize=7, pad=2)
+        inset.grid(False)
+        for spine in inset.spines.values():
+            spine.set_visible(False)
+
+    positions = np.arange(1, len(groups) + 1)
+    boxplot_kwargs = dict(
+        positions=positions,
+        showfliers=showfliers,
+        widths=box_width,
+        patch_artist=True,
+        medianprops=dict(color=median_color, linewidth=median_linewidth),
+        whiskerprops=dict(color="black", linewidth=line_width),
+        capprops=dict(color="black", linewidth=line_width),
+        boxprops=dict(linewidth=line_width, facecolor=box_facecolor),
+    )
+    colormap = None
+    if colormap_name:
+        name = str(colormap_name).strip().lower()
+        if name not in ("none", "off", "false", "no"):
+            try:
+                colormap = plt.colormaps[str(colormap_name).strip()]
+            except KeyError:
+                colormap = plt.colormaps["viridis"]
+
+    if vector_len == 1:
+        grouped_values = {g: [] for g in groups}
+        for g, v in df_use.itertuples(index=False):
+            if pd.isna(g) or v is None:
+                continue
+            val = _coerce_scalar(v)
+            if val is None or (isinstance(val, float) and np.isnan(val)):
+                continue
+            grouped_values[g].append(val)
+
+        groups = [g for g in groups if grouped_values[g]]
+        if not groups:
+            return _plot_error("No numeric data available for the selected y-axis variable.")
+
+        cohen_map = None
+        control_group_value = None
+        if show_cohend:
+            control_group_value = _match_control_group(groups, control_group_raw)
+            if control_group_value is None:
+                return _plot_error(
+                    f'Control group "{control_group_raw}" not found in the grouping column.'
+                )
+            try:
+                import ncpi
+            except Exception as exc:
+                return _plot_error(f"ncpi is required for Cohen's d: {exc}", status=500)
+            _log(f"Computing Cohen's d vs {control_group_value}.")
+            rows = []
+            for g, values in grouped_values.items():
+                for val in values:
+                    rows.append((g, val))
+            df_cohen = pd.DataFrame(rows, columns=[group_col, value_col])
+            sensor_col = "__boxplot_sensor__"
+            df_cohen[sensor_col] = "__all__"
+            analysis = ncpi.Analysis(df_cohen)
+            try:
+                results = analysis.cohend(
+                    control_group=control_group_value,
+                    data_col=value_col,
+                    data_index=-1,
+                    group_col=group_col,
+                    sensor_col=sensor_col,
+                    drop_zeros=False,
+                )
+            except Exception as exc:
+                return _plot_error(f"Failed to compute Cohen's d: {exc}")
+            cohen_map = {}
+            for g in groups:
+                if g == control_group_value:
+                    continue
+                key = f"{g}vs{control_group_value}"
+                comp_df = results.get(key)
+                if comp_df is None or comp_df.empty:
+                    cohen_map[g] = np.nan
+                    continue
+                row = comp_df.loc[comp_df[sensor_col] == "__all__"]
+                if row.empty:
+                    cohen_map[g] = comp_df["d"].iloc[0]
+                else:
+                    cohen_map[g] = row["d"].iloc[0]
+
+        positions = np.arange(1, len(groups) + 1)
+        data_plot = [grouped_values[g] for g in groups]
+
+        fig, ax = plt.subplots(figsize=(13.8, 6.2))
+        _log("Rendering boxplot.")
+        box = ax.boxplot(data_plot, **{**boxplot_kwargs, "positions": positions})
+        for patch in box.get("boxes", []):
+            patch.set_linewidth(box_edge_width)
+        if colormap is not None:
+            color_positions = np.linspace(0, 1, num=len(groups)) if len(groups) > 1 else [0.5]
+            for patch, color_pos in zip(box.get("boxes", []), color_positions):
+                color = colormap(color_pos)
+                patch.set_facecolor((color[0], color[1], color[2], colormap_alpha))
+        if show_cohend and cohen_map:
+            _add_cohen_bar(ax, cohen_map, control_group_value, groups)
+        ax.set_xticks(positions)
+        ax.set_xticklabels([str(g) for g in groups])
+        ax.set_xlabel(group_col)
+        ax.set_ylabel(value_col)
+        ax.set_title(f"{value_col} by {group_col}")
+        fig.suptitle("")
+        fig.tight_layout()
+        fig.subplots_adjust(right=0.64)
+    else:
+        grouped_arrays = {g: [] for g in groups}
+        for g, v in df_use.itertuples(index=False):
+            if pd.isna(g) or v is None:
+                continue
+            arr = _coerce_vector(v, vector_len)
+            if arr is None:
+                return _analysis_plot_error(
+                    f'Value column "{value_col}" must contain arrays/lists of length {vector_len}.'
+                )
+            grouped_arrays[g].append(arr)
+
+        groups = [g for g in groups if grouped_arrays[g]]
+        if not groups:
+            return _plot_error("No data available for the selected y-axis variable.")
+
+        cohen_maps = None
+        control_group_value = None
+        if show_cohend:
+            control_group_value = _match_control_group(groups, control_group_raw)
+            if control_group_value is None:
+                return _plot_error(
+                    f'Control group "{control_group_raw}" not found in the grouping column.'
+                )
+            try:
+                import ncpi
+            except Exception as exc:
+                return _plot_error(f"ncpi is required for Cohen's d: {exc}", status=500)
+            _log(f"Computing Cohen's d vs {control_group_value} for each dimension.")
+            rows = []
+            for g, arrs in grouped_arrays.items():
+                for arr in arrs:
+                    rows.append((g, arr))
+            df_cohen = pd.DataFrame(rows, columns=[group_col, value_col])
+            sensor_col = "__boxplot_sensor__"
+            df_cohen[sensor_col] = "__all__"
+            analysis = ncpi.Analysis(df_cohen)
+            cohen_maps = []
+            for dim in range(vector_len):
+                try:
+                    results = analysis.cohend(
+                        control_group=control_group_value,
+                        data_col=value_col,
+                        data_index=dim,
+                        group_col=group_col,
+                        sensor_col=sensor_col,
+                        drop_zeros=False,
+                    )
+                except Exception as exc:
+                    return _plot_error(f"Failed to compute Cohen's d: {exc}")
+                d_map = {}
+                for g in groups:
+                    if g == control_group_value:
+                        continue
+                    key = f"{g}vs{control_group_value}"
+                    comp_df = results.get(key)
+                    if comp_df is None or comp_df.empty:
+                        d_map[g] = np.nan
+                        continue
+                    row = comp_df.loc[comp_df[sensor_col] == "__all__"]
+                    if row.empty:
+                        d_map[g] = comp_df["d"].iloc[0]
+                    else:
+                        d_map[g] = row["d"].iloc[0]
+                cohen_maps.append(d_map)
+
+        import math
+
+        cols = 1
+        rows = vector_len
+        fig, axes = plt.subplots(rows, cols, figsize=(11.2, 4.6 * rows))
+        _log(f"Rendering {vector_len} boxplot panels.")
+        if not isinstance(axes, np.ndarray):
+            axes = np.array([axes])
+        axes = axes.ravel()
+
+        for dim in range(vector_len):
+            ax = axes[dim]
+            data_plot = []
+            has_data = False
+            for g in groups:
+                values = [arr[dim] for arr in grouped_arrays[g]]
+                values = [v for v in values if not (isinstance(v, float) and np.isnan(v))]
+                if values:
+                    has_data = True
+                data_plot.append(values)
+
+            positions = np.arange(1, len(groups) + 1)
+            if has_data:
+                box = ax.boxplot(data_plot, **{**boxplot_kwargs, "positions": positions})
+                for patch in box.get("boxes", []):
+                    patch.set_linewidth(box_edge_width)
+                if colormap is not None:
+                    color_positions = np.linspace(0, 1, num=len(groups)) if len(groups) > 1 else [0.5]
+                    for patch, color_pos in zip(box.get("boxes", []), color_positions):
+                        color = colormap(color_pos)
+                        patch.set_facecolor((color[0], color[1], color[2], colormap_alpha))
+                if show_cohend and cohen_maps:
+                    _add_cohen_bar(ax, cohen_maps[dim], control_group_value, groups)
+                ax.set_xticks(positions)
+                ax.set_xticklabels([str(g) for g in groups])
+            else:
+                ax.text(0.5, 0.5, "No data", ha="center", va="center")
+                ax.set_xticks([])
+                ax.set_yticks([])
+            ax.set_xlabel(group_col)
+            ax.set_ylabel(f"{value_col}[{dim}]")
+            ax.set_title(f"{value_col}[{dim}] by {group_col}")
+
+        for extra in range(vector_len, len(axes)):
+            fig.delaxes(axes[extra])
+        fig.suptitle("")
+        fig.tight_layout()
+        fig.subplots_adjust(right=0.64)
+
+    output = io.BytesIO()
+    fig.savefig(output, format="png", dpi=160)
+    plt.close(fig)
+    output.seek(0)
+    return _render_analysis_plot(
+        title="Boxplot result",
+        subtitle=f"{value_col} grouped by {group_col}.",
+        image_bytes=output.getvalue(),
+        log_output=log_buffer.getvalue(),
+    )
+
+
+@app.route("/analysis/plot/topomap", methods=["POST"])
+def analysis_plot_topomap():
+    log_buffer = io.StringIO()
+    def _log(message):
+        print(message, file=log_buffer)
+    def _plot_error(message, status=400):
+        return _analysis_plot_error(message, status=status, log_output=log_buffer.getvalue())
+
+    data_path = _analysis_data_path()
+    if data_path is None:
+        return _plot_error("No analysis dataframe found. Upload a .pkl file first.")
+
+    group_col = request.form.get("topomap_group_by")
+    if not group_col:
+        return _plot_error("Select a grouping column for the topomap.")
+
+    grouping_mode = request.form.get("topomap_grouping_mode", "per_sensor")
+    compare_method = request.form.get("topomap_compare_method", "raw")
+    control_group_raw = request.form.get("topomap_control_group") if grouping_mode == "compare_categories" else None
+    control_group_raw = control_group_raw.strip() if control_group_raw else ""
+
+    try:
+        df = compute_utils.read_df_file(data_path)
+    except Exception as exc:
+        return _plot_error(str(exc))
+    _log("Loaded dataframe.")
+
+    if group_col not in df.columns:
+        return _plot_error(f'Grouping column "{group_col}" not found in the dataframe.')
+
+    sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
+    if sensor_col is None:
+        return _plot_error("Sensor/channel column not found. Expected a column like 'sensor' or 'Sensor'.")
+
+    value_col = request.form.get("topomap_value_col")
+    if not value_col:
+        return _plot_error("Select a value column for the topomap.")
+    if value_col not in df.columns:
+        return _plot_error(f'Value column "{value_col}" not found in the dataframe.')
+
+    df_use = df[[group_col, sensor_col, value_col]].copy()
+    df_use = df_use.dropna(subset=[sensor_col, group_col])
+    if df_use.empty:
+        return _plot_error("No valid rows found for the selected group and sensor columns.")
+    _log(f"Topomap settings: group_col={group_col}, value_col={value_col}, mode={grouping_mode}.")
+
+    def _infer_vector_length(values):
+        lengths = set()
+        for v in values:
+            if v is None:
+                continue
+            if isinstance(v, float) and np.isnan(v):
+                continue
+            if isinstance(v, (list, tuple, np.ndarray)):
+                arr = np.asarray(v)
+                if arr.ndim == 0:
+                    lengths.add(1)
+                else:
+                    lengths.add(arr.size)
+            else:
+                lengths.add(1)
+        if not lengths:
+            return 0, None
+        if len(lengths) == 1:
+            return lengths.pop(), None
+        if 1 in lengths:
+            return None, "mixed scalars and vectors"
+        return None, "inconsistent vector lengths"
+
+    vector_len, length_error = _infer_vector_length(df_use[value_col])
+    if vector_len is None:
+        return _plot_error(
+            f'Value column "{value_col}" has {length_error}. Use a column with consistent lengths.'
+        )
+    if vector_len == 0:
+        return _plot_error(f'Value column "{value_col}" contains no data to plot.')
+
+    groups = [g for g in df_use[group_col].dropna().unique().tolist()]
+    if not groups:
+        return _plot_error("No groups found for the selected grouping column.")
+    if grouping_mode == "compare_categories" and not control_group_raw:
+        return _plot_error("Provide a control group for category comparisons.")
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        return _plot_error(f"Matplotlib is required for plotting: {exc}", status=500)
+    _log("Matplotlib initialized.")
+
+    try:
+        import ncpi
+    except Exception as exc:
+        return _plot_error(f"ncpi is required for topomap plotting: {exc}", status=500)
+    _log("ncpi loaded.")
+
+    # Parse numeric inputs for plotting
+    def _parse_float(value):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    head_radius = _parse_float(request.form.get("head-radius"))
+    head_pos_x = _parse_float(request.form.get("head-pos-x"))
+    show_colorbar = request.form.get("show-colorbar") is not None
+    scale_mode = request.form.get("topomap_scale_mode", "section")
+    use_diverging = grouping_mode == "compare_categories"
+    compare_cmap = "bwr" if use_diverging else None
+
+    sphere = "auto"
+    if head_radius is not None:
+        x = head_pos_x if head_pos_x is not None else 0.0
+        sphere = (x, 0.0, 0.0, head_radius)
+
+    analysis = ncpi.Analysis(df_use)
+
+    def _coerce_scalar(value):
+        if isinstance(value, (list, tuple, np.ndarray)):
+            arr = np.asarray(value)
+            if arr.ndim == 0:
+                try:
+                    return float(arr)
+                except (TypeError, ValueError):
+                    return None
+            flat = arr.ravel()
+            if flat.size != 1:
+                return None
+            try:
+                return float(flat[0])
+            except (TypeError, ValueError):
+                return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _coerce_vector(value, length):
+        if not isinstance(value, (list, tuple, np.ndarray)):
+            return None
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            return None
+        flat = arr.ravel()
+        if flat.size != length:
+            return None
+        try:
+            return flat.astype(float)
+        except (TypeError, ValueError):
+            return None
+
+    def _match_control_group(items, raw_value):
+        if not raw_value:
+            return None
+        for item in items:
+            if str(item) == raw_value:
+                return item
+        try:
+            raw_num = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+        for item in items:
+            try:
+                if float(item) == raw_num:
+                    return item
+            except (TypeError, ValueError):
+                continue
+        return None
+
+    def _symmetric_limits(min_val, max_val):
+        if min_val is None or max_val is None:
+            return min_val, max_val
+        max_abs = max(abs(min_val), abs(max_val))
+        if max_abs == 0:
+            return -1.0, 1.0
+        return -max_abs, max_abs
+
+    def _build_series_for_dim(dim):
+        items_local = []
+        if grouping_mode == "compare_categories":
+            control_group = _match_control_group(groups, control_group_raw)
+            if control_group is None:
+                return None, f'Control group "{control_group_raw}" not found in the grouping column.'
+            if compare_method == "cohen_d":
+                try:
+                    compare_results = analysis.cohend(
+                        control_group=str(control_group),
+                        data_col=value_col,
+                        data_index=dim,
+                        group_col=group_col,
+                        sensor_col=sensor_col,
+                        drop_zeros=False,
+                    )
+                except Exception as exc:
+                    return None, f"Failed to compute group comparisons: {exc}"
+                for label, comp_df in compare_results.items():
+                    if comp_df.empty:
+                        continue
+                    series = comp_df.set_index(sensor_col)["d"]
+                    items_local.append((label, series))
+            else:
+                control_df = df_use[df_use[group_col] == control_group]
+                if dim == -1:
+                    control_values = control_df[value_col].apply(_coerce_scalar)
+                else:
+                    control_values = control_df[value_col].apply(
+                        lambda x: _coerce_vector(x, vector_len)[dim] if _coerce_vector(x, vector_len) is not None else np.nan
+                    )
+                control_series = (
+                    pd.DataFrame({sensor_col: control_df[sensor_col], "value": control_values})
+                    .groupby(sensor_col)["value"]
+                    .mean()
+                    .dropna()
+                )
+                for g in groups:
+                    if g == control_group:
+                        continue
+                    group_df = df_use[df_use[group_col] == g]
+                    if dim == -1:
+                        group_values = group_df[value_col].apply(_coerce_scalar)
+                    else:
+                        group_values = group_df[value_col].apply(
+                            lambda x: _coerce_vector(x, vector_len)[dim] if _coerce_vector(x, vector_len) is not None else np.nan
+                        )
+                    group_series = (
+                        pd.DataFrame({sensor_col: group_df[sensor_col], "value": group_values})
+                        .groupby(sensor_col)["value"]
+                        .mean()
+                        .dropna()
+                    )
+                    diff = group_series.subtract(control_series, fill_value=np.nan)
+                    if not diff.empty:
+                        items_local.append((f"{g} - {control_group}", diff))
+            if not items_local:
+                return None, "No comparison results available to plot."
+        else:
+            for g in groups:
+                if dim == -1:
+                    series_data = df_use[df_use[group_col] == g][value_col].apply(_coerce_scalar)
+                else:
+                    series_data = df_use[df_use[group_col] == g][value_col].apply(
+                        lambda x: _coerce_vector(x, vector_len)[dim] if _coerce_vector(x, vector_len) is not None else np.nan
+                    )
+                series = (
+                    pd.DataFrame({sensor_col: df_use.loc[df_use[group_col] == g, sensor_col], "value": series_data})
+                    .groupby(sensor_col)["value"]
+                    .mean()
+                    .dropna()
+                )
+                if not series.empty:
+                    items_local.append((str(g), series))
+            if not items_local:
+                return None, "No data available to plot for the selected grouping."
+        return items_local, None
+
+    sections = []
+    if vector_len == 1:
+        df_use[value_col] = df_use[value_col].apply(_coerce_scalar)
+        df_use = df_use.dropna(subset=[value_col])
+        if df_use.empty:
+            return _plot_error(f'Value column "{value_col}" has no numeric values to plot.')
+        items, err = _build_series_for_dim(-1)
+        if err:
+            return _plot_error(err)
+        sections.append({"label": value_col, "items": items})
+    else:
+        for dim in range(vector_len):
+            dim_items, err = _build_series_for_dim(dim)
+            if err:
+                return _plot_error(err)
+            sections.append({"label": f"{value_col}[{dim}]", "items": dim_items})
+    _log(f"Prepared {len(sections)} section(s) for plotting.")
+
+    import math
+
+    max_items = max((len(section["items"]) for section in sections), default=1)
+    cols = min(3, max_items)
+    plot_rows_total = sum(math.ceil(len(section["items"]) / cols) for section in sections) or 1
+    title_rows_total = len(sections)
+    total_rows = plot_rows_total + title_rows_total
+    fig_height = (3.6 * plot_rows_total) + (0.2 * title_rows_total)
+    fig = plt.figure(figsize=(4.2 * cols, fig_height))
+    height_ratios = []
+    for section in sections:
+        height_ratios.append(0.10)
+        rows_needed = math.ceil(len(section["items"]) / cols) if section["items"] else 1
+        height_ratios.extend([1.0] * rows_needed)
+    gs = fig.add_gridspec(total_rows, cols, hspace=0.28, height_ratios=height_ratios)
+
+    row_cursor = 0
+    for section in sections:
+        section_items = section["items"]
+        section_vmin = None
+        section_vmax = None
+        if scale_mode != "plot":
+            section_values = []
+            for _, series in section_items:
+                values = series.to_numpy(dtype=float)
+                if values.size:
+                    section_values.append(values)
+            if section_values:
+                section_all = np.concatenate(section_values)
+                section_vmin = np.nanmin(section_all)
+                section_vmax = np.nanmax(section_all)
+                if use_diverging:
+                    section_vmin, section_vmax = _symmetric_limits(section_vmin, section_vmax)
+        rows_needed = math.ceil(len(section_items) / cols) if section_items else 1
+        section_row_start = row_cursor
+
+        title_ax = fig.add_subplot(gs[row_cursor, :])
+        title_ax.axis("off")
+        title_ax.text(
+            0.5,
+            0.5,
+            section["label"],
+            fontsize=12,
+            fontweight="bold",
+            ha="center",
+            va="center",
+        )
+        row_cursor += 1
+
+        if not section_items:
+            row_cursor += rows_needed
+            continue
+
+        for idx, (label, series) in enumerate(section_items):
+            r = row_cursor + (idx // cols)
+            c = idx % cols
+            ax = fig.add_subplot(gs[r, c])
+            try:
+                plot_vmin = section_vmin
+                plot_vmax = section_vmax
+                if scale_mode == "plot":
+                    values = series.to_numpy(dtype=float)
+                    if values.size:
+                        plot_vmin = np.nanmin(values)
+                        plot_vmax = np.nanmax(values)
+                    else:
+                        plot_vmin = None
+                        plot_vmax = None
+                    if use_diverging:
+                        plot_vmin, plot_vmax = _symmetric_limits(plot_vmin, plot_vmax)
+                im, _ = analysis.eeg_topomap(
+                    series,
+                    axes=ax,
+                    show=False,
+                    vmin=plot_vmin,
+                    vmax=plot_vmax,
+                    cmap=compare_cmap,
+                    colorbar=False,
+                    sensors=True,
+                    montage="standard_1020",
+                    extrapolate="local",
+                    sphere=sphere,
+                )
+            except Exception as exc:
+                plt.close(fig)
+                return _plot_error(f"Topomap plotting failed: {exc}")
+            if show_colorbar:
+                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+            ax.set_title(label)
+        row_cursor += rows_needed
+
+    fig.tight_layout(rect=[0, 0.02, 1, 0.98])
+    output = io.BytesIO()
+    fig.savefig(output, format="png", dpi=160)
+    plt.close(fig)
+    output.seek(0)
+    def _trim_whitespace(png_bytes, pad=2, threshold=250):
+        try:
+            from PIL import Image
+            import numpy as np
+        except Exception:
+            return png_bytes
+        try:
+            img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
+        except Exception:
+            return png_bytes
+        arr = np.asarray(img)
+        mask = np.any(arr < threshold, axis=2)
+        if not mask.any():
+            return png_bytes
+        coords = np.argwhere(mask)
+        y0, x0 = coords.min(axis=0)
+        y1, x1 = coords.max(axis=0) + 1
+        y0 = max(int(y0) - pad, 0)
+        x0 = max(int(x0) - pad, 0)
+        y1 = min(int(y1) + pad, arr.shape[0])
+        x1 = min(int(x1) + pad, arr.shape[1])
+        cropped = img.crop((x0, y0, x1, y1))
+        out = io.BytesIO()
+        cropped.save(out, format="PNG")
+        return out.getvalue()
+
+    image_bytes = _trim_whitespace(output.getvalue())
+    return _render_analysis_plot(
+        title="Topomap result",
+        subtitle="EEG topographic plot.",
+        image_bytes=image_bytes,
+        log_output=log_buffer.getvalue(),
+    )
+
+
+@app.route("/clear_analysis_data", methods=["POST"])
+def clear_analysis_data():
+    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    if os.path.isdir(analysis_data_dir):
+        for name in os.listdir(analysis_data_dir):
+            if not (name.endswith(".pkl") or name.endswith(".pickle")):
+                continue
+            path = os.path.join(analysis_data_dir, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    return redirect(request.referrer or url_for('dashboard'))
 
 
 @app.route("/start_computation_redirect/<computation_type>", methods=["POST"])
