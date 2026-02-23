@@ -484,7 +484,7 @@ def dashboard():
 def simulation():
     return render_template("1.simulation.html")
 
-@app.route("/upload_sim")
+@app.route("/simulation/upload_sim")
 def upload_sim():
     simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
     if os.path.isdir(simulation_data_dir):
@@ -561,19 +561,19 @@ def clear_field_potential_data():
                         pass
     return redirect(url_for('dashboard'))
 
-@app.route("/new_sim")
+@app.route("/simulation/new_sim")
 def new_sim():
     return render_template("1.2.0.new_sim.html")
 
-@app.route("/new_sim_brunel")
+@app.route("/simulation/new_sim/brunel")
 def new_sim_brunel():
     return render_template("1.2.2.new_sim_brunel.html")
 
-@app.route("/new_sim_four_area")
+@app.route("/simulation/new_sim/four_area")
 def new_sim_four_area():
     return render_template("1.2.3.new_sim_four_area.html")
 
-@app.route("/new_sim_custom")
+@app.route("/simulation/new_sim/custom")
 def new_sim_custom():
     return render_template("1.2.1.new_sim_custom.html")
 
@@ -832,7 +832,7 @@ def run_trial_simulation_custom():
 def field_potential():
     return render_template("2.field_potential.html")
 
-@app.route("/field_potential_kernel")
+@app.route("/field_potential/kernel")
 def field_potential_kernel():
     mc_models_default = os.path.expandvars(
         os.path.expanduser(os.path.join("$HOME", "multicompartment_neuron_network"))
@@ -895,7 +895,7 @@ def field_potential_kernel():
         initial_tab=initial_tab,
     )
 
-@app.route("/field_potential_proxy")
+@app.route("/field_potential/proxy")
 def field_potential_proxy():
     default_dir = "/tmp/simulation_data"
     default_paths = {
@@ -922,6 +922,16 @@ def features():
 @app.route("/inference")
 def inference():
     return render_template("4.inference.html")
+
+# New training for inference configuration page
+@app.route("/inference/new_training")
+def new_training():
+    return render_template("4.1.new_training.html")
+
+# Compute predictions for inference configuration page
+@app.route("/inference/compute_predictions")
+def compute_predictions():
+    return render_template("4.2.compute_predictions.html")
 
 # Analysis configuration page
 @app.route("/analysis")

@@ -49,8 +49,24 @@
                     key: 'Spectral parameterization',
                     label: 'Spectral parameterization: Specparam, formerly FOOOF, to parameterize neural power spectra',
                     value: 'power_spectrum_parameterization'
+                }, 
+                {
+                    key: 'DFA',
+                    label: 'DFA: Detrended fluctuation analysis',
+                    value: 'dfa'
+                }, 
+                {
+                    key: 'fEI',
+                    label: 'fEI: Functional excitation-inhibition ratio',
+                    value: 'fei'
+                },
+                {
+                    key: 'hctsa',
+                    label: 'hctsa: Highly comparative time-series analysis',
+                    value: 'hctsa'
                 }
-            ]
+            ],
+            on_filter: true,
     }">
     <div class="max-w-5xl mx-auto">
         <div class="pb-8">
@@ -83,30 +99,61 @@
                 
                 <!-- Load Data Tab -->
                 <div x-show="activeTab === 'load-data'" x-cloak>
-                    <div
-                        class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-8 flex flex-col items-center text-center">
-                        <div class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                            <span class="material-symbols-outlined">check_circle</span>
-                            <span>Available data is ready for the computation</span>
-                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                    <div class="pt-8">
+                        <div class="mb-6">
+                            <h2 class="text-xl font-bold text-[#34495E] dark:text-white">What data do you want to work with?</h2>
                         </div>
-                        <!-- <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
-                        <button type="button"
-                            @click="document.getElementById('data-file').click()"
-                            class="flex items-center justify-center gap-2 h-12 px-6 bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
-                            <span class="material-symbols-outlined">upload_file</span>
-                            Load data
-                        </button>
-
-                        <!-- Upload status indicator -->
-                        <!-- <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                            <span class="material-symbols-outlined">check_circle</span>
-                            <span>Data uploaded successfully</span>
-                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
-                        </div> 
-                        
-                        <p class="mt-4 text-sm text-gray-600 dark:text-gray-400 max-w-sm">You can extract features from
-                            simulation as well as from empirical data.</p> -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <div class="flex items-center gap-2 mb-4">
+                                    <span class="material-symbols-outlined text-primary">history</span>
+                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue flow</h3>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Select from data already detected in your current
+                                    session.</p>
+                                <div class="space-y-2">
+                                    <button
+                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group">
+                                        <span class="truncate flex items-center gap-2">
+                                            <span class="material-symbols-outlined text-sm opacity-60">description</span>
+                                            simulation_output_v1.dat
+                                        </span>
+                                        <span
+                                            class="material-symbols-outlined text-lg opacity-0 group-hover:opacity-100 text-primary">check_circle</span>
+                                    </button>
+                                    <button
+                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group">
+                                        <span class="truncate flex items-center gap-2">
+                                            <span class="material-symbols-outlined text-sm opacity-60">analytics</span>
+                                            field_potential_results.pkl
+                                        </span>
+                                        <span
+                                            class="material-symbols-outlined text-lg opacity-0 group-hover:opacity-100 text-primary">check_circle</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <div class="flex items-center gap-2 mb-4">
+                                    <span class="material-symbols-outlined text-primary">add_circle</span>
+                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
+                                </div>
+                                <!-- INPUT FILE hidden -->
+                                <input type="file" id="data-file" class="hidden" @change="handleFileUpload($event)"/>
+                                <div @click="document.getElementById('data-file').click()"
+                                    class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-[#323b67] rounded-lg p-6 hover:border-primary/50 transition-colors cursor-pointer group">
+                                    <span
+                                        class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600 group-hover:text-primary transition-colors">cloud_upload</span>
+                                    <p class="mt-2 text-sm font-medium text-[#34495E] dark:text-white">Drag &amp; Drop files here</p>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">or click to browse from computer</p>
+                                </div>
+                                <!-- Upload status indicator -->
+                                <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                                    <span class="material-symbols-outlined">check_circle</span>
+                                    <span>Data uploaded successfully</span>
+                                    <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                                </div> 
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -143,7 +190,7 @@
 
                 <!-- Configure Method Tab -->
                 <div x-show="activeTab === 'configure-method'" x-cloak>
-                    <h1 class="text-[#34495E] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">
+                    <h1 class="text-[#34495E] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em] py-4">
                         Method
                         Configuration: <span x-text="methods.find(m => m.value === selectedMethod)?.label"></span></h1>
 
@@ -199,126 +246,298 @@
 
                     <!-- Spectral parameterization Configuration -->
                     <div x-show="selectedMethod === 'power_spectrum_parameterization'" x-cloak>
-                        <p class="mt-2 mb-6 text-gray-500 dark:text-gray-400">Configuration of the method Spectral parameterization to parameterize neural power spectra </p>
-                        <div class="space-y-8">
-                            <section
-                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <h2
-                                    class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
-                                    Input parameters</h2>
-                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <label class="flex flex-col min-w-40 flex-1 md:col-span-2">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Sampling frequency</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <p 
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] h-10 p-[15px] text-base font-normal leading-normal focus:border-primary/50 placeholder:text-gray-400 dark:placeholder:text-[#929bc9]"
-                                                    >
-                                                    Sampling frequency detected in the loaded data
-                                                </p>
-                                            </div>
-                                        </label>
-                                        <label class="flex flex-col min-w-40 flex-1">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Minimum frequency for the power spectrum fit</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input id="min-freq-power" name="min-freq-power" type="number"
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    value="5.0" />
-                                            </div>
-                                        </label>
-                                        <label class="flex flex-col min-w-40 flex-1">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Maximum frequency for the power spectrum fit</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input id="max-freq-power" name="max-freq-power" type="number"
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    value="45.0" />
-                                            </div>
-                                        </label>
-                                        <label class="flex flex-col min-w-40 flex-1 md:col-span-2">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Threshold for the r squared value</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input id="threshold-r" name="threshold-r-power" type="number"
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    value="0.9" />
-                                            </div>
-                                        </label>
+                        <p class="text-gray-500 dark:text-gray-400">Configuration of the method Spectral parameterization to parameterize neural power spectra </p>
+                        <div class="pt-6">
+                            <div class="space-y-6">
+                                <section
+                                    class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 shadow-sm">
+                                    <div class="flex items-center gap-3 mb-4 pb-2 border-b border-gray-100 dark:border-[#323b67]/50">
+                                        <span class="material-symbols-outlined text-primary">analytics</span>
+                                        <h2 class="text-[#34495E] dark:text-white text-lg font-bold leading-tight">Data and range</h2>
                                     </div>
-                                </div>
-                            </section>
-                            <section
-                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <h2
-                                    class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
-                                    Parameters for the FOOOF algorithm</h2>
-                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <label class="flex flex-col min-w-40 flex-1">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Peak threshold</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input id="peak-threshold" name="peak-threshold-foof" type="number"
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    value="1.0" />
-                                            </div>
-                                        </label>
-                                        <label class="flex flex-col min-w-40 flex-1">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Minimum peak height</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input id="min-peak-height" name="min-peak-height-foof" type="number"
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    value="0.0" />
-                                            </div>
-                                        </label>
-                                        <label class="flex flex-col min-w-40 flex-1 md:col-span-2">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Maximum number of peaks</p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input id="max-peak-number" name="max-peak-number-foof" type="number"
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    value="5" />
-                                            </div>
-                                        </label>
-                                        <div class="md:col-span-2">
-                                            <p
-                                                class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">
-                                                Peak width limits</p>
-                                            <div class="grid grid-cols-2 gap-4">
-                                                <label class="flex flex-col min-w-40 flex-1">
-                                                    <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                        <span
-                                                            class="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 dark:border-[#323b67] bg-gray-50 dark:bg-[#232948] text-gray-500 dark:text-gray-400 text-sm">Min</span>
-                                                        <input id="peak-width-min" name="peak-width-min-foof" type="number"
-                                                            class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-none rounded-r-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                            value="10.0" />
-                                                    </div>
+                                    <div class="space-y-6">
+                                        <div>
+                                            <p class="text-[#34495E] dark:text-white text-sm font-semibold mb-3">Data Input Type</p>
+                                            <div class="flex flex-col sm:flex-row gap-4">
+                                                <label class="inline-flex items-center">
+                                                    <input checked=""
+                                                        class="form-radio text-primary focus:ring-primary border-gray-300 dark:border-gray-600 dark:bg-[#191e33]"
+                                                        name="data_input_type" type="radio" value="temporary_signal" />
+                                                    <span class="ml-2 text-gray-700 dark:text-gray-300">Temporary signal</span>
                                                 </label>
-                                                <label class="flex flex-col min-w-40 flex-1">
-                                                    <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                        <span
-                                                            class="inline-flex items-center px-3 rounded-l-lg border border-r-0 border-gray-300 dark:border-[#323b67] bg-gray-50 dark:bg-[#232948] text-gray-500 dark:text-gray-400 text-sm">Max</span>
-                                                        <input id="peak-width-max" name="peak-width-max-foof" type="number"
-                                                            class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-none rounded-r-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                            value="50.0" />
-                                                    </div>
+                                                <label class="inline-flex items-center">
+                                                    <input
+                                                        class="form-radio text-primary focus:ring-primary border-gray-300 dark:border-gray-600 dark:bg-[#191e33]"
+                                                        name="data_input_type" type="radio" value="power_spectrum" />
+                                                    <span class="ml-2 text-gray-700 dark:text-gray-300">Power spectrum</span>
                                                 </label>
                                             </div>
                                         </div>
+                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sampling
+                                                    frequency (Hz)</label>
+                                                <input
+                                                    class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
+                                                    placeholder="" step="any" type="number" />
+                                            </div>
+                                            <div>
+                                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Frequency range
+                                                    (Hz)</label>
+                                                <div class="flex items-center gap-2">
+                                                    <div class="relative flex-1">
+                                                        <input
+                                                            class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
+                                                            placeholder="Min" step="any" type="number" value="1.0" />
+                                                        <span
+                                                            class="absolute right-3 top-2.5 text-xs text-gray-400 pointer-events-none">Min</span>
+                                                    </div>
+                                                    <span class="text-gray-400">-</span>
+                                                    <div class="relative flex-1">
+                                                        <input
+                                                            class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
+                                                            placeholder="Max" step="any" type="number" value="45.0" />
+                                                        <span
+                                                            class="absolute right-3 top-2.5 text-xs text-gray-400 pointer-events-none">Max</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
+                                </section>
+                                <section
+                                    class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 shadow-sm">
+                                    <div class="flex items-center gap-3 mb-4 pb-2 border-b border-gray-100 dark:border-[#323b67]/50">
+                                        <span class="material-symbols-outlined text-primary">show_chart</span>
+                                        <h2 class="text-[#34495E] dark:text-white text-lg font-bold leading-tight">Peak Detection</h2>
+                                    </div>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                        <div>
+                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Peak selection
+                                                strategy</label>
+                                            <select
+                                                class="form-select block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3">
+                                                <option selected="">Maximum power peak</option>
+                                                <option>Maximum central frequency in range</option>
+                                                <option>All peaks</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </section>
+                                <section
+                                    class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl overflow-hidden shadow-sm">
+                                    <details class="group">
+                                        <summary
+                                            class="flex items-center justify-between p-6 cursor-pointer list-none bg-gray-50/50 dark:bg-[#191e33]/30 hover:bg-gray-50 dark:hover:bg-[#191e33]/50 transition-colors">
+                                            <div class="flex items-center gap-3">
+                                                <span class="material-symbols-outlined text-primary">tune</span>
+                                                <h2 class="text-[#34495E] dark:text-white text-lg font-bold leading-tight">Advanced options and
+                                                    quality</h2>
+                                            </div>
+                                            <span
+                                                class="material-symbols-outlined text-gray-500 group-open:rotate-180 transition-transform">expand_more</span>
+                                        </summary>
+                                        <div class="p-6 pt-0 border-t border-gray-100 dark:border-[#323b67]/50 mt-4">
+                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Metrics
+                                                        policy (error management)</label>
+                                                    <select
+                                                        class="form-select block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3">
+                                                        <option selected="">Reject if it fails</option>
+                                                        <option selected="">Flag but keep</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Metric
+                                                        thresholds (R2)</label>
+                                                    <input
+                                                        class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
+                                                        max="1" min="0" placeholder="0.00 - 1.00" step="0.01" type="number" />
+                                                </div>
+                                                <div class="md:col-span-2 pt-2">
+                                                    <label class="inline-flex items-center">
+                                                        <input
+                                                            class="form-checkbox rounded text-primary focus:ring-primary border-gray-300 dark:border-gray-600 dark:bg-[#191e33] h-5 w-5"
+                                                            type="checkbox" />
+                                                        <span class="ml-2 text-gray-700 dark:text-gray-300 font-medium">Debug mode</span>
+                                                    </label>
+                                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-7">Enable verbose logging for
+                                                        troubleshooting configuration issues.</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </details>
+                                </section>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- DFA Configuration -->
+                    <div x-show="selectedMethod === 'dfa'" x-cloak> 
+                        <div class="space-y-8">
+                            <section class="bg-white dark:bg-[#111422] rounded-xl p-6 border border-gray-200 dark:border-[#323b67]">
+                                <h2 class="text-2xl font-bold text-[#34495E] dark:text-white mb-6">Configuration of the method DFA</h2>
+                                <div class="space-y-6">
+                                    <h3
+                                        class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
+                                        Main configuration</h3>
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
+                                        <label class="flex flex-col min-w-40 flex-1">
+                                            <p class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">Sampling
+                                                frequency (Hz) <span class="text-red-500">*</span></p>
+                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
+                                                <input
+                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
+                                                    placeholder="e.g. 1000" required="" type="number" />
+                                            </div>
+                                        </label>
+                                        <div class="flex items-center h-10">
+                                            <label class="inline-flex items-center cursor-pointer">
+                                                <input checked=""
+                                                    class="form-checkbox h-5 w-5 rounded text-primary border-gray-300 focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-offset-gray-800"
+                                                    type="checkbox" />
+                                                <span class="ml-2 text-[#34495E] dark:text-white text-base font-medium">Overlapping windows
+                                                    (50%)</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                            
+                                <!-- Container where template form-analysis will generate -->
+                                <div x-data="form_analysis" x-html="template">
+
+                                </div>
+
+                                <!-- Container where template advanced-options will generate -->
+                                <div x-data="advanced_options" x-html="template">
+
                                 </div>
                             </section>
                         </div>
+                    </div>
+
+
+                    <!-- fEI Configuration -->
+                    <div x-show="selectedMethod === 'fei'" x-cloak>
+                        <section class="bg-white dark:bg-[#111422] rounded-xl p-6 border border-gray-200 dark:border-[#323b67]">
+                            <div class="flex items-center gap-4">
+                                <h2 class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">Configuration of
+                                    the method fEI</h2>
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-6">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="sampling-freq">Sampling
+                                            frequency (Hz)</label>
+                                        <input
+                                            class="mt-1 block w-full bg-white dark:bg-[#1b2034] border-gray-300 dark:border-[#323b67] rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
+                                            id="sampling-freq" required="" type="number" />
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="window-size">Window size (in
+                                            seconds)</label>
+                                        <input
+                                            class="mt-1 block w-full bg-white dark:bg-[#1b2034] border-gray-300 dark:border-[#323b67] rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
+                                            id="window-size" required="" type="number" />
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between items-center mb-1">
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="window-overlap">Window
+                                            overlap fEI</label>
+                                        <span class="text-sm text-gray-500 dark:text-gray-400" id="overlap-value">0.0</span>
+                                    </div>
+                                    <input class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-primary"
+                                        id="window-overlap" max="0.99" min="0" step="0.01" type="range" value="0.0" />
+                                    <div class="flex justify-between text-xs text-gray-400 px-1 mt-1">
+                                        <span>0</span>
+                                        <span>0.99</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                                <div>
+                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="dfa-threshold">DFA Threshold for
+                                        filtering</label>
+                                    <input
+                                        class="mt-1 block w-full bg-white dark:bg-[#1b2034] border-gray-300 dark:border-[#323b67] rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
+                                        id="dfa-threshold" max="1" min="0" step="0.1" type="number" value="0.6" />
+                                </div>
+                                <div class="flex items-center h-full pt-6">
+                                    <input checked=""
+                                        class="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary dark:bg-gray-700 dark:border-gray-600"
+                                        id="dfa-overlap" type="checkbox" />
+                                    <label class="ml-2 block text-sm text-gray-700 dark:text-gray-300" for="dfa-overlap">DFA Overlap (50%)</label>
+                                </div>
+                            </div>
+
+                            <!-- Insert DFA configuration options -->
+                            <!-- Container where template form-analysis will generate -->
+                            <div x-data="form_analysis" x-html="template">
+
+                            </div>
+                            
+                            <!-- Container where template advanced-options will generate -->
+                            <div x-data="advanced_options" x-html="template">
+
+                            </div>
+
+                        </section>
+                    </div>
+
+                    <!-- hctsa Configuration -->
+                    <div x-show="selectedMethod === 'hctsa'" x-cloak>
+                        <section class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                            <h2 class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">Execution
+                                Settings</h2>
+                            <div class="space-y-6">
+                                <div>
+                                    <div class="flex items-center gap-2 mb-1">
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                                            for="parallel-workers">Parallel Workers</label>
+                                    </div>
+                                    <input
+                                        class="block w-full max-w-md rounded-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-sm focus:border-primary focus:ring-primary sm:text-sm dark:text-white"
+                                        id="parallel-workers" min="1" name="parallel-workers" placeholder="" type="number" />
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave empty to run on a single core, or specify the number of cores for faster parallel
+                                                computing.</p>
+                                </div>
+                                <div class="flex items-center justify-between max-w-md">
+                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="return-metadata">Return
+                                        Metadata</label>
+                                    <button aria-checked="false"
+                                        class="bg-gray-200 dark:bg-gray-700 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-[#111422]"
+                                        onclick="this.classList.toggle('bg-primary'); this.classList.toggle('bg-gray-200'); this.classList.toggle('dark:bg-gray-700'); this.querySelector('span').classList.toggle('translate-x-5'); this.querySelector('span').classList.toggle('translate-x-0')"
+                                        role="switch" type="button">
+                                        <span aria-hidden="true"
+                                            class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                                    </button>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl overflow-hidden">
+                            <details class="group">
+                                <summary
+                                    class="flex cursor-pointer items-center justify-between p-6 bg-gray-50/50 dark:bg-[#1a1f35]/50 hover:bg-gray-100 dark:hover:bg-[#232948] transition-colors">
+                                    <h2 class="text-[#34495E] dark:text-white text-[18px] font-bold leading-tight tracking-[-0.015em]">System
+                                        Paths</h2>
+                                    <span
+                                        class="material-symbols-outlined text-gray-500 group-open:rotate-180 transition-transform duration-200">expand_more</span>
+                                </summary>
+                                <div class="p-6 border-t border-gray-200 dark:border-[#323b67]">
+                                    <div>
+                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" for="hctsa-path">HCTSA
+                                            Installation Path (hctsa_folder)</label>
+                                        <input
+                                            class="block w-full rounded-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-sm focus:border-primary focus:ring-primary sm:text-sm dark:text-white"
+                                            id="hctsa-path" name="hctsa-path" placeholder="/path/to/hctsa" type="text" />
+                                    </div>
+                                </div>
+                            </details>
+                        </section>
                     </div>
                 </div>
             </div>
@@ -355,7 +574,7 @@
                     </button>
                 </template>
 
-                <template x-if="activeTab !== 'configure-method'">
+                <template x-if="activeTab !== 'configure-method' && isUploaded('data-file')">
                     <button type="button"
                         @click="if (activeTab === 'load-data') { activeTab = 'select-method' } else if (activeTab === 'select-method') { activeTab = 'configure-method' }"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
@@ -373,4 +592,131 @@
 <script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <!-- Handle of file uploads script -->
 <script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+<!-- Definition of reusable form inputs form DFA and fEI forms -->
+<script>
+document.addEventListener('alpine:init', () => {
+    Alpine.data('form_analysis', () => ({
+        template: `
+            <div x-data="form_analysis" class="space-y-6 mt-8">
+                <h3
+                    class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
+                    Analysis mode (Dynamic flow)</h3>
+                <div class="flex items-center justify-between">
+                    <span class="text-[#34495E] dark:text-white text-base font-medium">Apply band filter / Spectral
+                        analysis?</span>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input x-model="on_filter" id="band-filter" checked="" class="sr-only peer" type="checkbox" />
+                        <div
+                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/30 dark:peer-focus:ring-primary/30 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary">
+                        </div>
+                    </label>
+                </div>
+                <div x-show="on_filter" class="space-y-4 p-4 bg-background-light dark:bg-[#191e33] rounded-lg">
+                    <p class="text-sm font-medium text-[#34495E] dark:text-white">Range type</p>
+                    <div class="flex gap-6">
+                        <label class="inline-flex items-center">
+                            <input checked="" class="form-radio text-primary border-gray-300 focus:ring-primary"
+                                name="range_type" type="radio" />
+                            <span class="ml-2 text-sm text-[#34495E] dark:text-white">Single frequency band</span>
+                        </label>
+                        <label class="inline-flex items-center">
+                            <input class="form-radio text-primary border-gray-300 focus:ring-primary" name="range_type"
+                                type="radio" />
+                            <span class="ml-2 text-sm text-[#34495E] dark:text-white">Spectrum range</span>
+                        </label>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                        <label class="flex flex-col">
+                            <span class="text-xs text-gray-500 dark:text-gray-400 mb-1">Minimum frequency (Hz)</span>
+                            <input
+                                class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#1f243d] text-[#34495E] dark:text-white text-sm h-9"
+                                type="number" />
+                        </label>
+                        <label class="flex flex-col">
+                            <span class="text-xs text-gray-500 dark:text-gray-400 mb-1">Maximum frequency (Hz)</span>
+                            <input
+                                class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#1f243d] text-[#34495E] dark:text-white text-sm h-9"
+                                type="number" />
+                        </label>
+                    </div>
+                </div>
+            </div>
+        `
+    }));
+
+    Alpine.data('advanced_options', () => ({
+        template: `
+            <details x-data="advanced_options" class="group mt-8">
+                <summary
+                    class="flex justify-between items-center font-medium cursor-pointer list-none text-primary dark:text-primary hover:text-primary/80 transition-colors select-none">
+                    <span>Show Advanced options</span>
+                    <span class="transition group-open:rotate-180">
+                        <span class="material-symbols-outlined">expand_more</span>
+                    </span>
+                </summary>
+                <div class="text-neutral-600 mt-6 group-open:animate-fadeIn space-y-8">
+                    <div class="space-y-6">
+                        <h3
+                            class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
+                            Interval parameters</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="space-y-2">
+                                <p class="text-[#34495E] dark:text-white text-sm font-medium">Fit interval (Seconds)</p>
+                                <div class="flex items-center gap-2">
+                                    <input
+                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                        placeholder="Min" type="number" />
+                                    <span class="text-gray-400">-</span>
+                                    <input
+                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                        placeholder="Max" type="number" />
+                                </div>
+                            </div>
+                            <div class="space-y-2">
+                                <p class="text-[#34495E] dark:text-white text-sm font-medium">Compute interval (Seconds)</p>
+                                <div class="flex items-center gap-2">
+                                    <input
+                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                        placeholder="Min" type="number" />
+                                    <span class="text-gray-400">-</span>
+                                    <input
+                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                        placeholder="Max" type="number" />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <h3
+                            class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
+                            Filtering and preprocessing configuration</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <label class="flex flex-col">
+                                <p class="text-[#34495E] dark:text-white text-sm font-medium pb-1">Edge trimming after
+                                    filtering (Seconds)</p>
+                                <input
+                                    class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                    type="number" value="1.0" />
+                            </label>
+                            <label class="flex flex-col">
+                                <p class="text-[#34495E] dark:text-white text-sm font-medium pb-1">Ignore indices (Bad
+                                    Indices)</p>
+                                <input
+                                    class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                    placeholder="e.g. 0, 3, 5" type="text" />
+                            </label>
+                            <label class="flex flex-col">
+                                <p class="text-[#34495E] dark:text-white text-sm font-medium pb-1">Hilbert FFT length</p>
+                                <input
+                                    class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
+                                    step="1" type="number" />
+                            </label>
+                        </div>
+                    </div>
+                </div>
+            </details>
+        `
+    }));
+});
+</script>
 {% endblock %}

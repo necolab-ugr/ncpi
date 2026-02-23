@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+
+<!-- Main content of the page -->
+{% block content %}
+<div class="flex flex-col gap-3 text-center mb-4">
+    <p class="text-slate-900 dark:text-white text-5xl font-black leading-tight tracking-[-0.033em]">
+        {% block page_title %}{% endblock %}</p> <!-- Title of the page -->
+
+    <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-2xl mx-auto">
+        {% block page_description %}{% endblock %} <!-- Description of the page -->
+    </p>
+</div>
+
+<!-- Selector section -->
+<div class="flex flex-wrap items-center justify-center gap-8 w-full">
+    <a href="{% block option1_url %}{% endblock %}"
+        class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
+        <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
+            {% block option1_icon %}{% endblock %} <!-- Icon / image of option1 -->
+        </div>
+        <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">{% block option1_title %}{% endblock %}</span>
+    </a>
+    <a href="{% block option2_url %}{% endblock %}" 
+        class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
+        <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
+            {% block option2_icon %}{% endblock %} <!-- Icon / image of option2 -->
+        </div>
+        <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">{% block option2_title %}{% endblock %}</span>
+    </a>
+</div>
+       
+
+<!-- Action buttons -->
+<div class="flex justify-start gap-4 p-4 mt-6">
+    <a
+        href="{{url_for('dashboard')}}" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-transparent text-slate-800 dark:text-white text-base font-bold leading-normal tracking-[0.015em] border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">
+        <span class="truncate">Back to the dashboard</span>
+    </a>
+</div>
+
+{% endblock %}
