@@ -42,10 +42,10 @@ confs = [[1.589, 2.020, -23.84, -8.441, 0.5, 0.5, 28.],
 
 # Do not change these paths if the zenodo_dir has been correctly set:
 # (1) Simulation output from the multicompartment neuron network model
-output_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network', 'output', 'adb947bfb931a5a8d09ad078a6d256b0')
+output_path = os.path.join(zenodo_dir, 'output', 'adb947bfb931a5a8d09ad078a6d256b0')
 
 # (2) Path to the data files of the multicompartment neuron models
-multicompartment_neuron_network_path = os.path.join(zenodo_dir, 'multicompartment_neuron_network')
+multicompartment_neuron_network_path = zenodo_dir
 
 # Names of catch22 features
 try:
