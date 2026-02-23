@@ -83,30 +83,61 @@
                 
                 <!-- Load Data Tab -->
                 <div x-show="activeTab === 'load-data'" x-cloak>
-                    <div
-                        class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-8 flex flex-col items-center text-center">
-                        <div class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                            <span class="material-symbols-outlined">check_circle</span>
-                            <span>Available data is ready for the computation</span>
-                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                    <div class="pt-8">
+                        <div class="mb-6">
+                            <h2 class="text-xl font-bold text-[#34495E] dark:text-white">What data do you want to work with?</h2>
                         </div>
-                        <!-- <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
-                        <button type="button"
-                            @click="document.getElementById('data-file').click()"
-                            class="flex items-center justify-center gap-2 h-12 px-6 bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
-                            <span class="material-symbols-outlined">upload_file</span>
-                            Load data
-                        </button>
-
-                        <!-- Upload status indicator -->
-                        <!-- <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                            <span class="material-symbols-outlined">check_circle</span>
-                            <span>Data uploaded successfully</span>
-                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
-                        </div> 
-                        
-                        <p class="mt-4 text-sm text-gray-600 dark:text-gray-400 max-w-sm">You can extract features from
-                            simulation as well as from empirical data.</p> -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <div class="flex items-center gap-2 mb-4">
+                                    <span class="material-symbols-outlined text-primary">history</span>
+                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue flow</h3>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Select from data already detected in your current
+                                    session.</p>
+                                <div class="space-y-2">
+                                    <button
+                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group">
+                                        <span class="truncate flex items-center gap-2">
+                                            <span class="material-symbols-outlined text-sm opacity-60">description</span>
+                                            simulation_output_v1.dat
+                                        </span>
+                                        <span
+                                            class="material-symbols-outlined text-lg opacity-0 group-hover:opacity-100 text-primary">check_circle</span>
+                                    </button>
+                                    <button
+                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group">
+                                        <span class="truncate flex items-center gap-2">
+                                            <span class="material-symbols-outlined text-sm opacity-60">analytics</span>
+                                            field_potential_results.pkl
+                                        </span>
+                                        <span
+                                            class="material-symbols-outlined text-lg opacity-0 group-hover:opacity-100 text-primary">check_circle</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                                <div class="flex items-center gap-2 mb-4">
+                                    <span class="material-symbols-outlined text-primary">add_circle</span>
+                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
+                                </div>
+                                <!-- INPUT FILE hidden -->
+                                <input type="file" id="data-file" class="hidden" @change="handleFileUpload($event)"/>
+                                <div @click="document.getElementById('data-file').click()"
+                                    class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-[#323b67] rounded-lg p-6 hover:border-primary/50 transition-colors cursor-pointer group">
+                                    <span
+                                        class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600 group-hover:text-primary transition-colors">cloud_upload</span>
+                                    <p class="mt-2 text-sm font-medium text-[#34495E] dark:text-white">Drag &amp; Drop files here</p>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">or click to browse from computer</p>
+                                </div>
+                                <!-- Upload status indicator -->
+                                <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                                    <span class="material-symbols-outlined">check_circle</span>
+                                    <span>Data uploaded successfully</span>
+                                    <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
+                                </div> 
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -355,7 +386,7 @@
                     </button>
                 </template>
 
-                <template x-if="activeTab !== 'configure-method'">
+                <template x-if="activeTab !== 'configure-method' && isUploaded('data-file')">
                     <button type="button"
                         @click="if (activeTab === 'load-data') { activeTab = 'select-method' } else if (activeTab === 'select-method') { activeTab = 'configure-method' }"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
