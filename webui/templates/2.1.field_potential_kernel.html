@@ -508,7 +508,7 @@
         </template>
         <template x-if="activeTab !== 'create_kernel'">
             <button
-                @click="if (activeTab === 'cdm_computation') { activeTab = 'create_kernel' } else if (activeTab === 'meeg') { activeTab = 'create_kernel' }"
+                @click="if (activeTab === 'cdm_computation') { activeTab = 'create_kernel' } else if (activeTab === 'meeg') { activeTab = 'cdm_computation' }"
                 class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
                 <span class="material-symbols-outlined">arrow_back</span>
                 Back step</button>
