@@ -508,9 +508,10 @@
         </template>
         <template x-if="activeTab !== 'create_kernel'">
             <button
-                @click="if (activeTab === 'cdm_computation') { activeTab = 'create_kernel' } else if (activeTab === 'meeg') { activeTab = 'cdm_computation' }"
-                class="px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/80 bg-transparent rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 border border-border-light dark:border-white/20">Back
-                step</button>
+                @click="if (activeTab === 'cdm_computation') { activeTab = 'create_kernel' } else if (activeTab === 'meeg') { activeTab = 'create_kernel' }"
+                class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                <span class="material-symbols-outlined">arrow_back</span>
+                Back step</button>
         </template>
 
         <!-- Next/Continue Button -->
@@ -523,8 +524,9 @@
         </template>
         <template x-if="activeTab === 'cdm_computation'">
             <button type="submit" form="kernel-compute-form"
-                class="px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg hover:bg-primary/90">
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
                 Compute CDM/LFP
+                <span class="material-symbols-outlined">arrow_forward</span>
             </button>
         </template>
     </div>
