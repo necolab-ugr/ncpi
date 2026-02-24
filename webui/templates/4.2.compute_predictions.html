@@ -39,7 +39,7 @@
 
 
 {% block content %}
-<div class="max-w-5xl mx-auto">
+<div x-data="{ useUploadedModel: false }" class="max-w-5xl mx-auto">
     <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Compute Predictions</h1>
     <p class="text-slate-600 dark:text-slate-400 mb-8">Generate predictions from your pre-trained machine learning or SBI models.</p>
     <form class="space-y-8">
@@ -88,15 +88,22 @@
             </h2>
             <div class="space-y-6">
                 <div class="flex items-center mb-6 bg-slate-50 dark:bg-slate-800/80 p-4 rounded-lg">
-                    <button aria-checked="false"
-                        class="bg-slate-200 dark:bg-slate-700 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                        role="switch" type="button">
-                        <span class="sr-only">Use uploaded model and scaler</span>
+                    <button type="button"
+                        role="switch" 
+                        :aria-checked="useUploadedModel"
+                        @click="useUploadedModel = !useUploadedModel"
+                        :class="useUploadedModel ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"> 
+                        <span class="sr-only">Use uploaded model and scaler</span>                
                         <span aria-hidden="true"
-                            class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                            :class="useUploadedModel ? 'translate-x-5' : 'translate-x-0'"
+                            class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 style-none ease-in-out">
+                        </span>
                     </button>
-                    <span class="ml-3 text-sm font-medium text-slate-900 dark:text-slate-200">Use uploaded model and
-                        scaler</span>
+
+                    <span class="ml-3 text-sm font-medium text-slate-900 dark:text-slate-200">
+                        Use uploaded model and scaler
+                    </span>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
@@ -275,5 +282,17 @@
             </div>
         </section>
     </form>
+
+    <!-- Navigation buttons -->
+    <div class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
+        <!-- Previous/Return Button -->
+        <button>
+            <a href="{{ url_for('dashboard') }}"
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                <span class="material-symbols-outlined">arrow_back</span>
+                Return to ncpi dashboard
+            </a>
+        </button>
+    </div>
 </div>
 {% endblock %}
