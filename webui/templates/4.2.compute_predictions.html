@@ -1,0 +1,279 @@
+{% extends "4.inference.html" %}
+{% block title %}Compute predictions{% endblock %}
+
+{% block head %}
+{{ super() }}
+<style>
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .code-editor::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .code-editor::-webkit-scrollbar-track {
+        background: #f1f5f9;
+    }
+    .code-editor::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+    }
+    .dark .code-editor::-webkit-scrollbar-track {
+        background: #1e293b;
+    }
+    .dark .code-editor::-webkit-scrollbar-thumb {
+        background: #475569;
+    }
+    .loader {
+        border-top-color: #39E079;
+        -webkit-animation: spinner 1.5s linear infinite;
+        animation: spinner 1.5s linear infinite;
+    }
+    @keyframes spinner {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+{% endblock %}
+
+
+{% block content %}
+<div class="max-w-5xl mx-auto">
+    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Compute Predictions</h1>
+    <p class="text-slate-600 dark:text-slate-400 mb-8">Generate predictions from your pre-trained machine learning or SBI models.</p>
+    <form class="space-y-8">
+        <section
+            class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span
+                    class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">1</span>
+                Load Data (Input Data)
+            </h2>
+            <div class="grid grid-cols-1 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Features Data <span class="text-red-500">*</span>
+                    </label>
+                    <div
+                        class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
+                        <div class="space-y-1 text-center">
+                            <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
+                            <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
+                                <label
+                                    class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
+                                    for="file-upload-features">
+                                    <span>Upload a file</span>
+                                    <input accept=".pkl" class="sr-only" id="file-upload-features"
+                                        name="file-upload-features" type="file" />
+                                </label>
+                                <p class="pl-1">or drag and drop</p>
+                            </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-500">
+                                .pkl only
+                            </p>
+                        </div>
+                    </div>
+                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Input data (X) that you want to make
+                        predictions of parameters of (θ)</p>
+                </div>
+            </div>
+        </section>
+        <section
+            class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span
+                    class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">2</span>
+                Load ML Models (Model Selection)
+            </h2>
+            <div class="space-y-6">
+                <div class="flex items-center mb-6 bg-slate-50 dark:bg-slate-800/80 p-4 rounded-lg">
+                    <button aria-checked="false"
+                        class="bg-slate-200 dark:bg-slate-700 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                        role="switch" type="button">
+                        <span class="sr-only">Use uploaded model and scaler</span>
+                        <span aria-hidden="true"
+                            class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                    </button>
+                    <span class="ml-3 text-sm font-medium text-slate-900 dark:text-slate-200">Use uploaded model and
+                        scaler</span>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            Model Source
+                        </label>
+                        <div
+                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-1 text-center">
+                                <span class="material-symbols-outlined text-4xl text-slate-400">model_training</span>
+                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
+                                    <label
+                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
+                                        for="file-upload-model">
+                                        <span>Upload model</span>
+                                        <input accept=".pkl" class="sr-only" id="file-upload-model" name="file-upload-model"
+                                            type="file" />
+                                    </label>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">
+                                    model.pkl
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            Scaler Source
+                        </label>
+                        <div
+                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-1 text-center">
+                                <span class="material-symbols-outlined text-4xl text-slate-400">scale</span>
+                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
+                                    <label
+                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
+                                        for="file-upload-scaler">
+                                        <span>Upload scaler</span>
+                                        <input accept=".pkl" class="sr-only" id="file-upload-scaler"
+                                            name="file-upload-scaler" type="file" />
+                                    </label>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">
+                                    scaler.pkl
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+        <section
+            class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span
+                    class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">3</span>
+                Advanced Settings
+                
+                <span class="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary border border-primary/20">NPE / NLE / NRE Active</span>
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
+                        for="posterior-samples">Posterior Samples</label>
+                    <div class="mt-1 relative rounded-md shadow-sm">
+                        <input
+                            class="block w-full rounded-md border-slate-300 dark:border-slate-600 focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            id="posterior-samples" name="posterior-samples" placeholder="500" type="number" value="500" />
+                    </div>
+                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Number of samples to extract from the
+                        distribution for each observation.</p>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="sbi-batch-size">SBI
+                        Batch Size</label>
+                    <div class="mt-1 relative rounded-md shadow-sm">
+                        <input
+                            class="block w-full rounded-md border-slate-300 dark:border-slate-600 focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            id="sbi-batch-size" name="sbi-batch-size" placeholder="256" type="number" value="256" />
+                    </div>
+                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Size of batch to process the predictions in
+                        memory.</p>
+                </div>
+            </div>
+        </section>
+        <section
+            class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span
+                    class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">4</span>
+                Predict
+            </h2>
+            <div class="flex flex-col items-center justify-center space-y-6 py-6">
+                <button
+                    class="flex items-center justify-center px-8 py-4 border border-transparent text-lg font-medium rounded-lg text-white bg-primary hover:bg-primary-hover focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary shadow-lg transition-all transform hover:scale-105"
+                    type="button">
+                    <span class="material-symbols-outlined mr-2">neurology</span>
+                    Compute Predictions
+                </button>
+                <div class="hidden flex flex-col items-center">
+                    <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-200 h-12 w-12 mb-4"></div>
+                    <p class="text-slate-600 dark:text-slate-400 font-medium animate-pulse">Computing predictions...</p>
+                </div>
+            </div>
+            <div class="mt-8 border-t border-slate-100 dark:border-slate-700 pt-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-base font-medium text-slate-900 dark:text-white">Results Output</h3>
+                    <button
+                        class="flex items-center text-sm font-medium text-primary hover:text-primary-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                        type="button">
+                        <span class="material-symbols-outlined mr-1 text-base">download</span>
+                        Download Predictions (.pkl)
+                    </button>
+                </div>
+                <div class="overflow-hidden shadow ring-1 ring-black ring-opacity-5 rounded-lg">
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-slate-300 dark:divide-slate-700">
+                            <thead class="bg-slate-50 dark:bg-slate-800">
+                                <tr>
+                                    <th class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-slate-900 dark:text-white sm:pl-6"
+                                        scope="col">Obs #</th>
+                                    <th class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-white"
+                                        scope="col">Param 1 (θ₁)</th>
+                                    <th class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-white"
+                                        scope="col">Param 2 (θ₂)</th>
+                                    <th class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-white"
+                                        scope="col">Param 3 (θ₃)</th>
+                                    <th class="px-3 py-3.5 text-left text-sm font-semibold text-slate-900 dark:text-white"
+                                        scope="col">Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-200 dark:divide-slate-700 bg-white dark:bg-slate-900">
+                                <tr>
+                                    <td
+                                        class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-slate-900 dark:text-white sm:pl-6">
+                                        1</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        0.4532</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        -1.2031</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        3.1415</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">95%
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td
+                                        class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-slate-900 dark:text-white sm:pl-6">
+                                        2</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        0.4821</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        -1.1822</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        3.0012</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">92%
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td
+                                        class="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-slate-900 dark:text-white sm:pl-6">
+                                        3</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        0.4611</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        -1.1990</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">
+                                        3.0567</td>
+                                    <td class="whitespace-nowrap px-3 py-4 text-sm text-slate-500 dark:text-slate-400">98%
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </form>
+</div>
+{% endblock %}
