@@ -48,3 +48,10 @@
 <span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">query_stats</span>
 {% endblock %}
 {% block option2_title %}Compute predictions{% endblock %}
+
+{% block scripts %}
+<!-- Menu tab navigation -->
+<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<!-- Handle of file uploads script -->
+<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+{% endblock %}
