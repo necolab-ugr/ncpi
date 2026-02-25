@@ -3,10 +3,22 @@ import glob
 import pandas as pd
 import pickle
 import numpy as np
+import sys
+
+# Prefer local repository package over globally installed ncpi.
+_webui_dir = os.path.dirname(os.path.abspath(__file__))
+_repo_root = os.path.dirname(_webui_dir)
+if _repo_root not in sys.path:
+    sys.path.insert(0, _repo_root)
+
 import ncpi
 import shutil
 import ast
 import importlib.util
+import tempfile
+import io
+import json
+import inspect
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
@@ -102,10 +114,43 @@ def save_df(job_id, output_df, temp_uploaded_files):
     return output_path
 
 
-def cleanup_temp_files(file_paths):
-    """Delete all temporary files in file_paths (params['file_paths']) silently."""    
+def _features_data_dir():
+    path = os.path.join(tempfile.gettempdir(), "features_data")
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _persist_features_dataframe(output_df, method):
+    features_dir = _features_data_dir()
+    safe_method = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(method or "features"))
+    # Cleanup legacy per-job files for this method so only one canonical file remains.
+    legacy_pattern = os.path.join(features_dir, f"features_computed_{safe_method}_*.pkl")
+    for legacy_path in glob.glob(legacy_pattern):
+        try:
+            if os.path.isfile(legacy_path):
+                os.remove(legacy_path)
+        except OSError:
+            pass
+
+    output_path = os.path.join(features_dir, f"{safe_method}_features.pkl")
+    output_df.to_pickle(output_path)
+    return output_path
+
+
+def cleanup_temp_files(file_paths, keep_paths=None):
+    """Delete temporary files in file_paths (params['file_paths']) silently."""
+    keep = set()
+    if keep_paths:
+        for path in keep_paths:
+            if path:
+                keep.add(os.path.realpath(path))
+
     for file_path in file_paths.values():
         try:
+            if not file_path:
+                continue
+            if os.path.realpath(file_path) in keep:
+                continue
             if os.path.exists(file_path):
                 os.remove(file_path)
         except OSError:
@@ -140,6 +185,139 @@ def _append_job_output(job_status, job_id, message):
     combined = current + message
     lines = combined.splitlines()[-MAX_OUTPUT_LINES:]
     job_status[job_id]["output"] = "\n".join(lines)
+
+
+def _compute_features_with_compat(features_obj, samples, exec_opts, progress_callback, log_callback):
+    """
+    Call Features.compute_features() across ncpi versions.
+    Older installed versions do not accept progress/log callbacks.
+    """
+    fn = features_obj.compute_features
+    sig = inspect.signature(fn)
+    params = sig.parameters
+
+    kwargs = {
+        "n_jobs": exec_opts["n_jobs"],
+        "chunksize": exec_opts["chunksize"],
+        "start_method": exec_opts["start_method"],
+    }
+    has_progress = "progress_callback" in params
+    has_log = "log_callback" in params
+    if has_progress:
+        kwargs["progress_callback"] = progress_callback
+    if has_log:
+        kwargs["log_callback"] = log_callback
+
+    if log_callback and (not has_progress or not has_log):
+        missing = []
+        if not has_progress:
+            missing.append("progress_callback")
+        if not has_log:
+            missing.append("log_callback")
+        log_callback(
+            "Installed ncpi.Features.compute_features does not support "
+            f"{', '.join(missing)}; running without those hooks."
+        )
+
+    return fn(samples, **kwargs)
+
+
+def _load_uploaded_source_bytes(name, ext, content):
+    safe_name = str(name or "uploaded_file")
+    ext = str(ext or os.path.splitext(safe_name)[1]).lower()
+    raw = content
+    if raw is None:
+        raise ValueError(f"Uploaded file '{safe_name}' is empty.")
+    if isinstance(raw, memoryview):
+        raw = raw.tobytes()
+    if isinstance(raw, bytearray):
+        raw = bytes(raw)
+    if not isinstance(raw, (bytes,)):
+        raise ValueError(f"Invalid uploaded content type for '{safe_name}'.")
+
+    if ext in {".pkl", ".pickle"}:
+        bio = io.BytesIO(raw)
+        try:
+            return pd.read_pickle(bio)
+        except Exception:
+            bio.seek(0)
+            return pickle.load(bio)
+
+    if ext == ".json":
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception as exc:
+            raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
+
+    if ext == ".npy":
+        return np.load(io.BytesIO(raw), allow_pickle=True)
+
+    if ext == ".csv":
+        return pd.read_csv(io.BytesIO(raw))
+
+    if ext == ".parquet":
+        return pd.read_parquet(io.BytesIO(raw))
+
+    if ext == ".feather":
+        return pd.read_feather(io.BytesIO(raw))
+
+    if ext in {".xlsx", ".xls"}:
+        return pd.read_excel(io.BytesIO(raw))
+
+    if ext == ".mat":
+        try:
+            import scipy.io as sio
+        except Exception as exc:
+            raise ValueError(f"scipy is required to parse .mat files: {exc}")
+        return sio.loadmat(io.BytesIO(raw), squeeze_me=True, struct_as_record=False)
+
+    raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
+
+
+def _load_uploaded_source_path(path, name=None, ext=None):
+    safe_path = str(path or "")
+    if not safe_path or not os.path.exists(safe_path):
+        raise ValueError(f"Uploaded file path does not exist: '{safe_path}'.")
+    safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
+    ext = str(ext or os.path.splitext(safe_name)[1]).lower()
+
+    if ext in {".pkl", ".pickle"}:
+        try:
+            return pd.read_pickle(safe_path)
+        except Exception:
+            with open(safe_path, "rb") as handle:
+                return pickle.load(handle)
+
+    if ext == ".json":
+        try:
+            with open(safe_path, "r", encoding="utf-8") as handle:
+                return json.load(handle)
+        except Exception as exc:
+            raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
+
+    if ext == ".npy":
+        return np.load(safe_path, allow_pickle=True)
+
+    if ext == ".csv":
+        return pd.read_csv(safe_path)
+
+    if ext == ".parquet":
+        return pd.read_parquet(safe_path)
+
+    if ext == ".feather":
+        return pd.read_feather(safe_path)
+
+    if ext in {".xlsx", ".xls"}:
+        return pd.read_excel(safe_path)
+
+    if ext == ".mat":
+        try:
+            import scipy.io as sio
+        except Exception as exc:
+            raise ValueError(f"scipy is required to parse .mat files: {exc}")
+        return sio.loadmat(safe_path, squeeze_me=True, struct_as_record=False)
+
+    raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
 def _load_module_from_path(path, name="kernel_params"):
@@ -210,6 +388,380 @@ def _flatten_spike_data(data):
     return np.asarray(data).ravel()
 
 
+def _safe_float(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_dt_ms(value):
+    if isinstance(value, pd.DataFrame):
+        dt_ms = _first_numeric_from_column(value, "dt_ms")
+        if dt_ms is None:
+            dt_ms = _first_numeric_from_column(value, "dt")
+        if dt_ms is not None:
+            return dt_ms
+        if "metadata" in value.columns and not value.empty:
+            meta_value = value["metadata"].dropna()
+            if not meta_value.empty:
+                meta = meta_value.iloc[0]
+                if isinstance(meta, str):
+                    try:
+                        meta = ast.literal_eval(meta)
+                    except Exception:
+                        meta = None
+                if isinstance(meta, dict):
+                    dt_ms = _safe_float(meta.get("dt_ms"))
+                    if dt_ms is None:
+                        dt_ms = _safe_float(meta.get("dt"))
+                    if dt_ms is not None:
+                        return dt_ms
+        return None
+
+    if isinstance(value, dict):
+        dt_ms = _safe_float(value.get("dt_ms"))
+        if dt_ms is None:
+            dt_ms = _safe_float(value.get("dt"))
+        return dt_ms
+
+    return _safe_float(value)
+
+
+def _load_simulation_dt_ms(file_paths):
+    dt_path = _resolve_sim_file(file_paths, "dt_file", "dt.pkl", required=False)
+    if not dt_path:
+        return None, None
+    try:
+        dt_obj = read_file(dt_path)
+    except Exception:
+        return None, dt_path
+    return _coerce_dt_ms(dt_obj), dt_path
+
+
+def _first_numeric_from_column(df, column_name):
+    if column_name not in df.columns:
+        return None
+    series = pd.to_numeric(df[column_name], errors="coerce").dropna()
+    if series.empty:
+        return None
+    return float(series.iloc[0])
+
+
+def _extract_signal_and_meta_from_source(obj):
+    meta = {"dt_ms": None, "decimation_factor": 1, "fs_hz": None}
+
+    if isinstance(obj, pd.DataFrame):
+        dt_ms = _first_numeric_from_column(obj, "dt_ms")
+        decimation_factor = _first_numeric_from_column(obj, "decimation_factor")
+        fs_hz = _first_numeric_from_column(obj, "fs_hz")
+
+        if "metadata" in obj.columns and (dt_ms is None or fs_hz is None or decimation_factor is None):
+            meta_series = obj["metadata"].dropna()
+            if not meta_series.empty:
+                meta_value = meta_series.iloc[0]
+                if isinstance(meta_value, str):
+                    try:
+                        meta_value = ast.literal_eval(meta_value)
+                    except Exception:
+                        meta_value = None
+                if isinstance(meta_value, dict):
+                    if dt_ms is None:
+                        dt_ms = _safe_float(meta_value.get("dt_ms"))
+                    if decimation_factor is None:
+                        decimation_factor = _safe_float(meta_value.get("decimation_factor"))
+                    if fs_hz is None:
+                        fs_hz = _safe_float(meta_value.get("fs_hz"))
+
+        if decimation_factor is None or decimation_factor <= 0:
+            decimation_factor = 1
+        meta["dt_ms"] = dt_ms
+        meta["decimation_factor"] = int(decimation_factor)
+        meta["fs_hz"] = fs_hz
+        if "data" in obj.columns and not obj.empty:
+            return obj["data"].iloc[0], meta
+        if not obj.empty:
+            return obj.iloc[0, 0], meta
+        return None, meta
+
+    return obj, meta
+
+
+def _sum_signal_dict(signal_dict):
+    total = None
+    for value in signal_dict.values():
+        arr = np.asarray(value)
+        if total is None:
+            total = np.array(arr, copy=True)
+        else:
+            total = total + arr
+    return total
+
+
+def _get_param(params, key, default=None):
+    value = params.get(key, default)
+    if isinstance(value, str):
+        value = value.strip()
+    if value == "":
+        return default
+    return value
+
+
+def _parse_float_param(params, key, default=None):
+    value = _get_param(params, key, None)
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid float for '{key}': {value}")
+
+
+def _parse_int_param(params, key, default=None):
+    value = _get_param(params, key, None)
+    if value is None:
+        return default
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        raise ValueError(f"Invalid integer for '{key}': {value}")
+
+
+def _parse_bool_param(params, key, default=False):
+    raw = _get_param(params, key, None)
+    parsed = _parse_bool(raw, default=None)
+    if parsed is None:
+        return default
+    return bool(parsed)
+
+
+def _parse_dict_param(params, key):
+    raw = _get_param(params, key, None)
+    if raw is None:
+        return None
+    value = _parse_literal_value(raw, None)
+    if not isinstance(value, dict):
+        raise ValueError(f"'{key}' must be a JSON/dict mapping.")
+    return dict(value)
+
+
+def _parse_idx_list_param(params, key):
+    raw = _get_param(params, key, None)
+    if raw is None:
+        return None
+    parsed = _parse_literal_value(raw, None)
+    if isinstance(parsed, (list, tuple, np.ndarray)):
+        out = [int(x) for x in np.asarray(parsed).tolist()]
+        return out if out else None
+    parts = [p.strip() for p in str(raw).split(",") if p.strip()]
+    if not parts:
+        return None
+    return [int(p) for p in parts]
+
+
+def _parse_range_pair(params, min_key, max_key):
+    lo = _parse_float_param(params, min_key, default=None)
+    hi = _parse_float_param(params, max_key, default=None)
+    if lo is None and hi is None:
+        return None
+    if lo is None or hi is None:
+        raise ValueError(f"Both '{min_key}' and '{max_key}' must be provided.")
+    if lo >= hi:
+        raise ValueError(f"Invalid range: {min_key} must be less than {max_key}.")
+    return [float(lo), float(hi)]
+
+
+def _resolve_fs_from_df(df):
+    if "fs" not in df.columns:
+        return None
+    series = pd.to_numeric(df["fs"], errors="coerce").dropna()
+    if series.empty:
+        return None
+    return float(series.iloc[0])
+
+
+def _extract_feature_samples(df):
+    if "data" not in df.columns:
+        raise ValueError("Input dataframe must contain a 'data' column from EphysDatasetParser.")
+    samples = []
+    for idx, value in enumerate(df["data"].tolist()):
+        arr = np.asarray(value).squeeze()
+        if arr.ndim == 0:
+            arr = np.asarray([arr])
+        if arr.ndim != 1:
+            raise ValueError(f"Row {idx} in 'data' is not a 1D signal.")
+        samples.append(arr)
+    if not samples:
+        raise ValueError("No signals found in dataframe 'data' column.")
+    return samples
+
+
+def _normalize_feature_method_name(raw_method):
+    mapping = {
+        "power_spectrum_parameterization": "specparam",
+        "fei": "fEI",
+    }
+    method = (raw_method or "").strip()
+    return mapping.get(method, method)
+
+
+def _resolve_sampling_frequency(params, key, df, label):
+    fs = _parse_float_param(params, key, default=None)
+    if fs is None:
+        fs = _resolve_fs_from_df(df)
+    if fs is None:
+        raise ValueError(f"Sampling frequency is required for {label}.")
+    return float(fs)
+
+
+def _build_feature_method_params(method, params, df):
+    method_params = {}
+    n_jobs = _parse_int_param(params, "features_n_jobs", default=None)
+    chunksize = _parse_int_param(params, "features_chunksize", default=None)
+    start_method = _get_param(params, "features_start_method", "spawn")
+    if start_method not in {"spawn", "fork", "forkserver"}:
+        start_method = "spawn"
+
+    if method == "catch22":
+        method_params["normalize"] = _parse_bool_param(params, "catch22_normalize", default=False)
+
+    elif method == "specparam":
+        method_params["normalize"] = _parse_bool_param(params, "specparam_normalize", default=False)
+        method_params["fs"] = _resolve_sampling_frequency(params, "specparam_fs", df, "specparam")
+        freq_range = _parse_range_pair(params, "specparam_freq_min", "specparam_freq_max")
+        if freq_range is not None:
+            method_params["freq_range"] = tuple(freq_range)
+
+        welch_kwargs = _parse_dict_param(params, "specparam_welch_kwargs") or {}
+        nperseg = _parse_int_param(params, "specparam_welch_nperseg", default=None)
+        noverlap = _parse_int_param(params, "specparam_welch_noverlap", default=None)
+        if nperseg is not None:
+            welch_kwargs["nperseg"] = int(nperseg)
+        if noverlap is not None:
+            welch_kwargs["noverlap"] = int(noverlap)
+        if welch_kwargs:
+            method_params["welch_kwargs"] = welch_kwargs
+
+        model_kwargs = _parse_dict_param(params, "specparam_model_kwargs")
+        if model_kwargs:
+            method_params["model_kwargs"] = model_kwargs
+
+        method_params["select_peak"] = _get_param(params, "specparam_select_peak", "max_pw")
+        method_params["metric_policy"] = _get_param(params, "specparam_metric_policy", "reject")
+        method_params["debug"] = _parse_bool_param(params, "specparam_debug", default=False)
+
+        thresholds = _parse_dict_param(params, "specparam_metric_thresholds") or {}
+        gof_r2 = _parse_float_param(params, "specparam_threshold_gof_rsquared", default=None)
+        if gof_r2 is not None:
+            thresholds["gof_rsquared"] = float(gof_r2)
+        if thresholds:
+            method_params["metric_thresholds"] = thresholds
+
+    elif method == "dfa":
+        method_params["normalize"] = _parse_bool_param(params, "dfa_normalize", default=False)
+        method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "dfa_sampling_frequency", df, "DFA")
+        fit_interval = _parse_range_pair(params, "dfa_fit_min", "dfa_fit_max")
+        compute_interval = _parse_range_pair(params, "dfa_compute_min", "dfa_compute_max")
+        if fit_interval is not None:
+            method_params["fit_interval"] = fit_interval
+        if compute_interval is not None:
+            method_params["compute_interval"] = compute_interval
+        method_params["overlap"] = _parse_bool_param(params, "dfa_overlap", default=True)
+
+        dfa_mode = _get_param(params, "dfa_analysis_mode", "envelope")
+        if dfa_mode == "frequency_range":
+            method_params["frequency_range"] = _parse_range_pair(params, "dfa_frequency_min", "dfa_frequency_max")
+            if method_params["frequency_range"] is None:
+                raise ValueError("DFA frequency_range mode requires min/max frequency values.")
+        elif dfa_mode == "spectrum_range":
+            method_params["spectrum_range"] = _parse_range_pair(params, "dfa_spectrum_min", "dfa_spectrum_max")
+            if method_params["spectrum_range"] is None:
+                raise ValueError("DFA spectrum_range mode requires min/max frequency values.")
+        else:
+            if fit_interval is None or compute_interval is None:
+                raise ValueError("DFA envelope mode requires fit_interval and compute_interval.")
+
+        bad_idxes = _parse_idx_list_param(params, "dfa_bad_idxes")
+        if bad_idxes is not None:
+            method_params["bad_idxes"] = bad_idxes
+
+        method_params["input_is_envelope"] = _parse_bool_param(params, "dfa_input_is_envelope", default=True)
+        filter_kwargs = _parse_dict_param(params, "dfa_filter_kwargs")
+        if filter_kwargs:
+            method_params["filter_kwargs"] = filter_kwargs
+        trim_seconds = _parse_float_param(params, "dfa_trim_seconds", default=None)
+        if trim_seconds is not None:
+            method_params["trim_seconds"] = float(trim_seconds)
+        hilbert_n_fft = _parse_int_param(params, "dfa_hilbert_n_fft", default=None)
+        if hilbert_n_fft is not None:
+            method_params["hilbert_n_fft"] = int(hilbert_n_fft)
+
+    elif method == "fEI":
+        method_params["normalize"] = _parse_bool_param(params, "fei_normalize", default=False)
+        method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "fei_sampling_frequency", df, "fEI")
+        window_size_sec = _parse_float_param(params, "fei_window_size_sec", default=None)
+        if window_size_sec is None:
+            raise ValueError("fEI requires window_size_sec.")
+        method_params["window_size_sec"] = float(window_size_sec)
+        method_params["window_overlap"] = _parse_float_param(params, "fei_window_overlap", default=0.0)
+        dfa_value = _parse_float_param(params, "fei_dfa_value", default=None)
+        if dfa_value is not None:
+            method_params["dfa_value"] = float(dfa_value)
+        dfa_threshold = _parse_float_param(params, "fei_dfa_threshold", default=0.6)
+        method_params["dfa_threshold"] = float(dfa_threshold)
+
+        dfa_fit_interval = _parse_range_pair(params, "fei_dfa_fit_min", "fei_dfa_fit_max")
+        dfa_compute_interval = _parse_range_pair(params, "fei_dfa_compute_min", "fei_dfa_compute_max")
+        if dfa_fit_interval is not None:
+            method_params["dfa_fit_interval"] = dfa_fit_interval
+        if dfa_compute_interval is not None:
+            method_params["dfa_compute_interval"] = dfa_compute_interval
+        method_params["dfa_overlap"] = _parse_bool_param(params, "fei_dfa_overlap", default=True)
+
+        fei_mode = _get_param(params, "fei_analysis_mode", "envelope")
+        if fei_mode == "frequency_range":
+            method_params["frequency_range"] = _parse_range_pair(params, "fei_frequency_min", "fei_frequency_max")
+            if method_params["frequency_range"] is None:
+                raise ValueError("fEI frequency_range mode requires min/max frequency values.")
+        elif fei_mode == "spectrum_range":
+            method_params["spectrum_range"] = _parse_range_pair(params, "fei_spectrum_min", "fei_spectrum_max")
+            if method_params["spectrum_range"] is None:
+                raise ValueError("fEI spectrum_range mode requires min/max frequency values.")
+        else:
+            if dfa_value is None and (dfa_fit_interval is None or dfa_compute_interval is None):
+                raise ValueError("fEI envelope mode requires dfa intervals unless dfa_value is provided.")
+
+        bad_idxes = _parse_idx_list_param(params, "fei_bad_idxes")
+        if bad_idxes is not None:
+            method_params["bad_idxes"] = bad_idxes
+        method_params["input_is_envelope"] = _parse_bool_param(params, "fei_input_is_envelope", default=True)
+        filter_kwargs = _parse_dict_param(params, "fei_filter_kwargs")
+        if filter_kwargs:
+            method_params["filter_kwargs"] = filter_kwargs
+        trim_seconds = _parse_float_param(params, "fei_trim_seconds", default=None)
+        if trim_seconds is not None:
+            method_params["trim_seconds"] = float(trim_seconds)
+        hilbert_n_fft = _parse_int_param(params, "fei_hilbert_n_fft", default=None)
+        if hilbert_n_fft is not None:
+            method_params["hilbert_n_fft"] = int(hilbert_n_fft)
+
+    elif method == "hctsa":
+        hctsa_folder = _get_param(params, "hctsa_folder", None)
+        if not hctsa_folder:
+            raise ValueError("hctsa_folder is required for hctsa.")
+        method_params["hctsa_folder"] = hctsa_folder
+
+    else:
+        raise ValueError(f"Unsupported features method '{method}'.")
+
+    return method_params, {
+        "n_jobs": n_jobs,
+        "chunksize": chunksize,
+        "start_method": start_method,
+        "hctsa_return_meta": _parse_bool_param(params, "hctsa_return_meta", default=False),
+    }
+
+
 
 
 #############################################################
@@ -218,53 +770,170 @@ def _flatten_spike_data(data):
 
 
 def features_computation(job_id, job_status, params, temp_uploaded_files):
+    output_df_path = None
     try:
-        # Read the file path into a dataframe
-        df = read_df_file(params['file_paths']['data_file'])
+        _append_job_output(job_status, job_id, "Starting features computation.")
+        if job_id in job_status:
+            # Keep progress at 0 during data loading/preparation.
+            job_status[job_id]["progress"] = 0
+        _append_job_output(job_status, job_id, "Loading data for features...")
 
-        # If select-method == 'power_spectrum_parameterization', prepare its parameters
-        if params['select-method'] == 'power_spectrum_parameterization':
-            fooof_setup_emp = {'peak_threshold': float(params['peak-threshold-foof']),
-                            'min_peak_height': float(params['min-peak-height-foof']),
-                            'max_n_peaks': int(params['max-peak-number-foof']),
-                            'peak_width_limits': (float(params['peak-width-min-foof']), float(params['peak-width-max-foof']))}
-            params_features ={'fs': int(df['fs'].iloc[0]),
-                'fmin': float(params['min-freq-power']),
-                'fmax': float(params['max-freq-power']),
-                'fooof_setup': fooof_setup_emp,
-                'r_squared_th': float(params['threshold-r-power'])}                
-            df.Recording = 'LFP'
-            df.fs = int(df['fs'].iloc[0])
+        prepared_df = params.get("prepared_features_df")
+        if isinstance(prepared_df, pd.DataFrame):
+            df = prepared_df
+            _append_job_output(job_status, job_id, "Using in-memory parsed empirical dataframe (no additional load).")
+        elif params.get("empirical_upload_paths"):
+            parse_cfg = params.get("parser_config_obj")
+            if parse_cfg is None:
+                raise ValueError("Missing parser configuration for empirical uploads.")
+            from ncpi.EphysDatasetParser import EphysDatasetParser
+            parser = EphysDatasetParser(parse_cfg)
 
-        # Compute features from the dataframe
-        features = ncpi.Features(method=params['select-method']) if params['select-method'] == 'catch22' else ncpi.Features(method=params['select-method'], params=params_features)
-        output_df = features.compute_features(df)
+            empirical_uploads = list(params.get("empirical_upload_paths") or [])
+            total_uploads = len(empirical_uploads)
+            if total_uploads == 0:
+                raise ValueError("No empirical uploads were provided.")
 
-        # Keep only the aperiodic exponent (1/f slope)
-        if params['select-method'] == 'power_spectrum_parameterization':
-            output_df['Features'] = output_df['Features'].apply(lambda x: x[1])
+            _append_job_output(job_status, job_id, f"Parsing {total_uploads} empirical file(s)...")
+            parsed_frames = []
+            log_every = max(1, total_uploads // 20)
+            for idx, payload in enumerate(empirical_uploads, start=1):
+                name = payload.get("name") or f"file_{idx}"
+                source_path = payload.get("path")
+                size_mb = 0.0
+                if source_path and os.path.exists(source_path):
+                    try:
+                        size_mb = os.path.getsize(source_path) / (1024 * 1024)
+                    except OSError:
+                        size_mb = 0.0
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Loading empirical file {idx}/{total_uploads}: {name} ({size_mb:.2f} MB)."
+                )
+                source_obj = _load_uploaded_source_path(
+                    source_path,
+                    payload.get("name"),
+                    payload.get("ext"),
+                )
+                parsed = parser.parse(source_obj)
+                if not isinstance(parsed, pd.DataFrame):
+                    raise ValueError(f"Parser output for '{name}' is not a dataframe.")
+                parsed_frames.append(parsed)
 
-        # Save the output dataframe to a file
-        output_df_path = save_df(job_id, output_df, temp_uploaded_files)
+                # Do not advance global progress bar during data loading.
+                if idx == 1 or idx == total_uploads or (idx % log_every == 0):
+                    _append_job_output(job_status, job_id, f"Parsed empirical file {idx}/{total_uploads}.")
+
+            df = pd.concat(parsed_frames, ignore_index=True)
+            _append_job_output(job_status, job_id, f"Merged empirical parsed dataframe shape: {df.shape}.")
+        else:
+            input_path = params.get("file_paths", {}).get("data_file")
+            if not input_path:
+                raise ValueError("No parsed dataframe input was provided for feature computation.")
+            source_label = os.path.basename(str(input_path))
+            _append_job_output(job_status, job_id, f"Reading dataframe from {source_label}...")
+            df = read_df_file(input_path)
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("Prepared parser output is not a pandas dataframe.")
+        _append_job_output(job_status, job_id, f"Loaded parsed dataframe with shape {df.shape}.")
+
+        samples = _extract_feature_samples(df)
+        _append_job_output(job_status, job_id, f"Extracted {len(samples)} signal sample(s) from dataframe.")
+
+        method = _normalize_feature_method_name(params.get('select-method'))
+        method_params, exec_opts = _build_feature_method_params(method, params, df)
+        _append_job_output(
+            job_status,
+            job_id,
+            f"Method: {method} | n_jobs={exec_opts['n_jobs']} | chunksize={exec_opts['chunksize']} | start_method={exec_opts['start_method']}"
+        )
+        features = ncpi.Features(method=method, params=method_params)
+        _append_job_output(job_status, job_id, "Starting feature extraction...")
+
+        if method == "hctsa" and exec_opts["hctsa_return_meta"]:
+            _append_job_output(job_status, job_id, "Running hctsa feature extraction...")
+            hctsa_result = features.hctsa(
+                samples,
+                hctsa_folder=method_params["hctsa_folder"],
+                workers=exec_opts["n_jobs"],
+                return_meta=True,
+            )
+            if job_id in job_status:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
+            output_df = df.copy()
+            output_df["Features"] = hctsa_result["features"]
+            output_df["hctsa_num_valid_features"] = int(hctsa_result["num_valid_features"])
+            output_df["hctsa_num_total_features"] = int(hctsa_result["num_total_features"])
+        else:
+            sig = inspect.signature(features.compute_features)
+            supports_progress = "progress_callback" in sig.parameters
+
+            def _on_feature_progress(completed, total, pct):
+                if total <= 0:
+                    return
+                mapped = int(max(0, min(99, float(pct))))
+                if job_id in job_status:
+                    # Follow ncpi compute_features progress directly.
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), mapped)
+
+            def _on_feature_log(message):
+                _append_job_output(job_status, job_id, str(message))
+
+            if not supports_progress:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Warning: compute_features progress callbacks are unavailable in this ncpi version."
+                )
+
+            computed = _compute_features_with_compat(
+                features_obj=features,
+                samples=samples,
+                exec_opts=exec_opts,
+                progress_callback=_on_feature_progress,
+                log_callback=_on_feature_log,
+            )
+            if job_id in job_status:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
+            output_df = df.copy()
+            output_df["Features"] = computed
+
+        _append_job_output(job_status, job_id, "Attaching computed features to dataframe.")
+        output_df["FeatureMethod"] = method
+
+        # By default, persist features into the same parsed dataframe pickle.
+        input_df_path = params['file_paths'].get('data_file')
+        input_ext = os.path.splitext(str(input_df_path or ""))[1].lower()
+        if input_df_path and input_ext in {'.pkl', '.pickle'}:
+            output_df.to_pickle(input_df_path)
+            output_df_path = input_df_path
+            _append_job_output(job_status, job_id, f"Updated input dataframe in-place: {input_df_path}")
+        else:
+            output_df_path = save_df(job_id, output_df, temp_uploaded_files)
+            _append_job_output(job_status, job_id, f"Saved computed dataframe: {output_df_path}")
+        persisted_dashboard_path = _persist_features_dataframe(output_df, method)
+        _append_job_output(job_status, job_id, f"Persisted dashboard features file: {persisted_dashboard_path}")
 
         job_status[job_id].update({
                 "status": "finished",
                 "progress": 100,
                 "estimated_time_remaining": 0,
                 "results": output_df_path, # Return to the client the output filepath
+                "dashboard_features_path": persisted_dashboard_path,
                 "error": False
             })
 
     except Exception as e:
-        print(e)
+        _append_job_output(job_status, job_id, f"Error: {e}")
         job_status[job_id].update({
                 "status": "failed",
                 "error": str(e),
                 "progress": job_status[job_id].get("progress", 0)
             })
 
-    # Remove the file after using it
-    cleanup_temp_files(params['file_paths'])
+    # Remove temporary inputs but keep result file available for download.
+    cleanup_temp_files(params['file_paths'], keep_paths=[output_df_path])
 
 
 
@@ -434,6 +1103,10 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         file_paths = params.get('file_paths', {})
         sim_data = {}
 
+        dt_from_stage, dt_path = _load_simulation_dt_ms(file_paths)
+        proxy_sim_step = None
+        dt_source = None
+
         if method == 'FR':
             _append_job_output(job_status, job_id, "Loading spike times and gids...")
             times_path = _resolve_sim_file(file_paths, 'times_file', 'times.pkl', required=True)
@@ -441,6 +1114,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             times = read_file(times_path)
             gids = read_file(gids_path)
             sim_data['FR'] = _compute_mean_firing_rate(times, gids, bin_size)
+            proxy_sim_step = float(bin_size)
+            dt_source = "bin_size_ms"
 
         elif method == 'AMPA':
             _append_job_output(job_status, job_id, "Loading AMPA currents...")
@@ -479,9 +1154,29 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         else:
             raise ValueError(f"Unknown proxy method '{method}'.")
 
+        if method != "FR":
+            if dt_from_stage is not None and dt_from_stage > 0:
+                proxy_sim_step = float(dt_from_stage)
+                dt_source = "simulation_dt_file"
+                if sim_step is not None and abs(sim_step - proxy_sim_step) > 1e-12:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Using simulation dt from {dt_path} ({proxy_sim_step:g} ms) instead of form sim_step ({sim_step:g} ms).",
+                    )
+            elif sim_step is not None and sim_step > 0:
+                proxy_sim_step = float(sim_step)
+                dt_source = "form_sim_step"
+            else:
+                raise ValueError(
+                    "Simulation step could not be determined. Provide sim_step or ensure dt.pkl is available in simulation outputs."
+                )
+
+        _append_job_output(job_status, job_id, f"Effective proxy sampling step: {proxy_sim_step:g} ms ({dt_source}).")
+
         _append_job_output(job_status, job_id, "Computing proxy with ncpi.FieldPotential.compute_proxy...")
         potential = ncpi.FieldPotential()
-        proxy = potential.compute_proxy(method, sim_data, sim_step, excitatory_only=excitatory_only)
+        proxy = potential.compute_proxy(method, sim_data, proxy_sim_step, excitatory_only=excitatory_only)
 
         output_root = '/tmp/field_potential_proxy'
         run_dir = os.path.join(output_root, job_id)
@@ -492,8 +1187,27 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         with open(sim_data_path, 'wb') as f:
             pickle.dump(sim_data, f)
-        with open(proxy_path, 'wb') as f:
-            pickle.dump(proxy, f)
+        # Save proxy outputs in a dataframe so downstream parsing can use "data" as locator.
+        dt_ms = _safe_float(proxy_sim_step)
+        proxy_df = pd.DataFrame([{
+            "data": proxy,
+            "proxy_method": method,
+            "dt_ms": dt_ms,
+            "decimation_factor": 1,
+            "fs_hz": None,
+            "metadata": {"dt_ms": dt_ms, "decimation_factor": 1, "fs_hz": None, "dt_source": dt_source},
+        }])
+        dt_val = proxy_df["dt_ms"].iloc[0]
+        if dt_val is not None and dt_val > 0:
+            fs_hz = 1000.0 / float(dt_val)
+            proxy_df["fs_hz"] = fs_hz
+            proxy_df.at[proxy_df.index[0], "metadata"] = {
+                "dt_ms": float(dt_val),
+                "decimation_factor": 1,
+                "fs_hz": fs_hz,
+                "dt_source": dt_source,
+            }
+        proxy_df.to_pickle(proxy_path)
 
         _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {run_dir}")
         job_status[job_id].update({
@@ -748,6 +1462,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
 
         probe_outputs = {}
         output_paths = {}
+        fs_hz = (1000.0 / float(cdm_dt)) if float(cdm_dt) > 0 else None
         for probe_name in probe_names:
             cdm_signals = potential.compute_cdm_lfp_from_kernels(
                 kernels,
@@ -769,8 +1484,17 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 safe_probe = "".join(ch.lower() if ch.isalnum() else "_" for ch in probe_name).strip("_")
                 output_name = f"{safe_probe or 'probe_output'}.pkl"
             output_path = os.path.join(run_dir, output_name)
-            with open(output_path, "wb") as f:
-                pickle.dump(cdm_signals, f)
+            combined_signal = _sum_signal_dict(cdm_signals)
+            payload_df = pd.DataFrame([{
+                "data": combined_signal,
+                "raw_signals": cdm_signals,
+                "probe": probe_name,
+                "dt_ms": float(cdm_dt),
+                "decimation_factor": 1,
+                "fs_hz": fs_hz,
+                "metadata": {"dt_ms": float(cdm_dt), "decimation_factor": 1, "fs_hz": fs_hz},
+            }])
+            payload_df.to_pickle(output_path)
             output_paths[probe_name] = output_path
             _append_job_output(job_status, job_id, f"Saved probe output to {output_path}")
 
@@ -779,8 +1503,18 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             results_path = next(iter(output_paths.values()))
         else:
             combined_path = os.path.join(run_dir, "probe_outputs.pkl")
-            with open(combined_path, "wb") as f:
-                pickle.dump(probe_outputs, f)
+            rows = []
+            for probe_name, probe_dict in probe_outputs.items():
+                rows.append({
+                    "data": _sum_signal_dict(probe_dict),
+                    "raw_signals": probe_dict,
+                    "probe": probe_name,
+                    "dt_ms": float(cdm_dt),
+                    "decimation_factor": 1,
+                    "fs_hz": fs_hz,
+                    "metadata": {"dt_ms": float(cdm_dt), "decimation_factor": 1, "fs_hz": fs_hz},
+                })
+            pd.DataFrame(rows).to_pickle(combined_path)
             results_path = combined_path
             _append_job_output(job_status, job_id, f"Saved combined probe outputs to {combined_path}")
 
@@ -818,7 +1552,8 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     cdm_path = max(fallback, key=os.path.getmtime)
         if not cdm_path or not os.path.exists(cdm_path):
             raise FileNotFoundError("CDM input is required (upload .pkl or compute kernels first).")
-        CDM = read_file(cdm_path)
+        CDM_obj = read_file(cdm_path)
+        CDM, cdm_meta = _extract_signal_and_meta_from_source(CDM_obj)
         job_status[job_id]["progress"] = 20
         if isinstance(CDM, dict):
             if "sum" in CDM:
@@ -1011,8 +1746,17 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         run_dir = os.path.join(output_root, job_id)
         os.makedirs(run_dir, exist_ok=True)
         meeg_path = os.path.join(run_dir, "meeg.pkl")
-        with open(meeg_path, "wb") as f:
-            pickle.dump(meeg, f)
+        meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
+        meeg_decimation = int(cdm_meta.get("decimation_factor", 1))
+        meeg_fs = _safe_float(cdm_meta.get("fs_hz"))
+        pd.DataFrame([{
+            "data": meeg,
+            "dt_ms": meeg_dt_ms,
+            "decimation_factor": meeg_decimation,
+            "fs_hz": meeg_fs,
+            "metadata": {"dt_ms": meeg_dt_ms, "decimation_factor": meeg_decimation, "fs_hz": meeg_fs},
+            "source_cdm_file": os.path.basename(cdm_path),
+        }]).to_pickle(meeg_path)
 
         _append_job_output(job_status, job_id, f"Saved M/EEG to {meeg_path}")
         job_status[job_id].update({

@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Features{% endblock %}
 
-<!-- Main color for simulation page: blue -->
 {% block head %}
 {{ super() }}
 <script id="tailwind-config">
@@ -27,174 +26,1065 @@
     [x-cloak] {
         display: none !important;
     }
+    @keyframes upload-indeterminate {
+        0% { transform: translateX(-120%); }
+        100% { transform: translateX(320%); }
+    }
+    .upload-indeterminate {
+        animation: upload-indeterminate 1.2s linear infinite;
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<!-- Main content -->
-<div x-data="{ 
-            activeTab: 'load-data', 
-            computeFeatures: window.computeFeatures,
+<script>
+    window.__featuresPipelineFiles = {{ pipeline_files | tojson }};
+
+    function featuresPage() {
+        return {
+            activeTab: 'entry',
+            entryChoice: '',
             uploads: {},
-            isUploaded(id) { return this.uploads[id] !== undefined; },
-            getFileName(id) { return this.uploads[id]?.name || ''; },
-            selectedMethod: '', // Track the selected method
+            pipelineFiles: window.__featuresPipelineFiles || [],
+            selectedPipelinePath: '',
+            dataSourceKind: 'new-simulation',
+            empiricalSourceMode: 'server-path',
+            empiricalFolderPath: '',
+            parserInfo: null,
+            parserLoading: false,
+            parserError: '',
+            empiricalFileCount: 0,
+            empiricalSampleName: '',
+            parserDataLocator: '',
+            parserFsManual: String(1.0 / (0.0625e-3)),
+            parserFsHint: '',
+            parserSensorNames: '',
+            parserRecordingType: 'LFP',
+            parserFsLocator: '',
+            parserChNamesLocator: '',
+            parserTableLayout: '',
+            parserLongTimeCol: '',
+            parserLongChannelCol: '',
+            parserLongValueCol: '',
+            parserEnableEpoching: false,
+            parserEpochLengthS: '5.0',
+            parserEpochStepS: '5.0',
+            parserZscore: false,
+            parserEnableAggregate: false,
+            parserAggregateOver: 'sensor',
+            parserAggregateMethod: 'sum',
+            parserAggregateLabels: '',
+            selectedMethod: '',
+            dfaAnalysisMode: 'envelope',
+            fEIAnalysisMode: 'envelope',
+            submitInProgress: false,
+            uploadProgress: 0,
+            uploadStatusMessage: '',
+            uploadBytesLoaded: 0,
+            uploadBytesTotal: 0,
+            uploadProgressKnown: false,
+            uploadWaitTimer: null,
+            uploadWaitSeconds: 0,
+            submitError: '',
             methods: [
                 {
                     key: 'catch22',
-                    label: 'Catch22: a collection of 22 time-series features (CAnonical Time-series CHaracteristics)',
+                    label: 'Catch22',
+                    description: '22 canonical time-series characteristics.',
                     value: 'catch22'
-                }, 
+                },
                 {
-                    key: 'Spectral parameterization',
-                    label: 'Spectral parameterization: Specparam, formerly FOOOF, to parameterize neural power spectra',
-                    value: 'power_spectrum_parameterization'
-                }, 
+                    key: 'specparam',
+                    label: 'Specparam',
+                    description: 'Spectral parameterization of neural power spectra.',
+                    value: 'specparam'
+                },
                 {
-                    key: 'DFA',
-                    label: 'DFA: Detrended fluctuation analysis',
+                    key: 'dfa',
+                    label: 'DFA',
+                    description: 'Detrended fluctuation analysis.',
                     value: 'dfa'
-                }, 
+                },
                 {
                     key: 'fEI',
-                    label: 'fEI: Functional excitation-inhibition ratio',
-                    value: 'fei'
+                    label: 'fEI',
+                    description: 'Functional excitation-inhibition ratio.',
+                    value: 'fEI'
                 },
                 {
                     key: 'hctsa',
-                    label: 'hctsa: Highly comparative time-series analysis',
+                    label: 'hctsa',
+                    description: 'Highly comparative time-series analysis.',
                     value: 'hctsa'
                 }
             ],
-            on_filter: true,
-    }">
+            isUploaded(id) {
+                return this.uploads[id] !== undefined;
+            },
+            getFileName(id) {
+                return this.uploads[id]?.name || '';
+            },
+            resolvedDataSourceKind() {
+                if (this.selectedPipelinePath) return 'pipeline';
+                if (this.isUploaded('data-file')) return 'new-simulation';
+                if (this.empiricalFileCount > 0) return 'new-empirical';
+                return '';
+            },
+            activeNewDataMode() {
+                return this.dataSourceKind || 'new-simulation';
+            },
+            hasAnyData() {
+                return this.resolvedDataSourceKind() !== '';
+            },
+            canSubmitFeatures() {
+                if (this.submitInProgress) return false;
+                const kind = this.resolvedDataSourceKind();
+                if (!this.selectedMethod) return false;
+                if (!this.parserDataLocator) return false;
+
+                if (kind === 'pipeline') {
+                    if (!this.parserFsManual) return false;
+                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
+                    return true;
+                }
+                if (kind === 'new-simulation') {
+                    if (!this.isUploaded('data-file')) return false;
+                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
+                    return true;
+                }
+                if (kind === 'new-empirical') {
+                    if (this.empiricalSourceMode === 'server-path') {
+                        if (!String(this.empiricalFolderPath || '').trim()) return false;
+                    } else if (this.empiricalFileCount <= 0) {
+                        return false;
+                    }
+                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
+                    return true;
+                }
+                return false;
+            },
+            selectedDataDescription() {
+                const kind = this.resolvedDataSourceKind();
+                if (kind === 'pipeline') {
+                    const row = this.pipelineFiles.find((item) => item.path === this.selectedPipelinePath);
+                    return row ? row.name : 'Detected pipeline file';
+                }
+                if (kind === 'new-simulation') return this.getFileName('data-file') || 'Uploaded simulation file';
+                if (kind === 'new-empirical') {
+                    if (this.empiricalSourceMode === 'server-path') {
+                        const folder = String(this.empiricalFolderPath || '').trim();
+                        if (!folder) return 'Empirical server folder path not set';
+                        return `${this.empiricalFileCount || 0} empirical file(s) from ${folder}`;
+                    }
+                    return `${this.empiricalFileCount} empirical file(s) selected`;
+                }
+                return '';
+            },
+            setNewDataMode(kind) {
+                this.stopUploadWaitPulse();
+                this.submitInProgress = false;
+                this.uploadProgress = 0;
+                this.uploadStatusMessage = '';
+                this.uploadBytesLoaded = 0;
+                this.uploadBytesTotal = 0;
+                this.uploadProgressKnown = false;
+                this.submitError = '';
+                this.empiricalSourceMode = 'server-path';
+                this.empiricalFolderPath = '';
+                this.dataSourceKind = kind;
+                this.selectedPipelinePath = '';
+                if (kind !== 'new-simulation') {
+                    delete this.uploads['data-file'];
+                    const simInput = document.getElementById('data-file');
+                    if (simInput) simInput.value = '';
+                }
+                if (kind !== 'new-empirical') {
+                    this.empiricalFileCount = 0;
+                    this.empiricalSampleName = '';
+                }
+                this.resetParserConfig();
+            },
+            resetParserConfig() {
+                this.parserInfo = null;
+                this.parserError = '';
+                this.parserDataLocator = '';
+                this.parserFsManual = String(1.0 / (0.0625e-3));
+                this.parserFsHint = '';
+                this.parserSensorNames = '';
+                this.parserRecordingType = 'LFP';
+                this.parserFsLocator = '';
+                this.parserChNamesLocator = '';
+                this.parserTableLayout = '';
+                this.parserLongTimeCol = '';
+                this.parserLongChannelCol = '';
+                this.parserLongValueCol = '';
+                this.parserEnableEpoching = false;
+                this.parserEpochLengthS = '5.0';
+                this.parserEpochStepS = '5.0';
+                this.parserZscore = false;
+                this.parserEnableAggregate = false;
+                this.parserAggregateOver = 'sensor';
+                this.parserAggregateMethod = 'sum';
+                this.parserAggregateLabels = '';
+            },
+            selectPipeline(path) {
+                this.stopUploadWaitPulse();
+                this.submitInProgress = false;
+                this.uploadProgress = 0;
+                this.uploadStatusMessage = '';
+                this.uploadBytesLoaded = 0;
+                this.uploadBytesTotal = 0;
+                this.uploadProgressKnown = false;
+                this.submitError = '';
+                this.empiricalSourceMode = 'server-path';
+                this.empiricalFolderPath = '';
+                this.selectedPipelinePath = path;
+                this.dataSourceKind = 'pipeline';
+                delete this.uploads['data-file'];
+                this.empiricalFileCount = 0;
+                this.empiricalSampleName = '';
+                const simInput = document.getElementById('data-file');
+                if (simInput) simInput.value = '';
+                this.resetParserConfig();
+                this.inspectParserSource(path, null);
+            },
+            onFileSelected(file, inputId) {
+                if (inputId !== 'data-file') return;
+                this.stopUploadWaitPulse();
+                this.submitInProgress = false;
+                this.uploadProgress = 0;
+                this.uploadStatusMessage = '';
+                this.uploadBytesLoaded = 0;
+                this.uploadBytesTotal = 0;
+                this.uploadProgressKnown = false;
+                this.submitError = '';
+                this.empiricalSourceMode = 'server-path';
+                this.empiricalFolderPath = '';
+                this.dataSourceKind = 'new-simulation';
+                this.selectedPipelinePath = '';
+                this.empiricalFileCount = 0;
+                this.empiricalSampleName = '';
+                this.resetParserConfig();
+                this.inspectParserSource('', file);
+            },
+            async pickEmpiricalFolder() {
+                this.submitError = '';
+                this.parserError = '';
+                try {
+                    const response = await fetch('{{ url_for('features_select_folder') }}', { method: 'POST' });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.error || 'Folder selection cancelled.');
+                    this.empiricalFolderPath = payload.path || '';
+                    if (!this.empiricalFolderPath) {
+                        throw new Error('No folder path returned by selector.');
+                    }
+                    await this.inspectEmpiricalFolderPath();
+                } catch (error) {
+                    this.parserError = error.message || 'Failed to select folder.';
+                }
+            },
+            async inspectEmpiricalFolderPath() {
+                const folder = String(this.empiricalFolderPath || '').trim();
+                this.submitError = '';
+                this.parserError = '';
+                if (!folder) {
+                    this.parserError = 'Provide a valid empirical folder path.';
+                    this.empiricalFileCount = 0;
+                    this.empiricalSampleName = '';
+                    this.parserInfo = null;
+                    return;
+                }
+                this.parserLoading = true;
+                this.parserInfo = null;
+                try {
+                    const formData = new FormData();
+                    formData.append('empirical_folder_path', folder);
+                    const response = await fetch('{{ url_for('features_parser_inspect') }}', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect empirical folder.');
+                    this.parserInfo = payload;
+                    this.applyParserDefaults(payload);
+                    this.empiricalFileCount = Number(payload.folder_file_count || 0);
+                    this.empiricalSampleName = payload.source_name || '';
+                    this.dataSourceKind = 'new-empirical';
+                } catch (error) {
+                    this.parserError = error.message || 'Failed to inspect empirical folder.';
+                    this.empiricalFileCount = 0;
+                    this.empiricalSampleName = '';
+                } finally {
+                    this.parserLoading = false;
+                }
+            },
+            applyParserDefaults(payload) {
+                const defaults = payload?.defaults || {};
+                if (!this.parserDataLocator) this.parserDataLocator = defaults.data || '';
+                if (!this.parserFsLocator) this.parserFsLocator = defaults.fs || '';
+                if (!this.parserChNamesLocator) this.parserChNamesLocator = defaults.ch_names || '';
+                this.parserFsHint = payload?.fs_hint_note || '';
+                if (
+                    this.resolvedDataSourceKind() === 'pipeline' &&
+                    payload?.fs_hint_hz !== null &&
+                    payload?.fs_hint_hz !== undefined &&
+                    Number.isFinite(Number(payload.fs_hint_hz)) &&
+                    Number(payload.fs_hint_hz) > 0
+                ) {
+                    this.parserFsManual = String(Number(payload.fs_hint_hz));
+                }
+            },
+            async inspectParserSource(existingPath, file) {
+                this.parserLoading = true;
+                this.parserError = '';
+                this.parserInfo = null;
+                const formData = new FormData();
+                if (existingPath) formData.append('existing_data_path', existingPath);
+                if (file) formData.append('file', file);
+                try {
+                    const response = await fetch('{{ url_for('features_parser_inspect') }}', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect data source.');
+                    this.parserInfo = payload;
+                    this.applyParserDefaults(payload);
+                } catch (error) {
+                    this.parserError = error.message || 'Failed to inspect data source.';
+                } finally {
+                    this.parserLoading = false;
+                }
+            },
+            hasUploadPayload() {
+                const kind = this.resolvedDataSourceKind();
+                if (kind === 'new-simulation') {
+                    const simInput = document.getElementById('data-file');
+                    return !!(simInput && simInput.files && simInput.files.length > 0);
+                }
+                if (kind === 'new-empirical') {
+                    return false;
+                }
+                return false;
+            },
+            formatBytes(bytes) {
+                const value = Number(bytes);
+                if (!Number.isFinite(value) || value <= 0) return '0 B';
+                const units = ['B', 'KB', 'MB', 'GB'];
+                let current = value;
+                let unit = 0;
+                while (current >= 1024 && unit < units.length - 1) {
+                    current /= 1024;
+                    unit += 1;
+                }
+                const decimals = current >= 10 || unit === 0 ? 0 : 1;
+                return `${current.toFixed(decimals)} ${units[unit]}`;
+            },
+            stopUploadWaitPulse() {
+                if (this.uploadWaitTimer) {
+                    clearInterval(this.uploadWaitTimer);
+                    this.uploadWaitTimer = null;
+                }
+                this.uploadWaitSeconds = 0;
+            },
+            submitComputeFeatures(event) {
+                const form = event.target;
+                if (this.submitInProgress) return;
+
+                this.stopUploadWaitPulse();
+                this.submitError = '';
+                this.uploadProgress = 0;
+                this.uploadBytesLoaded = 0;
+                this.uploadBytesTotal = 0;
+                this.uploadProgressKnown = false;
+                const uploadRequired = this.hasUploadPayload();
+
+                this.submitInProgress = true;
+                this.uploadStatusMessage = uploadRequired ? 'Uploading files...' : 'Submitting configuration...';
+                this.uploadProgress = 0;
+
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', form.action, true);
+
+                const startServerIngestPulse = () => {
+                    if (!this.submitInProgress) return;
+                    if (this.uploadWaitTimer) return;
+                    let tick = 0;
+                    this.uploadWaitSeconds = 0;
+                    this.uploadProgress = Math.max(this.uploadProgress, 95);
+                    this.uploadStatusMessage = 'Server ingesting uploaded files (0s)';
+                    this.uploadWaitTimer = setInterval(() => {
+                        if (!this.submitInProgress) {
+                            this.stopUploadWaitPulse();
+                            return;
+                        }
+                        this.uploadWaitSeconds += 1;
+                        tick = (tick + 1) % 4;
+                        this.uploadStatusMessage = `Server ingesting uploaded files (${this.uploadWaitSeconds}s)${'.'.repeat(tick)}`;
+                        if (this.uploadProgress < 99) this.uploadProgress += 1;
+                    }, 1000);
+                };
+
+                xhr.upload.onprogress = (evt) => {
+                    if (evt.lengthComputable && evt.total > 0) {
+                        this.stopUploadWaitPulse();
+                        this.uploadProgressKnown = true;
+                        this.uploadBytesLoaded = evt.loaded;
+                        this.uploadBytesTotal = evt.total;
+                        const pct = Math.round((evt.loaded / evt.total) * 95);
+                        this.uploadProgress = Math.max(0, Math.min(95, pct));
+                        if (evt.loaded >= evt.total) {
+                            this.uploadStatusMessage = 'Upload complete. Waiting for server response...';
+                            startServerIngestPulse();
+                        } else {
+                            this.uploadStatusMessage = `Uploading files... ${this.uploadProgress}%`;
+                        }
+                    } else {
+                        this.uploadStatusMessage = 'Uploading files...';
+                    }
+                };
+                xhr.upload.onload = () => {
+                    this.uploadProgressKnown = true;
+                    this.uploadProgress = Math.max(this.uploadProgress, 95);
+                    this.uploadStatusMessage = 'Upload complete. Preparing data...';
+                    startServerIngestPulse();
+                };
+                xhr.upload.onloadend = () => {
+                    if (this.submitInProgress) {
+                        this.uploadProgressKnown = true;
+                        this.uploadProgress = Math.max(this.uploadProgress, 95);
+                        this.uploadStatusMessage = 'Upload complete. Waiting for server response...';
+                        startServerIngestPulse();
+                    }
+                };
+                xhr.onreadystatechange = () => {
+                    if (xhr.readyState >= 2 && this.submitInProgress) {
+                        // Server started sending response headers/body: upload has finished.
+                        this.stopUploadWaitPulse();
+                        this.uploadProgressKnown = true;
+                        this.uploadProgress = 100;
+                        if (!this.uploadStatusMessage.startsWith('Upload complete')) {
+                            this.uploadStatusMessage = 'Upload complete. Preparing data...';
+                        }
+                    }
+                };
+
+                xhr.onload = () => {
+                    if (xhr.status >= 200 && xhr.status < 400) {
+                        this.stopUploadWaitPulse();
+                        this.uploadProgressKnown = true;
+                        this.uploadProgress = 100;
+                        this.uploadStatusMessage = 'Upload complete. Starting computation...';
+                        const redirectTarget = xhr.responseURL || form.action;
+                        window.location.assign(redirectTarget);
+                        return;
+                    }
+                    this.stopUploadWaitPulse();
+                    this.submitInProgress = false;
+                    this.submitError = `Upload failed (HTTP ${xhr.status}).`;
+                };
+
+                xhr.onerror = () => {
+                    this.stopUploadWaitPulse();
+                    this.submitInProgress = false;
+                    this.submitError = 'Upload failed due to a network error.';
+                };
+
+                xhr.onabort = () => {
+                    this.stopUploadWaitPulse();
+                    this.submitInProgress = false;
+                    this.submitError = 'Upload was cancelled.';
+                };
+
+                try {
+                    const formData = new FormData(form);
+                    xhr.send(formData);
+                } catch (_err) {
+                    this.stopUploadWaitPulse();
+                    this.submitInProgress = false;
+                    this.submitError = 'Unable to start file upload.';
+                }
+            },
+            parserDebugCode() {
+                if (!this.hasAnyData()) {
+                    return '# Select a data source to preview EphysDatasetParser configuration.';
+                }
+
+                const kind = this.resolvedDataSourceKind();
+                const dataLocator = this.parserDataLocator || 'REQUIRED_DATA_LOCATOR';
+                const epochEnabled = !!this.parserEnableEpoching;
+                const epochLength = this.parserEpochLengthS || '5.0';
+                const epochStep = this.parserEpochStepS || '5.0';
+
+                if (kind === 'pipeline') {
+                    const fsValue = this.parserFsManual || 'REQUIRED_FS';
+                    const recordingType = this.parserRecordingType || 'LFP';
+                    const sensors = (this.parserSensorNames || '')
+                        .split(',')
+                        .map((item) => item.trim())
+                        .filter((item) => item.length > 0);
+                    const detectedSensors = Number(this.parserInfo?.sensor_count_estimate || 0);
+                    const autoNames = detectedSensors > 0
+                        ? Array.from({ length: detectedSensors }, (_v, i) => `'ch${i}'`)
+                        : [`'ch0'`];
+                    const chNamesExpr = sensors.length > 0
+                        ? `[${sensors.map((s) => `'${s}'`).join(', ')}]`
+                        : `[${autoNames.join(', ')}]`;
+                    const lines = [
+                        'from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields',
+                        '',
+                        'cfg = ParseConfig(',
+                        '    fields=CanonicalFields(',
+                        `        data='${dataLocator}',`,
+                        `        fs=${fsValue},`,
+                        `        ch_names=${chNamesExpr},`,
+                        '        metadata={',
+                        `            'subject_id': 0,`,
+                        `            'group': 'simulation',`,
+                        `            'species': 'simulated',`,
+                        `            'condition': 'simulation_pipeline',`,
+                        `            'recording_type': '${recordingType}',`,
+                        '        },',
+                        '    ),',
+                    ];
+                    if (epochEnabled) {
+                        lines.push(`    epoch_length_s=${epochLength},`);
+                        lines.push(`    epoch_step_s=${epochStep},`);
+                    }
+                    lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
+                    lines.push(')');
+                    lines.push('');
+                    lines.push('parser = EphysDatasetParser(cfg)');
+                    lines.push('parsed = parser.parse(source_obj_or_path)');
+                    return lines.join('\n');
+                }
+
+                const fsLocator = this.parserFsLocator ? `'${this.parserFsLocator}'` : 'None';
+                const detectedSensors = Number(this.parserInfo?.sensor_count_estimate || 0);
+                const chLocator = this.parserChNamesLocator ? `'${this.parserChNamesLocator}'` : 'None';
+                const autoNames = detectedSensors > 0
+                    ? Array.from({ length: detectedSensors }, (_v, i) => `'ch${i}'`)
+                    : [];
+                const chExpr = this.parserChNamesLocator
+                    ? chLocator
+                    : (autoNames.length > 0
+                        ? `[${autoNames.join(', ')}]`
+                        : `[f"ch{i}" for i in range(d["LFP"].LFP.shape[0])]`);
+                const zscoreFlag = this.parserZscore ? 'True' : 'False';
+                const lines = [
+                    'from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields',
+                    '',
+                    'cfg = ParseConfig(',
+                    '    fields=CanonicalFields(',
+                    `        data='${dataLocator}',`,
+                    `        fs=${fsLocator},`,
+                    `        ch_names=${chExpr},`,
+                ];
+                if (!this.parserChNamesLocator) {
+                    lines.push(`        # Auto-generated from data locator '${dataLocator}' when channel labels are missing.`);
+                    lines.push('        # Example: [f"ch{i}" for i in range(d["LFP"].LFP.shape[0])]');
+                }
+                if (this.parserTableLayout) {
+                    lines.push(`        table_layout='${this.parserTableLayout}',`);
+                }
+                if (this.parserLongTimeCol) {
+                    lines.push(`        long_time_col='${this.parserLongTimeCol}',`);
+                }
+                if (this.parserLongChannelCol) {
+                    lines.push(`        long_channel_col='${this.parserLongChannelCol}',`);
+                }
+                if (this.parserLongValueCol) {
+                    lines.push(`        long_value_col='${this.parserLongValueCol}',`);
+                }
+                lines.push('    ),');
+                if (epochEnabled) {
+                    lines.push(`    epoch_length_s=${epochLength},`);
+                    lines.push(`    epoch_step_s=${epochStep},`);
+                }
+                lines.push(`    zscore=${zscoreFlag},`);
+                if (this.parserEnableAggregate && (this.parserAggregateOver || '').trim()) {
+                    const aggDims = (this.parserAggregateOver || '')
+                        .split(',')
+                        .map((item) => item.trim())
+                        .filter((item) => item.length > 0);
+                    if (aggDims.length > 0) {
+                        lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
+                        lines.push(`    aggregate_method='${this.parserAggregateMethod || 'sum'}',`);
+                        if ((this.parserAggregateLabels || '').trim()) {
+                            lines.push(`    aggregate_labels=${this.parserAggregateLabels},`);
+                        }
+                    }
+                }
+                lines.push(')');
+                lines.push('');
+                lines.push('parser = EphysDatasetParser(cfg)');
+                lines.push('parsed = parser.parse(source_obj_or_path)');
+                return lines.join('\n');
+            },
+            chooseEntry(choice) {
+                this.stopUploadWaitPulse();
+                this.submitInProgress = false;
+                this.uploadProgress = 0;
+                this.uploadStatusMessage = '';
+                this.uploadBytesLoaded = 0;
+                this.uploadBytesTotal = 0;
+                this.uploadProgressKnown = false;
+                this.submitError = '';
+                this.entryChoice = choice;
+                if (choice === 'compute') {
+                    this.activeTab = 'load-data';
+                    return;
+                }
+                if (choice === 'load') {
+                    this.activeTab = 'load-precomputed';
+                    return;
+                }
+                this.activeTab = 'entry';
+            },
+        };
+    }
+</script>
+
+<div x-data="featuresPage()">
     <div class="max-w-5xl mx-auto">
         <div class="pb-8">
             <h1 class="text-[#34495E] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em] min-w-72">
-                Module Configuration: Features</h1>
+                Module Configuration: Features
+            </h1>
         </div>
 
-        <!-- Menu tabs -->
-        <div class="border-b border-gray-200 dark:border-[#323b67]">
+        <div x-show="entryChoice !== ''" x-cloak class="border-b border-gray-200 dark:border-[#323b67]">
             <nav aria-label="Tabs" class="-mb-px flex space-x-6">
-                <button @click="activeTab = 'load-data'"
+                <button x-show="entryChoice === 'load'" x-cloak @click="activeTab = 'load-precomputed'"
+                    :class="{ 'border-primary text-primary': activeTab === 'load-precomputed', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'load-precomputed' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Load features
+                </button>
+                <button x-show="entryChoice === 'compute'" x-cloak @click="activeTab = 'load-data'"
                     :class="{ 'border-primary text-primary': activeTab === 'load-data', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'load-data' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
-                    Load data</button>
-                <button @click="activeTab = 'select-method'"
+                    Load data
+                </button>
+                <button x-show="entryChoice === 'compute'" x-cloak @click="activeTab = 'select-method'"
                     :class="{ 'border-primary text-primary': activeTab === 'select-method', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'select-method' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
-                    Select Method</button>
-                <button @click="activeTab = 'configure-method'"
+                    Select Method
+                </button>
+                <button x-show="entryChoice === 'compute'" x-cloak @click="activeTab = 'configure-method'"
                     :class="{ 'border-primary text-primary': activeTab === 'configure-method', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'configure-method' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
-                    Configure method</button>
+                    Configure method
+                </button>
             </nav>
         </div>
 
-        <!-- Form action -->
-        <form action="{{ url_for('start_computation_redirect', computation_type='features')}} " method="POST" enctype="multipart/form-data">
-            <!-- Tab contents -->
-            <div class="pt-8">
-                
-                <!-- Load Data Tab -->
-                <div x-show="activeTab === 'load-data'" x-cloak>
-                    <div class="pt-8">
-                        <div class="mb-6">
-                            <h2 class="text-xl font-bold text-[#34495E] dark:text-white">What data do you want to work with?</h2>
+        <div class="pt-8">
+            <div x-show="activeTab === 'entry'" x-cloak>
+                <div class="flex flex-col gap-3 text-center mb-6">
+                    <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-2xl mx-auto">
+                        Select how you would like to proceed with features.
+                        You can load existing features or compute new ones.
+                    </p>
+                </div>
+                <div class="flex flex-wrap items-center justify-center gap-8 w-full">
+                    <button type="button" @click="chooseEntry('load')"
+                        class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
+                        <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
+                            <span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <div class="flex items-center gap-2 mb-4">
-                                    <span class="material-symbols-outlined text-primary">history</span>
-                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue flow</h3>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">Select from data already detected in your current
-                                    session.</p>
-                                <div class="space-y-2">
-                                    <button
-                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group">
-                                        <span class="truncate flex items-center gap-2">
-                                            <span class="material-symbols-outlined text-sm opacity-60">description</span>
-                                            simulation_output_v1.dat
-                                        </span>
-                                        <span
-                                            class="material-symbols-outlined text-lg opacity-0 group-hover:opacity-100 text-primary">check_circle</span>
-                                    </button>
-                                    <button
-                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group">
+                        <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">Load data</span>
+                    </button>
+                    <button type="button" @click="chooseEntry('compute')"
+                        class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
+                        <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
+                            <span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>
+                        </div>
+                        <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">Compute new features</span>
+                    </button>
+                </div>
+            </div>
+
+            <div x-show="activeTab === 'load-precomputed'" x-cloak class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-5">
+                <div class="flex items-center gap-2 mb-3">
+                    <span class="material-symbols-outlined text-primary">upload_file</span>
+                    <h2 class="text-base font-bold text-[#34495E] dark:text-white">Load precomputed features</h2>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Upload a precomputed features dataframe (.pkl/.pickle). The file must contain a <code>Features</code> column.
+                </p>
+                <form action="{{ url_for('features_load_precomputed') }}" method="POST" enctype="multipart/form-data" class="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                    <input type="file" name="precomputed_features_file" accept=".pkl,.pickle"
+                        class="block w-full sm:w-auto text-sm text-slate-700 dark:text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary file:text-white hover:file:bg-primary/90">
+                    <button type="submit"
+                        class="h-10 px-4 bg-primary text-white font-semibold text-sm rounded-lg hover:bg-primary/90 transition-colors">
+                        Load features
+                    </button>
+                    <button type="button" @click="chooseEntry('entry')"
+                        class="h-10 px-4 border border-gray-300 dark:border-[#323b67] text-sm rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#191e33] transition-colors">
+                        Back
+                    </button>
+                </form>
+                {% if has_features_data %}
+                <div class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                    <p class="font-semibold mb-1">Already available:</p>
+                    {% for filename in features_data_files %}
+                    <span class="block">{{ filename }}</span>
+                    {% endfor %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <form x-show="entryChoice === 'compute'" x-cloak action="{{ url_for('start_computation_redirect', computation_type='features')}}" method="POST" enctype="multipart/form-data" @submit.prevent="submitComputeFeatures($event)">
+            <div class="pt-8">
+                <div x-show="activeTab === 'load-data'" x-cloak>
+                    <div class="mb-6">
+                        <h2 class="text-xl font-bold text-[#34495E] dark:text-white">What data do you want to work with?</h2>
+                    </div>
+
+                    <input type="hidden" name="data_source_kind" :value="resolvedDataSourceKind()">
+                    <input type="hidden" name="existing_data_path" :value="selectedPipelinePath">
+                    <input type="hidden" name="empirical_source_mode" :value="empiricalSourceMode">
+                    <input type="hidden" name="empirical_folder_path" :value="empiricalFolderPath">
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                            <div class="flex items-center gap-2 mb-4">
+                                <span class="material-symbols-outlined text-primary">history</span>
+                                <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue simulation pipeline</h3>
+                            </div>
+                            <div class="space-y-2">
+                                <template x-if="pipelineFiles.length === 0">
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">No field potential outputs detected yet.</p>
+                                </template>
+                                <template x-for="entry in pipelineFiles" :key="entry.path">
+                                    <button type="button" @click="selectPipeline(entry.path)"
+                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group"
+                                        :class="{ 'border-primary bg-primary/5': selectedPipelinePath === entry.path }">
                                         <span class="truncate flex items-center gap-2">
                                             <span class="material-symbols-outlined text-sm opacity-60">analytics</span>
-                                            field_potential_results.pkl
+                                            <span class="truncate" x-text="entry.name"></span>
                                         </span>
-                                        <span
-                                            class="material-symbols-outlined text-lg opacity-0 group-hover:opacity-100 text-primary">check_circle</span>
+                                        <span class="material-symbols-outlined text-lg text-primary"
+                                            :class="selectedPipelinePath === entry.path ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'">check_circle</span>
                                     </button>
-                                </div>
+                                </template>
                             </div>
-                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <div class="flex items-center gap-2 mb-4">
-                                    <span class="material-symbols-outlined text-primary">add_circle</span>
-                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
-                                </div>
-                                <!-- INPUT FILE hidden -->
-                                <input type="file" id="data-file" class="hidden" @change="handleFileUpload($event)"/>
+                            <div x-show="selectedPipelinePath" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                                <p x-text="pipelineFiles.find((item) => item.path === selectedPipelinePath)?.source || ''"></p>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                            <div class="flex items-center gap-2 mb-4">
+                                <span class="material-symbols-outlined text-primary">add_circle</span>
+                                <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                                Load one of two data types: simulation outputs representing field potentials, or empirical electrophysiological recordings.
+                            </p>
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                                <button type="button" @click="setNewDataMode('new-simulation')"
+                                    class="px-3 py-2 text-xs rounded-lg border transition-colors"
+                                    :class="activeNewDataMode() === 'new-simulation' ? 'bg-primary/10 border-primary text-primary' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    Simulation outputs
+                                </button>
+                                <button type="button" @click="setNewDataMode('new-empirical')"
+                                    class="px-3 py-2 text-xs rounded-lg border transition-colors"
+                                    :class="activeNewDataMode() === 'new-empirical' ? 'bg-primary/10 border-primary text-primary' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    Empirical recordings
+                                </button>
+                            </div>
+
+                            <div x-show="activeNewDataMode() === 'new-simulation'" x-cloak>
+                                <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
                                 <div @click="document.getElementById('data-file').click()"
                                     class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-[#323b67] rounded-lg p-6 hover:border-primary/50 transition-colors cursor-pointer group">
-                                    <span
-                                        class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600 group-hover:text-primary transition-colors">cloud_upload</span>
-                                    <p class="mt-2 text-sm font-medium text-[#34495E] dark:text-white">Drag &amp; Drop files here</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">or click to browse from computer</p>
+                                    <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600 group-hover:text-primary transition-colors">cloud_upload</span>
+                                    <p class="mt-2 text-sm font-medium text-[#34495E] dark:text-white">Upload simulation dataframe</p>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Accepted: .pkl/.csv/.parquet/.xlsx/.feather</p>
                                 </div>
-                                <!-- Upload status indicator -->
                                 <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
                                     <span class="material-symbols-outlined">check_circle</span>
-                                    <span>Data uploaded successfully</span>
-                                    <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
-                                </div> 
+                                    <span>Simulation data uploaded:</span>
+                                    <span class="font-semibold" x-text="getFileName('data-file')"></span>
+                                </div>
+                            </div>
+
+                            <div x-show="activeNewDataMode() === 'new-empirical'" x-cloak>
+                                <div class="space-y-3">
+                                    <label class="text-sm block">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Empirical folder path on server *</span>
+                                        <input type="text" x-model="empiricalFolderPath"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            placeholder="/absolute/path/to/empirical/folder">
+                                    </label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button type="button" @click="pickEmpiricalFolder()"
+                                            class="h-10 px-4 border border-gray-300 dark:border-[#323b67] text-sm rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#191e33] transition-colors">
+                                            Browse folder
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Data is read directly from server path (no HTTP upload).</p>
+                                </div>
+
+                                <div x-show="empiricalFileCount > 0" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg">
+                                    <p><span x-text="empiricalFileCount"></span> file(s) detected.</p>
+                                    <p class="text-xs opacity-80">Sample inspected: <span x-text="empiricalSampleName"></span></p>
+                                </div>
                             </div>
                         </div>
                     </div>
+
+                    <div x-show="hasAnyData()" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                        <div class="flex items-center gap-2 mb-3">
+                            <span class="material-symbols-outlined text-primary">tune</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Configure EphysDatasetParser</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                            Selected source: <span class="font-semibold" x-text="selectedDataDescription()"></span>
+                        </p>
+
+                        <div x-show="parserLoading" class="text-sm text-gray-500 dark:text-gray-400">Inspecting selected data...</div>
+                        <div x-show="parserError" class="text-sm text-red-600 dark:text-red-400" x-text="parserError"></div>
+
+                        <template x-if="parserInfo">
+                            <div class="space-y-4">
+                                <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
+
+                                <div x-show="resolvedDataSourceKind() === 'pipeline'" class="space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
+                                            <select name="parser_data_locator" x-model="parserDataLocator"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">Select</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-data-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) *</span>
+                                                <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                    placeholder="e.g. 16000 for dt=0.0625 ms">
+                                        </label>
+                                    </div>
+                                    <p x-show="parserFsHint" class="text-xs text-gray-500 dark:text-gray-400" x-text="parserFsHint"></p>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type</span>
+                                            <select name="parser_recording_type" x-model="parserRecordingType"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="LFP">LFP</option>
+                                                <option value="CDM">CDM</option>
+                                                <option value="EEG">EEG</option>
+                                                <option value="MEG">MEG</option>
+                                                <option value="ECoG">ECoG</option>
+                                                <option value="Unknown">Unknown</option>
+                                            </select>
+                                        </label>
+                                    </div>
+
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Metadata is auto-filled as one synthetic subject.</p>
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" x-model="parserZscore"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Apply z-score normalization
+                                    </label>
+
+                                    <div x-show="parserInfo.multi_sensor_detected" class="grid grid-cols-1 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sensor labels (comma-separated)</span>
+                                            <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                placeholder="e.g. ch0, ch1, ch2">
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div x-show="resolvedDataSourceKind() !== 'pipeline'" class="space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
+                                            <select name="parser_data_locator" x-model="parserDataLocator"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">Select</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'data-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency locator</span>
+                                            <select name="parser_fs_locator" x-model="parserFsLocator"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">Optional</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'fs-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names locator</span>
+                                            <select name="parser_ch_names_locator" x-model="parserChNamesLocator"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">Optional</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'ch-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserInfo.source_type === 'dataframe'">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Table layout</span>
+                                            <select name="parser_table_layout" x-model="parserTableLayout"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">Auto / row-wise</option>
+                                                <option value="wide">wide</option>
+                                                <option value="long">long</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Long layout time column</span>
+                                            <select name="parser_long_time_col" x-model="parserLongTimeCol"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">Optional</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'lt-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Long layout channel/value columns</span>
+                                            <div class="grid grid-cols-2 gap-2">
+                                                <select name="parser_long_channel_col" x-model="parserLongChannelCol"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                    <option value="">Channel</option>
+                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'lc-'+field">
+                                                        <option :value="field" x-text="field"></option>
+                                                    </template>
+                                                </select>
+                                                <select name="parser_long_value_col" x-model="parserLongValueCol"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                    <option value="">Value</option>
+                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'lv-'+field">
+                                                        <option :value="field" x-text="field"></option>
+                                                    </template>
+                                                </select>
+                                            </div>
+                                        </label>
+                                    </div>
+
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" x-model="parserZscore"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Apply z-score normalization
+                                    </label>
+                                </div>
+
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserEnableEpoching"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Enable epoching
+                                </label>
+                                <input type="hidden" name="parser_enable_epoching" :value="parserEnableEpoching ? '1' : '0'">
+
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserEnableAggregate"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Enable aggregation
+                                </label>
+                                <input type="hidden" name="parser_enable_aggregate" :value="parserEnableAggregate ? '1' : '0'">
+
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserEnableAggregate">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate over</span>
+                                        <input type="text" name="parser_aggregate_over" x-model="parserAggregateOver"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            placeholder="e.g. sensor, group">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate method</span>
+                                        <select name="parser_aggregate_method" x-model="parserAggregateMethod"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            <option value="sum">sum</option>
+                                            <option value="mean">mean</option>
+                                            <option value="median">median</option>
+                                        </select>
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate labels (dict)</span>
+                                        <input type="text" name="parser_aggregate_labels" x-model="parserAggregateLabels"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            placeholder="e.g. {'sensor': 'all'}">
+                                    </label>
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epoch length (s)</span>
+                                        <input type="number" step="any" name="parser_epoch_length_s" x-model="parserEpochLengthS"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epoch step (s)</span>
+                                        <input type="number" step="any" name="parser_epoch_step_s" x-model="parserEpochStepS"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                    </label>
+                                </div>
+                                <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
+                            </div>
+                        </template>
+                    </div>
+
+                    <div x-show="activeTab === 'load-data' && hasAnyData()" x-cloak class="mt-8 rounded-xl border border-slate-700 bg-slate-950 text-slate-100 overflow-hidden">
+                        <div class="px-4 py-2 border-b border-slate-800 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
+                            <span class="material-symbols-outlined text-sm">terminal</span>
+                            EphysDatasetParser Debug Terminal
+                        </div>
+                        <pre class="p-4 text-xs leading-relaxed font-mono whitespace-pre-wrap overflow-x-auto max-h-96" x-text="parserDebugCode()"></pre>
+                    </div>
                 </div>
 
-
-                <!-- Select Method Tab -->
                 <div x-show="activeTab === 'select-method'" x-cloak>
                     <div class="pt-8">
                         <div class="bg-white border border-gray-200 rounded-xl p-6 dark:bg-[#111422] dark:border-[#323b67]">
-                            <h2 class="text-[#34495E] text-[22px] font-bold leading-tight tracking-[-0.015em] mb-4 transition-colors dark:focus:ring-offset-background-dark dark:text-gray-400">
-                                Select Method</h2>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 dark:bg-[#111422] dark:border-[#323b67]">
+                            <h2 class="text-[#34495E] text-[22px] font-bold leading-tight tracking-[-0.015em] mb-4 dark:text-gray-100">Select Method</h2>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <template :key="method.key" x-for="method in methods">
                                     <label
-                                        class="flex items-center p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors dark:bg-[#111422] dark:border-[#323b67] dark:hover:border-gray-500 dark:hover:bg-white/10"
-                                        :class="{ 'border-primary bg-primary/5': selectedMethod === method.key }">
+                                        class="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors dark:bg-[#111422] dark:border-[#323b67] dark:hover:border-gray-500 dark:hover:bg-white/10"
+                                        :class="{ 'border-primary bg-primary/5': selectedMethod === method.value }">
                                         <input :value="method.value" x-model="selectedMethod"
-                                            class="form-radio h-4 w-4 text-primary focus:ring-primary/50 border-gray-300 bg-background-light"
+                                            class="form-radio h-4 w-4 mt-0.5 text-primary focus:ring-primary/50 border-gray-300 bg-background-light"
                                             name="select-method" type="radio" />
-                                        <span class="ml-3 text-sm font-medium text-[#34495E] dark:text-gray-400" x-text="method.label"></span>
+                                        <span class="ml-3">
+                                            <span class="block text-sm font-semibold text-[#34495E] dark:text-gray-200" x-text="method.label"></span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400" x-text="method.description"></span>
+                                        </span>
                                     </label>
                                 </template>
                             </div>
-                            <!-- Visual indicator of selection -->
                             <div class="mt-4 p-3 dark:bg-gray-800 bg-gray-50 rounded-lg" x-show="selectedMethod">
                                 <p class="text-sm text-gray-600 dark:text-gray-300">
-                                    Selected: <span class="font-semibold text-primary dark:text-primary-300"
-                                        x-text="methods.find(m => m.value === selectedMethod)?.label"></span>
+                                    Selected: <span class="font-semibold text-primary" x-text="methods.find(m => m.value === selectedMethod)?.label"></span>
                                 </p>
                             </div>
                         </div>
                     </div>
                 </div>
 
-
-                <!-- Configure Method Tab -->
                 <div x-show="activeTab === 'configure-method'" x-cloak>
-                    <h1 class="text-[#34495E] dark:text-white text-4xl font-black leading-tight tracking-[-0.033em] py-4">
-                        Method
-                        Configuration: <span x-text="methods.find(m => m.value === selectedMethod)?.label"></span></h1>
+                    <h1 class="text-[#34495E] dark:text-white text-3xl font-black leading-tight tracking-[-0.02em] py-4">
+                        Method Configuration
+                    </h1>
 
-                    <!-- Show message if no method selected -->
                     <div x-show="!selectedMethod" class="text-center py-8">
                         <p class="text-gray-500">Please select a method in the previous tab first.</p>
                         <button @click="activeTab = 'select-method'" type="button"
@@ -203,351 +1093,453 @@
                         </button>
                     </div>
 
-                    <!-- Catch22 Configuration -->
-                    <div x-show="selectedMethod === 'catch22'" x-cloak>
-                        <p class="mt-2 mb-6 text-gray-600 dark:text-gray-300">Configuration of the method Catch22: a
-                            collection of 22 time-series features (Canonical Time-series CHaracteristics)</p>
-                        <div class="space-y-8">
-                            <section
-                                class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <div class="flex items-center gap-4">
-                                    <h2
-                                        class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">
-                                        catch22 parameters</h2>
-                                </div>
-                                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-4">
-                                    <!-- Conditional message based on upload status -->
-                                    <template x-if="isUploaded('data-file')">
-                                        <div
-                                            class="bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium px-4 py-3 rounded-lg flex items-center gap-2">
-                                            <span class="material-symbols-outlined">check_circle</span>
-                                            <span>Data was already loaded.</span>
-                                            <span x-show="getFileName('data-file')" class="font-semibold">(<span x-text="getFileName('data-file')"></span>)</span>
-                                        </div>
-                                    </template>
-                                    
-                                    <template x-if="!isUploaded('data-file')">
-                                        <div class="mb-6">
-                                            <div
-                                                class="bg-yellow-100 dark:bg-yellow-900/50 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 text-sm font-medium px-4 py-3 rounded-lg flex items-center gap-2">
-                                                <span class="material-symbols-outlined">warning</span>
-                                                <span>No data loaded yet. Please go back to the "Load data" tab to upload your data.</span>
-                                            </div>
-                                            <button @click="activeTab = 'load-data'" type="button"
-                                                class="mt-4 px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90">
-                                                Go Back to Load Data
-                                            </button>
-                                        </div>
-                                    </template>
-                                </div>
-                            </section>
-                        </div>
-                    </div>
-
-                    <!-- Spectral parameterization Configuration -->
-                    <div x-show="selectedMethod === 'power_spectrum_parameterization'" x-cloak>
-                        <p class="text-gray-500 dark:text-gray-400">Configuration of the method Spectral parameterization to parameterize neural power spectra </p>
-                        <div class="pt-6">
-                            <div class="space-y-6">
-                                <section
-                                    class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 shadow-sm">
-                                    <div class="flex items-center gap-3 mb-4 pb-2 border-b border-gray-100 dark:border-[#323b67]/50">
-                                        <span class="material-symbols-outlined text-primary">analytics</span>
-                                        <h2 class="text-[#34495E] dark:text-white text-lg font-bold leading-tight">Data and range</h2>
-                                    </div>
-                                    <div class="space-y-6">
-                                        <div>
-                                            <p class="text-[#34495E] dark:text-white text-sm font-semibold mb-3">Data Input Type</p>
-                                            <div class="flex flex-col sm:flex-row gap-4">
-                                                <label class="inline-flex items-center">
-                                                    <input checked=""
-                                                        class="form-radio text-primary focus:ring-primary border-gray-300 dark:border-gray-600 dark:bg-[#191e33]"
-                                                        name="data_input_type" type="radio" value="temporary_signal" />
-                                                    <span class="ml-2 text-gray-700 dark:text-gray-300">Temporary signal</span>
-                                                </label>
-                                                <label class="inline-flex items-center">
-                                                    <input
-                                                        class="form-radio text-primary focus:ring-primary border-gray-300 dark:border-gray-600 dark:bg-[#191e33]"
-                                                        name="data_input_type" type="radio" value="power_spectrum" />
-                                                    <span class="ml-2 text-gray-700 dark:text-gray-300">Power spectrum</span>
-                                                </label>
-                                            </div>
-                                        </div>
-                                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Sampling
-                                                    frequency (Hz)</label>
-                                                <input
-                                                    class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
-                                                    placeholder="" step="any" type="number" />
-                                            </div>
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Frequency range
-                                                    (Hz)</label>
-                                                <div class="flex items-center gap-2">
-                                                    <div class="relative flex-1">
-                                                        <input
-                                                            class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
-                                                            placeholder="Min" step="any" type="number" value="1.0" />
-                                                        <span
-                                                            class="absolute right-3 top-2.5 text-xs text-gray-400 pointer-events-none">Min</span>
-                                                    </div>
-                                                    <span class="text-gray-400">-</span>
-                                                    <div class="relative flex-1">
-                                                        <input
-                                                            class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
-                                                            placeholder="Max" step="any" type="number" value="45.0" />
-                                                        <span
-                                                            class="absolute right-3 top-2.5 text-xs text-gray-400 pointer-events-none">Max</span>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </section>
-                                <section
-                                    class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 shadow-sm">
-                                    <div class="flex items-center gap-3 mb-4 pb-2 border-b border-gray-100 dark:border-[#323b67]/50">
-                                        <span class="material-symbols-outlined text-primary">show_chart</span>
-                                        <h2 class="text-[#34495E] dark:text-white text-lg font-bold leading-tight">Peak Detection</h2>
-                                    </div>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                        <div>
-                                            <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Peak selection
-                                                strategy</label>
-                                            <select
-                                                class="form-select block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3">
-                                                <option selected="">Maximum power peak</option>
-                                                <option>Maximum central frequency in range</option>
-                                                <option>All peaks</option>
-                                            </select>
-                                        </div>
-                                    </div>
-                                </section>
-                                <section
-                                    class="group bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl overflow-hidden shadow-sm">
-                                    <details class="group">
-                                        <summary
-                                            class="flex items-center justify-between p-6 cursor-pointer list-none bg-gray-50/50 dark:bg-[#191e33]/30 hover:bg-gray-50 dark:hover:bg-[#191e33]/50 transition-colors">
-                                            <div class="flex items-center gap-3">
-                                                <span class="material-symbols-outlined text-primary">tune</span>
-                                                <h2 class="text-[#34495E] dark:text-white text-lg font-bold leading-tight">Advanced options and
-                                                    quality</h2>
-                                            </div>
-                                            <span
-                                                class="material-symbols-outlined text-gray-500 group-open:rotate-180 transition-transform">expand_more</span>
-                                        </summary>
-                                        <div class="p-6 pt-0 border-t border-gray-100 dark:border-[#323b67]/50 mt-4">
-                                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                <div>
-                                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Metrics
-                                                        policy (error management)</label>
-                                                    <select
-                                                        class="form-select block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3">
-                                                        <option selected="">Reject if it fails</option>
-                                                        <option selected="">Flag but keep</option>
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Metric
-                                                        thresholds (R2)</label>
-                                                    <input
-                                                        class="form-input block w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white focus:border-primary focus:ring-primary/50 sm:text-sm h-10 px-3"
-                                                        max="1" min="0" placeholder="0.00 - 1.00" step="0.01" type="number" />
-                                                </div>
-                                                <div class="md:col-span-2 pt-2">
-                                                    <label class="inline-flex items-center">
-                                                        <input
-                                                            class="form-checkbox rounded text-primary focus:ring-primary border-gray-300 dark:border-gray-600 dark:bg-[#191e33] h-5 w-5"
-                                                            type="checkbox" />
-                                                        <span class="ml-2 text-gray-700 dark:text-gray-300 font-medium">Debug mode</span>
-                                                    </label>
-                                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-7">Enable verbose logging for
-                                                        troubleshooting configuration issues.</p>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </details>
-                                </section>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- DFA Configuration -->
-                    <div x-show="selectedMethod === 'dfa'" x-cloak> 
-                        <div class="space-y-8">
-                            <section class="bg-white dark:bg-[#111422] rounded-xl p-6 border border-gray-200 dark:border-[#323b67]">
-                                <h2 class="text-2xl font-bold text-[#34495E] dark:text-white mb-6">Configuration of the method DFA</h2>
-                                <div class="space-y-6">
-                                    <h3
-                                        class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
-                                        Main configuration</h3>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-end">
-                                        <label class="flex flex-col min-w-40 flex-1">
-                                            <p class="text-[#34495E] dark:text-white text-base font-medium leading-normal pb-1">Sampling
-                                                frequency (Hz) <span class="text-red-500">*</span></p>
-                                            <div class="flex w-full flex-1 items-stretch rounded-lg">
-                                                <input
-                                                    class="form-input flex w-full min-w-0 flex-1 resize-none overflow-hidden rounded-lg text-[#34495E] dark:text-white focus:outline-0 focus:ring-2 focus:ring-primary/50 border border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] focus:border-primary/50 h-10 placeholder:text-gray-400 dark:placeholder:text-[#929bc9] p-[15px] text-base font-normal leading-normal"
-                                                    placeholder="e.g. 1000" required="" type="number" />
-                                            </div>
-                                        </label>
-                                        <div class="flex items-center h-10">
-                                            <label class="inline-flex items-center cursor-pointer">
-                                                <input checked=""
-                                                    class="form-checkbox h-5 w-5 rounded text-primary border-gray-300 focus:ring-primary dark:border-gray-600 dark:bg-gray-700 dark:focus:ring-offset-gray-800"
-                                                    type="checkbox" />
-                                                <span class="ml-2 text-[#34495E] dark:text-white text-base font-medium">Overlapping windows
-                                                    (50%)</span>
-                                            </label>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                            
-                                <!-- Container where template form-analysis will generate -->
-                                <div x-data="form_analysis" x-html="template">
-
-                                </div>
-
-                                <!-- Container where template advanced-options will generate -->
-                                <div x-data="advanced_options" x-html="template">
-
-                                </div>
-                            </section>
-                        </div>
-                    </div>
-
-
-                    <!-- fEI Configuration -->
-                    <div x-show="selectedMethod === 'fei'" x-cloak>
-                        <section class="bg-white dark:bg-[#111422] rounded-xl p-6 border border-gray-200 dark:border-[#323b67]">
-                            <div class="flex items-center gap-4">
-                                <h2 class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em]">Configuration of
-                                    the method fEI</h2>
-                            </div>
-                            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-[#323b67] space-y-6">
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="sampling-freq">Sampling
-                                            frequency (Hz)</label>
-                                        <input
-                                            class="mt-1 block w-full bg-white dark:bg-[#1b2034] border-gray-300 dark:border-[#323b67] rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
-                                            id="sampling-freq" required="" type="number" />
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="window-size">Window size (in
-                                            seconds)</label>
-                                        <input
-                                            class="mt-1 block w-full bg-white dark:bg-[#1b2034] border-gray-300 dark:border-[#323b67] rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
-                                            id="window-size" required="" type="number" />
-                                    </div>
-                                </div>
-                                <div>
-                                    <div class="flex justify-between items-center mb-1">
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="window-overlap">Window
-                                            overlap fEI</label>
-                                        <span class="text-sm text-gray-500 dark:text-gray-400" id="overlap-value">0.0</span>
-                                    </div>
-                                    <input class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer dark:bg-gray-700 accent-primary"
-                                        id="window-overlap" max="0.99" min="0" step="0.01" type="range" value="0.0" />
-                                    <div class="flex justify-between text-xs text-gray-400 px-1 mt-1">
-                                        <span>0</span>
-                                        <span>0.99</span>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300" for="dfa-threshold">DFA Threshold for
-                                        filtering</label>
-                                    <input
-                                        class="mt-1 block w-full bg-white dark:bg-[#1b2034] border-gray-300 dark:border-[#323b67] rounded-md shadow-sm focus:ring-primary focus:border-primary sm:text-sm"
-                                        id="dfa-threshold" max="1" min="0" step="0.1" type="number" value="0.6" />
-                                </div>
-                                <div class="flex items-center h-full pt-6">
-                                    <input checked=""
-                                        class="h-4 w-4 text-primary border-gray-300 rounded focus:ring-primary dark:bg-gray-700 dark:border-gray-600"
-                                        id="dfa-overlap" type="checkbox" />
-                                    <label class="ml-2 block text-sm text-gray-700 dark:text-gray-300" for="dfa-overlap">DFA Overlap (50%)</label>
-                                </div>
-                            </div>
-
-                            <!-- Insert DFA configuration options -->
-                            <!-- Container where template form-analysis will generate -->
-                            <div x-data="form_analysis" x-html="template">
-
-                            </div>
-                            
-                            <!-- Container where template advanced-options will generate -->
-                            <div x-data="advanced_options" x-html="template">
-
-                            </div>
-
-                        </section>
-                    </div>
-
-                    <!-- hctsa Configuration -->
-                    <div x-show="selectedMethod === 'hctsa'" x-cloak>
+                    <div x-show="selectedMethod" class="space-y-6">
                         <section class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                            <h2 class="text-[#34495E] dark:text-white text-[22px] font-bold leading-tight tracking-[-0.015em] mb-6">Execution
-                                Settings</h2>
-                            <div class="space-y-6">
-                                <div>
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300"
-                                            for="parallel-workers">Parallel Workers</label>
-                                    </div>
-                                    <input
-                                        class="block w-full max-w-md rounded-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-sm focus:border-primary focus:ring-primary sm:text-sm dark:text-white"
-                                        id="parallel-workers" min="1" name="parallel-workers" placeholder="" type="number" />
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Leave empty to run on a single core, or specify the number of cores for faster parallel
-                                                computing.</p>
-                                </div>
-                                <div class="flex items-center justify-between max-w-md">
-                                    <label class="text-sm font-medium text-gray-700 dark:text-gray-300" for="return-metadata">Return
-                                        Metadata</label>
-                                    <button aria-checked="false"
-                                        class="bg-gray-200 dark:bg-gray-700 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 dark:focus:ring-offset-[#111422]"
-                                        onclick="this.classList.toggle('bg-primary'); this.classList.toggle('bg-gray-200'); this.classList.toggle('dark:bg-gray-700'); this.querySelector('span').classList.toggle('translate-x-5'); this.querySelector('span').classList.toggle('translate-x-0')"
-                                        role="switch" type="button">
-                                        <span aria-hidden="true"
-                                            class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                                    </button>
-                                </div>
+                            <h2 class="text-lg font-semibold text-[#34495E] dark:text-white mb-4">Execution settings</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Parallel workers (n_jobs)</span>
+                                    <input type="number" min="1" step="1" name="features_n_jobs"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Chunksize</span>
+                                    <input type="number" min="1" step="1" name="features_chunksize"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start method</span>
+                                    <select name="features_start_method"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        <option value="spawn">spawn</option>
+                                        <option value="fork">fork</option>
+                                        <option value="forkserver">forkserver</option>
+                                    </select>
+                                </label>
                             </div>
                         </section>
-                        <section class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl overflow-hidden">
-                            <details class="group">
-                                <summary
-                                    class="flex cursor-pointer items-center justify-between p-6 bg-gray-50/50 dark:bg-[#1a1f35]/50 hover:bg-gray-100 dark:hover:bg-[#232948] transition-colors">
-                                    <h2 class="text-[#34495E] dark:text-white text-[18px] font-bold leading-tight tracking-[-0.015em]">System
-                                        Paths</h2>
-                                    <span
-                                        class="material-symbols-outlined text-gray-500 group-open:rotate-180 transition-transform duration-200">expand_more</span>
-                                </summary>
-                                <div class="p-6 border-t border-gray-200 dark:border-[#323b67]">
-                                    <div>
-                                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1" for="hctsa-path">HCTSA
-                                            Installation Path (hctsa_folder)</label>
-                                        <input
-                                            class="block w-full rounded-md border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-sm focus:border-primary focus:ring-primary sm:text-sm dark:text-white"
-                                            id="hctsa-path" name="hctsa-path" placeholder="/path/to/hctsa" type="text" />
-                                    </div>
-                                </div>
-                            </details>
+
+                        <section x-show="selectedMethod === 'catch22'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                            <h2 class="text-lg font-semibold text-[#34495E] dark:text-white mb-4">catch22 options</h2>
+                            <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <input type="checkbox" name="catch22_normalize" value="1"
+                                    class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                Normalize each sample before feature extraction
+                            </label>
+                        </section>
+
+                        <section x-show="selectedMethod === 'specparam'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
+                            <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">specparam options</h2>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz)</span>
+                                    <input type="number" step="any" name="specparam_fs"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional: fallback to parsed dataframe fs">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Select peak</span>
+                                    <select name="specparam_select_peak"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        <option value="max_pw">max_pw</option>
+                                        <option value="max_cf_in_range">max_cf_in_range</option>
+                                        <option value="all">all</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range min (Hz)</span>
+                                    <input type="number" step="any" name="specparam_freq_min" value="1.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range max (Hz)</span>
+                                    <input type="number" step="any" name="specparam_freq_max" value="45.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Welch nperseg</span>
+                                    <input type="number" step="1" min="1" name="specparam_welch_nperseg"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Welch noverlap</span>
+                                    <input type="number" step="1" min="0" name="specparam_welch_noverlap"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Welch kwargs (JSON/dict)</span>
+                                    <textarea name="specparam_welch_kwargs" rows="2"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. {'detrend': 'constant'}"></textarea>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">SpectralModel kwargs (JSON/dict)</span>
+                                    <textarea name="specparam_model_kwargs" rows="2"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. {'peak_width_limits': [1, 8], 'max_n_peaks': 6}"></textarea>
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Metric policy</span>
+                                    <select name="specparam_metric_policy"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        <option value="reject">reject</option>
+                                        <option value="flag">flag</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Threshold gof_rsquared</span>
+                                    <input type="number" min="0" max="1" step="any" name="specparam_threshold_gof_rsquared"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <label class="text-sm block">
+                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Additional metric thresholds (JSON/dict)</span>
+                                <textarea name="specparam_metric_thresholds" rows="2"
+                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                    placeholder="e.g. {'gof_rsquared': 0.95}"></textarea>
+                            </label>
+
+                            <div class="flex flex-wrap gap-5">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="specparam_debug" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Debug mode
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="specparam_normalize" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Normalize each sample
+                                </label>
+                            </div>
+                        </section>
+
+                        <section x-show="selectedMethod === 'dfa'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
+                            <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">DFA options</h2>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz)</span>
+                                    <input type="number" step="any" name="dfa_sampling_frequency"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional: fallback to parsed dataframe fs">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Analysis mode</span>
+                                    <select x-model="dfaAnalysisMode" name="dfa_analysis_mode"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        <option value="envelope">envelope input</option>
+                                        <option value="frequency_range">single frequency range</option>
+                                        <option value="spectrum_range">spectrum bins</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Fit interval min (s)</span>
+                                    <input type="number" step="any" name="dfa_fit_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Required for envelope mode">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Fit interval max (s)</span>
+                                    <input type="number" step="any" name="dfa_fit_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Required for envelope mode">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Compute interval min (s)</span>
+                                    <input type="number" step="any" name="dfa_compute_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Required for envelope mode">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Compute interval max (s)</span>
+                                    <input type="number" step="any" name="dfa_compute_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Required for envelope mode">
+                                </label>
+                            </div>
+
+                            <div x-show="dfaAnalysisMode === 'frequency_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range min (Hz)</span>
+                                    <input type="number" step="any" name="dfa_frequency_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range max (Hz)</span>
+                                    <input type="number" step="any" name="dfa_frequency_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                            </div>
+
+                            <div x-show="dfaAnalysisMode === 'spectrum_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range min (Hz)</span>
+                                    <input type="number" step="any" name="dfa_spectrum_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        value="1.0">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range max (Hz)</span>
+                                    <input type="number" step="any" name="dfa_spectrum_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        value="45.0">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Bad channel indices</span>
+                                    <input type="text" name="dfa_bad_idxes"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. 1,3,5">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trim seconds</span>
+                                    <input type="number" step="any" name="dfa_trim_seconds" value="1.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Hilbert n_fft</span>
+                                    <input type="number" step="1" min="1" name="dfa_hilbert_n_fft"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <label class="text-sm block">
+                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Filter kwargs (JSON/dict)</span>
+                                <textarea name="dfa_filter_kwargs" rows="2"
+                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                    placeholder="e.g. {'fir_design': 'firwin'}"></textarea>
+                            </label>
+
+                            <div class="flex flex-wrap gap-5">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="dfa_overlap" value="1" checked
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Overlap windows (50%)
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="dfa_input_is_envelope" value="1" checked
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Input is already an envelope
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="dfa_normalize" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Normalize each sample
+                                </label>
+                            </div>
+                        </section>
+
+                        <section x-show="selectedMethod === 'fEI'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
+                            <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">fEI options</h2>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz)</span>
+                                    <input type="number" step="any" name="fei_sampling_frequency"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional: fallback to parsed dataframe fs">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Analysis mode</span>
+                                    <select x-model="fEIAnalysisMode" name="fei_analysis_mode"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        <option value="envelope">envelope input</option>
+                                        <option value="frequency_range">single frequency range</option>
+                                        <option value="spectrum_range">spectrum bins</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Window size (s)</span>
+                                    <input type="number" step="any" name="fei_window_size_sec"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Required">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Window overlap [0,1)</span>
+                                    <input type="number" min="0" max="0.99" step="any" name="fei_window_overlap" value="0.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA value (optional)</span>
+                                    <input type="number" step="any" name="fei_dfa_value"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Single-channel envelope only">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA threshold</span>
+                                    <input type="number" min="0" max="1" step="any" name="fei_dfa_threshold" value="0.6"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Hilbert n_fft</span>
+                                    <input type="number" step="1" min="1" name="fei_hilbert_n_fft"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA fit interval min (s)</span>
+                                    <input type="number" step="any" name="fei_dfa_fit_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA fit interval max (s)</span>
+                                    <input type="number" step="any" name="fei_dfa_fit_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA compute interval min (s)</span>
+                                    <input type="number" step="any" name="fei_dfa_compute_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA compute interval max (s)</span>
+                                    <input type="number" step="any" name="fei_dfa_compute_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div x-show="fEIAnalysisMode === 'frequency_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range min (Hz)</span>
+                                    <input type="number" step="any" name="fei_frequency_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range max (Hz)</span>
+                                    <input type="number" step="any" name="fei_frequency_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                            </div>
+
+                            <div x-show="fEIAnalysisMode === 'spectrum_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range min (Hz)</span>
+                                    <input type="number" step="any" name="fei_spectrum_min" value="1.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range max (Hz)</span>
+                                    <input type="number" step="any" name="fei_spectrum_max" value="45.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Bad channel indices</span>
+                                    <input type="text" name="fei_bad_idxes"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. 1,3,5">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trim seconds</span>
+                                    <input type="number" step="any" name="fei_trim_seconds" value="1.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Filter kwargs (JSON/dict)</span>
+                                    <input type="text" name="fei_filter_kwargs"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="flex flex-wrap gap-5">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="fei_dfa_overlap" value="1" checked
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    DFA overlap (50%)
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="fei_input_is_envelope" value="1" checked
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Input is already an envelope
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" name="fei_normalize" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Normalize each sample
+                                </label>
+                            </div>
+                        </section>
+
+                        <section x-show="selectedMethod === 'hctsa'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
+                            <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">hctsa options</h2>
+                            <label class="text-sm block">
+                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">hctsa_folder *</span>
+                                <input type="text" name="hctsa_folder"
+                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                    placeholder="Path to hctsa installation">
+                            </label>
+                            <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <input type="checkbox" name="hctsa_return_meta" value="1"
+                                    class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                Return hctsa metadata summary
+                            </label>
                         </section>
                     </div>
                 </div>
             </div>
 
+            <div x-show="submitInProgress || submitError" x-cloak
+                class="mt-8 w-full p-4 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl space-y-3">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-primary">cloud_upload</span>
+                    <p class="text-sm font-medium text-[#34495E] dark:text-white" x-text="uploadStatusMessage || 'Uploading files...'"></p>
+                </div>
+                <div x-show="hasUploadPayload()" class="w-full h-2 rounded-full bg-gray-200 dark:bg-[#323b67] overflow-hidden relative">
+                    <div x-show="uploadProgressKnown" class="h-full bg-primary transition-all duration-200" :style="`width: ${Math.max(0, Math.min(100, uploadProgress))}%`"></div>
+                    <div x-show="!uploadProgressKnown" class="absolute inset-y-0 left-0 w-1/3 bg-primary/70 upload-indeterminate"></div>
+                </div>
+                <p x-show="uploadBytesTotal > 0" class="text-xs text-gray-500 dark:text-gray-400"
+                    x-text="`${formatBytes(uploadBytesLoaded)} / ${formatBytes(uploadBytesTotal)}`"></p>
+                <p x-show="submitError" class="text-xs text-red-600 dark:text-red-400" x-text="submitError"></p>
+            </div>
 
-
-
-            <!-- Navigation Buttons -->
             <div class="mt-10 flex flex-col sm:flex-row justify-between items-center gap-4">
-                <!-- Previous/Return Button -->
                 <template x-if="activeTab === 'load-data'">
                     <a href="{{ url_for('dashboard') }}"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
@@ -565,16 +1557,17 @@
                     </button>
                 </template>
 
-                <!-- Next/Compute Button -->
-                <template x-if="activeTab === 'configure-method' && isUploaded('data-file')">
-                    <button type="submit" x-show="selectedMethod" 
+                <template x-if="activeTab === 'configure-method' && canSubmitFeatures()">
+                    <button type="submit"
+                        :disabled="submitInProgress"
+                        :class="submitInProgress ? 'opacity-70 cursor-not-allowed' : ''"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
-                        Compute features
+                        <span x-text="submitInProgress ? (hasUploadPayload() ? 'Uploading files...' : 'Processing...') : 'Compute features'"></span>
                         <span class="material-symbols-outlined">arrow_forward</span>
                     </button>
                 </template>
 
-                <template x-if="activeTab !== 'configure-method' && isUploaded('data-file')">
+                <template x-if="activeTab !== 'configure-method' && hasAnyData()">
                     <button type="button"
                         @click="if (activeTab === 'load-data') { activeTab = 'select-method' } else if (activeTab === 'select-method') { activeTab = 'configure-method' }"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
@@ -587,136 +1580,8 @@
     </div>
 </div>
 {% endblock %}
-{% block scripts %}
-<!-- Menu tab navigation -->
-<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<!-- Handle of file uploads script -->
-<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
-<!-- Definition of reusable form inputs form DFA and fEI forms -->
-<script>
-document.addEventListener('alpine:init', () => {
-    Alpine.data('form_analysis', () => ({
-        template: `
-            <div x-data="form_analysis" class="space-y-6 mt-8">
-                <h3
-                    class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
-                    Analysis mode (Dynamic flow)</h3>
-                <div class="flex items-center justify-between">
-                    <span class="text-[#34495E] dark:text-white text-base font-medium">Apply band filter / Spectral
-                        analysis?</span>
-                    <label class="relative inline-flex items-center cursor-pointer">
-                        <input x-model="on_filter" id="band-filter" checked="" class="sr-only peer" type="checkbox" />
-                        <div
-                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-primary/30 dark:peer-focus:ring-primary/30 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-primary">
-                        </div>
-                    </label>
-                </div>
-                <div x-show="on_filter" class="space-y-4 p-4 bg-background-light dark:bg-[#191e33] rounded-lg">
-                    <p class="text-sm font-medium text-[#34495E] dark:text-white">Range type</p>
-                    <div class="flex gap-6">
-                        <label class="inline-flex items-center">
-                            <input checked="" class="form-radio text-primary border-gray-300 focus:ring-primary"
-                                name="range_type" type="radio" />
-                            <span class="ml-2 text-sm text-[#34495E] dark:text-white">Single frequency band</span>
-                        </label>
-                        <label class="inline-flex items-center">
-                            <input class="form-radio text-primary border-gray-300 focus:ring-primary" name="range_type"
-                                type="radio" />
-                            <span class="ml-2 text-sm text-[#34495E] dark:text-white">Spectrum range</span>
-                        </label>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                        <label class="flex flex-col">
-                            <span class="text-xs text-gray-500 dark:text-gray-400 mb-1">Minimum frequency (Hz)</span>
-                            <input
-                                class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#1f243d] text-[#34495E] dark:text-white text-sm h-9"
-                                type="number" />
-                        </label>
-                        <label class="flex flex-col">
-                            <span class="text-xs text-gray-500 dark:text-gray-400 mb-1">Maximum frequency (Hz)</span>
-                            <input
-                                class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#1f243d] text-[#34495E] dark:text-white text-sm h-9"
-                                type="number" />
-                        </label>
-                    </div>
-                </div>
-            </div>
-        `
-    }));
 
-    Alpine.data('advanced_options', () => ({
-        template: `
-            <details x-data="advanced_options" class="group mt-8">
-                <summary
-                    class="flex justify-between items-center font-medium cursor-pointer list-none text-primary dark:text-primary hover:text-primary/80 transition-colors select-none">
-                    <span>Show Advanced options</span>
-                    <span class="transition group-open:rotate-180">
-                        <span class="material-symbols-outlined">expand_more</span>
-                    </span>
-                </summary>
-                <div class="text-neutral-600 mt-6 group-open:animate-fadeIn space-y-8">
-                    <div class="space-y-6">
-                        <h3
-                            class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
-                            Interval parameters</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div class="space-y-2">
-                                <p class="text-[#34495E] dark:text-white text-sm font-medium">Fit interval (Seconds)</p>
-                                <div class="flex items-center gap-2">
-                                    <input
-                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                        placeholder="Min" type="number" />
-                                    <span class="text-gray-400">-</span>
-                                    <input
-                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                        placeholder="Max" type="number" />
-                                </div>
-                            </div>
-                            <div class="space-y-2">
-                                <p class="text-[#34495E] dark:text-white text-sm font-medium">Compute interval (Seconds)</p>
-                                <div class="flex items-center gap-2">
-                                    <input
-                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                        placeholder="Min" type="number" />
-                                    <span class="text-gray-400">-</span>
-                                    <input
-                                        class="form-input flex w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                        placeholder="Max" type="number" />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="space-y-6">
-                        <h3
-                            class="text-lg font-semibold text-[#34495E] dark:text-white border-b border-gray-100 dark:border-[#323b67] pb-2">
-                            Filtering and preprocessing configuration</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <label class="flex flex-col">
-                                <p class="text-[#34495E] dark:text-white text-sm font-medium pb-1">Edge trimming after
-                                    filtering (Seconds)</p>
-                                <input
-                                    class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                    type="number" value="1.0" />
-                            </label>
-                            <label class="flex flex-col">
-                                <p class="text-[#34495E] dark:text-white text-sm font-medium pb-1">Ignore indices (Bad
-                                    Indices)</p>
-                                <input
-                                    class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                    placeholder="e.g. 0, 3, 5" type="text" />
-                            </label>
-                            <label class="flex flex-col">
-                                <p class="text-[#34495E] dark:text-white text-sm font-medium pb-1">Hilbert FFT length</p>
-                                <input
-                                    class="form-input rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-[#34495E] dark:text-white h-10"
-                                    step="1" type="number" />
-                            </label>
-                        </div>
-                    </div>
-                </div>
-            </details>
-        `
-    }));
-});
-</script>
+{% block scripts %}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
 {% endblock %}

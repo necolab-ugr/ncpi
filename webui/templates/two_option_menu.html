@@ -27,6 +27,16 @@
         </div>
         <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">{% block option2_title %}{% endblock %}</span>
     </a>
+    {% set option3_url = self.option3_url() | trim %}
+    {% if option3_url %}
+    <a href="{{ option3_url }}"
+        class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
+        <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
+            {% block option3_icon %}{% endblock %}
+        </div>
+        <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">{% block option3_title %}{% endblock %}</span>
+    </a>
+    {% endif %}
 </div>
        
 
@@ -39,3 +49,5 @@
 </div>
 
 {% endblock %}
+
+{% block option3_url %}{% endblock %}

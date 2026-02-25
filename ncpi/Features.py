@@ -2009,7 +2009,15 @@ class Features:
                 pass
 
 
-    def compute_features(self, samples, n_jobs=None, chunksize=None, start_method="spawn"):
+    def compute_features(
+        self,
+        samples,
+        n_jobs=None,
+        chunksize=None,
+        start_method="spawn",
+        progress_callback=None,
+        log_callback=None,
+    ):
         """
         Compute features from a collection of 1D samples in parallel.
 
@@ -2023,6 +2031,12 @@ class Features:
             Chunk size for multiprocessing scheduling.
         start_method : {"spawn","fork","forkserver"}
             Process start method. "spawn" is most robust across platforms.
+        progress_callback : callable | None
+            Optional callback receiving progress updates as
+            ``progress_callback(completed, total, percent)``.
+            If the callback only accepts one argument, ``percent`` is passed.
+        log_callback : callable | None
+            Optional callback receiving textual progress messages.
 
         Returns
         -------
@@ -2040,6 +2054,20 @@ class Features:
         if n == 0:
             return []
 
+        if log_callback:
+            try:
+                log_callback(f"Starting feature computation ({self.method}) on {n} sample(s).")
+            except Exception:
+                pass
+
+        if progress_callback:
+            try:
+                progress_callback(0, n, 0)
+            except TypeError:
+                progress_callback(0)
+            except Exception:
+                pass
+
         if self.method == "hctsa":
             hctsa_folder = self.params.get("hctsa_folder", None)
             if hctsa_folder is None:
@@ -2048,7 +2076,25 @@ class Features:
                     "Make sure hctsa is installed and its setup instructions have been followed."
                 )
             workers = n_jobs if n_jobs is not None else (os.cpu_count() or 1)
-            return self.hctsa(samples_list, hctsa_folder=hctsa_folder, workers=workers)
+            if log_callback:
+                try:
+                    log_callback(f"Running hctsa with {workers} worker(s).")
+                except Exception:
+                    pass
+            result = self.hctsa(samples_list, hctsa_folder=hctsa_folder, workers=workers)
+            if progress_callback:
+                try:
+                    progress_callback(n, n, 100)
+                except TypeError:
+                    progress_callback(100)
+                except Exception:
+                    pass
+            if log_callback:
+                try:
+                    log_callback("Feature computation finished.")
+                except Exception:
+                    pass
+            return result
 
         # Determine number of processes
         if n_jobs is None:
@@ -2072,5 +2118,32 @@ class Features:
 
             if self.tqdm_inst:
                 it = self.tqdm(it, total=n, desc=f"Computing {self.method} features")
+            results = []
+            last_percent = -1
+            next_log_percent = 5
+            for completed, feature_out in enumerate(it, start=1):
+                results.append(feature_out)
+                percent = int((completed * 100) / n)
+                if percent != last_percent and progress_callback:
+                    try:
+                        progress_callback(completed, n, percent)
+                    except TypeError:
+                        progress_callback(percent)
+                    except Exception:
+                        pass
+                    last_percent = percent
 
-            return list(it)
+                if log_callback and (percent >= next_log_percent or completed == n):
+                    try:
+                        log_callback(f"Feature progress: {completed}/{n} ({percent}%).")
+                    except Exception:
+                        pass
+                    while next_log_percent <= percent:
+                        next_log_percent += 5
+
+            if log_callback:
+                try:
+                    log_callback("Feature computation finished.")
+                except Exception:
+                    pass
+            return results

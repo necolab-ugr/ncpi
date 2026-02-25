@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Load Field Potential Data{% endblock %}
+
+{% block content %}
+<div class="px-4 md:px-8 lg:px-20 flex justify-center">
+    <div class="layout-content-container flex flex-col max-w-[900px] w-full">
+        <div class="mb-8">
+            <h1 class="text-3xl font-black leading-tight tracking-[-0.033em] mb-2 text-slate-900 dark:text-white">
+                Load Field Potential Data
+            </h1>
+            <p class="text-slate-500 dark:text-slate-400 text-base">
+                Upload a field-potential pickle file and map it to a pipeline output type.
+            </p>
+        </div>
+
+        <form class="flex flex-col gap-6" method="POST" enctype="multipart/form-data"
+            action="{{ url_for('field_potential_load_precomputed') }}">
+            <div class="bg-white dark:bg-[#111422] border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
+                <label class="block">
+                    <span class="text-sm font-bold text-slate-800 dark:text-white">Output type</span>
+                    <select name="precomputed_fp_type"
+                        class="mt-2 form-select w-full h-12 rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary">
+                        <option value="proxy">Proxy</option>
+                        <option value="cdm">CDM</option>
+                        <option value="lfp">LFP</option>
+                        <option value="eeg">EEG</option>
+                        <option value="meg">MEG</option>
+                    </select>
+                </label>
+
+                <label class="block">
+                    <span class="text-sm font-bold text-slate-800 dark:text-white">Precomputed file (.pkl/.pickle)</span>
+                    <input type="file" name="precomputed_fp_file" accept=".pkl,.pickle"
+                        class="mt-2 block w-full text-sm text-slate-700 dark:text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-primary file:text-white hover:file:bg-primary/90">
+                </label>
+            </div>
+
+            <div class="flex flex-col-reverse sm:flex-row items-center justify-between gap-4">
+                <a href="{{ url_for('field_potential') }}"
+                    class="w-full sm:w-auto px-6 h-12 flex items-center justify-center gap-2 text-slate-600 dark:text-slate-300 font-bold hover:text-slate-900 dark:hover:text-white transition-colors">
+                    <span class="material-symbols-outlined">arrow_back</span>
+                    Back to Field Potential
+                </a>
+                <button
+                    class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
+                    type="submit">
+                    Load data
+                    <span class="material-symbols-outlined">upload</span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

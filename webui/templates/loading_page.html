@@ -12,19 +12,21 @@
     'analysis': 'Analysis'
 } %}
 {% set computation_label = label_map.get(computation_type, computation_type.replace('_', ' ')|title) %}
+{% set completion_title = 'Features Computed' if computation_type == 'features' else 'Computation Complete!' %}
+{% set is_pending = pending if pending is not none else false %}
 
-<div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}')">
+<div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}', {{ is_pending | tojson }})">
     <div class="flex items-center gap-6">
         <div x-show="progress < 100 && !error" class="flex flex-col items-center gap-6 text-center">
             <div class="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-primary dark:border-primary"></div>
         </div>
-        <div x-show="progress === 100" class="text-primary dark:text-primary text-4xl">✅</div>
+        <div x-show="progress === 100 && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
         <div x-show="error" class="flex flex-col items-center gap-6 text-center">
             <div class="text-red-500 dark:text-red-400 text-4xl">❌</div>
         </div>
         <div class="flex flex-col gap-2">
-            <p x-text="error ? 'Computation Failed' : (progress < 100 ? 'Computing {{ computation_label }}' : 'Computation Complete!')" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
-            <p x-text="error ? 'An error occurred during computation.' : (progress < 100 ? 'Please wait while the computation is in progress...' : 'Your results are ready.')" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
+            <p x-text="error ? 'Computation Failed' : (pending ? 'Preparing {{ computation_label }}' : (progress < 100 ? 'Computing {{ computation_label }}' : '{{ completion_title }}'))" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
+            <p x-text="error ? 'An error occurred during computation.' : (pending ? 'Waiting for upload to complete...' : (progress < 100 ? 'Please wait while the computation is in progress...' : 'Your results are ready.'))" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
         </div>
     </div>
     <div class="w-64 mt-4">
@@ -48,7 +50,7 @@
             </p>
         </div>
     </div>
-    {% if computation_type in ['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'] %}
+    {% if computation_type in ['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'features'] %}
     <div class="w-full max-w-2xl mt-6">
         <div class="flex items-center justify-between text-xs text-text-light-secondary dark:text-[#929bc9] mb-2">
             <span class="font-semibold lowercase tracking-wide">ncpi output</span>
@@ -60,31 +62,36 @@
                 <span>ncpi terminal</span>
             </div>
             <pre x-ref="log" class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed font-mono"
-                x-text="output || 'Waiting for ncpi output...'"></pre>
+                x-text="output || (pending ? 'Uploading data...' : 'Waiting for ncpi output...')"></pre>
         </div>
     </div>
     {% endif %}
     <div class="flex justify-end gap-4 mt-10 pt-6">
         {% if computation_type == 'simulation' %}
-        <a x-show="progress >= 100" href="{{url_for('field_potential')}}"
+        <a x-show="!pending && progress >= 100" href="{{url_for('field_potential')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Field Potential
         </a>
         {% elif computation_type in ['field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'] %}
-        <a x-show="progress >= 100" href="{{url_for('features')}}"
+        <a x-show="!pending && progress >= 100" href="{{url_for('features')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Features
         </a>
         {% if computation_type == 'field_potential_kernel' %}
-        <a x-show="progress >= 100" href="{{ url_for('field_potential_kernel') }}?tab=meeg"
+        <a x-show="!pending && progress >= 100" href="{{ url_for('field_potential_kernel') }}?tab=meeg"
             class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
             Compute M/EEG
         </a>
         {% endif %}
+        {% elif computation_type == 'features' %}
+        <a x-show="!pending && progress >= 100" href="{{url_for('inference')}}"
+            class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+            Continue to Inference
+        </a>
         {% else %}
-        <button :disabled="progress < 100 || hasBeenClicked"
+        <button :disabled="pending || progress < 100 || hasBeenClicked"
                 @click="hasBeenClicked = true; window.location.href = `{{url_for('download_results', job_id=job_id, computation_type=computation_type )}}`"
-                :class="progress < 100 || hasBeenClicked
+                :class="pending || progress < 100 || hasBeenClicked
                 ? 'px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/50 bg-gray-200 dark:bg-[#2d3358] rounded-lg cursor-not-allowed opacity-50'
                 : 'px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg shadow-md hover:bg-primary-dark transition-colors'">
             Save results
@@ -112,18 +119,49 @@ function formatTime(seconds) {
 
 // Alpine.js component for the loading page
 document.addEventListener('alpine:init', () => {
-    Alpine.data('loadingApp', (initialJobId) => ({
+    Alpine.data('loadingApp', (initialJobId, pending) => ({
         jobId: initialJobId,
+        pending,
         progress: 0,
         elapsedTime: '00:00',
         estimatedTimeRemaining: 'Calculating...',
         hasBeenClicked : false,
         error: null, 
         output: "",
+        uploadProgress: 0,
+        uploadMessage: "",
         
         init() {
             this.startTime = Date.now();
-            this.pollStatus(); // Start polling immediately when the page loads
+            if (!this.pending) {
+                this.pollStatus(); // Start polling immediately when the page loads
+            }
+            window.addEventListener('message', (event) => {
+                try {
+                    if (event.origin !== window.location.origin) return;
+                } catch (_err) {
+                    return;
+                }
+                if (!event.data) return;
+                if (event.data.jobId) {
+                    this.jobId = event.data.jobId;
+                    this.pending = false;
+                    this.startTime = Date.now();
+                    this.progress = 0;
+                    this.estimatedTimeRemaining = 'Calculating...';
+                    this.pollStatus();
+                    return;
+                }
+                if (this.pending && (event.data.uploadProgress !== undefined || event.data.uploadMessage)) {
+                    const nextProgress = Number(event.data.uploadProgress);
+                    if (Number.isFinite(nextProgress)) {
+                        this.progress = Math.max(0, Math.min(100, Math.round(nextProgress)));
+                    }
+                    if (event.data.uploadMessage) {
+                        this.output = String(event.data.uploadMessage);
+                    }
+                }
+            });
         },
 
         pollStatus() {
@@ -131,6 +169,10 @@ document.addEventListener('alpine:init', () => {
             const elapsedSeconds = Math.floor((Date.now() - this.startTime) / 1000);
             this.elapsedTime = formatTime(elapsedSeconds);
 
+            if (!this.jobId) {
+                this.schedulePendingPoll();
+                return;
+            }
             fetch(`/status/${this.jobId}`)
                 .then(response => response.json())
                 .then(data => {
@@ -178,6 +220,10 @@ document.addEventListener('alpine:init', () => {
                     // Retry polling after a longer delay on network error
                     setTimeout(() => this.pollStatus(), 5000); 
                 });
+        },
+        schedulePendingPoll() {
+            if (!this.pending) return;
+            setTimeout(() => this.pollStatus(), 1500);
         },
     }));
 });

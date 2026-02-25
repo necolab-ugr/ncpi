@@ -44,18 +44,25 @@
 <!-- Content of the page -->
 {% block page_title %}Field Potential Configuration{% endblock %}
 
-{% block page_description %}Select the method for computing field potentials.{% endblock %}
+{% block page_description %}Select how to proceed with field potentials: load data or compute new outputs.{% endblock %}
 
 <!-- Option 1 -->
-{% block option1_url %}{{url_for('field_potential_kernel')}}{% endblock %}
+{% block option1_url %}{{url_for('field_potential_load')}}{% endblock %}
 {% block option1_icon %}
-<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">grain</span>
+<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>
 {% endblock %}
-{% block option1_title %}Kernel{% endblock %}
+{% block option1_title %}Load data{% endblock %}
 
 <!-- Option 2 -->
-{% block option2_url %}{{url_for('field_potential_proxy')}}{% endblock %}
+{% block option2_url %}{{url_for('field_potential_kernel')}}{% endblock %}
 {% block option2_icon %}
+<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">grain</span>
+{% endblock %}
+{% block option2_title %}Kernel{% endblock %}
+
+<!-- Option 3 -->
+{% block option3_url %}{{url_for('field_potential_proxy')}}{% endblock %}
+{% block option3_icon %}
 <span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">analytics</span>
 {% endblock %}
-{% block option2_title %}Proxy{% endblock %}
+{% block option3_title %}Proxy{% endblock %}
