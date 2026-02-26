@@ -1343,8 +1343,9 @@ class Features:
             if select_peak == "all":
                 all_peaks = peaks
             elif select_peak == "max_pw":
-                idx = int(np.nanargmax(pws))
-                selected_peaks = peaks[idx:idx + 1]
+                if not np.all(np.isnan(pws)):
+                    idx = int(np.nanargmax(pws))
+                    selected_peaks = peaks[idx:idx + 1]
             elif select_peak == "max_cf_in_range":
                 mask = (cfs >= fmin) & (cfs <= fmax)
                 if np.any(mask):
