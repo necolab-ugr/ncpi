@@ -180,6 +180,8 @@ class ParseConfig:
     # Post-processing
     # ---------------------------
     zscore: bool = False
+    zscore_after_epoch: bool = False  # If True, apply z-score AFTER epoching (per-epoch)
+    exclude_last_epoch: bool = False  # If True, exclude the last epoch from each time series
 
     # Aggregation: aggregate over one or more categorical columns.
     # Examples:
@@ -235,8 +237,8 @@ class EphysDatasetParser:
         rows = self._parse_object(obj, source_file=source_file)
         df = self._rows_to_df(rows)
 
-        # 2) Optional z-scoring (sensor-wise, pre-aggregation)
-        if self.config.zscore:
+        # 2) Optional z-scoring BEFORE epoching (default behavior)
+        if self.config.zscore and not self.config.zscore_after_epoch:
             df = self._apply_zscore(df)
 
         # 3) Aggregate FIRST (e.g. collapse sensors)
@@ -248,6 +250,14 @@ class EphysDatasetParser:
             rows = df.to_dict("records")
             rows = self._apply_epoching_rows(rows)
             df = self._rows_to_df(rows)
+
+            # 4b) Exclude last epoch if requested
+            if self.config.exclude_last_epoch:
+                df = self._exclude_last_epoch(df)
+
+        # 5) Optional z-scoring AFTER epoching (per-epoch normalization)
+        if self.config.zscore and self.config.zscore_after_epoch:
+            df = self._apply_zscore(df)
 
         return df
 
@@ -945,6 +955,28 @@ class EphysDatasetParser:
         df = df.copy()
         df["data"] = df["data"].apply(z)
         return df
+
+    def _exclude_last_epoch(self, df: "Any") -> "Any":
+        """Exclude the last epoch for each unique combination of grouping columns.
+
+        This is useful for discarding the last (potentially incomplete) epoch
+        from each time series when the signal length is not perfectly divisible
+        by the epoch length.
+        """
+        if "epoch" not in df.columns:
+            return df
+
+        # Group by columns that identify unique time series (e.g., subject_id, sensor)
+        group_cols = [c for c in ["subject_id", "sensor"] if c in df.columns]
+
+        if not group_cols:
+            # No grouping columns, just exclude the global max epoch
+            max_epoch = df["epoch"].max()
+            return df[df["epoch"] < max_epoch].reset_index(drop=True)
+
+        # For each group, find the max epoch and exclude it
+        max_epochs = df.groupby(group_cols)["epoch"].transform("max")
+        return df[df["epoch"] < max_epochs].reset_index(drop=True)
 
     def _apply_aggregation(self, df):
         over = list(self.config.aggregate_over or [])
