@@ -48,9 +48,9 @@ import time
 import io
 import pandas as pd
 import numpy as np
-#import compute_utils
-#import ncpi
-#from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields
+import compute_utils
+import ncpi
+from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields
 
 # Main app object
 app = Flask(__name__)
