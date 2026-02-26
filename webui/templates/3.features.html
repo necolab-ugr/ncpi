@@ -50,16 +50,24 @@
             dataSourceKind: 'new-simulation',
             empiricalSourceMode: 'server-path',
             empiricalFolderPath: '',
+            simulationFilePath: '',
             parserInfo: null,
             parserLoading: false,
             parserError: '',
             empiricalFileCount: 0,
             empiricalSampleName: '',
+            simulationFileCount: 0,
+            simulationSampleName: '',
             parserDataLocator: '',
             parserFsManual: String(1.0 / (0.0625e-3)),
-            parserFsHint: '',
+            parserFsSource: '__none__',
             parserSensorNames: '',
+            parserChNamesSource: '__autocomplete__',
             parserRecordingType: 'LFP',
+            parserRecordingTypeLocator: '',
+            parserRecordingTypeSource: '__value__',
+            parserSubjectIdLocator: '',
+            parserGroupLocator: '',
             parserFsLocator: '',
             parserChNamesLocator: '',
             parserTableLayout: '',
@@ -71,7 +79,7 @@
             parserEpochStepS: '5.0',
             parserZscore: false,
             parserEnableAggregate: false,
-            parserAggregateOver: 'sensor',
+            parserAggregateOverSelected: ['sensor'],
             parserAggregateMethod: 'sum',
             parserAggregateLabels: '',
             selectedMethod: '',
@@ -126,6 +134,9 @@
             },
             resolvedDataSourceKind() {
                 if (this.selectedPipelinePath) return 'pipeline';
+                if (this.dataSourceKind === 'new-simulation' && (this.simulationFileCount > 0 || this.isUploaded('data-file'))) return 'new-simulation';
+                if (this.dataSourceKind === 'new-empirical' && this.empiricalFileCount > 0) return 'new-empirical';
+                if (this.simulationFileCount > 0) return 'new-simulation';
                 if (this.isUploaded('data-file')) return 'new-simulation';
                 if (this.empiricalFileCount > 0) return 'new-empirical';
                 return '';
@@ -136,19 +147,53 @@
             hasAnyData() {
                 return this.resolvedDataSourceKind() !== '';
             },
+            aggregateOverOptions() {
+                const base = [
+                    'sensor',
+                    'epoch',
+                    'subject_id',
+                    'group',
+                    'condition',
+                    'species',
+                    'recording_type',
+                    'source_file',
+                ];
+                const candidates = Array.isArray(this.parserInfo?.candidate_fields)
+                    ? this.parserInfo.candidate_fields.map((field) => String(field))
+                    : [];
+                const seen = new Set();
+                const out = [];
+                for (const item of [...base, ...candidates]) {
+                    const key = String(item || '').trim();
+                    if (!key || seen.has(key)) continue;
+                    seen.add(key);
+                    out.push(key);
+                }
+                return out;
+            },
             canSubmitFeatures() {
                 if (this.submitInProgress) return false;
                 const kind = this.resolvedDataSourceKind();
                 if (!this.selectedMethod) return false;
                 if (!this.parserDataLocator) return false;
+                if (this.parserEnableAggregate && (!Array.isArray(this.parserAggregateOverSelected) || this.parserAggregateOverSelected.length === 0)) return false;
+                const fsSource = String(this.parserFsSource || '').trim();
+                if (!fsSource) return false;
+                if (fsSource === '__numeric__' && !String(this.parserFsManual || '').trim()) return false;
+                const recSource = String(this.parserRecordingTypeSource || '').trim();
+                if (!recSource) return false;
+                if (recSource === '__value__' && !String(this.parserRecordingType || '').trim()) return false;
+                const chSource = String(this.parserChNamesSource || '').trim();
+                if (!chSource) return false;
+                if (chSource === '__manual__' && !String(this.parserSensorNames || '').trim()) return false;
 
                 if (kind === 'pipeline') {
-                    if (!this.parserFsManual) return false;
                     if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
                 }
                 if (kind === 'new-simulation') {
-                    if (!this.isUploaded('data-file')) return false;
+                    const hasSimulationPath = String(this.simulationFilePath || '').trim().length > 0 && this.simulationFileCount > 0;
+                    if (!this.isUploaded('data-file') && !hasSimulationPath) return false;
                     if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
                 }
@@ -169,7 +214,11 @@
                     const row = this.pipelineFiles.find((item) => item.path === this.selectedPipelinePath);
                     return row ? row.name : 'Detected pipeline file';
                 }
-                if (kind === 'new-simulation') return this.getFileName('data-file') || 'Uploaded simulation file';
+                if (kind === 'new-simulation') {
+                    const filePath = String(this.simulationFilePath || '').trim();
+                    if (filePath) return this.simulationSampleName || filePath;
+                    return this.getFileName('data-file') || 'Uploaded simulation file';
+                }
                 if (kind === 'new-empirical') {
                     if (this.empiricalSourceMode === 'server-path') {
                         const folder = String(this.empiricalFolderPath || '').trim();
@@ -190,15 +239,18 @@
                 this.uploadProgressKnown = false;
                 this.submitError = '';
                 this.empiricalSourceMode = 'server-path';
-                this.empiricalFolderPath = '';
                 this.dataSourceKind = kind;
                 this.selectedPipelinePath = '';
                 if (kind !== 'new-simulation') {
                     delete this.uploads['data-file'];
                     const simInput = document.getElementById('data-file');
                     if (simInput) simInput.value = '';
+                    this.simulationFilePath = '';
+                    this.simulationFileCount = 0;
+                    this.simulationSampleName = '';
                 }
                 if (kind !== 'new-empirical') {
+                    this.empiricalFolderPath = '';
                     this.empiricalFileCount = 0;
                     this.empiricalSampleName = '';
                 }
@@ -209,9 +261,14 @@
                 this.parserError = '';
                 this.parserDataLocator = '';
                 this.parserFsManual = String(1.0 / (0.0625e-3));
-                this.parserFsHint = '';
+                this.parserFsSource = '__none__';
                 this.parserSensorNames = '';
+                this.parserChNamesSource = '__autocomplete__';
                 this.parserRecordingType = 'LFP';
+                this.parserRecordingTypeLocator = '';
+                this.parserRecordingTypeSource = '__value__';
+                this.parserSubjectIdLocator = '';
+                this.parserGroupLocator = '';
                 this.parserFsLocator = '';
                 this.parserChNamesLocator = '';
                 this.parserTableLayout = '';
@@ -223,7 +280,7 @@
                 this.parserEpochStepS = '5.0';
                 this.parserZscore = false;
                 this.parserEnableAggregate = false;
-                this.parserAggregateOver = 'sensor';
+                this.parserAggregateOverSelected = ['sensor'];
                 this.parserAggregateMethod = 'sum';
                 this.parserAggregateLabels = '';
             },
@@ -238,9 +295,12 @@
                 this.submitError = '';
                 this.empiricalSourceMode = 'server-path';
                 this.empiricalFolderPath = '';
+                this.simulationFilePath = '';
                 this.selectedPipelinePath = path;
                 this.dataSourceKind = 'pipeline';
                 delete this.uploads['data-file'];
+                this.simulationFileCount = 0;
+                this.simulationSampleName = '';
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 const simInput = document.getElementById('data-file');
@@ -260,12 +320,72 @@
                 this.submitError = '';
                 this.empiricalSourceMode = 'server-path';
                 this.empiricalFolderPath = '';
+                this.simulationFilePath = '';
                 this.dataSourceKind = 'new-simulation';
                 this.selectedPipelinePath = '';
+                this.simulationFileCount = 0;
+                this.simulationSampleName = '';
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.resetParserConfig();
                 this.inspectParserSource('', file);
+            },
+            async pickSimulationFile() {
+                this.submitError = '';
+                this.parserError = '';
+                try {
+                    const formData = new FormData();
+                    formData.append('mode', 'file');
+                    const response = await fetch('{{ url_for('features_select_folder') }}', { method: 'POST', body: formData });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.error || 'File selection cancelled.');
+                    this.simulationFilePath = payload.path || '';
+                    if (!this.simulationFilePath) {
+                        throw new Error('No file path returned by selector.');
+                    }
+                    await this.inspectSimulationFilePath();
+                } catch (error) {
+                    this.parserError = error.message || 'Failed to select file.';
+                }
+            },
+            async inspectSimulationFilePath() {
+                const filePath = String(this.simulationFilePath || '').trim();
+                this.submitError = '';
+                this.parserError = '';
+                if (!filePath) {
+                    this.parserError = 'Provide a valid simulation output file path.';
+                    this.simulationFileCount = 0;
+                    this.simulationSampleName = '';
+                    this.parserInfo = null;
+                    return;
+                }
+                this.parserLoading = true;
+                this.parserInfo = null;
+                try {
+                    const formData = new FormData();
+                    formData.append('simulation_file_path', filePath);
+                    const response = await fetch('{{ url_for('features_parser_inspect') }}', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const payload = await response.json();
+                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect simulation file.');
+                    this.parserInfo = payload;
+                    this.applyParserDefaults(payload);
+                    this.simulationFileCount = 1;
+                    this.simulationSampleName = payload.source_name || '';
+                    this.dataSourceKind = 'new-simulation';
+                    this.selectedPipelinePath = '';
+                    delete this.uploads['data-file'];
+                    const simInput = document.getElementById('data-file');
+                    if (simInput) simInput.value = '';
+                } catch (error) {
+                    this.parserError = error.message || 'Failed to inspect simulation file.';
+                    this.simulationFileCount = 0;
+                    this.simulationSampleName = '';
+                } finally {
+                    this.parserLoading = false;
+                }
             },
             async pickEmpiricalFolder() {
                 this.submitError = '';
@@ -322,17 +442,91 @@
                 const defaults = payload?.defaults || {};
                 if (!this.parserDataLocator) this.parserDataLocator = defaults.data || '';
                 if (!this.parserFsLocator) this.parserFsLocator = defaults.fs || '';
+                if (!this.parserRecordingTypeLocator) this.parserRecordingTypeLocator = defaults.recording_type || '';
+                if (!this.parserSubjectIdLocator) this.parserSubjectIdLocator = defaults.subject_id || '';
+                if (!this.parserGroupLocator) this.parserGroupLocator = defaults.group || '';
                 if (!this.parserChNamesLocator) this.parserChNamesLocator = defaults.ch_names || '';
-                this.parserFsHint = payload?.fs_hint_note || '';
-                if (
-                    this.resolvedDataSourceKind() === 'pipeline' &&
+                const validAggregate = new Set(this.aggregateOverOptions());
+                this.parserAggregateOverSelected = (this.parserAggregateOverSelected || []).filter((dim) => validAggregate.has(dim));
+                if (this.parserAggregateOverSelected.length === 0) this.parserAggregateOverSelected = ['sensor'];
+
+                if (String(this.parserFsLocator || '').trim()) {
+                    this.parserFsSource = this.parserFsLocator;
+                    this.parserFsManual = '';
+                } else if (
                     payload?.fs_hint_hz !== null &&
                     payload?.fs_hint_hz !== undefined &&
                     Number.isFinite(Number(payload.fs_hint_hz)) &&
                     Number(payload.fs_hint_hz) > 0
                 ) {
+                    this.parserFsSource = '__numeric__';
                     this.parserFsManual = String(Number(payload.fs_hint_hz));
+                    this.parserFsLocator = '';
+                } else {
+                    this.parserFsSource = '__none__';
+                    this.parserFsManual = '';
+                    this.parserFsLocator = '';
                 }
+
+                if (String(this.parserRecordingTypeLocator || '').trim()) {
+                    this.parserRecordingTypeSource = this.parserRecordingTypeLocator;
+                    this.parserRecordingType = '';
+                } else {
+                    this.parserRecordingTypeSource = '__value__';
+                    if (!String(this.parserRecordingType || '').trim()) this.parserRecordingType = 'LFP';
+                    this.parserRecordingTypeLocator = '';
+                }
+
+                if (String(this.parserChNamesLocator || '').trim()) {
+                    this.parserChNamesSource = this.parserChNamesLocator;
+                    this.parserSensorNames = '';
+                } else {
+                    this.parserChNamesSource = '__autocomplete__';
+                    this.parserChNamesLocator = '';
+                }
+            },
+            onPipelineFsSourceChange() {
+                const source = String(this.parserFsSource || '').trim();
+                if (source === '__numeric__') {
+                    this.parserFsLocator = '';
+                    return;
+                }
+                if (source === '__none__') {
+                    this.parserFsLocator = '';
+                    this.parserFsManual = '';
+                    return;
+                }
+                this.parserFsLocator = source;
+                this.parserFsManual = '';
+            },
+            onPipelineRecordingTypeSourceChange() {
+                const source = String(this.parserRecordingTypeSource || '').trim();
+                if (source === '__value__') {
+                    this.parserRecordingTypeLocator = '';
+                    if (!String(this.parserRecordingType || '').trim()) this.parserRecordingType = 'LFP';
+                    return;
+                }
+                if (source === '__none__') {
+                    this.parserRecordingTypeLocator = '';
+                    this.parserRecordingType = '';
+                    return;
+                }
+                this.parserRecordingTypeLocator = source;
+                this.parserRecordingType = '';
+            },
+            onParserChNamesSourceChange() {
+                const source = String(this.parserChNamesSource || '').trim();
+                if (source === '__manual__') {
+                    this.parserChNamesLocator = '';
+                    return;
+                }
+                if (source === '__autocomplete__') {
+                    this.parserChNamesLocator = '';
+                    this.parserSensorNames = '';
+                    return;
+                }
+                this.parserChNamesLocator = source;
+                this.parserSensorNames = '';
             },
             async inspectParserSource(existingPath, file) {
                 this.parserLoading = true;
@@ -515,25 +709,39 @@
                 const epochEnabled = !!this.parserEnableEpoching;
                 const epochLength = this.parserEpochLengthS || '5.0';
                 const epochStep = this.parserEpochStepS || '5.0';
-
-                if (kind === 'pipeline') {
-                    const fsValue = this.parserFsManual || 'REQUIRED_FS';
-                    const recordingType = this.parserRecordingType || 'LFP';
+                const chSource = String(this.parserChNamesSource || '').trim();
+                let chNamesExpr = 'None';
+                if (chSource === '__manual__') {
                     const sensors = (this.parserSensorNames || '')
                         .split(',')
                         .map((item) => item.trim())
                         .filter((item) => item.length > 0);
-                    const detectedSensors = Number(this.parserInfo?.sensor_count_estimate || 0);
-                    const autoNames = detectedSensors > 0
-                        ? Array.from({ length: detectedSensors }, (_v, i) => `'ch${i}'`)
-                        : [`'ch0'`];
-                    const chNamesExpr = sensors.length > 0
+                    chNamesExpr = sensors.length > 0
                         ? `[${sensors.map((s) => `'${s}'`).join(', ')}]`
-                        : `[${autoNames.join(', ')}]`;
+                        : '[]';
+                } else if (chSource === '__autocomplete__') {
+                    chNamesExpr = `[f"ch{i}" for i in range(data.${dataLocator}.shape[0])]`;
+                } else if (chSource) {
+                    chNamesExpr = `'${chSource}'`;
+                }
+
+                if (kind === 'pipeline' || kind === 'new-simulation') {
+                    const fsSource = String(this.parserFsSource || '').trim();
+                    let fsValue = 'None';
+                    if (fsSource === '__numeric__') {
+                        fsValue = this.parserFsManual || 'REQUIRED_FS';
+                    } else if (fsSource && fsSource !== '__none__') {
+                        fsValue = `'${fsSource}'`;
+                    }
+                    const recSource = String(this.parserRecordingTypeSource || '').trim();
+                    let recordingTypeValue = 'None';
+                    if (recSource === '__value__') {
+                        recordingTypeValue = `'${(this.parserRecordingType || 'LFP')}'`;
+                    } else if (recSource && recSource !== '__none__') {
+                        recordingTypeValue = `'${recSource}'`;
+                    }
                     const lines = [
-                        'from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields',
-                        '',
-                        'cfg = ParseConfig(',
+                        'ParseConfig(',
                         '    fields=CanonicalFields(',
                         `        data='${dataLocator}',`,
                         `        fs=${fsValue},`,
@@ -543,7 +751,7 @@
                         `            'group': 'simulation',`,
                         `            'species': 'simulated',`,
                         `            'condition': 'simulation_pipeline',`,
-                        `            'recording_type': '${recordingType}',`,
+                        `            'recording_type': ${recordingTypeValue},`,
                         '        },',
                         '    ),',
                     ];
@@ -552,49 +760,59 @@
                         lines.push(`    epoch_step_s=${epochStep},`);
                     }
                     lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
+                    if (this.parserEnableAggregate) {
+                        const aggDims = (this.parserAggregateOverSelected || [])
+                            .map((item) => String(item || '').trim())
+                            .filter((item) => item.length > 0);
+                        if (aggDims.length > 0) {
+                            lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
+                            lines.push(`    aggregate_method='${this.parserAggregateMethod || 'sum'}',`);
+                            if ((this.parserAggregateLabels || '').trim()) {
+                                lines.push(`    aggregate_labels=${this.parserAggregateLabels},`);
+                            }
+                        }
+                    }
                     lines.push(')');
-                    lines.push('');
-                    lines.push('parser = EphysDatasetParser(cfg)');
-                    lines.push('parsed = parser.parse(source_obj_or_path)');
                     return lines.join('\n');
                 }
 
-                const fsLocator = this.parserFsLocator ? `'${this.parserFsLocator}'` : 'None';
-                const detectedSensors = Number(this.parserInfo?.sensor_count_estimate || 0);
-                const chLocator = this.parserChNamesLocator ? `'${this.parserChNamesLocator}'` : 'None';
-                const autoNames = detectedSensors > 0
-                    ? Array.from({ length: detectedSensors }, (_v, i) => `'ch${i}'`)
-                    : [];
-                const chExpr = this.parserChNamesLocator
-                    ? chLocator
-                    : (autoNames.length > 0
-                        ? `[${autoNames.join(', ')}]`
-                        : `[f"ch{i}" for i in range(d["LFP"].LFP.shape[0])]`);
+                const fsSource = String(this.parserFsSource || '').trim();
+                let fsValue = 'None';
+                if (fsSource === '__numeric__') {
+                    fsValue = this.parserFsManual || 'REQUIRED_FS';
+                } else if (fsSource && fsSource !== '__none__') {
+                    fsValue = `'${fsSource}'`;
+                }
+                const recSource = String(this.parserRecordingTypeSource || '').trim();
+                let recordingTypeValue = 'None';
+                if (recSource === '__value__') {
+                    recordingTypeValue = `'${(this.parserRecordingType || 'LFP')}'`;
+                } else if (recSource && recSource !== '__none__') {
+                    recordingTypeValue = `'${recSource}'`;
+                }
+                const subjectIdLocator = String(this.parserSubjectIdLocator || '').trim();
+                const subjectIdValue = kind === 'new-empirical' && subjectIdLocator
+                    ? (subjectIdLocator === '__file_id__' ? `'file_ID'` : `'${subjectIdLocator}'`)
+                    : 'None';
+                const groupValue = kind === 'new-empirical' && String(this.parserGroupLocator || '').trim()
+                    ? `'${String(this.parserGroupLocator).trim()}'`
+                    : 'None';
                 const zscoreFlag = this.parserZscore ? 'True' : 'False';
                 const lines = [
-                    'from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig, CanonicalFields',
-                    '',
-                    'cfg = ParseConfig(',
+                    'ParseConfig(',
                     '    fields=CanonicalFields(',
                     `        data='${dataLocator}',`,
-                    `        fs=${fsLocator},`,
-                    `        ch_names=${chExpr},`,
+                    `        fs=${fsValue},`,
+                    `        ch_names=${chNamesExpr},`,
                 ];
-                if (!this.parserChNamesLocator) {
-                    lines.push(`        # Auto-generated from data locator '${dataLocator}' when channel labels are missing.`);
-                    lines.push('        # Example: [f"ch{i}" for i in range(d["LFP"].LFP.shape[0])]');
-                }
-                if (this.parserTableLayout) {
-                    lines.push(`        table_layout='${this.parserTableLayout}',`);
-                }
-                if (this.parserLongTimeCol) {
-                    lines.push(`        long_time_col='${this.parserLongTimeCol}',`);
-                }
-                if (this.parserLongChannelCol) {
-                    lines.push(`        long_channel_col='${this.parserLongChannelCol}',`);
-                }
-                if (this.parserLongValueCol) {
-                    lines.push(`        long_value_col='${this.parserLongValueCol}',`);
+                const metadataEntries = [];
+                if (recordingTypeValue !== 'None') metadataEntries.push(`            'recording_type': ${recordingTypeValue},`);
+                if (subjectIdValue !== 'None') metadataEntries.push(`            'subject_id': ${subjectIdValue},`);
+                if (groupValue !== 'None') metadataEntries.push(`            'group': ${groupValue},`);
+                if (metadataEntries.length > 0) {
+                    lines.push('        metadata={');
+                    lines.push(...metadataEntries);
+                    lines.push('        },');
                 }
                 lines.push('    ),');
                 if (epochEnabled) {
@@ -602,10 +820,9 @@
                     lines.push(`    epoch_step_s=${epochStep},`);
                 }
                 lines.push(`    zscore=${zscoreFlag},`);
-                if (this.parserEnableAggregate && (this.parserAggregateOver || '').trim()) {
-                    const aggDims = (this.parserAggregateOver || '')
-                        .split(',')
-                        .map((item) => item.trim())
+                if (this.parserEnableAggregate) {
+                    const aggDims = (this.parserAggregateOverSelected || [])
+                        .map((item) => String(item || '').trim())
                         .filter((item) => item.length > 0);
                     if (aggDims.length > 0) {
                         lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
@@ -616,9 +833,6 @@
                     }
                 }
                 lines.push(')');
-                lines.push('');
-                lines.push('parser = EphysDatasetParser(cfg)');
-                lines.push('parsed = parser.parse(source_obj_or_path)');
                 return lines.join('\n');
             },
             chooseEntry(choice) {
@@ -746,6 +960,7 @@
                     <input type="hidden" name="existing_data_path" :value="selectedPipelinePath">
                     <input type="hidden" name="empirical_source_mode" :value="empiricalSourceMode">
                     <input type="hidden" name="empirical_folder_path" :value="empiricalFolderPath">
+                    <input type="hidden" name="simulation_file_path" :value="simulationFilePath">
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
@@ -781,14 +996,14 @@
                                 <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
                             </div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                                Load one of two data types: simulation outputs representing field potentials, or empirical electrophysiological recordings.
+                                Load one of two data types: a simulation output representing field potentials, or empirical electrophysiological recordings.
                             </p>
 
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
                                 <button type="button" @click="setNewDataMode('new-simulation')"
                                     class="px-3 py-2 text-xs rounded-lg border transition-colors"
                                     :class="activeNewDataMode() === 'new-simulation' ? 'bg-primary/10 border-primary text-primary' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                    Simulation outputs
+                                    Simulation output
                                 </button>
                                 <button type="button" @click="setNewDataMode('new-empirical')"
                                     class="px-3 py-2 text-xs rounded-lg border transition-colors"
@@ -798,17 +1013,24 @@
                             </div>
 
                             <div x-show="activeNewDataMode() === 'new-simulation'" x-cloak>
-                                <input type="file" id="data-file" name="data_file" class="hidden" @change="handleFileUpload($event)"/>
-                                <div @click="document.getElementById('data-file').click()"
-                                    class="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-[#323b67] rounded-lg p-6 hover:border-primary/50 transition-colors cursor-pointer group">
-                                    <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-600 group-hover:text-primary transition-colors">cloud_upload</span>
-                                    <p class="mt-2 text-sm font-medium text-[#34495E] dark:text-white">Upload simulation dataframe</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Accepted: .pkl/.csv/.parquet/.xlsx/.feather</p>
+                                <div class="space-y-3">
+                                    <label class="text-sm block">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Simulation output file path on server *</span>
+                                        <input type="text" x-model="simulationFilePath" @keydown.enter.prevent="inspectSimulationFilePath()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            placeholder="/absolute/path/to/simulation_output.pkl">
+                                    </label>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button type="button" @click="pickSimulationFile()"
+                                            class="h-10 px-4 border border-gray-300 dark:border-[#323b67] text-sm rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#191e33] transition-colors">
+                                            Browse file
+                                        </button>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">Data is read directly from server path (no HTTP upload).</p>
                                 </div>
-                                <div x-show="isUploaded('data-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                                    <span class="material-symbols-outlined">check_circle</span>
-                                    <span>Simulation data uploaded:</span>
-                                    <span class="font-semibold" x-text="getFileName('data-file')"></span>
+                                <div x-show="simulationFileCount > 0" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg">
+                                    <p>1 file detected.</p>
+                                    <p class="text-xs opacity-80">Sample inspected: <span x-text="simulationSampleName"></span></p>
                                 </div>
                             </div>
 
@@ -816,7 +1038,7 @@
                                 <div class="space-y-3">
                                     <label class="text-sm block">
                                         <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Empirical folder path on server *</span>
-                                        <input type="text" x-model="empiricalFolderPath"
+                                        <input type="text" x-model="empiricalFolderPath" @keydown.enter.prevent="inspectEmpiricalFolderPath()"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
                                             placeholder="/absolute/path/to/empirical/folder">
                                     </label>
@@ -853,8 +1075,8 @@
                             <div class="space-y-4">
                                 <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
 
-                                <div x-show="resolvedDataSourceKind() === 'pipeline'" class="space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div x-show="resolvedDataSourceKind() === 'pipeline' || resolvedDataSourceKind() === 'new-simulation'" class="space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
@@ -866,19 +1088,64 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) *</span>
-                                                <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
-                                                    placeholder="e.g. 16000 for dt=0.0625 ms">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
+                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__numeric__">Numeric value</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-fs-source-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                                <option value="__none__">None</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
+                                            <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
+                                                :disabled="parserFsSource !== '__numeric__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="e.g. 16000 for dt=0.0625 ms">
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
+                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__manual__">Manual list</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-ch-source-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                                <option value="__autocomplete__">Autocomplete</option>
+                                            </select>
                                         </label>
                                     </div>
-                                    <p x-show="parserFsHint" class="text-xs text-gray-500 dark:text-gray-400" x-text="parserFsHint"></p>
+                                    <input type="hidden" name="parser_fs_locator"
+                                        :value="(parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__') ? parserFsSource : ''">
+                                    <input type="hidden" name="parser_ch_names_locator"
+                                        :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
+                                    <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
+                                        <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
+                                            :disabled="parserChNamesSource !== '__manual__'"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                            placeholder="e.g. ch0, ch1, ch2">
+                                    </label>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type</span>
-                                            <select name="parser_recording_type" x-model="parserRecordingType"
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
+                                            <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__value__">Value</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-rec-type-source-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                                <option value="__none__">None</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type value</span>
+                                            <select name="parser_recording_type" x-model="parserRecordingType"
+                                                :disabled="parserRecordingTypeSource !== '__value__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50">
                                                 <option value="LFP">LFP</option>
                                                 <option value="CDM">CDM</option>
                                                 <option value="EEG">EEG</option>
@@ -888,6 +1155,8 @@
                                             </select>
                                         </label>
                                     </div>
+                                    <input type="hidden" name="parser_recording_type_locator"
+                                        :value="(parserRecordingTypeSource && parserRecordingTypeSource !== '__value__' && parserRecordingTypeSource !== '__none__') ? parserRecordingTypeSource : ''">
 
                                     <p class="text-xs text-gray-500 dark:text-gray-400">Metadata is auto-filled as one synthetic subject.</p>
                                     <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
@@ -896,18 +1165,10 @@
                                         Apply z-score normalization
                                     </label>
 
-                                    <div x-show="parserInfo.multi_sensor_detected" class="grid grid-cols-1 gap-4">
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sensor labels (comma-separated)</span>
-                                            <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
-                                                placeholder="e.g. ch0, ch1, ch2">
-                                        </label>
-                                    </div>
                                 </div>
 
-                                <div x-show="resolvedDataSourceKind() !== 'pipeline'" class="space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <div x-show="resolvedDataSourceKind() === 'new-empirical'" class="space-y-4">
+                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
@@ -919,73 +1180,106 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency locator</span>
-                                            <select name="parser_fs_locator" x-model="parserFsLocator"
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
+                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">Optional</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'fs-'+field">
+                                                <option value="__numeric__">Numeric value</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'fs-source-'+field">
                                                     <option :value="field" x-text="field"></option>
                                                 </template>
+                                                <option value="__none__">None</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names locator</span>
-                                            <select name="parser_ch_names_locator" x-model="parserChNamesLocator"
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
+                                            <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
+                                                :disabled="parserFsSource !== '__numeric__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="e.g. 16000 for dt=0.0625 ms">
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
+                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">Optional</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'ch-'+field">
+                                                <option value="__manual__">Manual list</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'ch-source-'+field">
                                                     <option :value="field" x-text="field"></option>
                                                 </template>
+                                                <option value="__autocomplete__">Autocomplete</option>
                                             </select>
                                         </label>
                                     </div>
+                                    <input type="hidden" name="parser_fs_locator"
+                                        :value="(parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__') ? parserFsSource : ''">
+                                    <input type="hidden" name="parser_ch_names_locator"
+                                        :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
+                                    <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
+                                        <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
+                                            :disabled="parserChNamesSource !== '__manual__'"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                            placeholder="e.g. ch0, ch1, ch2">
+                                    </label>
 
-                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserInfo.source_type === 'dataframe'">
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Table layout</span>
-                                            <select name="parser_table_layout" x-model="parserTableLayout"
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
+                                            <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">Auto / row-wise</option>
-                                                <option value="wide">wide</option>
-                                                <option value="long">long</option>
+                                                <option value="__value__">Value</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'rec-source-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                                <option value="__none__">None</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Long layout time column</span>
-                                            <select name="parser_long_time_col" x-model="parserLongTimeCol"
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type value</span>
+                                            <select name="parser_recording_type" x-model="parserRecordingType"
+                                                :disabled="parserRecordingTypeSource !== '__value__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50">
+                                                <option value="LFP">LFP</option>
+                                                <option value="CDM">CDM</option>
+                                                <option value="EEG">EEG</option>
+                                                <option value="MEG">MEG</option>
+                                                <option value="ECoG">ECoG</option>
+                                                <option value="Unknown">Unknown</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <input type="hidden" name="parser_recording_type_locator"
+                                        :value="(parserRecordingTypeSource && parserRecordingTypeSource !== '__value__' && parserRecordingTypeSource !== '__none__') ? parserRecordingTypeSource : ''">
+
+                                    <div x-show="resolvedDataSourceKind() === 'new-empirical'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject ID column</span>
+                                            <select name="parser_subject_id_locator" x-model="parserSubjectIdLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">Optional</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'lt-'+field">
+                                                <option value="">None</option>
+                                                <option value="__file_id__">Each file (file_ID)</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'subject-id-source-'+field">
                                                     <option :value="field" x-text="field"></option>
                                                 </template>
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Long layout channel/value columns</span>
-                                            <div class="grid grid-cols-2 gap-2">
-                                                <select name="parser_long_channel_col" x-model="parserLongChannelCol"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                    <option value="">Channel</option>
-                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'lc-'+field">
-                                                        <option :value="field" x-text="field"></option>
-                                                    </template>
-                                                </select>
-                                                <select name="parser_long_value_col" x-model="parserLongValueCol"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                    <option value="">Value</option>
-                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'lv-'+field">
-                                                        <option :value="field" x-text="field"></option>
-                                                    </template>
-                                                </select>
-                                            </div>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Group column</span>
+                                            <select name="parser_group_locator" x-model="parserGroupLocator"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="">None</option>
+                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'group-source-'+field">
+                                                    <option :value="field" x-text="field"></option>
+                                                </template>
+                                            </select>
                                         </label>
                                     </div>
 
                                     <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                         <input type="checkbox" x-model="parserZscore"
-                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                         Apply z-score normalization
                                     </label>
+
                                 </div>
 
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
@@ -1001,13 +1295,18 @@
                                     Enable aggregation
                                 </label>
                                 <input type="hidden" name="parser_enable_aggregate" :value="parserEnableAggregate ? '1' : '0'">
+                                <input type="hidden" name="parser_aggregate_over" :value="(parserAggregateOverSelected || []).join(',')">
 
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserEnableAggregate">
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate over</span>
-                                        <input type="text" name="parser_aggregate_over" x-model="parserAggregateOver"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
-                                            placeholder="e.g. sensor, group">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate over fields</span>
+                                        <select multiple x-model="parserAggregateOverSelected"
+                                            class="w-full min-h-32 rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            <template x-for="field in aggregateOverOptions()" :key="'agg-over-'+field">
+                                                <option :value="field" x-text="field"></option>
+                                            </template>
+                                        </select>
+                                        <span class="block text-[11px] text-gray-400 mt-1">Choose one or more fields.</span>
                                     </label>
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate method</span>

@@ -668,6 +668,10 @@ class Inference:
             *,
             result_dir: str = "data",
             scaler=None,
+            # sklearn multiprocessing knobs
+            n_jobs: int | None = None,
+            chunksize: int | None = None,
+            start_method: str = "spawn",
             # SBI knobs
             num_posterior_samples: int | None = None,
             sbi_batch_size: int = 256,
@@ -787,16 +791,30 @@ class Inference:
         # ---------------- SKLEARN: multiprocessing + ensemble ----------------
         if self.backend == "sklearn":
             # IMPORTANT: do NOT scale X here; _predict_one scales inside workers.
-            num_cpus = os.cpu_count() or 1
-            chunksize = max(1, n // (num_cpus * 8))
+            if n_jobs is None:
+                num_cpus = os.cpu_count() or 1
+            else:
+                num_cpus = int(n_jobs)
+                if num_cpus <= 0:
+                    raise ValueError("n_jobs must be a positive integer.")
 
-            ctx = self.multiprocessing.get_context("spawn")
+            if chunksize is None:
+                chunksize_local = max(1, n // (num_cpus * 8))
+            else:
+                chunksize_local = int(chunksize)
+                if chunksize_local <= 0:
+                    raise ValueError("chunksize must be a positive integer.")
+
+            if start_method not in {"spawn", "fork", "forkserver"}:
+                raise ValueError("start_method must be one of: spawn, fork, forkserver.")
+
+            ctx = self.multiprocessing.get_context(start_method)
             with ctx.Pool(
                     processes=num_cpus,
                     initializer=_prediction_worker_init,
                     initargs=(model, scaler),
             ) as pool:
-                it = pool.imap(_predict_one, X, chunksize=chunksize)
+                it = pool.imap(_predict_one, X, chunksize=chunksize_local)
                 if self.tqdm_inst:
                     it = self.tqdm(it, total=n, desc="Computing predictions")
                 preds = list(it)
@@ -872,6 +890,5 @@ class Inference:
             return samples[:, 0, :].detach().cpu().numpy()
 
         return samples.detach().cpu().numpy()
-
 
 

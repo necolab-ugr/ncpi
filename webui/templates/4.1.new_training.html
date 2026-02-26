@@ -4,10 +4,14 @@
 {% block head %}
 {{ super() }}
 <style>
+    [x-cloak] {
+        display: none !important;
+    }
     body {
       -webkit-font-smoothing: antialiased;
       -moz-osx-font-smoothing: grayscale;
-    }.code-editor::-webkit-scrollbar {
+    }
+    .code-editor::-webkit-scrollbar {
         width: 8px;
         height: 8px;
     }
@@ -28,584 +32,359 @@
 {% endblock %}
 
 {% block content %}
-<div x-data="{ activeTab: '1' }" class="max-w-5xl mx-auto">
-    <!-- Progress top bar -->
-    <nav aria-label="Progress" class="mb-12">
-        <ol class="space-y-4 md:flex md:space-x-8 md:space-y-0" role="list">
-            <li class="md:flex-1">
-                <a aria-current="step"
-                    class="group flex flex-col border-l-4 border-primary py-2 pl-4 md:border-l-0 md:border-t-4 md:pl-0 md:pt-4 md:pb-0"
-                    href="#" @click="activeTab = '1'">
-                    <span class="text-sm font-medium text-primary">Step 1</span>
-                    <span class="text-sm font-medium text-slate-900 dark:text-white">Data &amp; Configuration</span>
-                </a>
-            </li>
-            <li class="md:flex-1">
-                <a class="group flex flex-col border-l-4 border-slate-200 dark:border-slate-700 py-2 pl-4 md:border-l-0 md:border-t-4 md:pl-0 md:pt-4 md:pb-0"
-                    href="#" @click="activeTab = '2'">
-                    <span
-                        class="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300">Step
-                        2</span>
-                    <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Review &amp; Validation</span>
-                </a>
-            </li>
-            <li class="md:flex-1">
-                <a class="group flex flex-col border-l-4 border-slate-200 dark:border-slate-700 py-2 pl-4 md:border-l-0 md:border-t-4 md:pl-0 md:pt-4 md:pb-0"
-                    href="#" @click="activeTab = '3'">
-                    <span
-                        class="text-sm font-medium text-slate-500 dark:text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-300">Step
-                        3</span>
-                    <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Execution</span>
-                </a>
-            </li>
-        </ol>
-    </nav>
+<div
+    x-data="{
+        modelName: 'MLPRegressor',
+        cvEnabled: false,
+        paramGridEnabled: false,
+        uploads: {},
+        isUploaded(id) { return this.uploads[id]?.uploaded === true; },
+        getFileName(id) { return this.uploads[id]?.name || ''; },
+        onFileSelected(event, id) {
+            const input = event && event.target ? event.target : null;
+            const file = input && input.files && input.files[0] ? input.files[0] : null;
+            if (!file) {
+                this.uploads[id] = { uploaded: false, name: '' };
+                return;
+            }
+            this.uploads[id] = { uploaded: true, name: file.name };
+        },
+        isSbiModel() {
+            const selected = this.modelName === '__custom__'
+                ? ((this.$refs.customModelName && this.$refs.customModelName.value) ? this.$refs.customModelName.value.trim() : '')
+                : this.modelName;
+            return ['NPE', 'NLE', 'NRE'].includes(selected);
+        }
+    }"
+    class="max-w-5xl mx-auto"
+>
+    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Inference Training Configuration</h1>
+    <p class="text-slate-600 dark:text-slate-400 mb-8">Configure training and launch a model-training job from uploaded features and parameters.</p>
 
-    <!-- Content tab 1 -->
-    <div x-show="activeTab === '1'" x-cloak>
-        <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Inference Module Configuration</h1>
-        <p class="text-slate-600 dark:text-slate-400 mb-8">Configure your machine learning or SBI model for the inference
-            process.</p>
-        <form class="space-y-8">
-            <section
-                class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
-                    <span
-                        class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">A</span>
-                    Dataset Upload
-                </h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                            Features Data <span class="text-red-500">*</span>
-                        </label>
-                        <div class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-1 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                    <label
-                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                        for="file-upload-x">
-                                        <span>Upload a file</span>
-                                        <input accept=".pkl" class="sr-only" id="file-upload-x" name="file-upload-x"
-                                            type="file" />
-                                    </label>
-                                    <p class="pl-1">or drag and drop</p>
-                                </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    .pkl up to 50MB
-                                </p>
+    <form action="{{ url_for('start_computation_redirect', computation_type='inference_training') }}" method="POST" enctype="multipart/form-data" class="space-y-8">
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">A</span>
+                Dataset Upload
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Features Data <span class="text-red-500">*</span>
+                    </label>
+                    <div onclick="document.getElementById('training-features-file').click()"
+                        class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
+                        <div class="space-y-1 text-center">
+                            <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
+                            <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
+                                <label class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
+                                    for="training-features-file">
+                                    <span>Upload a file</span>
+                                    <input class="sr-only" id="training-features-file" name="training_features_file" type="file" @change="onFileSelected($event, 'training-features-file')" />
+                                </label>
                             </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-500">Any supported dataframe format</p>
                         </div>
-                        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">X matrix of features</p>
                     </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                            Parameters Data <span class="text-red-500">*</span>
-                        </label>
-                        <div
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-1 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">table_chart</span>
-                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                    <label
-                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                        for="file-upload-y">
-                                        <span>Upload a file</span>
-                                        <input accept=".pkl" class="sr-only" id="file-upload-y" name="file-upload-y" type="file" />
-                                    </label>
-                                    <p class="pl-1">or drag and drop</p>
-                                </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    .pkl up to 50MB
-                                </p>
-                            </div>
-                        </div>
-                        <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Matrix or target vector Y (θ)</p>
+                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Features matrix/dataframe (X). If dataframe contains <code>Features</code>, it will be used directly.</p>
+                    <div x-show="isUploaded('training-features-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                        <span class="material-symbols-outlined">check_circle</span>
+                        <span>File uploaded successfully</span>
+                        <span class="font-semibold">(<span x-text="getFileName('training-features-file')"></span>)</span>
                     </div>
                 </div>
-            </section>
-            <section
-                class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
-                    <span
-                        class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">B</span>
-                    Core Setup
-                </h2>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6">
-                    <div class="col-span-1 md:col-span-1">
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="model-type">Model
-                            Type</label>
-                        <select
-                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                            id="model-type" name="model-type">
-                            <optgroup label="Sklearn">
-                                <option>RandomForestRegressor</option>
-                                <option>SVR</option>
-                                <option>MLPRegressor</option>
-                            </optgroup>
-                            <optgroup label="SBI (Simulation-Based Inference)">
-                                <option selected="">NPE (Neural Posterior Estimation)</option>
-                                <option>NLE (Neural Likelihood Estimation)</option>
-                                <option>NRE (Neural Ratio Estimation)</option>
-                            </optgroup>
-                        </select>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Parameters Data <span class="text-red-500">*</span>
+                    </label>
+                    <div onclick="document.getElementById('training-parameters-file').click()"
+                        class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
+                        <div class="space-y-1 text-center">
+                            <span class="material-symbols-outlined text-4xl text-slate-400">table_chart</span>
+                            <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
+                                <label class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
+                                    for="training-parameters-file">
+                                    <span>Upload a file</span>
+                                    <input class="sr-only" id="training-parameters-file" name="training_parameters_file" type="file" @change="onFileSelected($event, 'training-parameters-file')" />
+                                </label>
+                            </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-500">Any supported dataframe format</p>
+                        </div>
                     </div>
+                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Target parameters matrix/vector (Y, θ).</p>
+                    <div x-show="isUploaded('training-parameters-file')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                        <span class="material-symbols-outlined">check_circle</span>
+                        <span>File uploaded successfully</span>
+                        <span class="font-semibold">(<span x-text="getFileName('training-parameters-file')"></span>)</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">B</span>
+                Core Setup
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-model-name">Model</label>
+                    <select
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        id="training-model-name"
+                        name="training_model_name"
+                        x-model="modelName"
+                    >
+                        <optgroup label="Sklearn">
+                            <option value="MLPRegressor">MLPRegressor</option>
+                            <option value="RandomForestRegressor">RandomForestRegressor</option>
+                            <option value="Ridge">Ridge</option>
+                            <option value="SVR">SVR</option>
+                            <option value="LinearRegression">LinearRegression</option>
+                        </optgroup>
+                        <optgroup label="SBI">
+                            <option value="NPE">NPE</option>
+                            <option value="NLE">NLE</option>
+                            <option value="NRE">NRE</option>
+                        </optgroup>
+                        <option value="__custom__">Custom model name...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-model-name-custom">Custom Model Name</label>
+                    <input
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        id="training-model-name-custom"
+                        name="training_model_name_custom"
+                        type="text"
+                        placeholder="e.g., ExtraTreesRegressor"
+                        x-ref="customModelName"
+                        :disabled="modelName !== '__custom__'"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-seed">Random Seed</label>
+                    <input
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        id="training-seed"
+                        name="training_seed"
+                        type="number"
+                        value="0"
+                    />
+                </div>
+                <div class="flex items-center pt-6">
+                    <label class="inline-flex items-center gap-2">
+                        <input class="rounded border-slate-300 text-primary focus:ring-primary" name="training_use_scaler" type="checkbox" value="1" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Scale input features during training</span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">C</span>
+                Training Strategy
+            </h2>
+
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-hyperparams-json">Base Hyperparameters (dict)</label>
+                    <textarea
+                        id="training-hyperparams-json"
+                        name="training_hyperparams_json"
+                        rows="3"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+
+                <div class="flex items-center">
+                    <label class="inline-flex items-center gap-2">
+                        <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_enable_cv" value="1" x-model="cvEnabled" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable cross-validation / repeated CV</span>
+                    </label>
+                </div>
+                <p class="text-xs text-slate-500 dark:text-slate-400" x-show="!cvEnabled">
+                    Direct training mode: model is trained once on the full (or subsampled) dataset without CV.
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="cvEnabled" x-cloak>
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="random-seed">Random
-                            Seed</label>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-splits">CV Splits (n_splits)</label>
                         <input
+                            id="training-n-splits"
+                            name="training_n_splits"
+                            type="number"
+                            min="2"
+                            value="10"
                             class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                            id="random-seed" name="random-seed" type="number" value="0" />
+                        />
                     </div>
-                    <div class="col-span-1 md:col-span-2 flex items-center">
-                        <button aria-checked="false"
-                            class="bg-slate-200 dark:bg-slate-700 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                            role="switch" type="button">
-                            <span class="sr-only">Scale Data</span>
-                            <span aria-hidden="true"
-                                class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                        </button>
-                        <span class="ml-3 text-sm font-medium text-slate-900 dark:text-slate-200">Scale Data</span>
-                    </div>
-                </div>
-            </section>
-            <section
-                class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
-                    <span
-                        class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">C</span>
-                    Model Hyperparameters
-                </h2>
-                <div class="space-y-6">
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
-                            for="base-hyperparams">Base Hyperparameters (JSON)</label>
-                        <div class="relative">
-                            <textarea
-                                class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                                id="base-hyperparams" name="base-hyperparams" rows="4">{"n_estimators": 100, "max_depth": 5}</textarea>
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2 border-t border-slate-100 dark:border-slate-700">
-                        <div class="col-span-1 md:col-span-2">
-                            <p class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">SBI Specific
-                                Settings</p>
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                for="prior-min">Prior Minimum</label>
-                            <input
-                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                id="prior-min" name="prior-min" placeholder="0.0" step="any" type="number" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                for="prior-max">Prior Maximum</label>
-                            <input
-                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                id="prior-max" name="prior-max" placeholder="1.0" step="any" type="number" />
-                        </div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-repeats">CV Repeats (n_repeats)</label>
+                        <input
+                            id="training-n-repeats"
+                            name="training_n_repeats"
+                            type="number"
+                            min="1"
+                            value="10"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
                     </div>
                 </div>
-            </section>
-            <details
-                class="group bg-white dark:bg-slate-800/50 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                <summary
-                    class="p-6 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/80 transition-colors flex justify-between items-center list-none">
-                    <h2 class="text-lg font-semibold text-slate-900 dark:text-white flex items-center">
-                        <span
-                            class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">D</span>
-                        Advanced Options
-                    </h2>
-                    <span
-                        class="material-symbols-outlined text-slate-400 group-hover:text-slate-600 dark:group-hover:text-slate-200 transform transition-transform group-open:rotate-180">expand_more</span>
-                </summary>
-                <!-- Content that shows when unfolding -->
-                <div class="px-6 pb-6 pt-0 border-t border-slate-100 dark:border-slate-700">
-                    <div class="mt-6" x-data="{ gridEnabled: false }">
-                        <div class="flex items-center mb-6">
-                            <button @click="gridEnabled = !gridEnabled"
-                                :class="gridEnabled ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'"
-                                :aria-checked="gridEnabled"
-                                class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
-                                role="switch" 
-                                type="button">
-                                <span class="sr-only">Enable Grid Search</span>
-                                <span aria-hidden="true"
-                                    :class="gridEnabled ? 'translate-x-5' : 'translate-x-0'"
-                                    class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                            </button>
-                            <span class="ml-3 text-sm font-medium text-slate-900 dark:text-slate-200">Enable Grid Search</span>
-                        </div>
-                        
-                        <!-- Conditional content showed if gridEnabled is true -->
-                        <div x-show="gridEnabled" class="space-y-6 pl-2 border-l-2 border-slate-100 dark:border-slate-700 ml-5">
-                            <div>
-                                <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
-                                    for="param-grid">Parameter Grid (JSON)</label>
-                                <textarea
-                                    class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                                    id="param-grid" name="param-grid" rows="3">{"n_estimators": [50, 100], "max_depth": [3, 5]}</textarea>
-                            </div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                        for="num-splits">Number of Splits</label>
-                                    <input
-                                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                        id="num-splits" name="num-splits" type="number" value="10" />
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                        for="num-repeats">Number of Repeats</label>
-                                    <input
-                                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                        id="num-repeats" name="num-repeats" type="number" value="10" />
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </details>
 
-            <section
-                class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700 border-l-4 border-l-primary/50">
-                <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
-                    <span
-                        class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">E</span>
-                    SBI Configuration
-                    <span
-                        class="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-primary/10 text-primary border border-primary/20">NPE
-                        / NLE / NRE Active</span>
-                </h2>
-                <div class="space-y-6">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2"
-                            for="training-params">Training Parameters (JSON)</label>
-                        <textarea
-                            class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                            id="training-params" name="training-params" rows="3">{"max_num_epochs": 50}</textarea>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                for="eval-posterior">Eval Posterior Samples</label>
-                            <input
-                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                id="eval-posterior" name="eval-posterior" type="number" value="2000" />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300"
-                                for="eval-batch">Eval Batch Size</label>
-                            <input
-                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                                id="eval-batch" name="eval-batch" type="number" value="256" />
-                        </div>
-                    </div>
-                </div>
-            </section>
-        </div>
-
-        <!-- Content tab 2 -->
-        <div x-show="activeTab === '2'" x-cloak>
-            <div class="flex justify-between items-end mb-8">
                 <div>
-                    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Training Execution</h1>
-                    <p class="text-slate-600 dark:text-slate-400">Monitor the progress of your model training.</p>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-subsample-percent">Random Subsample (%)</label>
+                    <input
+                        id="training-subsample-percent"
+                        name="training_subsample_percent"
+                        type="number"
+                        min="0.1"
+                        max="100"
+                        step="0.1"
+                        placeholder="100 (default)"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Randomly samples this percentage of rows before training.</p>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <span class="relative flex h-3 w-3">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-3 w-3 bg-primary"></span>
-                    </span>
-                    <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Running</span>
-                </div>
-            </div>
-            <div class="space-y-8">
-                <section class="bg-slate-900 rounded-lg shadow-lg border border-slate-700 overflow-hidden flex flex-col h-[500px]">
-                    <div class="flex items-center justify-between px-4 py-3 bg-slate-800 border-b border-slate-700">
-                        <div class="flex items-center space-x-2">
-                            <span class="material-symbols-outlined text-slate-400 text-sm">terminal</span>
-                            <span class="text-xs font-mono text-slate-300">console-output.log</span>
-                        </div>
-                        <div class="flex space-x-1.5">
-                            <div class="w-3 h-3 rounded-full bg-red-500/20 border border-red-500/50"></div>
-                            <div class="w-3 h-3 rounded-full bg-yellow-500/20 border border-yellow-500/50"></div>
-                            <div class="w-3 h-3 rounded-full bg-green-500/20 border border-green-500/50"></div>
-                        </div>
-                    </div>
-                    <div class="flex-grow p-4 font-mono text-sm overflow-y-auto console-scroll bg-[#0f172a] text-slate-300">
-                        <div class="space-y-1">
-                            <div class="text-slate-500 text-xs mb-2">2023-10-27 10:42:01</div>
-                            <div class="flex">
-                                <span class="text-green-500 mr-2">✓</span>
-                                <span>Initializing inference environment...</span>
-                            </div>
-                            <div class="flex">
-                                <span class="text-green-500 mr-2">✓</span>
-                                <span>Loaded features data (shape: 1000x50)</span>
-                            </div>
-                            <div class="flex">
-                                <span class="text-green-500 mr-2">✓</span>
-                                <span>Loaded parameters data (shape: 1000x3)</span>
-                            </div>
-                            <div class="flex">
-                                <span class="text-blue-400 mr-2">ℹ</span>
-                                <span>Starting hyperparameter search with cross-validation...</span>
-                            </div>
-                            <br />
-                            <div class="text-slate-400 pl-4 border-l-2 border-slate-700">
-                                <div>[CV] Evaluating params: {'n_estimators': 100, 'max_depth': 5}...</div>
-                                <div>[CV] Fold 1/10 completed. Score: 0.852</div>
-                                <div>[CV] Fold 2/10 completed. Score: 0.849</div>
-                                <div>[CV] Fold 3/10 completed. Score: 0.861</div>
-                                <div>[CV] Fold 4/10 in progress...</div>
-                            </div>
-                            <br />
-                            <div class="flex items-center text-primary blink-cursor">
-                                <span class="mr-2">➜</span>
-                                <span>Processing...</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div
-                        class="bg-slate-800 px-4 py-2 border-t border-slate-700 flex justify-between items-center text-xs text-slate-400">
-                        <span>Memory Usage: 4.2 GB / 16 GB</span>
-                        <span>CPU: 45%</span>
-                    </div>
-                </section>
-                <section
-                    class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                    <div class="flex flex-col sm:flex-row justify-between items-center gap-4">
-                        <div>
-                            <h3 class="text-lg font-medium text-slate-900 dark:text-white">Process Control</h3>
-                            <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                                You can stop the current training process. Partial results may not be saved.
-                            </p>
-                        </div>
-                        <button
-                            class="flex items-center justify-center px-4 py-2 border border-red-200 dark:border-red-900/30 text-sm font-medium rounded-md text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/10 hover:bg-red-100 dark:hover:bg-red-900/20 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors w-full sm:w-auto"
-                            type="button">
-                            <span class="material-symbols-outlined mr-2 text-lg">cancel</span>
-                            Cancel Training
-                        </button>
-                    </div>
-                    <div class="mt-6 relative pt-1">
-                        <div class="flex mb-2 items-center justify-between">
-                            <div>
-                                <span
-                                    class="text-xs font-semibold inline-block py-1 px-2 uppercase rounded-full text-primary bg-primary/10">
-                                    Progress
-                                </span>
-                            </div>
-                            <div class="text-right">
-                                <span class="text-xs font-semibold inline-block text-primary">
-                                    34%
-                                </span>
-                            </div>
-                        </div>
-                        <div class="overflow-hidden h-2 mb-4 text-xs flex rounded bg-slate-100 dark:bg-slate-700">
-                            <div class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center bg-primary transition-all duration-500"
-                                style="width: 34%"></div>
-                        </div>
-                    </div>
-                </section>
-            </div>
-        </div>
 
-        <!-- Content tab 3 -->
-        <div x-show="activeTab === '3'" x-cloak>
-            <div class="flex justify-between items-end mb-8">
+                <div class="flex items-center">
+                    <label class="inline-flex items-center gap-2">
+                        <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_enable_param_grid" value="1" x-model="paramGridEnabled" :disabled="!cvEnabled" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable hyperparameter search (param_grid)</span>
+                    </label>
+                </div>
+                <div x-show="cvEnabled && paramGridEnabled" x-cloak>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-param-grid-json">Parameter Grid (dict of lists or list of dicts)</label>
+                    <textarea
+                        id="training-param-grid-json"
+                        name="training_param_grid_json"
+                        rows="4"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                        placeholder="e.g. {'n_estimators': [100, 300], 'max_depth': [5, 10]}"
+                    ></textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700" x-show="isSbiModel()" x-cloak>
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">D</span>
+                SBI Settings
+            </h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Training Complete</h1>
-                    <p class="text-slate-600 dark:text-slate-400">Review the performance metrics and download the trained model
-                        artifacts.</p>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-prior-low">Prior Low</label>
+                    <input
+                        id="training-sbi-prior-low"
+                        name="training_sbi_prior_low"
+                        type="text"
+                        placeholder="0 or [0, 0, 0]"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
                 </div>
-                <div class="flex items-center space-x-2">
-                    <span class="flex h-3 w-3">
-                        <span class="relative inline-flex rounded-full h-3 w-3 bg-green-500"></span>
-                    </span>
-                    <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Finished Successfully</span>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-prior-high">Prior High</label>
+                    <input
+                        id="training-sbi-prior-high"
+                        name="training_sbi_prior_high"
+                        type="text"
+                        placeholder="1 or [1, 1, 1]"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-estimator">Estimator</label>
+                    <select
+                        id="training-sbi-estimator"
+                        name="training_sbi_estimator"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    >
+                        <option value="nsf">nsf</option>
+                        <option value="maf">maf</option>
+                        <option value="mdn">mdn</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">CV Posterior Samples</label>
+                    <input
+                        id="training-sbi-eval-num"
+                        name="training_sbi_eval_num_posterior_samples"
+                        type="number"
+                        min="1"
+                        value="2000"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">CV Eval Batch Size</label>
+                    <input
+                        id="training-sbi-eval-batch"
+                        name="training_sbi_eval_batch_size"
+                        type="number"
+                        min="1"
+                        value="256"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs (dict)</label>
+                    <textarea
+                        id="training-sbi-estimator-kwargs"
+                        name="training_sbi_estimator_kwargs_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs (dict)</label>
+                    <textarea
+                        id="training-sbi-inference-kwargs"
+                        name="training_sbi_inference_kwargs_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs (dict)</label>
+                    <textarea
+                        id="training-sbi-build-posterior-kwargs"
+                        name="training_sbi_build_posterior_kwargs_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train params (dict)</label>
+                    <textarea
+                        id="training-sbi-train-params"
+                        name="training_sbi_train_params_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{"max_num_epochs": 50}</textarea>
                 </div>
             </div>
-            <div class="space-y-8">
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div
-                        class="md:col-span-1 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-6 flex flex-col justify-center items-center text-center relative overflow-hidden">
-                        <div class="absolute top-0 right-0 p-4 opacity-10">
-                            <span class="material-symbols-outlined text-8xl text-primary">analytics</span>
-                        </div>
-                        <p class="text-sm font-medium text-slate-500 dark:text-slate-400 mb-1 z-10">Best CV MSE</p>
-                        <div class="text-4xl font-bold text-slate-900 dark:text-white mb-2 z-10 tracking-tight">0.01456</div>
-                        <div
-                            class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 z-10">
-                            <span class="material-symbols-outlined text-[14px] mr-1">trending_down</span>
-                            -12.4% vs Baseline
-                        </div>
-                    </div>
-                    <div
-                        class="md:col-span-2 bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 p-6">
-                        <h3 class="text-lg font-medium text-slate-900 dark:text-white mb-4 flex items-center">
-                            <span class="material-symbols-outlined mr-2 text-primary">tune</span>
-                            Best Parameters
-                        </h3>
-                        <div
-                            class="bg-slate-50 dark:bg-slate-900/50 rounded-md border border-slate-200 dark:border-slate-700 overflow-hidden">
-                            <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
-                                <thead class="bg-slate-100 dark:bg-slate-800">
-                                    <tr>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider"
-                                            scope="col">Hyperparameter</th>
-                                        <th class="px-6 py-3 text-left text-xs font-medium text-slate-500 dark:text-slate-400 uppercase tracking-wider"
-                                            scope="col">Optimal Value</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
-                                            n_estimators</td>
-                                        <td
-                                            class="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400 font-mono">
-                                            150</td>
-                                    </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
-                                            max_depth</td>
-                                        <td
-                                            class="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400 font-mono">
-                                            8</td>
-                                    </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
-                                            learning_rate</td>
-                                        <td
-                                            class="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400 font-mono">
-                                            0.05</td>
-                                    </tr>
-                                    <tr>
-                                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900 dark:text-white">
-                                            subsample</td>
-                                        <td
-                                            class="px-6 py-4 whitespace-nowrap text-sm text-slate-500 dark:text-slate-400 font-mono">
-                                            0.8</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-                <div
-                    class="bg-white dark:bg-slate-800 rounded-lg shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-                    <div class="p-6 border-b border-slate-200 dark:border-slate-700">
-                        <h3 class="text-lg font-medium text-slate-900 dark:text-white">Download Artifacts</h3>
-                        <p class="text-sm text-slate-500 dark:text-slate-400 mt-1">Download the generated model files for deployment
-                            or local testing.</p>
-                    </div>
-                    <div class="divide-y divide-slate-200 dark:divide-slate-700">
-                        <div
-                            class="p-4 sm:px-6 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                            <div class="flex items-center space-x-4">
-                                <div
-                                    class="flex-shrink-0 h-10 w-10 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400">
-                                    <span class="material-symbols-outlined">model_training</span>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-slate-900 dark:text-white">model.pkl</p>
-                                    <p class="text-xs text-slate-500 dark:text-slate-400">Trained XGBoost model instance • 45.2 MB
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                class="flex items-center px-3 py-1.5 border border-slate-300 dark:border-slate-600 shadow-sm text-sm font-medium rounded text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
-                                <span class="material-symbols-outlined text-sm mr-2">download</span>
-                                Download
-                            </button>
-                        </div>
-                        <div
-                            class="p-4 sm:px-6 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                            <div class="flex items-center space-x-4">
-                                <div
-                                    class="flex-shrink-0 h-10 w-10 rounded-lg bg-purple-100 dark:bg-purple-900/30 flex items-center justify-center text-purple-600 dark:text-purple-400">
-                                    <span class="material-symbols-outlined">straighten</span>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-slate-900 dark:text-white">scaler.pkl</p>
-                                    <p class="text-xs text-slate-500 dark:text-slate-400">StandardScaler object for feature
-                                        normalization • 12 KB</p>
-                                </div>
-                            </div>
-                            <button
-                                class="flex items-center px-3 py-1.5 border border-slate-300 dark:border-slate-600 shadow-sm text-sm font-medium rounded text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
-                                <span class="material-symbols-outlined text-sm mr-2">download</span>
-                                Download
-                            </button>
-                        </div>
-                        <div
-                            class="p-4 sm:px-6 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                            <div class="flex items-center space-x-4">
-                                <div
-                                    class="flex-shrink-0 h-10 w-10 rounded-lg bg-orange-100 dark:bg-orange-900/30 flex items-center justify-center text-orange-600 dark:text-orange-400">
-                                    <span class="material-symbols-outlined">query_stats</span>
-                                </div>
-                                <div>
-                                    <p class="text-sm font-medium text-slate-900 dark:text-white">density_estimator.pkl</p>
-                                    <p class="text-xs text-slate-500 dark:text-slate-400">Density estimator for uncertainty
-                                        quantification • 2.1 MB</p>
-                                </div>
-                            </div>
-                            <button
-                                class="flex items-center px-3 py-1.5 border border-slate-300 dark:border-slate-600 shadow-sm text-sm font-medium rounded text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
-                                <span class="material-symbols-outlined text-sm mr-2">download</span>
-                                Download
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        </section>
 
-
-        <!-- Navigation buttons -->
         <div class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
-            <!-- Previous/Return Button -->
-            <template x-if="activeTab === '1'">
-                <a href="{{ url_for('dashboard') }}"
-                    class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
-                    <span class="material-symbols-outlined">arrow_back</span>
-                    Return to ncpi dashboard
-                </a>
-            </template>
-            <template x-if="activeTab !== '1'">
-                <button
-                    @click="if (activeTab === '2') { activeTab = '1' } else if (activeTab === '3') { activeTab = '2' }"
-                    class="px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/80 bg-transparent rounded-lg hover:bg-gray-100 dark:hover:bg-white/10 border border-border-light dark:border-white/20">Back
-                    step</button>
-            </template>
-
-            <!-- Next/Continue Button -->
-            <template x-if="activeTab === '1'">
-                <button type="submit" form=""
-                    @click="activeTab = '2'"
-                    class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
-                    Train
-                    <span class="material-symbols-outlined">arrow_forward</span>
-                </button>
-            </template>
-            <template x-if="activeTab === '2'">
-                <button
-                    @click="activeTab = '3'"
-                    class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">Next
-                    step</button>
-            </template>
+            <a href="{{ url_for('inference') }}"
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                <span class="material-symbols-outlined">arrow_back</span>
+                Back to Inference
+            </a>
+            <button type="submit"
+                class="flex items-center justify-center gap-2 py-2.5 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                Start Training
+                <span class="material-symbols-outlined">play_arrow</span>
+            </button>
         </div>
     </form>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<!-- Menu tab navigation -->
-<script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<!-- Handle of file uploads script -->
-<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+{{ super() }}
 {% endblock %}

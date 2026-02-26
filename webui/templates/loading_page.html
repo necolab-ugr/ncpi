@@ -8,11 +8,12 @@
     'field_potential_kernel': 'CDM/LFP',
     'field_potential_meeg': 'Field Potential M/EEG',
     'features': 'Features',
-    'inference': 'Inference',
+    'inference_training': 'Inference Training',
+    'inference': 'Predictions',
     'analysis': 'Analysis'
 } %}
 {% set computation_label = label_map.get(computation_type, computation_type.replace('_', ' ')|title) %}
-{% set completion_title = 'Features Computed' if computation_type == 'features' else 'Computation Complete!' %}
+{% set completion_title = 'Features Computed' if computation_type == 'features' else ('Training Complete' if computation_type == 'inference_training' else ('Predictions Computed' if computation_type == 'inference' else 'Computation Complete!')) %}
 {% set is_pending = pending if pending is not none else false %}
 
 <div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}', {{ is_pending | tojson }})">
@@ -50,7 +51,7 @@
             </p>
         </div>
     </div>
-    {% if computation_type in ['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'features'] %}
+    {% if computation_type in ['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'features', 'inference', 'inference_training'] %}
     <div class="w-full max-w-2xl mt-6">
         <div class="flex items-center justify-between text-xs text-text-light-secondary dark:text-[#929bc9] mb-2">
             <span class="font-semibold lowercase tracking-wide">ncpi output</span>
@@ -87,6 +88,16 @@
         <a x-show="!pending && progress >= 100" href="{{url_for('inference')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Inference
+        </a>
+        {% elif computation_type == 'inference_training' %}
+        <a x-show="!pending && progress >= 100" href="{{url_for('compute_predictions')}}"
+            class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+            Continue to Compute Predictions
+        </a>
+        {% elif computation_type == 'inference' %}
+        <a x-show="!pending && progress >= 100" href="{{url_for('analysis')}}"
+            class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+            Continue to Analysis
         </a>
         {% else %}
         <button :disabled="pending || progress < 100 || hasBeenClicked"

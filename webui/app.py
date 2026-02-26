@@ -190,20 +190,182 @@ def _field_potential_dirs():
 
 
 def _features_data_dir(create=False):
-    path = os.path.join(tempfile.gettempdir(), "features_data")
+    path = os.path.realpath("/tmp/features_data")
     if create:
         os.makedirs(path, exist_ok=True)
     return path
 
 
+def _predictions_data_dir(create=False):
+    path = os.path.realpath("/tmp/predictions_data")
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _features_data_candidate_dirs():
+    raw_paths = [
+        "/tmp/features_data",
+        os.path.join(tempfile.gettempdir(), "features_data"),
+        os.path.join(_tempdir, "features_data"),
+        "/home/necolab/tmp/features_data",
+    ]
+    seen = set()
+    candidates = []
+    for raw_path in raw_paths:
+        if not raw_path:
+            continue
+        path = os.path.realpath(os.path.expanduser(raw_path))
+        if path in seen:
+            continue
+        seen.add(path)
+        candidates.append(path)
+    return candidates
+
+
+def _sync_features_data_from_candidates():
+    primary = os.path.realpath(_features_data_dir(create=True))
+    for candidate_dir in _features_data_candidate_dirs():
+        if candidate_dir == primary:
+            continue
+        if not os.path.isdir(candidate_dir):
+            continue
+        try:
+            names = os.listdir(candidate_dir)
+        except OSError:
+            continue
+        for name in names:
+            if not (name.endswith(".pkl") or name.endswith(".pickle")):
+                continue
+            src = os.path.join(candidate_dir, name)
+            if not os.path.isfile(src):
+                continue
+            dst = os.path.join(primary, name)
+            should_copy = False
+            if not os.path.isfile(dst):
+                should_copy = True
+            else:
+                try:
+                    should_copy = os.path.getmtime(src) > os.path.getmtime(dst)
+                except OSError:
+                    should_copy = False
+            if should_copy:
+                try:
+                    shutil.copy2(src, dst)
+                except OSError:
+                    continue
+
+
 def _list_features_data_files():
+    _sync_features_data_from_candidates()
     features_dir = _features_data_dir(create=False)
     if not os.path.isdir(features_dir):
         return []
-    return sorted(
-        f for f in os.listdir(features_dir)
-        if (f.endswith(".pkl") or f.endswith(".pickle")) and os.path.isfile(os.path.join(features_dir, f))
-    )
+    files = []
+    for root, _, names in os.walk(features_dir):
+        for name in names:
+            lower = name.lower()
+            if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                continue
+            abs_path = os.path.join(root, name)
+            if not os.path.isfile(abs_path):
+                continue
+            rel_path = os.path.relpath(abs_path, features_dir)
+            files.append(rel_path)
+    return sorted(files)
+
+
+def _bootstrap_features_data_from_previous_steps():
+    """
+    Ensure inference can auto-detect features from earlier steps.
+    If features_data folder is empty, try to recover the latest persisted features
+    output from completed features jobs and copy it into features_data.
+    """
+    if _list_features_data_files():
+        return False
+
+    candidates = []
+    for status in job_status.values():
+        if not isinstance(status, dict):
+            continue
+        candidate = status.get("dashboard_features_path")
+        if not candidate:
+            continue
+        if not os.path.isfile(candidate):
+            continue
+        ext = Path(candidate).suffix.lower()
+        if ext not in {".pkl", ".pickle"}:
+            continue
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            continue
+        candidates.append((mtime, candidate))
+
+    if not candidates:
+        return False
+
+    _, src_path = max(candidates, key=lambda item: item[0])
+    features_dir = _features_data_dir(create=True)
+    dst_name = os.path.basename(src_path)
+    dst_path = os.path.join(features_dir, dst_name)
+
+    # Avoid noisy copy errors if source and destination are already the same.
+    if os.path.realpath(src_path) != os.path.realpath(dst_path):
+        shutil.copy2(src_path, dst_path)
+    return True
+
+
+def _list_predictions_data_files():
+    predictions_dir = _predictions_data_dir(create=False)
+    if not os.path.isdir(predictions_dir):
+        return []
+    files = []
+    for root, _, names in os.walk(predictions_dir):
+        for name in names:
+            lower = name.lower()
+            if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                continue
+            abs_path = os.path.join(root, name)
+            if not os.path.isfile(abs_path):
+                continue
+            rel_path = os.path.relpath(abs_path, predictions_dir)
+            files.append(rel_path)
+    return sorted(files)
+
+
+def _bootstrap_predictions_data_from_previous_steps():
+    if _list_predictions_data_files():
+        return False
+
+    candidates = []
+    for status in job_status.values():
+        if not isinstance(status, dict):
+            continue
+        candidate = status.get("dashboard_predictions_path")
+        if not candidate:
+            continue
+        if not os.path.isfile(candidate):
+            continue
+        ext = Path(candidate).suffix.lower()
+        if ext not in {".pkl", ".pickle"}:
+            continue
+        try:
+            mtime = os.path.getmtime(candidate)
+        except OSError:
+            continue
+        candidates.append((mtime, candidate))
+
+    if not candidates:
+        return False
+
+    _, src_path = max(candidates, key=lambda item: item[0])
+    predictions_dir = _predictions_data_dir(create=True)
+    dst_name = os.path.basename(src_path)
+    dst_path = os.path.join(predictions_dir, dst_name)
+    if os.path.realpath(src_path) != os.path.realpath(dst_path):
+        shutil.copy2(src_path, dst_path)
+    return True
 
 
 def _collect_empirical_folder_files(folder_path):
@@ -223,6 +385,37 @@ def _collect_empirical_folder_files(folder_path):
     if not matches:
         raise ValueError(f"No supported empirical files found in folder: {root}")
     return matches
+
+
+def _collect_simulation_folder_files(folder_path):
+    root = os.path.realpath((folder_path or "").strip())
+    if not root:
+        raise ValueError("Provide a folder path for simulation outputs.")
+    if not os.path.isdir(root):
+        raise ValueError(f"Simulation outputs folder does not exist: {root}")
+
+    matches = []
+    for current_root, _, files in os.walk(root):
+        for name in files:
+            ext = Path(name).suffix.lower()
+            if ext in FEATURES_PARSER_FILE_EXTENSIONS:
+                matches.append(os.path.join(current_root, name))
+    matches.sort()
+    if not matches:
+        raise ValueError(f"No supported simulation output files found in folder: {root}")
+    return matches
+
+
+def _validate_simulation_file_path(file_path):
+    candidate = os.path.realpath((file_path or "").strip())
+    if not candidate:
+        raise ValueError("Provide a simulation output file path.")
+    if not os.path.isfile(candidate):
+        raise ValueError(f"Simulation output file does not exist: {candidate}")
+    ext = Path(candidate).suffix.lower()
+    if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+        raise ValueError(f"Unsupported simulation output file extension: {ext}")
+    return candidate
 
 
 def _collect_feature_pipeline_inputs():
@@ -858,6 +1051,9 @@ def _describe_parser_source(path):
             "data": _pick_field_guess(columns, ["data", "signal", "proxy", "cdm"]),
             "fs": _pick_field_guess(columns, ["fs", "sfreq", "sampling_rate"]),
             "ch_names": _pick_field_guess(columns, ["ch_names", "channels", "channel", "sensor"]),
+            "recording_type": _pick_field_guess(columns, ["recording_type", "modality", "recording", "type"]),
+            "subject_id": _pick_field_guess(columns, ["subject_id", "subject", "subj", "participant"]),
+            "group": _pick_field_guess(columns, ["group", "cohort", "class"]),
         }
         if fs_hint_hz is None and defaults["fs"] and defaults["fs"] in source_obj.columns:
             fs_series = pd.to_numeric(source_obj[defaults["fs"]], errors="coerce").dropna()
@@ -902,7 +1098,14 @@ def _describe_parser_source(path):
         return {
             "source_type": "ndarray",
             "candidate_fields": ["__self__"],
-            "defaults": {"data": "__self__", "fs": "", "ch_names": ""},
+            "defaults": {
+                "data": "__self__",
+                "fs": "",
+                "ch_names": "",
+                "recording_type": "",
+                "subject_id": "",
+                "group": "",
+            },
             "summary": f"NumPy array with shape {list(source_obj.shape)}.",
             "sensor_count_estimate": sensor_count,
             "multi_sensor_detected": bool(sensor_count and sensor_count > 1),
@@ -915,6 +1118,9 @@ def _describe_parser_source(path):
         "data": _pick_field_guess(candidate_fields, ["data", "signal", "lfp", "cdm"]),
         "fs": _pick_field_guess(candidate_fields, ["fs", "sfreq", "sampling_rate"]),
         "ch_names": _pick_field_guess(candidate_fields, ["ch_names", "channels", "channel_names"]),
+        "recording_type": _pick_field_guess(candidate_fields, ["recording_type", "modality", "recording", "type"]),
+        "subject_id": _pick_field_guess(candidate_fields, ["subject_id", "subject", "subj", "participant"]),
+        "group": _pick_field_guess(candidate_fields, ["group", "cohort", "class"]),
     }
 
     if isinstance(source_obj, dict):
@@ -975,23 +1181,84 @@ def _build_parse_config_from_form(form):
             raise ValueError("Aggregate method must be one of: sum, mean, median.")
         aggregate_labels = _parse_aggregate_labels(form.get("parser_aggregate_labels"))
 
-    if data_source_kind == "pipeline":
-        fs_manual = _optional_float(form.get("parser_fs_manual"))
+    fs_locator = (form.get("parser_fs_locator") or "").strip() or None
+    fs_source = (form.get("parser_fs_source") or "").strip()
+    fs_manual = _optional_float(form.get("parser_fs_manual"))
+    if fs_source == "__numeric__":
         if fs_manual is None:
-            raise ValueError("Sampling frequency is required for pipeline data.")
-        sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
-        recording_type = (form.get("parser_recording_type") or "LFP").strip() or "LFP"
+            # Defensive fallback for duplicated/hidden form controls:
+            # if a locator is present, prefer it; for empirical sources allow missing fs.
+            if fs_locator:
+                fs_value = fs_locator
+            elif data_source_kind == "new-empirical":
+                fs_value = None
+            else:
+                raise ValueError("Sampling frequency numeric value is required when source is set to numeric.")
+        else:
+            fs_value = float(fs_manual)
+    elif fs_source == "__none__":
+        fs_value = None
+    elif fs_source:
+        fs_value = fs_source
+    else:
+        # Backward-compatible fallback for old forms.
+        if fs_locator and fs_manual is not None:
+            raise ValueError("Sampling frequency locator and numeric value are mutually exclusive.")
+        if fs_locator:
+            fs_value = fs_locator
+        elif fs_manual is not None:
+            fs_value = float(fs_manual)
+        else:
+            raise ValueError("Sampling frequency is required (field, numeric value, or None).")
+
+    recording_type_source = (form.get("parser_recording_type_source") or "").strip()
+    recording_type_locator = (form.get("parser_recording_type_locator") or "").strip() or None
+    recording_type = (form.get("parser_recording_type") or "").strip()
+    subject_id_locator = (form.get("parser_subject_id_locator") or "").strip() or None
+    group_locator = (form.get("parser_group_locator") or "").strip() or None
+    if recording_type_source == "__value__":
+        recording_type_value = recording_type or "LFP"
+    elif recording_type_source == "__none__":
+        recording_type_value = None
+    elif recording_type_source:
+        recording_type_value = recording_type_source
+    else:
+        # Backward-compatible fallback for old forms.
+        if recording_type_locator and recording_type:
+            raise ValueError("Recording type locator and recording type value are mutually exclusive.")
+        recording_type = recording_type or "LFP"
+        recording_type_value = recording_type_locator if recording_type_locator else recording_type
+
+    sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
+    ch_names_source = (form.get("parser_ch_names_source") or "").strip()
+    ch_names_locator = (form.get("parser_ch_names_locator") or "").strip() or None
+    if ch_names_source == "__manual__":
+        if sensor_names is None:
+            raise ValueError("Provide manual channel names when channel names source is set to manual.")
+        ch_names_value = sensor_names
+    elif ch_names_source == "__autocomplete__":
+        ch_names_value = None
+    elif ch_names_source == "__none__":
+        ch_names_value = None
+    elif ch_names_source:
+        ch_names_value = ch_names_source
+    else:
+        # Backward-compatible fallback for old forms.
+        ch_names_value = sensor_names if sensor_names is not None else ch_names_locator
+
+    if data_source_kind in {"pipeline", "new-simulation"}:
+        metadata = {
+            "subject_id": 0,
+            "group": "simulation",
+            "species": "simulated",
+            "condition": "simulation_pipeline",
+            "recording_type": recording_type_value,
+        }
         fields = CanonicalFields(
             data=data_locator,
-            fs=float(fs_manual),
-            ch_names=sensor_names,
-            metadata={
-                "subject_id": 0,
-                "group": "simulation",
-                "species": "simulated",
-                "condition": "simulation_pipeline",
-                "recording_type": recording_type,
-            },
+            fs=fs_value,
+            ch_names=ch_names_value,
+            metadata=metadata,
         )
         return ParseConfig(
             fields=fields,
@@ -1003,16 +1270,22 @@ def _build_parse_config_from_form(form):
             aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
         )
 
-    fs_locator = (form.get("parser_fs_locator") or "").strip() or None
-    ch_names_locator = (form.get("parser_ch_names_locator") or "").strip() or None
     table_layout = (form.get("parser_table_layout") or "").strip().lower() or None
     if table_layout not in {None, "wide", "long"}:
         raise ValueError("Invalid table layout. Use 'wide' or 'long'.")
 
+    metadata = {"recording_type": recording_type_value}
+    if data_source_kind == "new-empirical":
+        if subject_id_locator:
+            metadata["subject_id"] = "file_ID" if subject_id_locator == "__file_id__" else subject_id_locator
+        if group_locator:
+            metadata["group"] = group_locator
+
     fields = CanonicalFields(
         data=data_locator,
-        fs=fs_locator,
-        ch_names=ch_names_locator,
+        fs=fs_value,
+        ch_names=ch_names_value,
+        metadata=metadata,
         table_layout=table_layout,
         long_time_col=(form.get("parser_long_time_col") or "").strip() or None,
         long_channel_col=(form.get("parser_long_channel_col") or "").strip() or None,
@@ -1370,6 +1643,8 @@ def dashboard():
     else:
         analysis_data_files = []
     features_data_files = _list_features_data_files()
+    _bootstrap_predictions_data_from_previous_steps()
+    predictions_data_files = _list_predictions_data_files()
     return render_template(
         "0.dashboard.html",
         simulation_pkl_files=simulation_pkl_files,
@@ -1378,6 +1653,8 @@ def dashboard():
         has_field_potential_data=bool(field_potential_files),
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
+        predictions_data_files=predictions_data_files,
+        has_predictions_data=bool(predictions_data_files),
         analysis_data_files=analysis_data_files,
         has_analysis_data=bool(analysis_data_files),
     )
@@ -1464,6 +1741,22 @@ def clear_features_data():
             if not (name.endswith(".pkl") or name.endswith(".pickle")):
                 continue
             path = os.path.join(features_data_dir, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+    return redirect(url_for('dashboard'))
+
+
+@app.route("/clear_predictions_data", methods=["POST"])
+def clear_predictions_data():
+    predictions_data_dir = _predictions_data_dir(create=False)
+    if os.path.isdir(predictions_data_dir):
+        for name in os.listdir(predictions_data_dir):
+            if not (name.endswith(".pkl") or name.endswith(".pickle")):
+                continue
+            path = os.path.join(predictions_data_dir, name)
             if os.path.isfile(path):
                 try:
                     os.remove(path)
@@ -1921,25 +2214,38 @@ def features_browse_dirs():
 
 @app.route("/features/select_folder", methods=["POST"])
 def features_select_folder():
-    # Opens a native folder picker on the machine running the Flask server.
+    # Opens a native path picker on the machine running the Flask server.
     # This is intended for local desktop usage.
+    mode = (request.form.get("mode") or "folder").strip().lower()
     if shutil.which("zenity"):
         try:
+            cmd = ["zenity", "--file-selection"]
+            if mode == "folder":
+                cmd.extend(["--directory", "--title=Select data folder"])
+            else:
+                cmd.extend(["--title=Select data file"])
             proc = subprocess.run(
-                ["zenity", "--file-selection", "--directory", "--title=Select empirical folder"],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=300,
                 env=os.environ.copy(),
             )
             if proc.returncode != 0:
-                return jsonify({"error": "Folder selection cancelled."}), 400
+                return jsonify({"error": "Path selection cancelled."}), 400
             picked = (proc.stdout or "").strip()
             if not picked:
-                return jsonify({"error": "No folder selected."}), 400
+                return jsonify({"error": "No path selected."}), 400
             picked = os.path.realpath(os.path.expanduser(picked))
-            if not os.path.isdir(picked):
-                return jsonify({"error": f"Selected path is not a directory: {picked}"}), 400
+            if mode == "folder":
+                if not os.path.isdir(picked):
+                    return jsonify({"error": f"Selected path is not a directory: {picked}"}), 400
+            else:
+                if not os.path.isfile(picked):
+                    return jsonify({"error": f"Selected path is not a file: {picked}"}), 400
+                ext = Path(picked).suffix.lower()
+                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                    return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
             return jsonify({"path": picked})
         except subprocess.TimeoutExpired:
             return jsonify({"error": "Folder selector timed out."}), 408
@@ -1953,6 +2259,8 @@ def features_select_folder():
 def features_parser_inspect():
     existing_data_path = (request.form.get("existing_data_path") or "").strip()
     empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
+    simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
+    simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
     upload = request.files.get("file")
     inspect_path = None
     cleanup_path = None
@@ -1963,6 +2271,14 @@ def features_parser_inspect():
             file_name = os.path.basename(inspect_path)
         elif empirical_folder_path:
             folder_files = _collect_empirical_folder_files(empirical_folder_path)
+            inspect_path = folder_files[0]
+            file_name = os.path.basename(inspect_path)
+        elif simulation_file_path:
+            inspect_path = _validate_simulation_file_path(simulation_file_path)
+            file_name = os.path.basename(inspect_path)
+        elif simulation_folder_path:
+            # Backward-compatible support for older form payloads.
+            folder_files = _collect_simulation_folder_files(simulation_folder_path)
             inspect_path = folder_files[0]
             file_name = os.path.basename(inspect_path)
         elif upload and upload.filename:
@@ -1979,13 +2295,16 @@ def features_parser_inspect():
             upload.save(inspect_path)
             cleanup_path = inspect_path
         else:
-            return jsonify({"error": "Provide an existing pipeline file, an empirical folder path, or upload a file to inspect."}), 400
+            return jsonify({"error": "Provide an existing pipeline file, a simulation file path, an empirical folder path, or upload a file to inspect."}), 400
 
         description = _describe_parser_source(inspect_path)
         description["source_name"] = file_name
-        if empirical_folder_path:
+        if empirical_folder_path or simulation_folder_path:
             description["folder_file_count"] = len(folder_files)
-            description["folder_path"] = os.path.realpath(empirical_folder_path)
+            selected_folder = empirical_folder_path if empirical_folder_path else simulation_folder_path
+            description["folder_path"] = os.path.realpath(selected_folder)
+        if simulation_file_path:
+            description["selected_file_path"] = os.path.realpath(simulation_file_path)
         return jsonify(description)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
@@ -2048,6 +2367,64 @@ def features_load_precomputed():
 def inference():
     return render_template("4.inference.html")
 
+# Load precomputed predictions for inference module
+@app.route("/inference/load_data")
+def inference_load_data():
+    predictions_data_files = _list_predictions_data_files()
+    return render_template(
+        "4.0.load_data.html",
+        predictions_data_files=predictions_data_files,
+        has_predictions_data=bool(predictions_data_files),
+    )
+
+
+@app.route("/inference/load_precomputed", methods=["POST"])
+def inference_load_precomputed():
+    upload = request.files.get("precomputed_predictions_file")
+    if upload is None or not upload.filename:
+        flash("Upload a precomputed predictions dataframe (.pkl/.pickle).", "error")
+        return redirect(request.referrer or url_for("inference_load_data"))
+
+    safe_name = secure_filename(upload.filename)
+    if not safe_name:
+        flash("Invalid uploaded file name.", "error")
+        return redirect(request.referrer or url_for("inference_load_data"))
+
+    ext = Path(safe_name).suffix.lower()
+    if ext not in PICKLE_EXTENSIONS:
+        flash("Precomputed predictions must be a pickle file (.pkl/.pickle).", "error")
+        return redirect(request.referrer or url_for("inference_load_data"))
+
+    predictions_dir = _predictions_data_dir(create=True)
+    temp_path = os.path.join(predictions_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
+    upload.save(temp_path)
+    try:
+        df = compute_utils.read_df_file(temp_path)
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError("Uploaded object is not a pandas dataframe.")
+        if "Predictions" not in df.columns:
+            raise ValueError("Uploaded dataframe does not contain a 'Predictions' column.")
+        output_name = "predictions.pkl"
+        output_path = os.path.join(predictions_dir, output_name)
+        df.to_pickle(output_path)
+    except Exception as exc:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+        flash(f"Failed to load precomputed predictions: {exc}", "error")
+        return redirect(request.referrer or url_for("inference_load_data"))
+
+    if os.path.exists(temp_path):
+        try:
+            os.remove(temp_path)
+        except OSError:
+            pass
+
+    flash(f"Predictions file loaded: {output_name}", "success")
+    return redirect(url_for("inference_load_data"))
+
 # New training for inference configuration page
 @app.route("/inference/new_training")
 def new_training():
@@ -2056,7 +2433,49 @@ def new_training():
 # Compute predictions for inference configuration page
 @app.route("/inference/compute_predictions")
 def compute_predictions():
-    return render_template("4.2.compute_predictions.html")
+    _bootstrap_features_data_from_previous_steps()
+    feature_data_files = _list_features_data_files()
+    # Hard fallback: directly scan canonical folder in case helper discovery is bypassed.
+    if not feature_data_files:
+        hard_root = os.path.realpath("/tmp/features_data")
+        if os.path.isdir(hard_root):
+            recovered = []
+            for root, _, names in os.walk(hard_root):
+                for name in names:
+                    lower = name.lower()
+                    if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                        continue
+                    abs_path = os.path.join(root, name)
+                    if not os.path.isfile(abs_path):
+                        continue
+                    recovered.append(os.path.relpath(abs_path, hard_root))
+            if recovered:
+                feature_data_files = sorted(recovered)
+    app.logger.warning(
+        "[inference] features auto-detect dir=%s files=%s",
+        _features_data_dir(create=False),
+        feature_data_files,
+    )
+    print(
+        f"[inference] features auto-detect dir={_features_data_dir(create=False)} files={feature_data_files}",
+        flush=True,
+    )
+    default_feature_file = ""
+    if feature_data_files:
+        features_root = _features_data_dir(create=False)
+        try:
+            default_feature_file = max(
+                feature_data_files,
+                key=lambda name: os.path.getmtime(os.path.join(features_root, name))
+            )
+        except Exception:
+            default_feature_file = feature_data_files[-1]
+    return render_template(
+        "4.2.compute_predictions.html",
+        feature_data_files=feature_data_files,
+        has_feature_data=bool(feature_data_files),
+        default_feature_file=default_feature_file,
+    )
 
 # Analysis configuration page
 @app.route("/analysis")
@@ -2071,12 +2490,31 @@ def analysis():
     else:
         analysis_data_files = []
     feature_data_files = _list_features_data_files()
+    predictions_data_files = _list_predictions_data_files()
+    detected_data_files = []
+    for name in feature_data_files:
+        detected_data_files.append({
+            "key": f"features::{name}",
+            "name": name,
+            "source": "features",
+            "label": "Features",
+        })
+    for name in predictions_data_files:
+        detected_data_files.append({
+            "key": f"predictions::{name}",
+            "name": name,
+            "source": "predictions",
+            "label": "Predictions",
+        })
     return render_template(
         "5.analysis.html",
         analysis_data_files=analysis_data_files,
         has_analysis_data=bool(analysis_data_files),
         feature_data_files=feature_data_files,
         has_feature_data=bool(feature_data_files),
+        predictions_data_files=predictions_data_files,
+        has_predictions_data=bool(predictions_data_files),
+        detected_data_files=detected_data_files,
     )
 
 
@@ -2098,17 +2536,37 @@ def _analysis_data_path():
 
 @app.route("/analysis/select_features_file", methods=["POST"])
 def analysis_select_features_file():
-    filename = (request.form.get("features_file") or "").strip()
-    if not filename:
-        return jsonify({"error": "Select a features file."}), 400
+    selector = (request.form.get("data_file_key") or request.form.get("features_file") or "").strip()
+    if not selector:
+        return jsonify({"error": "Select a detected file."}), 400
 
-    available = set(_list_features_data_files())
+    if "::" in selector:
+        source, filename = selector.split("::", 1)
+        source = source.strip().lower()
+        filename = filename.strip()
+    else:
+        # Backward compatibility: treat plain value as features file.
+        source = "features"
+        filename = selector
+
+    source_dirs = {
+        "features": _features_data_dir(create=False),
+        "predictions": _predictions_data_dir(create=False),
+    }
+    source_list_fn = {
+        "features": _list_features_data_files,
+        "predictions": _list_predictions_data_files,
+    }
+    if source not in source_dirs:
+        return jsonify({"error": f"Unsupported data source '{source}'."}), 400
+
+    available = set(source_list_fn[source]())
     if filename not in available:
-        return jsonify({"error": "Selected features file is not available. Refresh the page and try again."}), 400
+        return jsonify({"error": "Selected file is not available. Refresh the page and try again."}), 400
 
-    src_path = os.path.join(_features_data_dir(create=False), filename)
+    src_path = os.path.join(source_dirs[source], filename)
     if not os.path.isfile(src_path):
-        return jsonify({"error": "Selected features file was not found on disk."}), 404
+        return jsonify({"error": "Selected file was not found on disk."}), 404
 
     analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
     os.makedirs(analysis_data_dir, exist_ok=True)
@@ -2129,9 +2587,9 @@ def analysis_select_features_file():
     try:
         df = compute_utils.read_df_file(dst_path)
         if not isinstance(df, pd.DataFrame):
-            raise ValueError("Selected features file is not a pandas dataframe.")
+            raise ValueError("Selected file is not a pandas dataframe.")
         columns = [str(col) for col in df.columns]
-        return jsonify({"columns": columns, "filename": dst_name})
+        return jsonify({"columns": columns, "filename": dst_name, "source": source})
     except Exception as exc:
         try:
             if os.path.exists(dst_path):
@@ -3165,7 +3623,15 @@ def clear_analysis_data():
 def start_computation_redirect(computation_type):
     """Starts the background job and redirects to the status page."""
     # Allowed function names to redirect to
-    allowed_functions = {'features', 'inference', 'analysis', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}
+    allowed_functions = {
+        'features',
+        'inference',
+        'inference_training',
+        'analysis',
+        'field_potential_proxy',
+        'field_potential_kernel',
+        'field_potential_meeg',
+    }
 
     if computation_type not in allowed_functions:
         return f"Type of computation is not valid", 400
@@ -3273,19 +3739,79 @@ def start_computation_redirect(computation_type):
             if not existing_data_path:
                 flash('Select a detected simulation pipeline file to continue.', 'error')
                 return redirect(request.referrer or url_for('features'))
-            if _optional_float(request.form.get("parser_fs_manual")) is None:
-                flash('Insert the sampling frequency manually (e.g., 16000).', 'error')
-                return redirect(request.referrer or url_for('features'))
+            fs_source = (request.form.get("parser_fs_source") or "").strip()
+            fs_manual = _optional_float(request.form.get("parser_fs_manual"))
+            if fs_source == "__numeric__":
+                if fs_manual is None:
+                    flash('Provide sampling frequency numeric value.', 'error')
+                    return redirect(request.referrer or url_for('features'))
+            elif fs_source == "__none__":
+                pass
+            elif fs_source:
+                pass
+            else:
+                fs_locator = (request.form.get("parser_fs_locator") or "").strip()
+                if fs_locator and fs_manual is not None:
+                    flash('Sampling frequency locator and sampling frequency value are mutually exclusive.', 'error')
+                    return redirect(request.referrer or url_for('features'))
+                if not fs_locator and fs_manual is None:
+                    flash('Provide sampling frequency source (field, numeric value, or None).', 'error')
+                    return redirect(request.referrer or url_for('features'))
+
+            recording_type_source = (request.form.get("parser_recording_type_source") or "").strip()
+            recording_type_value = (request.form.get("parser_recording_type") or "").strip()
+            if recording_type_source == "__value__":
+                if not recording_type_value:
+                    flash('Select a recording type value.', 'error')
+                    return redirect(request.referrer or url_for('features'))
+            elif recording_type_source == "__none__":
+                pass
+            elif recording_type_source:
+                pass
+            else:
+                recording_type_locator = (request.form.get("parser_recording_type_locator") or "").strip()
+                if recording_type_locator and recording_type_value:
+                    flash('Recording type locator and recording type value are mutually exclusive.', 'error')
+                    return redirect(request.referrer or url_for('features'))
+
+            ch_names_source = (request.form.get("parser_ch_names_source") or "").strip()
+            manual_sensor_names = _parse_sensor_names(request.form.get("parser_sensor_names"))
+            if ch_names_source == "__manual__":
+                if not manual_sensor_names:
+                    flash('Provide manual channel names (comma-separated).', 'error')
+                    return redirect(request.referrer or url_for('features'))
+            elif ch_names_source == "__autocomplete__":
+                pass
+            elif ch_names_source:
+                pass
+            else:
+                ch_names_locator = (request.form.get("parser_ch_names_locator") or "").strip()
+                if ch_names_locator and manual_sensor_names:
+                    flash('Channel names locator and manual channel names are mutually exclusive.', 'error')
+                    return redirect(request.referrer or url_for('features'))
             try:
                 _validate_feature_existing_path(existing_data_path)
             except Exception as exc:
                 flash(str(exc), 'error')
                 return redirect(request.referrer or url_for('features'))
         elif data_source_kind == "new-simulation":
+            simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
             data_upload = _ensure_files_parsed().get("data_file")
-            if data_upload is None or not data_upload.filename:
-                flash('Upload a simulation output dataframe (.pkl/.csv/.parquet/...).', 'error')
-                return redirect(request.referrer or url_for('features'))
+            has_upload = data_upload is not None and bool(data_upload.filename)
+            if not has_upload:
+                if not simulation_file_path:
+                    flash('Provide a simulation output file path or upload a simulation output dataframe.', 'error')
+                    return redirect(request.referrer or url_for('features'))
+                try:
+                    simulation_path = _validate_simulation_file_path(simulation_file_path)
+                    app.logger.warning(
+                        "[compute %s] simulation file mode path=%s",
+                        job_id,
+                        simulation_path,
+                    )
+                except Exception as exc:
+                    flash(f"Invalid simulation output file path: {exc}", 'error')
+                    return redirect(request.referrer or url_for('features'))
         elif data_source_kind == "new-empirical":
             if empirical_source_mode == "server-path":
                 empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
@@ -3321,15 +3847,81 @@ def start_computation_redirect(computation_type):
 
     if computation_type != 'features':
         _ensure_files_parsed()
-    if computation_type != 'features' and len(uploaded_files) == 0 and computation_type not in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
+    if computation_type != 'features' and len(uploaded_files) == 0 and computation_type not in {'inference', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
         flash('No files uploaded, please try again.', 'error')
         return redirect(request.referrer)
 
+    if computation_type == 'inference_training':
+        files_obj = _ensure_files_parsed()
+
+        def _has_upload(*keys):
+            for key in keys:
+                upload = files_obj.get(key)
+                if upload is not None and bool(upload.filename):
+                    return True
+            return False
+
+        has_features = _has_upload("training_features_file", "file-upload-x", "features_train_file")
+        has_parameters = _has_upload("training_parameters_file", "file-upload-y", "parameters_train_file")
+        if not has_features or not has_parameters:
+            flash('Upload both Features Data and Parameters Data for training.', 'error')
+            return redirect(request.referrer or url_for('new_training'))
+
+        model_name = (request.form.get("training_model_name") or "").strip()
+        if model_name == "__custom__":
+            model_name = (request.form.get("training_model_name_custom") or "").strip()
+        if not model_name:
+            flash('Select a training model.', 'error')
+            return redirect(request.referrer or url_for('new_training'))
+
+        estimated_time_remaining = time.time() + 300
+
     if computation_type == 'inference':
-        # Expect 5 files
-        if len(uploaded_files) != 5 and len(uploaded_files) != 1:
-            flash('This computation requires you to upload all 5 files or only the features prediction file.', 'error')
+        existing_features_file = (request.form.get("existing_features_file") or "").strip()
+        has_existing_features = existing_features_file in set(_list_features_data_files()) if existing_features_file else False
+
+        files_obj = _ensure_files_parsed()
+
+        def _has_upload(*keys):
+            for key in keys:
+                upload = files_obj.get(key)
+                if upload is not None and bool(upload.filename):
+                    return True
+            return False
+
+        has_uploaded_features = _has_upload("features_predict_file", "features_predict", "file-upload-features")
+        if not has_uploaded_features and not has_existing_features:
+            flash('Upload features data or use an auto-loaded features file.', 'error')
             return redirect(request.referrer or url_for('inference'))
+
+        has_uploaded_model = _has_upload("model_file", "model-file", "file-upload-model")
+        has_uploaded_scaler = _has_upload("scaler_file", "scaler-file", "file-upload-scaler")
+        has_uploaded_density = _has_upload("density_estimator_file", "density-estimator-file", "file-upload-density-estimator")
+        folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
+        has_folder_uploads = bool(folder_uploads)
+        has_individual_assets = has_uploaded_model or has_uploaded_scaler or has_uploaded_density
+        assets_upload_mode = (request.form.get("assets_upload_mode") or "").strip().lower()
+
+        if has_folder_uploads and has_individual_assets:
+            flash('Use only one assets upload mode: either individual files or one folder.', 'error')
+            return redirect(request.referrer or url_for('inference'))
+        if assets_upload_mode == "folder" and has_individual_assets:
+            flash('Assets upload mode is set to folder, so individual asset files are not allowed.', 'error')
+            return redirect(request.referrer or url_for('inference'))
+        if assets_upload_mode == "individual" and has_folder_uploads:
+            flash('Assets upload mode is set to individual files, so folder upload is not allowed.', 'error')
+            return redirect(request.referrer or url_for('inference'))
+
+        folder_has_model = False
+        for folder_upload in folder_uploads:
+            base = os.path.basename(folder_upload.filename or "").lower()
+            if base.startswith("model") or base == "model.pkl":
+                folder_has_model = True
+                break
+        if not has_uploaded_model and not folder_has_model:
+            flash('Upload a model file, or upload a folder that contains a model file (e.g. model.pkl).', 'error')
+            return redirect(request.referrer or url_for('inference'))
+
         estimated_time_remaining = time.time() + 130 # 130 seconds of estimated time remaining
 
     if computation_type == 'analysis':
@@ -3367,19 +3959,34 @@ def start_computation_redirect(computation_type):
                 return redirect(request.referrer or url_for('features'))
 
         elif data_source_kind == "new-simulation":
-            file = _ensure_files_parsed().get("data_file")
-            safe_name = secure_filename(file.filename)
-            unique_filename = f"{computation_type}_data_file_0_{job_id}_{safe_name}"
-            file_path = os.path.join(temp_uploaded_files, unique_filename)
-            file.save(file_path)
-            try:
-                normalized_path = _normalize_features_input_path(file_path, request.form, job_id)
-                if normalized_path != file_path and os.path.exists(file_path):
-                    os.remove(file_path)
-                file_paths["data_file"] = normalized_path
-            except Exception as exc:
-                flash(f"Failed to prepare uploaded simulation file: {exc}", "error")
-                return redirect(request.referrer or url_for('features'))
+            simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
+            if simulation_file_path:
+                try:
+                    source_path = _validate_simulation_file_path(simulation_file_path)
+                    copied_name = f"features_data_file_0_{job_id}_{os.path.basename(source_path)}"
+                    copied_path = os.path.join(temp_uploaded_files, copied_name)
+                    shutil.copy2(source_path, copied_path)
+                    normalized_path = _normalize_features_input_path(copied_path, request.form, job_id)
+                    if normalized_path != copied_path and os.path.exists(copied_path):
+                        os.remove(copied_path)
+                    file_paths["data_file"] = normalized_path
+                except Exception as exc:
+                    flash(f"Failed to prepare simulation file from file path: {exc}", "error")
+                    return redirect(request.referrer or url_for('features'))
+            else:
+                file = _ensure_files_parsed().get("data_file")
+                safe_name = secure_filename(file.filename)
+                unique_filename = f"{computation_type}_data_file_0_{job_id}_{safe_name}"
+                file_path = os.path.join(temp_uploaded_files, unique_filename)
+                file.save(file_path)
+                try:
+                    normalized_path = _normalize_features_input_path(file_path, request.form, job_id)
+                    if normalized_path != file_path and os.path.exists(file_path):
+                        os.remove(file_path)
+                    file_paths["data_file"] = normalized_path
+                except Exception as exc:
+                    flash(f"Failed to prepare uploaded simulation file: {exc}", "error")
+                    return redirect(request.referrer or url_for('features'))
 
         elif data_source_kind == "new-empirical":
             try:
@@ -3459,7 +4066,28 @@ def start_computation_redirect(computation_type):
                 return redirect(request.referrer or url_for('features'))
     else:
         files_obj = _ensure_files_parsed()
+        inference_file_key_map = {
+            "features_predict_file": "features_predict",
+            "file-upload-features": "features_predict",
+            "features_predict": "features_predict",
+            "model_file": "model_file",
+            "model-file": "model_file",
+            "file-upload-model": "model_file",
+            "scaler_file": "scaler_file",
+            "scaler-file": "scaler_file",
+            "file-upload-scaler": "scaler_file",
+            "density_estimator_file": "density_estimator_file",
+            "density-estimator-file": "density_estimator_file",
+            "file-upload-density-estimator": "density_estimator_file",
+            # Backward-compatibility with older input keys.
+            "features_sim": "features_sim",
+            "parameters": "parameters",
+        }
+
         for i, file_key in enumerate(files_obj):
+            if computation_type == "inference" and file_key == "inference_assets_folder":
+                # Folder uploads are handled below via getlist.
+                continue
             file = files_obj[file_key]
             if not file or not file.filename:
                 if computation_type in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
@@ -3469,7 +4097,51 @@ def start_computation_redirect(computation_type):
             file_path = os.path.join(temp_uploaded_files, unique_filename)
             file.save(file_path)
             # Save dictionary with file_key: file_path
-            file_paths[file_key] = file_path
+            normalized_key = file_key
+            if computation_type == "inference":
+                normalized_key = inference_file_key_map.get(file_key, file_key)
+            file_paths[normalized_key] = file_path
+        if computation_type == "inference":
+            folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
+            for idx, upload in enumerate(folder_uploads):
+                raw_name = upload.filename or ""
+                base_name = os.path.basename(raw_name)
+                safe_name = secure_filename(base_name)
+                if not safe_name:
+                    continue
+                unique_filename = f"{computation_type}_inference_assets_folder_{idx}_{job_id}_{safe_name}"
+                file_path = os.path.join(temp_uploaded_files, unique_filename)
+                upload.save(file_path)
+
+                lower = safe_name.lower()
+                normalized_key = None
+                if lower.startswith("model") or lower == "model.pkl":
+                    normalized_key = "model_file"
+                elif lower.startswith("scaler") or lower == "scaler.pkl":
+                    normalized_key = "scaler_file"
+                elif "density_estimator" in lower or lower.startswith("density"):
+                    normalized_key = "density_estimator_file"
+
+                # Do not override explicit single-file uploads from dedicated controls.
+                if normalized_key and normalized_key not in file_paths:
+                    file_paths[normalized_key] = file_path
+                else:
+                    try:
+                        if os.path.exists(file_path):
+                            os.remove(file_path)
+                    except OSError:
+                        pass
+        if computation_type == "inference":
+            existing_features_file = (request.form.get("existing_features_file") or "").strip()
+            if "features_predict" not in file_paths and existing_features_file:
+                available = set(_list_features_data_files())
+                if existing_features_file in available:
+                    src_path = os.path.join(_features_data_dir(create=False), existing_features_file)
+                    if os.path.isfile(src_path):
+                        copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(src_path)}"
+                        copied_path = os.path.join(temp_uploaded_files, copied_name)
+                        shutil.copy2(src_path, copied_path)
+                        file_paths["features_predict"] = copied_path
 
     data = request.form.to_dict() # Get parameters from form POST
     # Add file information to the data dictionary
@@ -3490,7 +4162,7 @@ def start_computation_redirect(computation_type):
         "results": None,
         "error": False,
         "output": "",
-        "progress_mode": "manual" if computation_type == "features" else "time",
+        "progress_mode": "manual" if computation_type in {"features", "inference", "inference_training"} else "time",
     }
 
     # Submit the long-running task according to the computation type.
@@ -3620,6 +4292,13 @@ def download_results(job_id):
             mimetype='application/python-pickle',
             as_attachment=True,
             download_name=f'{computation_type}_results_{job_id}.pkl'
+        )
+    if computation_type == 'inference_training':
+        return send_file(
+            output_df_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='inference_training_artifacts.zip'
         )
 
     output_df = compute_utils.read_df_file(output_df_path)

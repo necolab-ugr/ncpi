@@ -35,6 +35,13 @@
 
 {% block page_description %}Select the option for computing the inference of the data.{% endblock %}
 
+<!-- Option 0 -->
+{% block option0_url %}{{url_for('inference_load_data')}}{% endblock %}
+{% block option0_icon %}
+<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>
+{% endblock %}
+{% block option0_title %}Load data{% endblock %}
+
 <!-- Option 1 -->
 {% block option1_url %}{{url_for('new_training')}}{% endblock %}
 {% block option1_icon %}

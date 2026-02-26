@@ -27,6 +27,8 @@
 <script>
     window.__analysisDataFiles = {{ analysis_data_files | tojson }};
     window.__featureDataFiles = {{ feature_data_files | tojson }};
+    window.__predictionsDataFiles = {{ predictions_data_files | tojson }};
+    window.__detectedAnalysisFiles = {{ detected_data_files | tojson }};
 </script>
 <style>
     body {
@@ -70,6 +72,8 @@
             hasExistingData: {{ 'true' if has_analysis_data else 'false' }},
             existingDataFiles: (window.__analysisDataFiles || []),
             featureDataFiles: (window.__featureDataFiles || []),
+            predictionsDataFiles: (window.__predictionsDataFiles || []),
+            detectedAnalysisFiles: (window.__detectedAnalysisFiles || []),
             isUploaded(id) { return this.uploads[id]?.uploaded === true; },
             getFileName(id) { return this.uploads[id]?.name || ''; },
             currentDataFile() { return this.existingDataFiles.length ? this.existingDataFiles[0] : ''; },
@@ -256,8 +260,8 @@
                     this.uploadInProgress = false;
                 }
             },
-            async useDetectedFeaturesFile(filename) {
-                if (!filename) {
+            async useDetectedFeaturesFile(entry) {
+                if (!entry || !entry.key) {
                     return;
                 }
                 this.columnsError = '';
@@ -268,22 +272,22 @@
                 this.topomapControlGroup = '';
                 try {
                     const formData = new FormData();
-                    formData.append('features_file', filename);
+                    formData.append('data_file_key', entry.key);
                     const response = await fetch('{{ url_for("analysis_select_features_file") }}', {
                         method: 'POST',
                         body: formData,
                     });
                     const data = await response.json();
                     if (!response.ok || data.error) {
-                        throw new Error(data.error || 'Failed to load detected features file.');
+                        throw new Error(data.error || 'Failed to load detected file.');
                     }
                     this.dfColumns = Array.isArray(data.columns) ? data.columns : [];
-                    const selected = data.filename || filename;
+                    const selected = data.filename || entry.name || '';
                     this.existingDataFiles = [selected];
                     this.hasExistingData = true;
                     this.uploads['dataframe-upload'] = { name: selected, uploaded: true, persisted: true };
                 } catch (err) {
-                    const message = err && err.message ? err.message : 'Failed to load detected features file.';
+                    const message = err && err.message ? err.message : 'Failed to load detected file.';
                     this.columnsError = message;
                 } finally {
                     this.columnsLoading = false;
@@ -332,16 +336,18 @@
                                 </button>
                             </form>
                         </div>
-                        <div x-show="featureDataFiles.length" class="mt-4 rounded-md border border-sky-200 dark:border-sky-800/50 bg-sky-50/70 dark:bg-sky-900/20 px-4 py-3">
-                            <p class="text-sm font-semibold text-sky-900 dark:text-sky-200">Detected feature files in tmp</p>
+                        <div x-show="detectedAnalysisFiles.length" class="mt-4 rounded-md border border-sky-200 dark:border-sky-800/50 bg-sky-50/70 dark:bg-sky-900/20 px-4 py-3">
+                            <p class="text-sm font-semibold text-sky-900 dark:text-sky-200">Detected features/predictions files in tmp</p>
                             <p class="mt-1 text-xs text-sky-700 dark:text-sky-300">Select one to use directly in Analysis.</p>
                             <div class="mt-3 flex flex-wrap gap-2">
-                                <template x-for="name in featureDataFiles" :key="`feature-${name}`">
+                                <template x-for="entry in detectedAnalysisFiles" :key="entry.key">
                                     <button type="button"
-                                        @click="useDetectedFeaturesFile(name)"
+                                        @click="useDetectedFeaturesFile(entry)"
                                         class="inline-flex items-center gap-1 rounded-md border border-sky-300 dark:border-sky-700 px-2.5 py-1.5 text-xs font-medium text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-colors">
                                         <span class="material-symbols-outlined text-sm">dataset</span>
-                                        <span x-text="name"></span>
+                                        <span class="font-semibold" x-text="entry.label"></span>
+                                        <span>:</span>
+                                        <span x-text="entry.name"></span>
                                     </button>
                                 </template>
                             </div>

@@ -19,6 +19,9 @@ import tempfile
 import io
 import json
 import inspect
+import re
+import contextlib
+import itertools
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
@@ -115,7 +118,7 @@ def save_df(job_id, output_df, temp_uploaded_files):
 
 
 def _features_data_dir():
-    path = os.path.join(tempfile.gettempdir(), "features_data")
+    path = os.path.realpath("/tmp/features_data")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -187,6 +190,60 @@ def _append_job_output(job_status, job_id, message):
     job_status[job_id]["output"] = "\n".join(lines)
 
 
+_PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
+_FOLD_PROGRESS_RE = re.compile(r"Fold\s+(\d+)\s*/\s*(\d+)")
+
+
+class _JobOutputCapture(io.TextIOBase):
+    def __init__(self, job_status, job_id, progress_base=0, progress_span=0, line_callback=None):
+        self.job_status = job_status
+        self.job_id = job_id
+        self.progress_base = int(progress_base)
+        self.progress_span = int(progress_span)
+        self.line_callback = line_callback
+        self._buf = ""
+
+    def write(self, text):
+        if text is None:
+            return 0
+        chunk = str(text)
+        if not chunk:
+            return 0
+        normalized = chunk.replace("\r", "\n")
+
+        if self.job_id in self.job_status and self.progress_span > 0:
+            for match in _PROGRESS_PERCENT_RE.finditer(normalized):
+                try:
+                    pct = int(match.group(1))
+                except Exception:
+                    continue
+                if pct < 0 or pct > 100:
+                    continue
+                mapped = self.progress_base + int((self.progress_span * pct) / 100.0)
+                self.job_status[self.job_id]["progress"] = max(
+                    self.job_status[self.job_id].get("progress", 0),
+                    mapped,
+                )
+
+        self._buf += normalized
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = line.strip()
+            if line:
+                if callable(self.line_callback):
+                    try:
+                        self.line_callback(line, self)
+                    except Exception:
+                        pass
+                _append_job_output(self.job_status, self.job_id, line)
+        return len(chunk)
+
+    def flush(self):
+        if self._buf.strip():
+            _append_job_output(self.job_status, self.job_id, self._buf.strip())
+        self._buf = ""
+
+
 def _compute_features_with_compat(features_obj, samples, exec_opts, progress_callback, log_callback):
     """
     Call Features.compute_features() across ncpi versions.
@@ -220,6 +277,34 @@ def _compute_features_with_compat(features_obj, samples, exec_opts, progress_cal
         )
 
     return fn(samples, **kwargs)
+
+
+def _predict_inference_with_compat(inference_obj, features, base_kwargs, exec_kwargs, log_callback=None):
+    """
+    Call Inference.predict() across ncpi versions.
+    Older versions may not accept n_jobs/chunksize/start_method kwargs.
+    """
+    fn = inference_obj.predict
+    sig = inspect.signature(fn)
+    params = sig.parameters
+
+    kwargs = dict(base_kwargs)
+    unsupported = []
+    for key, value in (exec_kwargs or {}).items():
+        if value is None:
+            continue
+        if key in params:
+            kwargs[key] = value
+        else:
+            unsupported.append(key)
+
+    if unsupported and log_callback:
+        log_callback(
+            "Installed ncpi.Inference.predict does not support "
+            f"{', '.join(sorted(unsupported))}; using default execution behavior."
+        )
+
+    return fn(features, **kwargs)
 
 
 def _load_uploaded_source_bytes(name, ext, content):
@@ -788,6 +873,9 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 raise ValueError("Missing parser configuration for empirical uploads.")
             from ncpi.EphysDatasetParser import EphysDatasetParser
             parser = EphysDatasetParser(parse_cfg)
+            subject_id_cfg = ((parse_cfg.fields.metadata or {}).get("subject_id")
+                              if getattr(parse_cfg, "fields", None) is not None else None)
+            use_file_subject_id = isinstance(subject_id_cfg, str) and subject_id_cfg == "file_ID"
 
             empirical_uploads = list(params.get("empirical_upload_paths") or [])
             total_uploads = len(empirical_uploads)
@@ -819,6 +907,8 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 parsed = parser.parse(source_obj)
                 if not isinstance(parsed, pd.DataFrame):
                     raise ValueError(f"Parser output for '{name}' is not a dataframe.")
+                if use_file_subject_id:
+                    parsed["subject_id"] = str(name)
                 parsed_frames.append(parsed)
 
                 # Do not advance global progress bar during data loading.
@@ -937,125 +1027,1055 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
 
 
-def inference_computation(job_id, job_status, params, temp_uploaded_files):
+def _first_existing_file(paths):
+    for path in paths:
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
+def _copy_artifact_if_present(src_path, dst_path):
+    if not src_path:
+        return False
+    if not os.path.isfile(src_path):
+        raise FileNotFoundError(f"Artifact file not found: {src_path}")
+    shutil.copy2(src_path, dst_path)
+    return True
+
+
+def _load_pickle_file(path):
+    with open(path, "rb") as f:
+        return pickle.load(f)
+
+
+def _features_series_to_matrix(features_series):
+    rows = []
+    expected_dim = None
+    for idx, value in enumerate(features_series):
+        if isinstance(value, str):
+            try:
+                value = ast.literal_eval(value)
+            except Exception as exc:
+                raise ValueError(f"Features row {idx} is a string that cannot be parsed as numeric data.") from exc
+        try:
+            row = np.asarray(value, dtype=float)
+        except Exception as exc:
+            raise ValueError(f"Features row {idx} cannot be converted to a numeric vector.") from exc
+        if row.ndim == 0:
+            row = row.reshape(1)
+        else:
+            row = row.reshape(-1)
+        if expected_dim is None:
+            expected_dim = int(row.shape[0])
+        elif int(row.shape[0]) != expected_dim:
+            raise ValueError(
+                f"Features row {idx} has length {row.shape[0]}, expected {expected_dim}. "
+                "All feature rows must have the same length."
+            )
+        rows.append(row)
+    if not rows:
+        return np.empty((0, 0), dtype=float)
+    return np.vstack(rows)
+
+
+def _generic_series_to_matrix(series, label):
+    rows = []
+    expected_dim = None
+    for idx, value in enumerate(series):
+        if isinstance(value, str):
+            try:
+                value = ast.literal_eval(value)
+            except Exception as exc:
+                raise ValueError(f"{label} row {idx} is a string that cannot be parsed as numeric data.") from exc
+        try:
+            row = np.asarray(value, dtype=float)
+        except Exception as exc:
+            raise ValueError(f"{label} row {idx} cannot be converted to a numeric vector.") from exc
+        if row.ndim == 0:
+            row = row.reshape(1)
+        else:
+            row = row.reshape(-1)
+        if expected_dim is None:
+            expected_dim = int(row.shape[0])
+        elif int(row.shape[0]) != expected_dim:
+            raise ValueError(
+                f"{label} row {idx} has length {row.shape[0]}, expected {expected_dim}. "
+                f"All {label.lower()} rows must have the same length."
+            )
+        rows.append(row)
+    if not rows:
+        return np.empty((0, 0), dtype=float)
+    return np.vstack(rows)
+
+
+def _coerce_training_matrix(obj, label):
+    if isinstance(obj, pd.DataFrame):
+        if label == "Features":
+            if "Features" in obj.columns:
+                return _features_series_to_matrix(obj["Features"])
+            if obj.shape[1] == 1 and str(obj.columns[0]).lower() in {"features", "feature", "x"}:
+                return _features_series_to_matrix(obj.iloc[:, 0])
+        if label == "Parameters":
+            if "Parameters" in obj.columns:
+                return _generic_series_to_matrix(obj["Parameters"], label)
+            if obj.shape[1] == 1 and str(obj.columns[0]).lower() in {"parameters", "parameter", "theta", "y"}:
+                return _generic_series_to_matrix(obj.iloc[:, 0], label)
+
+        # Generic dataframe path: all numeric columns.
+        numeric_df = obj.select_dtypes(include=[np.number])
+        if numeric_df.shape[1] > 0:
+            arr = numeric_df.to_numpy(dtype=float, copy=False)
+            if arr.ndim == 1:
+                arr = arr.reshape(-1, 1)
+            return arr
+
+        # If dataframe is object-heavy, attempt row-wise vector coercion.
+        if obj.shape[1] == 1:
+            return _generic_series_to_matrix(obj.iloc[:, 0], label)
+        raise ValueError(f"{label} dataframe does not contain numeric columns.")
+
+    if isinstance(obj, pd.Series):
+        return _generic_series_to_matrix(obj, label)
+
+    if isinstance(obj, (list, tuple, np.ndarray)):
+        arr = np.asarray(obj, dtype=object if isinstance(obj, (list, tuple)) else None)
+        if arr.ndim == 1 and arr.dtype == object:
+            return _generic_series_to_matrix(arr, label)
+        try:
+            out = np.asarray(arr, dtype=float)
+        except Exception as exc:
+            raise ValueError(f"{label} array cannot be converted to numeric values.") from exc
+        if out.ndim == 0:
+            out = out.reshape(1, 1)
+        elif out.ndim == 1:
+            out = out.reshape(-1, 1)
+        elif out.ndim > 2:
+            raise ValueError(f"{label} array must be 1D or 2D.")
+        return out
+
+    raise ValueError(f"Unsupported {label.lower()} input type: {type(obj).__name__}.")
+
+
+def _read_training_input_any(file_path):
+    """
+    Load training inputs with permissive format handling.
+    This is intentionally broader than read_df_file()/allowed_file checks so
+    training uploads can accept arbitrary extensions as long as content is parseable.
+    """
+    if not file_path or not os.path.isfile(file_path):
+        raise FileNotFoundError(f"Training file not found: {file_path}")
+
+    ext = os.path.splitext(str(file_path))[1].lower()
+    loaders = []
+
+    # Extension-prioritized attempts first.
+    def _pickle_load(path):
+        with open(path, "rb") as f:
+            return pickle.load(f)
+
+    if ext in {".pkl", ".pickle", ".bin", ".dat"}:
+        loaders.extend([
+            ("pandas.read_pickle", lambda p: pd.read_pickle(p)),
+            ("pickle.load", _pickle_load),
+        ])
+    elif ext == ".csv":
+        loaders.append(("pandas.read_csv", lambda p: pd.read_csv(p)))
+    elif ext == ".parquet":
+        loaders.append(("pandas.read_parquet", lambda p: pd.read_parquet(p)))
+    elif ext == ".feather":
+        loaders.append(("pandas.read_feather", lambda p: pd.read_feather(p)))
+    elif ext in {".xlsx", ".xls"}:
+        loaders.append(("pandas.read_excel", lambda p: pd.read_excel(p)))
+    elif ext in {".npy", ".npz"}:
+        loaders.append(("numpy.load", lambda p: np.load(p, allow_pickle=True)))
+    elif ext == ".mat":
+        try:
+            import scipy.io as sio
+            loaders.append(("scipy.io.loadmat", lambda p: sio.loadmat(p, squeeze_me=True, struct_as_record=False)))
+        except Exception:
+            pass
+
+    # Generic fallbacks (for unknown extensions or when extension is misleading).
+    generic_fallbacks = [
+        ("pandas.read_pickle", lambda p: pd.read_pickle(p)),
+        ("pickle.load", _pickle_load),
+        ("pandas.read_csv", lambda p: pd.read_csv(p)),
+        ("pandas.read_parquet", lambda p: pd.read_parquet(p)),
+        ("pandas.read_feather", lambda p: pd.read_feather(p)),
+        ("pandas.read_excel", lambda p: pd.read_excel(p)),
+        ("numpy.load", lambda p: np.load(p, allow_pickle=True)),
+    ]
+    if ext != ".mat":
+        try:
+            import scipy.io as sio
+            generic_fallbacks.append(("scipy.io.loadmat", lambda p: sio.loadmat(p, squeeze_me=True, struct_as_record=False)))
+        except Exception:
+            pass
+    loaders.extend(generic_fallbacks)
+
+    seen = set()
+    errors = []
+    for name, loader in loaders:
+        if name in seen:
+            continue
+        seen.add(name)
+        try:
+            obj = loader(file_path)
+            return obj
+        except Exception as exc:
+            errors.append(f"{name}: {type(exc).__name__}")
+            continue
+
+    raise ValueError(
+        "Could not parse uploaded training file with available loaders. "
+        f"Tried: {', '.join(errors[:8])}."
+    )
+
+
+def _load_training_with_example_loader(features_path, parameters_path):
+    """
+    Try loading X/theta using examples/tools.py::load_model_features by creating
+    a temporary Zenodo-like folder structure around uploaded files.
+    """
+    tools_path = os.path.join(_repo_root, "examples", "tools.py")
+    if not os.path.isfile(tools_path):
+        raise FileNotFoundError("examples/tools.py not found.")
+
+    module = _load_module_from_path(tools_path, name=f"examples_tools_{os.getpid()}")
+    loader = getattr(module, "load_model_features", None)
+    if not callable(loader):
+        raise AttributeError("load_model_features not found in examples/tools.py.")
+
+    temp_root = tempfile.mkdtemp(prefix="ncpi_train_loader_")
+    method_name = "uploaded"
+    method_dir = os.path.join(temp_root, "data", method_name)
+    os.makedirs(method_dir, exist_ok=True)
+    sim_x = os.path.join(method_dir, "sim_X")
+    sim_theta = os.path.join(method_dir, "sim_theta")
+    shutil.copy2(features_path, sim_x)
+    shutil.copy2(parameters_path, sim_theta)
+
     try:
-        # Read the files
-        # if sim_X file wasn't uploaded, use the one in the server
-        features_sim_path = params['file_paths']['features_sim']
-        if not (allowed_file(features_sim_path)): 
-            features_sim_path = os.path.join(sim_data_path, params['method'], 'sim_X.pkl')
-        array_features_sim = read_file(features_sim_path) # sim_X.pkl
+        X, theta = loader(method_name, temp_root)
+    finally:
+        shutil.rmtree(temp_root, ignore_errors=True)
 
-        # if sim_theta file wasn't uploaded, use the one in the server
-        parameters_path = params['file_paths']['parameters']
-        if not (allowed_file(parameters_path)): 
-            parameters_path = os.path.join(sim_data_path, params['method'], 'sim_theta.pkl')
-        array_parameters = read_file(parameters_path) # sim_theta.pkl
+    if not isinstance(theta, dict) or "data" not in theta:
+        raise ValueError("examples.tools.load_model_features returned theta without key 'data'.")
 
-        df_features_predict = read_df_file(params['file_paths']['features_predict']) # features_results_lfp_catch22.pkl
-        
-        # Rename model and scaler files, make them readable for inference object
-        model_path = params['file_paths']['model-file']
-        if not (allowed_file(model_path)):
-            model_path = os.path.join(model_scaler_path, params['method'], 'model.pkl')
-        
-        scaler_path = params['file_paths']['scaler-file']
-        if not (allowed_file(scaler_path)):
-            scaler_path = os.path.join(model_scaler_path, params['method'], 'scaler.pkl')
-        
-        shutil.copy(
-            os.path.join(model_path),
-            os.path.join(temp_uploaded_files, 'model.pkl')
+    X_arr = np.asarray(X, dtype=float)
+    if X_arr.ndim == 0:
+        X_arr = X_arr.reshape(1, 1)
+    elif X_arr.ndim == 1:
+        X_arr = X_arr.reshape(-1, 1)
+    elif X_arr.ndim > 2:
+        raise ValueError("X loaded from examples loader must be 1D or 2D.")
+
+    Y_arr = np.asarray(theta["data"], dtype=float)
+    if Y_arr.ndim == 0:
+        Y_arr = Y_arr.reshape(1, 1)
+    elif Y_arr.ndim == 1:
+        Y_arr = Y_arr.reshape(-1, 1)
+    elif Y_arr.ndim > 2:
+        raise ValueError("theta['data'] loaded from examples loader must be 1D or 2D.")
+
+    return X_arr, Y_arr
+
+
+def _parse_param_grid(raw_value):
+    parsed = _parse_literal_value(raw_value, None)
+    if parsed is None:
+        return None
+
+    if isinstance(parsed, list):
+        if not all(isinstance(item, dict) for item in parsed):
+            raise ValueError("param_grid must be a list of dicts.")
+        return [dict(item) for item in parsed]
+
+    if isinstance(parsed, dict):
+        keys = list(parsed.keys())
+        value_lists = []
+        for key in keys:
+            value = parsed[key]
+            if isinstance(value, (list, tuple, np.ndarray)):
+                values = list(np.asarray(value, dtype=object).tolist())
+            else:
+                values = [value]
+            if not values:
+                raise ValueError(f"param_grid entry '{key}' has no values.")
+            value_lists.append(values)
+
+        combos = [dict(zip(keys, combo)) for combo in itertools.product(*value_lists)]
+        if len(combos) > 256:
+            raise ValueError("param_grid expands to more than 256 combinations; reduce the search space.")
+        return combos
+
+    raise ValueError("param_grid must be a dict or a list of dicts.")
+
+
+def _parse_numeric_vector(raw_value, default_vector):
+    if raw_value is None or str(raw_value).strip() == "":
+        return np.asarray(default_vector, dtype=float)
+    parsed = _parse_literal_value(raw_value, None)
+    if parsed is None:
+        parsed = raw_value
+    if isinstance(parsed, str):
+        parts = [p.strip() for p in parsed.split(",") if p.strip()]
+        if not parts:
+            return np.asarray(default_vector, dtype=float)
+        parsed = [float(p) for p in parts]
+    arr = np.asarray(parsed, dtype=float).reshape(-1)
+    if arr.size == 0:
+        return np.asarray(default_vector, dtype=float)
+    return arr
+
+
+def _is_posterior_like(obj):
+    return hasattr(obj, "sample")
+
+
+def _is_inference_like(obj):
+    return hasattr(obj, "build_posterior")
+
+
+def _sample_sbi_posterior(posterior, torch_mod, x_valid, num_samples, batch_size, show_progress=False):
+    x_local = np.asarray(x_valid, dtype=np.float32)
+    x_t = torch_mod.from_numpy(x_local)
+    total = int(x_t.shape[0])
+    if total == 0:
+        return np.empty((num_samples, 0, 0), dtype=float)
+
+    chunks = []
+    for start in range(0, total, batch_size):
+        xb = x_t[start:start + batch_size]
+        b = int(xb.shape[0])
+        if b == 1:
+            sb = posterior.sample((num_samples,), x=xb, show_progress_bars=bool(show_progress))
+            if sb.ndim == 2:
+                sb = sb.unsqueeze(1)
+        else:
+            if hasattr(posterior, "sample_batched"):
+                sb = posterior.sample_batched((num_samples,), x=xb, show_progress_bars=bool(show_progress))
+            else:
+                single_chunks = []
+                for one_idx in range(b):
+                    one = posterior.sample(
+                        (num_samples,),
+                        x=xb[one_idx:one_idx + 1],
+                        show_progress_bars=bool(show_progress),
+                    )
+                    if one.ndim == 2:
+                        one = one.unsqueeze(1)
+                    single_chunks.append(one)
+                sb = torch_mod.cat(single_chunks, dim=1)
+        chunks.append(sb)
+
+    sample_tensor = torch_mod.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]
+    samples = sample_tensor.detach().cpu().numpy()
+    if samples.ndim == 2:
+        samples = samples[:, np.newaxis, :]
+    return samples
+
+
+def _summarize_sbi_samples(samples, mode):
+    if mode == "median":
+        summary = np.median(samples, axis=0)
+    else:
+        summary = np.mean(samples, axis=0)
+    if summary.ndim == 1:
+        summary = summary.reshape(1, -1)
+    return summary
+
+
+def _resolve_sbi_posteriors(model_obj, density_obj, build_kwargs):
+    source = model_obj
+    if source is None:
+        raise ValueError(
+            "Missing SBI model artifact. Provide a model/posterior file."
         )
-        shutil.copy(
-            os.path.join(scaler_path),
-            os.path.join(temp_uploaded_files, 'scaler.pkl')
+
+    if _is_posterior_like(source):
+        return [source]
+
+    if isinstance(source, list):
+        if source and all(_is_posterior_like(item) for item in source):
+            return list(source)
+        if source and all(_is_inference_like(item) for item in source):
+            if density_obj is None:
+                raise ValueError(
+                    "SBI model list contains inference objects. Upload density_estimator.pkl "
+                    "to build posteriors for prediction."
+                )
+            if isinstance(density_obj, list):
+                if len(density_obj) != len(source):
+                    raise ValueError(
+                        "density_estimator list length does not match number of inference objects."
+                    )
+                densities = density_obj
+            else:
+                densities = [density_obj] * len(source)
+            return [
+                inf_obj.build_posterior(de_obj, **build_kwargs)
+                for inf_obj, de_obj in zip(source, densities)
+            ]
+
+    if _is_inference_like(source):
+        if density_obj is None:
+            raise ValueError(
+                "SBI inference object requires density_estimator.pkl to build posterior for prediction."
+            )
+        return [source.build_posterior(density_obj, **build_kwargs)]
+
+    raise ValueError(
+        f"Unsupported SBI artifact type: {type(source).__name__}. "
+        "Expected posterior object(s) or inference object(s)."
+    )
+
+
+def _normalize_prediction_value(value):
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        return [float(v) if np.isscalar(v) else v for v in value]
+    if value is None:
+        return np.nan
+    if np.isscalar(value):
+        try:
+            return float(value)
+        except Exception:
+            return value
+    return value
+
+
+def _infer_artifact_backend(model_obj):
+    if model_obj is None:
+        return None, "None"
+
+    if _is_posterior_like(model_obj) or _is_inference_like(model_obj):
+        return "sbi", type(model_obj).__name__
+
+    if isinstance(model_obj, list):
+        if not model_obj:
+            return None, "list[empty]"
+        first_name = type(model_obj[0]).__name__
+        if all(_is_posterior_like(item) for item in model_obj):
+            return "sbi", f"list[{first_name}]"
+        if all(_is_inference_like(item) for item in model_obj):
+            return "sbi", f"list[{first_name}]"
+        if all(hasattr(item, "predict") for item in model_obj):
+            return "sklearn", f"list[{first_name}]"
+        return None, f"list[{first_name}]"
+
+    if hasattr(model_obj, "predict"):
+        return "sklearn", type(model_obj).__name__
+
+    return None, type(model_obj).__name__
+
+
+def _initialize_inference_from_artifact(model_obj, requested_model_name):
+    inferred_backend, inferred_type = _infer_artifact_backend(model_obj)
+    if inferred_backend is None:
+        raise ValueError(
+            f"Could not infer backend from uploaded model artifact type '{inferred_type}'."
         )
-        
-        # Column transformation to list (for parquet files)
-        if isinstance(df_features_predict['Features'].iloc[0], np.ndarray):
-            df_features_predict['Features'] = df_features_predict['Features'].apply(lambda x: x.tolist())
 
-        # Compute inference depending on the example computation
-        if params['example'] == 'lfp':
-            emp_data = inference_lfp(params['model'], array_features_sim, array_parameters, df_features_predict)
-        else: # eeg
-            # Estimated waiting time will take much longer than the rest of the tasks
-            job_status[job_id]["estimated_time_remaining"] = time.time() + 330 # 5:35 min power_spectrum, 10:30 min catch22
-            emp_data = inference_eeg(params['model'], array_features_sim, array_parameters, df_features_predict)
+    requested = (requested_model_name or "").strip()
+    if requested in {"", "__auto__", "auto"}:
+        requested = ""
 
-        # Replace parameters of recurrent synaptic conductances with the ratio (E/I)_net
-        E_I_net = emp_data['Predictions'].apply(lambda x: (x[0]/x[2]) / (x[1]/x[3]))
-        others = emp_data['Predictions'].apply(lambda x: x[4:])
-        emp_data['Predictions'] = (np.concatenate((E_I_net.values.reshape(-1,1),
-                                                    np.array(others.tolist())), axis=1)).tolist()
-        # Load inference (if EEG and LFP examples were the same)
-        # inference = ncpi.Inference(model=params['model'])
-        # inference.add_simulation_data(array_features_sim, array_parameters['data'])
-        # # if (params['train-option'] == 'load'):
-        # #     # My custom training code for inference
-        # predictions = inference.predict(np.array(df_features_predict['Features'].to_list()), result_dir=temp_uploaded_files)
+    if inferred_backend == "sklearn":
+        candidates = []
+        if requested:
+            candidates.append(requested)
+        if isinstance(model_obj, list) and model_obj:
+            candidates.append(type(model_obj[0]).__name__)
+        elif model_obj is not None:
+            candidates.append(type(model_obj).__name__)
+        # Safe fallback that guarantees sklearn backend initialization.
+        candidates.append("MLPRegressor")
 
-        # Save the output dataframe to a file
-        output_df_path = save_df(job_id, emp_data)
+        seen = set()
+        for candidate in candidates:
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            try:
+                obj = ncpi.Inference(model=candidate)
+                if obj.backend == "sklearn":
+                    return obj, candidate, inferred_backend, inferred_type
+            except Exception:
+                continue
+        raise ValueError(
+            "Unable to initialize sklearn inference backend from uploaded model artifact."
+        )
 
+    sbi_candidates = []
+    if requested in {"NPE", "NLE", "NRE"}:
+        sbi_candidates.append(requested)
+    sbi_candidates.extend(["NPE", "NLE", "NRE"])
+
+    seen = set()
+    for candidate in sbi_candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            obj = ncpi.Inference(model=candidate)
+            if obj.backend == "sbi":
+                return obj, candidate, inferred_backend, inferred_type
+        except Exception:
+            continue
+    raise ValueError("Unable to initialize SBI inference backend.")
+
+
+def inference_computation(job_id, job_status, params, temp_uploaded_files):
+    file_paths = params.get("file_paths", {})
+    artifacts_dir = os.path.join(temp_uploaded_files, f"inference_assets_{job_id}")
+    output_df_path = None
+
+    try:
+        _append_job_output(job_status, job_id, "Starting predictions computation.")
+
+        features_predict_path = file_paths.get("features_predict")
+        if not features_predict_path:
+            raise ValueError("Missing features prediction input. Upload features data or select existing features data.")
+
+        _append_job_output(job_status, job_id, "Loading features dataframe...")
+        df_features_predict = read_df_file(features_predict_path)
+        if not isinstance(df_features_predict, pd.DataFrame):
+            raise ValueError("Features prediction input must be a pandas dataframe.")
+        if "Features" not in df_features_predict.columns:
+            raise ValueError("Input dataframe must contain a 'Features' column.")
+
+        feature_matrix = _features_series_to_matrix(df_features_predict["Features"])
+        if feature_matrix.shape[0] == 0:
+            raise ValueError("Input features dataframe is empty.")
+        _append_job_output(
+            job_status,
+            job_id,
+            f"Loaded features dataframe shape={df_features_predict.shape}, rows for prediction={feature_matrix.shape[0]}."
+        )
+
+        model_assets_source = (params.get("model_assets_source") or "upload").strip().lower()
+        if model_assets_source != "upload":
+            raise ValueError("Only uploaded prediction artifacts are supported.")
+
+        model_uploaded = _first_existing_file([file_paths.get("model_file"), file_paths.get("model-file")])
+        scaler_uploaded = _first_existing_file([file_paths.get("scaler_file"), file_paths.get("scaler-file")])
+        density_uploaded = _first_existing_file([
+            file_paths.get("density_estimator_file"),
+            file_paths.get("density-estimator-file"),
+        ])
+
+        model_source = model_uploaded
+        scaler_source = scaler_uploaded
+        density_source = density_uploaded
+
+        os.makedirs(artifacts_dir, exist_ok=True)
+        model_dst = os.path.join(artifacts_dir, "model.pkl")
+        scaler_dst = os.path.join(artifacts_dir, "scaler.pkl")
+        density_dst = os.path.join(artifacts_dir, "density_estimator.pkl")
+
+        model_present = _copy_artifact_if_present(model_source, model_dst)
+        scaler_present = _copy_artifact_if_present(scaler_source, scaler_dst)
+        density_present = _copy_artifact_if_present(density_source, density_dst)
+        _append_job_output(
+            job_status,
+            job_id,
+            f"Prepared artifacts: model={'yes' if model_present else 'no'}, scaler={'yes' if scaler_present else 'no'}, density_estimator={'yes' if density_present else 'no'}."
+        )
+        if not model_present:
+            raise ValueError("Model artifact is required for prediction.")
+
+        requested_model_name = (params.get("inference_model_name") or params.get("model") or "").strip()
+        if requested_model_name == "__custom__":
+            requested_model_name = (params.get("inference_model_name_custom") or "").strip()
+
+        model_obj = _load_pickle_file(model_dst)
+        inference_obj, init_model_name, inferred_backend, inferred_type = _initialize_inference_from_artifact(
+            model_obj,
+            requested_model_name,
+        )
+        _append_job_output(
+            job_status,
+            job_id,
+            f"Inferred model artifact: type={inferred_type}, backend={inferred_backend}. "
+            f"Initialized ncpi.Inference(model='{init_model_name}').",
+        )
+
+        output_df = df_features_predict.copy()
+
+        use_scaler = str(params.get("use_scaler", "")).lower() in {"1", "true", "on", "yes"}
+        _append_job_output(job_status, job_id, f"Scaler enabled={'yes' if use_scaler else 'no'}.")
+        inference_n_jobs = _parse_int_param(params, "inference_n_jobs", default=None)
+        inference_chunksize = _parse_int_param(params, "inference_chunksize", default=None)
+        inference_start_method = _get_param(params, "inference_start_method", "spawn")
+        if inference_start_method not in {"spawn", "fork", "forkserver"}:
+            inference_start_method = "spawn"
+        _append_job_output(
+            job_status,
+            job_id,
+            "Execution settings: "
+            f"n_jobs={inference_n_jobs if inference_n_jobs is not None else 'auto'}, "
+            f"chunksize={inference_chunksize if inference_chunksize is not None else 'auto'}, "
+            f"start_method={inference_start_method}.",
+        )
+
+        if inference_obj.backend == "sklearn":
+            if not model_present:
+                raise ValueError("Sklearn prediction requires model.pkl.")
+            if use_scaler and not scaler_present:
+                raise ValueError("Scaler usage is enabled, but scaler.pkl was not provided.")
+
+            _append_job_output(job_status, job_id, "Running ncpi.Inference.predict() for sklearn model(s)...")
+            capture = _JobOutputCapture(job_status, job_id, progress_base=0, progress_span=95)
+            with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
+                predictions = _predict_inference_with_compat(
+                    inference_obj,
+                    feature_matrix,
+                    base_kwargs={
+                        "result_dir": artifacts_dir,
+                        "scaler": True if (use_scaler and scaler_present) else None,
+                    },
+                    exec_kwargs={
+                        "n_jobs": inference_n_jobs,
+                        "chunksize": inference_chunksize,
+                        "start_method": inference_start_method,
+                    },
+                    log_callback=lambda msg: _append_job_output(job_status, job_id, msg),
+                )
+            capture.flush()
+
+            output_df["Predictions"] = [_normalize_prediction_value(pred) for pred in predictions]
+            if job_id in job_status:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 92)
+
+        else:
+            # model_obj already loaded above for automatic backend/type inference.
+            density_obj = _load_pickle_file(density_dst) if density_present else None
+            _append_job_output(job_status, job_id, "Preparing SBI posterior sampling...")
+
+            build_kwargs_raw = (params.get("sbi_build_posterior_kwargs") or "").strip()
+            build_kwargs = {}
+            if build_kwargs_raw:
+                try:
+                    build_kwargs = json.loads(build_kwargs_raw)
+                except json.JSONDecodeError as exc:
+                    raise ValueError("SBI build posterior kwargs must be valid JSON.") from exc
+                if not isinstance(build_kwargs, dict):
+                    raise ValueError("SBI build posterior kwargs JSON must decode to an object/dict.")
+
+            sbi_summary_mode = (params.get("sbi_summary_mode") or "mean").strip().lower()
+            if sbi_summary_mode not in {"mean", "median"}:
+                raise ValueError("SBI summary mode must be 'mean' or 'median'.")
+
+            num_samples_raw = (
+                params.get("sbi_num_posterior_samples")
+                or params.get("posterior-samples")
+                or "500"
+            )
+            sbi_batch_raw = (
+                params.get("sbi_batch_size")
+                or params.get("sbi-batch-size")
+                or "256"
+            )
+            try:
+                num_samples = int(num_samples_raw)
+            except Exception as exc:
+                raise ValueError("SBI posterior samples must be a valid integer.") from exc
+            try:
+                sbi_batch_size = int(sbi_batch_raw)
+            except Exception as exc:
+                raise ValueError("SBI batch size must be a valid integer.") from exc
+            if num_samples <= 0:
+                raise ValueError("SBI posterior samples must be > 0.")
+            if sbi_batch_size <= 0:
+                raise ValueError("SBI batch size must be > 0.")
+
+            scaler_obj = None
+            if use_scaler:
+                if not scaler_present:
+                    raise ValueError("Scaler usage is enabled, but scaler.pkl was not provided.")
+                scaler_obj = _load_pickle_file(scaler_dst)
+
+            posteriors = _resolve_sbi_posteriors(model_obj, density_obj, build_kwargs)
+            _append_job_output(job_status, job_id, f"Resolved {len(posteriors)} SBI posterior object(s).")
+
+            x_local = np.asarray(feature_matrix, dtype=float)
+            finite_mask = np.isfinite(x_local).all(axis=1)
+            preds = [np.nan] * int(x_local.shape[0])
+            if np.any(finite_mask):
+                x_valid = x_local[finite_mask]
+                if scaler_obj is not None:
+                    x_valid = scaler_obj.transform(x_valid)
+                    valid_after_scale = np.isfinite(x_valid).all(axis=1)
+                    valid_indices = np.where(finite_mask)[0]
+                    finite_mask[:] = False
+                    finite_mask[valid_indices[valid_after_scale]] = True
+                    x_valid = x_valid[valid_after_scale]
+
+                if x_valid.shape[0] > 0:
+                    per_model_summaries = []
+                    posterior_count = max(1, len(posteriors))
+                    for idx, posterior in enumerate(posteriors, start=1):
+                        _append_job_output(job_status, job_id, f"Sampling posterior {idx}/{len(posteriors)}...")
+                        segment_start = int(((idx - 1) * 95) / posterior_count)
+                        segment_end = int((idx * 95) / posterior_count)
+                        capture = _JobOutputCapture(
+                            job_status,
+                            job_id,
+                            progress_base=segment_start,
+                            progress_span=max(1, segment_end - segment_start),
+                        )
+                        with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
+                            samples = _sample_sbi_posterior(
+                                posterior,
+                                inference_obj.torch,
+                                x_valid,
+                                num_samples,
+                                sbi_batch_size,
+                                show_progress=True,
+                            )
+                        capture.flush()
+                        per_model_summaries.append(_summarize_sbi_samples(samples, sbi_summary_mode))
+
+                    stacked = np.stack(per_model_summaries, axis=0)
+                    combined = np.mean(stacked, axis=0)
+                    valid_rows = np.where(finite_mask)[0]
+                    for local_idx, global_idx in enumerate(valid_rows):
+                        preds[int(global_idx)] = _normalize_prediction_value(combined[local_idx])
+
+            output_df["Predictions"] = preds
+            if job_id in job_status:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 92)
+
+        _append_job_output(job_status, job_id, "Attaching predictions and saving output dataframe.")
+        output_df_path = save_df(job_id, output_df, temp_uploaded_files)
+        persisted_predictions_path = None
+        try:
+            predictions_dir = os.path.realpath("/tmp/predictions_data")
+            os.makedirs(predictions_dir, exist_ok=True)
+            persisted_name = "predictions.pkl"
+            persisted_predictions_path = os.path.join(predictions_dir, persisted_name)
+            output_df.to_pickle(persisted_predictions_path)
+            _append_job_output(job_status, job_id, f"Persisted dashboard predictions file: {persisted_predictions_path}")
+        except Exception as persist_exc:
+            _append_job_output(job_status, job_id, f"Warning: could not persist dashboard predictions file: {persist_exc}")
+        _append_job_output(job_status, job_id, f"Saved predictions dataframe: {output_df_path}")
         job_status[job_id].update({
-                    "status": "finished",
-                    "progress": 100,
-                    "estimated_time_remaining": 0,
-                    "results": output_df_path, # Return to the client the output filename
-                    "error": False
-                })
-        
+            "status": "finished",
+            "progress": 100,
+            "estimated_time_remaining": 0,
+            "results": output_df_path,
+            "error": False,
+            "dashboard_predictions_path": persisted_predictions_path,
+        })
+
     except Exception as e:
+        _append_job_output(job_status, job_id, f"Error: {e}")
         job_status[job_id].update({
-                "status": "failed",
-                "error": str(e),
-                "progress": job_status[job_id].get("progress", 0)
+            "status": "failed",
+            "error": str(e),
+            "progress": job_status[job_id].get("progress", 0),
+        })
+    finally:
+        cleanup_temp_files(file_paths)
+        if os.path.isdir(artifacts_dir):
+            shutil.rmtree(artifacts_dir, ignore_errors=True)
+def inference_training_computation(job_id, job_status, params, temp_uploaded_files):
+    file_paths = params.get("file_paths", {})
+    artifacts_dir = os.path.join(temp_uploaded_files, f"inference_training_artifacts_{job_id}")
+    zip_path = None
+
+    try:
+        _append_job_output(job_status, job_id, "Starting inference model training.")
+
+        features_path = _first_existing_file([
+            file_paths.get("training_features_file"),
+            file_paths.get("file-upload-x"),
+            file_paths.get("features_train_file"),
+        ])
+        parameters_path = _first_existing_file([
+            file_paths.get("training_parameters_file"),
+            file_paths.get("file-upload-y"),
+            file_paths.get("parameters_train_file"),
+        ])
+        if not features_path or not parameters_path:
+            raise ValueError("Both features and parameters training files are required.")
+
+        try:
+            X, Y = _load_training_with_example_loader(features_path, parameters_path)
+            _append_job_output(job_status, job_id, "Loaded X/theta using examples.tools.load_model_features.")
+        except Exception as loader_exc:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"examples.tools.load_model_features unavailable for these files ({loader_exc}); using generic loaders.",
+            )
+            features_obj = _read_training_input_any(features_path)
+            parameters_obj = _read_training_input_any(parameters_path)
+            X = _coerce_training_matrix(features_obj, "Features")
+            Y = _coerce_training_matrix(parameters_obj, "Parameters")
+        if X.shape[0] == 0 or Y.shape[0] == 0:
+            raise ValueError("Training inputs are empty.")
+        if X.shape[0] != Y.shape[0]:
+            raise ValueError(f"Features/parameters row mismatch: {X.shape[0]} vs {Y.shape[0]}.")
+
+        subsample_percent = _parse_float_param(params, "training_subsample_percent", default=100.0)
+        if subsample_percent is None:
+            subsample_percent = 100.0
+        if subsample_percent <= 0 or subsample_percent > 100:
+            raise ValueError("Random Subsample (%) must be > 0 and <= 100.")
+
+        original_rows = int(X.shape[0])
+        if subsample_percent < 100.0 and original_rows > 1:
+            seed_for_sample = _parse_int_param(params, "training_seed", default=0)
+            rng = np.random.default_rng(seed_for_sample if seed_for_sample is not None else 0)
+            n_select = max(1, int(np.floor((subsample_percent / 100.0) * original_rows)))
+            if n_select < original_rows:
+                indices = rng.choice(original_rows, size=n_select, replace=False)
+                indices.sort()
+                X = X[indices]
+                Y = Y[indices]
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Applied random subsample: {subsample_percent:.2f}% ({original_rows} -> {n_select} rows).",
+                )
+        else:
+            _append_job_output(job_status, job_id, f"Subsample disabled (using {original_rows} rows).")
+
+        _append_job_output(job_status, job_id, f"Loaded training data: X={X.shape}, Y={Y.shape}.")
+        if job_id in job_status:
+            job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 5)
+
+        model_name = (_get_param(params, "training_model_name", "MLPRegressor") or "").strip()
+        if model_name == "__custom__":
+            model_name = (_get_param(params, "training_model_name_custom", "") or "").strip()
+        if not model_name:
+            raise ValueError("Training model is required.")
+
+        base_hyperparams = _parse_dict_param(params, "training_hyperparams_json") or {}
+        inference_obj = ncpi.Inference(
+            model=model_name,
+            hyperparams=base_hyperparams if model_name not in {"NPE", "NLE", "NRE"} else None,
+        )
+
+        use_scaler = _parse_bool_param(params, "training_use_scaler", default=False)
+        seed = _parse_int_param(params, "training_seed", default=0)
+        enable_cv = _parse_bool_param(params, "training_enable_cv", default=False)
+        n_splits = _parse_int_param(params, "training_n_splits", default=10)
+        n_repeats = _parse_int_param(params, "training_n_repeats", default=10)
+        if enable_cv:
+            if n_splits is None or n_splits <= 1:
+                raise ValueError("n_splits must be an integer > 1 when CV is enabled.")
+            if n_repeats is None or n_repeats <= 0:
+                raise ValueError("n_repeats must be an integer > 0 when CV is enabled.")
+        else:
+            n_splits = 2
+            n_repeats = 1
+
+        param_grid = None
+        if enable_cv and _parse_bool_param(params, "training_enable_param_grid", default=False):
+            raw_grid = _get_param(params, "training_param_grid_json", None)
+            if raw_grid is None:
+                raise ValueError("Parameter grid is enabled, but no grid was provided.")
+            param_grid = _parse_param_grid(raw_grid)
+            _append_job_output(job_status, job_id, f"Parameter grid enabled with {len(param_grid)} combination(s).")
+        elif (not enable_cv) and _parse_bool_param(params, "training_enable_param_grid", default=False):
+            _append_job_output(job_status, job_id, "CV is disabled: parameter grid will be ignored.")
+
+        train_params = {}
+        sbi_eval_num = 2000
+        sbi_eval_batch = 256
+        if inference_obj.backend == "sbi":
+            theta_dim = int(Y.shape[1]) if Y.ndim == 2 else 1
+            low_vec = _parse_numeric_vector(_get_param(params, "training_sbi_prior_low", None), np.zeros(theta_dim, dtype=float))
+            high_vec = _parse_numeric_vector(_get_param(params, "training_sbi_prior_high", None), np.ones(theta_dim, dtype=float))
+            if low_vec.size == 1:
+                low_vec = np.repeat(low_vec[0], theta_dim)
+            if high_vec.size == 1:
+                high_vec = np.repeat(high_vec[0], theta_dim)
+            if low_vec.size != theta_dim or high_vec.size != theta_dim:
+                raise ValueError(f"SBI prior bounds must have length 1 or match theta dimension ({theta_dim}).")
+            if np.any(low_vec >= high_vec):
+                raise ValueError("SBI prior bounds require low < high for every dimension.")
+
+            estimator_name = _get_param(params, "training_sbi_estimator", "nsf")
+            estimator_kwargs = _parse_dict_param(params, "training_sbi_estimator_kwargs_json") or {}
+            estimator_kwargs["estimator"] = estimator_name
+            inference_kwargs = _parse_dict_param(params, "training_sbi_inference_kwargs_json") or {}
+            build_posterior_kwargs = _parse_dict_param(params, "training_sbi_build_posterior_kwargs_json") or {}
+
+            BoxUniform = ncpi.tools.dynamic_import("sbi.utils", "BoxUniform")
+            torch_mod = inference_obj.torch
+            prior = BoxUniform(
+                low=torch_mod.tensor(low_vec, dtype=torch_mod.float32),
+                high=torch_mod.tensor(high_vec, dtype=torch_mod.float32),
+            )
+            sbi_hyperparams = dict(base_hyperparams or {})
+            sbi_hyperparams.update({
+                "prior": prior,
+                "estimator_kwargs": estimator_kwargs,
+                "inference_kwargs": inference_kwargs,
+                "build_posterior_kwargs": build_posterior_kwargs,
             })
+            inference_obj.hyperparams = sbi_hyperparams
+            train_params = _parse_dict_param(params, "training_sbi_train_params_json") or {}
+            sbi_eval_num = _parse_int_param(params, "training_sbi_eval_num_posterior_samples", default=2000)
+            sbi_eval_batch = _parse_int_param(params, "training_sbi_eval_batch_size", default=256)
+            if sbi_eval_num is None or sbi_eval_num <= 0:
+                raise ValueError("SBI eval posterior samples must be > 0.")
+            if sbi_eval_batch is None or sbi_eval_batch <= 0:
+                raise ValueError("SBI eval batch size must be > 0.")
+            _append_job_output(
+                job_status,
+                job_id,
+                f"SBI prior configured with theta_dim={theta_dim}; estimator={estimator_name}.",
+            )
 
-    # Remove the files after using them
-    cleanup_temp_files(params['file_paths'])
+        scaler_obj = None
+        if use_scaler:
+            StandardScaler = ncpi.tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
+            scaler_obj = StandardScaler()
 
+        inference_obj.add_simulation_data(X, Y)
+        _append_job_output(job_status, job_id, f"Initialized model='{model_name}' backend='{inference_obj.backend}'.")
+        _append_job_output(
+            job_status,
+            job_id,
+            f"Training config: seed={seed}, n_splits={n_splits}, n_repeats={n_repeats}, scaler={'on' if use_scaler else 'off'}.",
+        )
+        total_fold_count = int(max(1, n_splits * n_repeats)) if enable_cv and param_grid else 1
+        total_candidates = int(len(param_grid)) if (enable_cv and param_grid) else 1
+        _append_job_output(
+            job_status,
+            job_id,
+            (
+                f"Planned training work: {total_candidates} configuration(s), {total_fold_count} fold(s) each."
+                if (enable_cv and param_grid)
+                else "Planned training work: direct training (no CV)."
+            ),
+        )
 
+        os.makedirs(artifacts_dir, exist_ok=True)
+        progress_state = {
+            "param_idx": 0,
+            "total_candidates": total_candidates,
+            "folds_per_candidate": total_fold_count,
+        }
 
-def inference_lfp(ML_model, array_features_sim, array_parameters, df_features_predict, temp_uploaded_files):
-    # Compute inference the way lfp does
-    inference = ncpi.Inference(model=ML_model)
-    inference.add_simulation_data(array_features_sim, array_parameters['data'])
+        def _training_line_progress(line, _capture_obj):
+            text = str(line or "")
+            if not text:
+                return
 
-    # Predict the parameters from the features of the empirical data. Model and scaler are searched in RESULT_DIR
-    predictions = inference.predict(np.array(df_features_predict['Features'].tolist()), result_dir=temp_uploaded_files)
+            if "Starting hyperparameter search with cross-validation" in text:
+                if job_id in job_status:
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 12)
+                return
 
-    # Append the predictions to the DataFrame
-    pd_preds = pd.DataFrame({'Predictions': predictions})
-    df_features_predict = pd.concat([df_features_predict, pd_preds], axis=1)
-    return df_features_predict
+            if "Evaluating params:" in text:
+                progress_state["param_idx"] = min(
+                    progress_state["total_candidates"],
+                    progress_state["param_idx"] + 1,
+                )
+                if job_id in job_status:
+                    candidate_done = max(0, progress_state["param_idx"] - 1)
+                    coarse = 12 + int(70 * candidate_done / max(1, progress_state["total_candidates"]))
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), coarse)
+                return
 
+            fold_match = _FOLD_PROGRESS_RE.search(text)
+            if fold_match:
+                fold_idx = int(fold_match.group(1))
+                fold_total = max(1, int(fold_match.group(2)))
+                param_idx = max(1, progress_state["param_idx"]) if progress_state["total_candidates"] > 1 else 1
+                completed_units = (param_idx - 1) * fold_total + min(fold_idx, fold_total)
+                total_units = max(1, progress_state["total_candidates"] * fold_total)
+                mapped = 12 + int(75 * completed_units / total_units)
+                if job_id in job_status:
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), mapped)
+                return
 
+            if "Training single sklearn model on full data" in text:
+                if job_id in job_status:
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 30)
+                return
 
-def inference_eeg(ML_model, array_features_sim, array_parameters, df_features_predict, temp_uploaded_files):
-    # Add "Predictions" column to later store the parameters infered
-    df_features_predict['Predictions'] = np.nan
+            if "Model saved at" in text:
+                if job_id in job_status:
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 92)
+                return
 
-    # List of sensors
-    sensor_list = [
-        'Fp1','Fp2','F3','F4','C3','C4','P3','P4','O1',
-        'O2','F7','F8','T3','T4','T5','T6','Fz','Cz','Pz']
+            if "Density estimator saved at" in text:
+                if job_id in job_status:
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 94)
+                return
 
-    # Create inference object
-    inference = ncpi.Inference(model=ML_model)
-    inference.add_simulation_data(array_features_sim, array_parameters['data'])
+        capture = _JobOutputCapture(
+            job_status,
+            job_id,
+            progress_base=12,
+            progress_span=80,
+            line_callback=_training_line_progress,
+        )
+        with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
+            inference_obj.train(
+                param_grid=param_grid,
+                n_splits=n_splits,
+                n_repeats=n_repeats,
+                train_params=train_params,
+                result_dir=artifacts_dir,
+                scaler=scaler_obj,
+                seed=seed,
+                sbi_eval_num_posterior_samples=sbi_eval_num,
+                sbi_eval_batch_size=sbi_eval_batch,
+            )
+        capture.flush()
+        if job_id in job_status:
+            job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 95)
 
-    for s, sensor in enumerate(sensor_list):
-        print(f'--- Sensor: {sensor}')
-        sensor_df = df_features_predict[df_features_predict['Sensor'].isin([sensor, s])]
-        predictions = inference.predict(np.array(sensor_df['Features'].to_list()), result_dir=temp_uploaded_files)
-        sensor_df['Predictions'] = [list(pred) for pred in predictions]
-        df_features_predict.update(sensor_df['Predictions'])
+        produced = sorted(
+            name for name in os.listdir(artifacts_dir)
+            if os.path.isfile(os.path.join(artifacts_dir, name))
+        )
+        if not produced:
+            raise ValueError("Training completed but no artifacts were produced.")
+        _append_job_output(job_status, job_id, f"Generated artifacts: {', '.join(produced)}")
 
-    return df_features_predict
+        archive_base = os.path.join(temp_uploaded_files, f"inference_training_{job_id}")
+        zip_path = shutil.make_archive(archive_base, "zip", root_dir=artifacts_dir)
+        _append_job_output(job_status, job_id, f"Saved training artifacts archive: {zip_path}")
+        persisted_zip_path = None
+        try:
+            persisted_dir = os.path.realpath("/tmp/inference_training_data")
+            os.makedirs(persisted_dir, exist_ok=True)
+            persisted_zip_path = os.path.join(persisted_dir, "training_artifacts.zip")
+            shutil.copy2(zip_path, persisted_zip_path)
+            _append_job_output(job_status, job_id, f"Persisted training artifacts to: {persisted_zip_path}")
+        except Exception as persist_exc:
+            _append_job_output(job_status, job_id, f"Warning: could not persist training artifacts to /tmp: {persist_exc}")
 
+        job_status[job_id].update({
+            "status": "finished",
+            "progress": 100,
+            "estimated_time_remaining": 0,
+            "results": persisted_zip_path or zip_path,
+            "error": False,
+        })
+
+    except Exception as e:
+        _append_job_output(job_status, job_id, f"Error: {e}")
+        job_status[job_id].update({
+            "status": "failed",
+            "error": str(e),
+            "progress": job_status[job_id].get("progress", 0),
+        })
+    finally:
+        cleanup_temp_files(file_paths)
+        if os.path.isdir(artifacts_dir):
+            shutil.rmtree(artifacts_dir, ignore_errors=True)
 
 
 def analysis_computation(job_id, job_status, params, temp_uploaded_files):
