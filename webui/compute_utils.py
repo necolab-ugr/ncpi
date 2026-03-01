@@ -22,6 +22,8 @@ import inspect
 import re
 import contextlib
 import itertools
+import threading
+import time
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
@@ -458,19 +460,331 @@ def _compute_mean_firing_rate(times, gids, bin_size_ms):
 
 
 def _flatten_spike_data(data):
-    if data is None:
+    def _collect_numeric_chunks(value, chunks):
+        if value is None:
+            return
+        if isinstance(value, dict):
+            for nested in value.values():
+                _collect_numeric_chunks(nested, chunks)
+            return
+        if isinstance(value, (list, tuple)):
+            for nested in value:
+                _collect_numeric_chunks(nested, chunks)
+            return
+        arr = np.asarray(value).ravel()
+        if arr.size == 0:
+            return
+        try:
+            arr = arr.astype(float, copy=False)
+        except (TypeError, ValueError):
+            return
+        if arr.size > 0:
+            chunks.append(arr)
+
+    chunks = []
+    _collect_numeric_chunks(data, chunks)
+    if not chunks:
         return np.asarray([])
-    if isinstance(data, dict):
-        values = [np.asarray(v).ravel() for v in data.values()]
-        return np.concatenate(values) if values else np.asarray([])
+    return np.concatenate(chunks)
+
+
+def _extract_kernel_presynaptic_populations(kernels):
+    pops = []
+    seen = set()
+    if not isinstance(kernels, dict):
+        return pops
+    for key in kernels.keys():
+        if not isinstance(key, str) or ":" not in key:
+            continue
+        _, pop = key.split(":", 1)
+        pop = str(pop).strip()
+        if not pop or pop in seen:
+            continue
+        seen.add(pop)
+        pops.append(pop)
+    return pops
+
+
+def _to_1d_numeric_array(value):
+    arr = np.asarray(value).ravel()
+    if arr.size == 0:
+        return np.asarray([], dtype=float)
+    try:
+        return arr.astype(float, copy=False)
+    except (TypeError, ValueError):
+        return np.asarray([], dtype=float)
+
+
+def _prepare_spike_times_for_kernel_convolution(spike_times, required_populations):
+    source = "as_is"
+    data = spike_times
+
+    # If spike times contain multiple trials, use the first dictionary-like trial.
     if isinstance(data, (list, tuple)):
-        if not data:
-            return np.asarray([])
-        if all(np.isscalar(x) for x in data):
-            return np.asarray(data).ravel()
-        values = [np.asarray(v).ravel() for v in data]
-        return np.concatenate(values) if values else np.asarray([])
-    return np.asarray(data).ravel()
+        for item in data:
+            if isinstance(item, dict):
+                data = item
+                source = "trial_list_first"
+                break
+
+    if not isinstance(data, dict):
+        return data, source
+
+    required = [str(pop).strip() for pop in required_populations if str(pop).strip()]
+    if not required:
+        return data, source
+
+    # Already in expected format: {population: times}
+    if all(pop in data for pop in required):
+        normalized = {pop: _to_1d_numeric_array(data.get(pop)) for pop in required}
+        return normalized, "population"
+
+    # Four-area style format: {area: {population: times}}
+    if any(isinstance(val, dict) for val in data.values()):
+        aggregated = {}
+        missing = []
+        for pop in required:
+            chunks = []
+            for area_payload in data.values():
+                if not isinstance(area_payload, dict) or pop not in area_payload:
+                    continue
+                arr = _to_1d_numeric_array(area_payload.get(pop))
+                if arr.size:
+                    chunks.append(arr)
+            if chunks:
+                aggregated[pop] = np.concatenate(chunks)
+            else:
+                aggregated[pop] = np.asarray([], dtype=float)
+                missing.append(pop)
+        if missing:
+            missing_str = ", ".join(missing)
+            raise KeyError(f"Missing spike times for population(s): {missing_str}.")
+        return aggregated, "area_aggregated"
+
+    return data, source
+
+
+def _prepare_population_sizes_for_kernel_convolution(population_sizes, required_populations):
+    if population_sizes is None or not isinstance(population_sizes, dict):
+        return population_sizes, "as_is"
+
+    required = [str(pop).strip() for pop in required_populations if str(pop).strip()]
+    if not required:
+        return population_sizes, "as_is"
+
+    # Already in expected format: {population: size}
+    if all(pop in population_sizes and isinstance(population_sizes.get(pop), (int, float, np.integer, np.floating))
+           for pop in required):
+        return {pop: float(population_sizes[pop]) for pop in required}, "population"
+
+    # Four-area style format: {area: {population: size}}
+    if any(isinstance(val, dict) for val in population_sizes.values()):
+        aggregated = {}
+        found_any = False
+        for pop in required:
+            total = 0.0
+            found = False
+            for area_payload in population_sizes.values():
+                if not isinstance(area_payload, dict) or pop not in area_payload:
+                    continue
+                try:
+                    total += float(area_payload[pop])
+                    found = True
+                    found_any = True
+                except (TypeError, ValueError):
+                    continue
+            if found:
+                aggregated[pop] = total
+        if found_any:
+            return aggregated, "area_aggregated"
+
+    return population_sizes, "as_is"
+
+
+def _parse_population_area_label(label):
+    token = str(label).strip()
+    if token.endswith(")") and "(" in token:
+        split_idx = token.rfind("(")
+        pop = token[:split_idx].strip()
+        area = token[split_idx + 1:-1].strip()
+        if pop and area:
+            return pop, area
+    return token, None
+
+
+def _extract_area_population_layout_from_spike_times(spike_times):
+    source = "as_is"
+    data = spike_times
+
+    # If spike times contain multiple trials, use the first dictionary-like trial.
+    if isinstance(data, (list, tuple)):
+        for item in data:
+            if isinstance(item, dict):
+                data = item
+                source = "trial_list_first"
+                break
+
+    if not isinstance(data, dict):
+        return data, [], [], source
+
+    if not data:
+        return data, [], [], source
+
+    # Four-area style format: {area: {population: times}}
+    if all(isinstance(val, dict) for val in data.values()):
+        areas = [str(area).strip() for area in data.keys() if str(area).strip()]
+        populations = []
+        seen = set()
+        for area in areas:
+            payload = data.get(area, {})
+            if not isinstance(payload, dict):
+                continue
+            for pop in payload.keys():
+                pop_name = str(pop).strip()
+                if not pop_name or pop_name in seen:
+                    continue
+                seen.add(pop_name)
+                populations.append(pop_name)
+        if areas and populations:
+            return data, areas, populations, "area_structured"
+
+    return data, [], [], source
+
+
+def _scale_kernel_payload(kernel_payload, scale):
+    if not isinstance(kernel_payload, dict):
+        return kernel_payload
+    scaled = {}
+    for probe_name, probe_kernel in kernel_payload.items():
+        arr = np.asarray(probe_kernel)
+        if np.issubdtype(arr.dtype, np.number):
+            scaled[probe_name] = np.array(arr, dtype=float, copy=True) * float(scale)
+        else:
+            scaled[probe_name] = np.array(arr, copy=True)
+    return scaled
+
+
+def _compute_inter_area_kernel_scales(network_obj, populations):
+    if not isinstance(network_obj, dict):
+        return {}
+
+    pop_names = network_obj.get("X")
+    local_c = network_obj.get("C_YX")
+    local_j = network_obj.get("J_YX")
+    inter_area = network_obj.get("inter_area", {})
+    inter_c = inter_area.get("C_YX") if isinstance(inter_area, dict) else None
+    inter_j = inter_area.get("J_YX") if isinstance(inter_area, dict) else None
+
+    if not isinstance(pop_names, (list, tuple)):
+        return {}
+    if local_c is None or local_j is None or inter_c is None or inter_j is None:
+        return {}
+
+    index_by_pop = {str(pop).strip(): idx for idx, pop in enumerate(pop_names)}
+    scales = {}
+    for pre in populations:
+        for post in populations:
+            i = index_by_pop.get(str(pre).strip())
+            j = index_by_pop.get(str(post).strip())
+            if i is None or j is None:
+                continue
+            try:
+                local_strength = abs(float(local_c[i][j])) * abs(float(local_j[i][j]))
+                inter_strength = abs(float(inter_c[i][j])) * abs(float(inter_j[i][j]))
+            except (TypeError, ValueError, IndexError, KeyError):
+                continue
+            if local_strength > 0:
+                scales[(str(pre).strip(), str(post).strip())] = inter_strength / local_strength
+            elif inter_strength == 0:
+                scales[(str(pre).strip(), str(post).strip())] = 0.0
+    return scales
+
+
+def _expand_kernels_for_area_combinations(base_kernels, areas, inter_area_scales=None):
+    if not isinstance(base_kernels, dict):
+        return base_kernels, "as_is"
+
+    area_names = [str(area).strip() for area in areas if str(area).strip()]
+    if not area_names:
+        return base_kernels, "as_is"
+
+    expanded = {}
+    expanded_any = False
+    inter_area_scales = inter_area_scales or {}
+
+    for key, kernel_payload in base_kernels.items():
+        if not isinstance(key, str) or ":" not in key:
+            expanded[key] = kernel_payload
+            continue
+
+        post_label, pre_label = key.split(":", 1)
+        post_pop, post_area = _parse_population_area_label(post_label)
+        pre_pop, pre_area = _parse_population_area_label(pre_label)
+
+        # Keep existing area-resolved kernels unchanged.
+        if post_area is not None or pre_area is not None:
+            expanded[key] = kernel_payload
+            continue
+
+        for post_area_name in area_names:
+            for pre_area_name in area_names:
+                scale = 1.0
+                if post_area_name != pre_area_name:
+                    scale = inter_area_scales.get((pre_pop, post_pop), 1.0)
+                area_key = f"{post_pop}({post_area_name}):{pre_pop}({pre_area_name})"
+                expanded[area_key] = _scale_kernel_payload(kernel_payload, scale)
+                expanded_any = True
+
+    if expanded_any:
+        return expanded, "area_expanded"
+    return base_kernels, "as_is"
+
+
+def _flatten_area_spike_times_for_kernels(spike_times, areas, populations):
+    if not isinstance(spike_times, dict):
+        return spike_times
+    flattened = {}
+    missing = []
+    for area in areas:
+        payload = spike_times.get(area)
+        for pop in populations:
+            token = f"{pop}({area})"
+            if not isinstance(payload, dict) or pop not in payload:
+                flattened[token] = np.asarray([], dtype=float)
+                missing.append(token)
+                continue
+            flattened[token] = _to_1d_numeric_array(payload.get(pop))
+    if missing:
+        missing_preview = ", ".join(missing[:8])
+        if len(missing) > 8:
+            missing_preview += ", ..."
+        raise KeyError(f"Missing spike times for area/population entry(ies): {missing_preview}.")
+    return flattened
+
+
+def _flatten_area_population_sizes_for_kernels(population_sizes, areas, populations):
+    if population_sizes is None or not isinstance(population_sizes, dict):
+        return population_sizes, "as_is"
+
+    flattened = {}
+    found_any = False
+    for area in areas:
+        area_payload = population_sizes.get(area)
+        for pop in populations:
+            token = f"{pop}({area})"
+            value = None
+            if isinstance(area_payload, dict) and pop in area_payload:
+                value = _safe_float(area_payload.get(pop))
+            elif pop in population_sizes:
+                value = _safe_float(population_sizes.get(pop))
+            if value is None:
+                continue
+            flattened[token] = float(value)
+            found_any = True
+
+    if found_any:
+        return flattened, "area_flattened"
+    return population_sizes, "as_is"
 
 
 def _safe_float(value):
@@ -701,7 +1015,7 @@ def _resolve_sampling_frequency(params, key, df, label):
 
 def _build_feature_method_params(method, params, df):
     method_params = {}
-    n_jobs = _parse_int_param(params, "features_n_jobs", default=None)
+    n_jobs = _parse_int_param(params, "features_n_jobs", default=1)
     chunksize = _parse_int_param(params, "features_chunksize", default=None)
     start_method = _get_param(params, "features_start_method", "spawn")
     if start_method not in {"spawn", "fork", "forkserver"}:
@@ -958,10 +1272,16 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         else:
             sig = inspect.signature(features.compute_features)
             supports_progress = "progress_callback" in sig.parameters
+            progress_state = {
+                "callback_seen": False,
+                "running": True,
+                "last_heartbeat_log": time.time(),
+            }
 
             def _on_feature_progress(completed, total, pct):
                 if total <= 0:
                     return
+                progress_state["callback_seen"] = True
                 mapped = int(max(0, min(99, float(pct))))
                 if job_id in job_status:
                     # Follow ncpi compute_features progress directly.
@@ -977,13 +1297,43 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     "Warning: compute_features progress callbacks are unavailable in this ncpi version."
                 )
 
-            computed = _compute_features_with_compat(
-                features_obj=features,
-                samples=samples,
-                exec_opts=exec_opts,
-                progress_callback=_on_feature_progress,
-                log_callback=_on_feature_log,
-            )
+            if job_id in job_status:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 10)
+
+            def _feature_progress_heartbeat():
+                while progress_state["running"]:
+                    time.sleep(2.0)
+                    if not progress_state["running"]:
+                        break
+                    # If callbacks are working, trust them and stop synthetic progress updates.
+                    if progress_state["callback_seen"]:
+                        continue
+                    if job_id in job_status:
+                        current = int(job_status[job_id].get("progress", 0))
+                        if current < 95:
+                            job_status[job_id]["progress"] = current + 1
+                    now = time.time()
+                    if now - progress_state["last_heartbeat_log"] >= 15.0:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "Feature extraction is still running..."
+                        )
+                        progress_state["last_heartbeat_log"] = now
+
+            heartbeat_thread = threading.Thread(target=_feature_progress_heartbeat, daemon=True)
+            heartbeat_thread.start()
+            try:
+                computed = _compute_features_with_compat(
+                    features_obj=features,
+                    samples=samples,
+                    exec_opts=exec_opts,
+                    progress_callback=_on_feature_progress,
+                    log_callback=_on_feature_log,
+                )
+            finally:
+                progress_state["running"] = False
+                heartbeat_thread.join(timeout=0.2)
             if job_id in job_status:
                 job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
             output_df = df.copy()
@@ -1607,7 +1957,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
 
         use_scaler = str(params.get("use_scaler", "")).lower() in {"1", "true", "on", "yes"}
         _append_job_output(job_status, job_id, f"Scaler enabled={'yes' if use_scaler else 'no'}.")
-        inference_n_jobs = _parse_int_param(params, "inference_n_jobs", default=None)
+        inference_n_jobs = _parse_int_param(params, "inference_n_jobs", default=1)
         inference_chunksize = _parse_int_param(params, "inference_chunksize", default=None)
         inference_start_method = _get_param(params, "inference_start_method", "spawn")
         if inference_start_method not in {"spawn", "fork", "forkserver"}:
@@ -2199,11 +2549,18 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         proxy = potential.compute_proxy(method, sim_data, proxy_sim_step, excitatory_only=excitatory_only)
 
         output_root = '/tmp/field_potential_proxy'
-        run_dir = os.path.join(output_root, job_id)
-        os.makedirs(run_dir, exist_ok=True)
+        os.makedirs(output_root, exist_ok=True)
+        # Keep canonical short filenames for proxy outputs.
+        for name in ('proxy.pkl', 'sim_data.pkl'):
+            old_path = os.path.join(output_root, name)
+            if os.path.isfile(old_path):
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
 
-        sim_data_path = os.path.join(run_dir, 'sim_data.pkl')
-        proxy_path = os.path.join(run_dir, 'proxy.pkl')
+        sim_data_path = os.path.join(output_root, 'sim_data.pkl')
+        proxy_path = os.path.join(output_root, 'proxy.pkl')
 
         with open(sim_data_path, 'wb') as f:
             pickle.dump(sim_data, f)
@@ -2229,7 +2586,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             }
         proxy_df.to_pickle(proxy_path)
 
-        _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {run_dir}")
+        _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {output_root}")
         job_status[job_id].update({
                 "status": "finished",
                 "progress": 100,
@@ -2434,19 +2791,107 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         )
 
         output_root = "/tmp/field_potential_kernel"
-        run_dir = os.path.join(output_root, job_id)
-        os.makedirs(run_dir, exist_ok=True)
-        kernels_path = os.path.join(run_dir, "kernels.pkl")
-        with open(kernels_path, "wb") as f:
-            pickle.dump(kernels, f)
-
-        _append_job_output(job_status, job_id, f"Saved kernels to {kernels_path}")
+        os.makedirs(output_root, exist_ok=True)
+        for name in os.listdir(output_root):
+            lower = name.lower()
+            if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                continue
+            old_path = os.path.join(output_root, name)
+            if os.path.isfile(old_path):
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
 
         _append_job_output(job_status, job_id, "Computing CDM/LFP from kernels...")
         spike_times_path = _resolve_sim_file(
             file_paths, "kernel_spike_times_file", "times.pkl", required=True
         )
-        spike_times = read_file(spike_times_path)
+        spike_times_raw = read_file(spike_times_path)
+        spike_times_input, area_names, area_populations, spike_layout_mode = _extract_area_population_layout_from_spike_times(
+            spike_times_raw
+        )
+
+        if spike_layout_mode == "trial_list_first":
+            _append_job_output(
+                job_status,
+                job_id,
+                "Detected multiple spike-time trials; using the first trial for kernel convolution.",
+            )
+
+        kernels_for_convolution = kernels
+        if area_names and area_populations:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Detected area-wise spike times ({', '.join(area_names)}); expanding kernels per area/population pair.",
+            )
+            network_path = _resolve_sim_file(
+                file_paths, "kernel_network_file", "network.pkl", required=False
+            )
+            if not network_path:
+                candidate_network = os.path.join(os.path.dirname(spike_times_path), "network.pkl")
+                if os.path.exists(candidate_network):
+                    network_path = candidate_network
+
+            inter_area_scales = {}
+            if network_path and os.path.exists(network_path):
+                try:
+                    network_obj = read_file(network_path)
+                    inter_area_scales = _compute_inter_area_kernel_scales(network_obj, area_populations)
+                    if inter_area_scales:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "Applied inter-area kernel scaling from network connectivity (network.pkl).",
+                        )
+                except Exception as exc:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Warning: failed to load inter-area scaling from network file ({exc}). Using unscaled area kernels.",
+                    )
+
+            kernels_for_convolution, kernel_mode = _expand_kernels_for_area_combinations(
+                kernels,
+                area_names,
+                inter_area_scales=inter_area_scales,
+            )
+            if kernel_mode == "area_expanded":
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Expanded kernel dictionary from {len(kernels)} to {len(kernels_for_convolution)} entries.",
+                )
+                spike_times_input = _flatten_area_spike_times_for_kernels(
+                    spike_times_input,
+                    area_names,
+                    area_populations,
+                )
+
+        required_populations = _extract_kernel_presynaptic_populations(kernels_for_convolution)
+        if (
+            area_names
+            and area_populations
+            and isinstance(spike_times_input, dict)
+            and any(_parse_population_area_label(pop)[1] is not None for pop in required_populations)
+            and not all(pop in spike_times_input for pop in required_populations)
+        ):
+            spike_times_input = _flatten_area_spike_times_for_kernels(
+                spike_times_input,
+                area_names,
+                area_populations,
+            )
+        spike_times, spike_times_mode = _prepare_spike_times_for_kernel_convolution(
+            spike_times_input,
+            required_populations,
+        )
+        if spike_times_mode == "area_aggregated":
+            _append_job_output(
+                job_status,
+                job_id,
+                "Detected area-wise spike times; aggregated spikes across areas by population for kernel convolution.",
+            )
 
         population_sizes = None
         pop_path = _resolve_sim_file(
@@ -2454,6 +2899,34 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         )
         if pop_path:
             population_sizes = read_file(pop_path)
+            if area_names and area_populations:
+                population_sizes, pop_sizes_layout = _flatten_area_population_sizes_for_kernels(
+                    population_sizes,
+                    area_names,
+                    area_populations,
+                )
+                if pop_sizes_layout == "area_flattened":
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Detected area-wise population sizes; mapped them to area/population kernel keys.",
+                    )
+            population_sizes, pop_sizes_mode = _prepare_population_sizes_for_kernel_convolution(
+                population_sizes,
+                required_populations,
+            )
+            if pop_sizes_mode == "area_aggregated":
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Detected area-wise population sizes; aggregated sizes across areas by population.",
+                )
+
+        kernels_path = os.path.join(output_root, "kernels.pkl")
+        with open(kernels_path, "wb") as f:
+            pickle.dump(kernels_for_convolution, f)
+
+        _append_job_output(job_status, job_id, f"Saved kernels to {kernels_path}")
 
         cdm_dt = params.get("cdm_dt")
         cdm_dt = float(cdm_dt) if cdm_dt not in (None, "") else dt
@@ -2485,7 +2958,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         fs_hz = (1000.0 / float(cdm_dt)) if float(cdm_dt) > 0 else None
         for probe_name in probe_names:
             cdm_signals = potential.compute_cdm_lfp_from_kernels(
-                kernels,
+                kernels_for_convolution,
                 spike_times,
                 cdm_dt,
                 cdm_tstop,
@@ -2503,7 +2976,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             if not output_name:
                 safe_probe = "".join(ch.lower() if ch.isalnum() else "_" for ch in probe_name).strip("_")
                 output_name = f"{safe_probe or 'probe_output'}.pkl"
-            output_path = os.path.join(run_dir, output_name)
+            output_path = os.path.join(output_root, output_name)
             combined_signal = _sum_signal_dict(cdm_signals)
             payload_df = pd.DataFrame([{
                 "data": combined_signal,
@@ -2522,7 +2995,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         if len(probe_outputs) == 1:
             results_path = next(iter(output_paths.values()))
         else:
-            combined_path = os.path.join(run_dir, "probe_outputs.pkl")
+            combined_path = os.path.join(output_root, "probe_outputs.pkl")
             rows = []
             for probe_name, probe_dict in probe_outputs.items():
                 rows.append({
@@ -2563,11 +3036,19 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
 
         cdm_path = file_paths.get("meeg_cdm_file")
         if not cdm_path or not os.path.exists(cdm_path):
-            preferred = glob.glob(os.path.join("/tmp/field_potential_kernel", "*", "current_dipole_moment.pkl"))
+            preferred = []
+            direct_cdm = os.path.join("/tmp/field_potential_kernel", "current_dipole_moment.pkl")
+            if os.path.isfile(direct_cdm):
+                preferred.append(direct_cdm)
+            preferred.extend(glob.glob(os.path.join("/tmp/field_potential_kernel", "*", "current_dipole_moment.pkl")))
             if preferred:
                 cdm_path = max(preferred, key=os.path.getmtime)
             else:
-                fallback = glob.glob(os.path.join("/tmp/field_potential_kernel", "*", "kernel_approx_cdm.pkl"))
+                fallback = []
+                direct_kernel_approx = os.path.join("/tmp/field_potential_kernel", "kernel_approx_cdm.pkl")
+                if os.path.isfile(direct_kernel_approx):
+                    fallback.append(direct_kernel_approx)
+                fallback.extend(glob.glob(os.path.join("/tmp/field_potential_kernel", "*", "kernel_approx_cdm.pkl")))
                 if fallback:
                     cdm_path = max(fallback, key=os.path.getmtime)
         if not cdm_path or not os.path.exists(cdm_path):
@@ -2763,9 +3244,18 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             job_status[job_id]["progress"] = progress
 
         output_root = "/tmp/field_potential_meeg"
-        run_dir = os.path.join(output_root, job_id)
-        os.makedirs(run_dir, exist_ok=True)
-        meeg_path = os.path.join(run_dir, "meeg.pkl")
+        os.makedirs(output_root, exist_ok=True)
+        for name in os.listdir(output_root):
+            lower = name.lower()
+            if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                continue
+            old_path = os.path.join(output_root, name)
+            if os.path.isfile(old_path):
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
+        meeg_path = os.path.join(output_root, "meeg.pkl")
         meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
         meeg_decimation = int(cdm_meta.get("decimation_factor", 1))
         meeg_fs = _safe_float(cdm_meta.get("fs_hz"))

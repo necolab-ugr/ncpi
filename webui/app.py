@@ -10,8 +10,10 @@ import base64
 import pickle
 import sys
 import inspect
+import re
 from pathlib import Path
 from collections import deque
+from itertools import product
 
 # Folder for temporary files > 5 GB
 # Set BEFORE any flask imports if possible
@@ -70,12 +72,14 @@ FEATURES_PARSER_FILE_EXTENSIONS = {
 }
 PICKLE_EXTENSIONS = {".pkl", ".pickle"}
 MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
+MAX_SIMULATION_GRID_COMBINATIONS = 256
+GRID_PREFIX = "grid="
 
 
 HAGEN_DEFAULTS = {
     "tstop": 12000.0,
     "dt": 2 ** -4,
-    "local_num_threads": 64,
+    "local_num_threads": 1,
     "X": ["E", "I"],
     "N_X": [8192, 1024],
     "C_m_X": [289.1, 110.7],
@@ -94,7 +98,7 @@ HAGEN_DEFAULTS = {
 FOUR_AREA_DEFAULTS = {
     "tstop": 12000.0,
     "dt": 2 ** -4,
-    "local_num_threads": 64,
+    "local_num_threads": 1,
     "areas": ["frontal", "parietal", "temporal", "occipital"],
     "X": ["E", "I"],
     "N_X": [8192, 1024],
@@ -116,6 +120,55 @@ FOUR_AREA_DEFAULTS = {
     "inter_area_p": 0.02,
     "inter_area_delay": 10.0,
 }
+
+HAGEN_GRID_KEYS = [
+    "tstop",
+    "dt",
+    "local_num_threads",
+    "X",
+    "N_X",
+    "C_m_X",
+    "tau_m_X",
+    "E_L_X",
+    "model",
+    "C_YX",
+    "J_YX",
+    "delay_YX",
+    "tau_syn_YX",
+    "n_ext",
+    "nu_ext",
+    "J_ext",
+]
+
+FOUR_AREA_GRID_KEYS = [
+    "tstop",
+    "dt",
+    "local_num_threads",
+    "areas",
+    "X",
+    "N_X",
+    "C_m_X",
+    "tau_m_X",
+    "E_L_X",
+    "model",
+    "J_EE",
+    "J_IE",
+    "J_EI",
+    "J_II",
+    "C_YX",
+    "J_YX",
+    "delay_YX",
+    "tau_syn_YX",
+    "n_ext",
+    "nu_ext",
+    "J_ext",
+    "inter_area_scale",
+    "inter_area_p",
+    "inter_area_delay",
+    "inter_area.C_YX",
+    "inter_area.J_YX",
+    "inter_area.delay_YX",
+]
 
 
 def _get_form_value(form, key):
@@ -172,6 +225,210 @@ def _format_value(value):
     return repr(value)
 
 
+def _append_job_output(job_status, job_id, message):
+    if job_id not in job_status:
+        return
+    line = str(message).strip()
+    if not line:
+        return
+    current = job_status[job_id].get("output", "")
+    lines = [ln for ln in current.splitlines() if ln.strip()] if current else []
+    lines.append(line)
+    if len(lines) > MAX_OUTPUT_LINES:
+        lines = lines[-MAX_OUTPUT_LINES:]
+    job_status[job_id]["output"] = "\n".join(lines)
+
+
+def _is_numeric_default(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _coerce_grid_candidate(value, default, key):
+    if isinstance(default, str):
+        if not isinstance(value, str):
+            return str(value)
+        return value
+    if isinstance(default, int) and not isinstance(default, bool):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid grid candidate for '{key}': {value}") from exc
+    if isinstance(default, float):
+        try:
+            return float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid grid candidate for '{key}': {value}") from exc
+    return value
+
+
+def _expand_numeric_range(spec, key):
+    parts = [p.strip() for p in spec.split(":")]
+    if len(parts) != 3:
+        raise ValueError(
+            f"Invalid grid range for '{key}'. Use 'grid=start:stop:step'."
+        )
+    try:
+        start = float(parts[0])
+        stop = float(parts[1])
+        step = float(parts[2])
+    except ValueError as exc:
+        raise ValueError(
+            f"Invalid grid range for '{key}'. Use numeric values in 'start:stop:step'."
+        ) from exc
+    if step == 0:
+        raise ValueError(f"Invalid grid range for '{key}': step cannot be 0.")
+
+    values = []
+    current = start
+    eps = abs(step) * 1e-9 + 1e-12
+    if step > 0:
+        while current <= stop + eps:
+            values.append(round(current, 12))
+            current += step
+    else:
+        while current >= stop - eps:
+            values.append(round(current, 12))
+            current += step
+
+    if not values:
+        raise ValueError(f"Grid range for '{key}' generated no values.")
+    return values
+
+
+def _parse_grid_candidates(form, key, default):
+    raw = _get_form_value(form, key)
+    if raw is None:
+        return [default], False
+
+    if not raw.lower().startswith(GRID_PREFIX):
+        if isinstance(default, str):
+            return [_parse_str({key: raw}, key, default)], False
+        if isinstance(default, int) and not isinstance(default, bool):
+            return [_parse_int({key: raw}, key, default)], False
+        if isinstance(default, float):
+            return [_parse_float({key: raw}, key, default)], False
+        return [_parse_literal({key: raw}, key, default)], False
+
+    spec = raw[len(GRID_PREFIX):].strip()
+    if not spec:
+        raise ValueError(
+            f"Grid definition for '{key}' is empty. Use e.g. grid=[v1, v2] or grid=start:stop:step."
+        )
+
+    if _is_numeric_default(default) and ":" in spec and not any(ch in spec for ch in "[]{}(),"):
+        candidates = _expand_numeric_range(spec, key)
+    else:
+        try:
+            parsed = ast.literal_eval(spec)
+        except (ValueError, SyntaxError) as exc:
+            raise ValueError(
+                f"Invalid grid definition for '{key}'. Use e.g. grid=[v1, v2] or grid=start:stop:step."
+            ) from exc
+        if isinstance(parsed, (list, tuple)):
+            candidates = list(parsed)
+        else:
+            candidates = [parsed]
+
+    if not candidates:
+        raise ValueError(f"Grid definition for '{key}' produced no values.")
+    coerced = [_coerce_grid_candidate(candidate, default, key) for candidate in candidates]
+    return coerced, True
+
+
+def _simulation_grid_defaults(model_type):
+    if model_type == "hagen":
+        defaults = {
+            "tstop": HAGEN_DEFAULTS["tstop"],
+            "dt": HAGEN_DEFAULTS["dt"],
+            "local_num_threads": HAGEN_DEFAULTS["local_num_threads"],
+        }
+        defaults.update({key: HAGEN_DEFAULTS[key] for key in HAGEN_GRID_KEYS if key in HAGEN_DEFAULTS})
+        return defaults
+
+    inter_area_p = FOUR_AREA_DEFAULTS["inter_area_p"]
+    inter_area_scale = FOUR_AREA_DEFAULTS["inter_area_scale"]
+    inter_area_delay = FOUR_AREA_DEFAULTS["inter_area_delay"]
+    j_ee = FOUR_AREA_DEFAULTS["J_EE"]
+    j_ie = FOUR_AREA_DEFAULTS["J_IE"]
+    j_ei = FOUR_AREA_DEFAULTS["J_EI"]
+    j_ii = FOUR_AREA_DEFAULTS["J_II"]
+    defaults = {
+        "tstop": FOUR_AREA_DEFAULTS["tstop"],
+        "dt": FOUR_AREA_DEFAULTS["dt"],
+        "local_num_threads": FOUR_AREA_DEFAULTS["local_num_threads"],
+        "areas": FOUR_AREA_DEFAULTS["areas"],
+        "X": FOUR_AREA_DEFAULTS["X"],
+        "N_X": FOUR_AREA_DEFAULTS["N_X"],
+        "C_m_X": FOUR_AREA_DEFAULTS["C_m_X"],
+        "tau_m_X": FOUR_AREA_DEFAULTS["tau_m_X"],
+        "E_L_X": FOUR_AREA_DEFAULTS["E_L_X"],
+        "model": FOUR_AREA_DEFAULTS["model"],
+        "J_EE": j_ee,
+        "J_IE": j_ie,
+        "J_EI": j_ei,
+        "J_II": j_ii,
+        "C_YX": FOUR_AREA_DEFAULTS["C_YX"],
+        "J_YX": [[j_ee, j_ie], [j_ei, j_ii]],
+        "delay_YX": FOUR_AREA_DEFAULTS["delay_YX"],
+        "tau_syn_YX": FOUR_AREA_DEFAULTS["tau_syn_YX"],
+        "n_ext": FOUR_AREA_DEFAULTS["n_ext"],
+        "nu_ext": FOUR_AREA_DEFAULTS["nu_ext"],
+        "J_ext": FOUR_AREA_DEFAULTS["J_ext"],
+        "inter_area_scale": inter_area_scale,
+        "inter_area_p": inter_area_p,
+        "inter_area_delay": inter_area_delay,
+        "inter_area.C_YX": [[inter_area_p, inter_area_p], [0.0, 0.0]],
+        "inter_area.J_YX": [
+            [j_ee * inter_area_scale, j_ie * inter_area_scale],
+            [0.0, 0.0],
+        ],
+        "inter_area.delay_YX": [[inter_area_delay, inter_area_delay], [0.0, 0.0]],
+    }
+    return defaults
+
+
+def _to_form_value(value):
+    if isinstance(value, str):
+        return value
+    return _format_value(value)
+
+
+def _expand_simulation_forms(model_type, form):
+    run_mode = (_get_form_value(form, "sim_run_mode") or "single").lower()
+    if run_mode not in {"single", "grid"}:
+        raise ValueError("Invalid simulation mode. Use single trial or parameter grid.")
+
+    if run_mode == "single":
+        return run_mode, [dict(form)]
+
+    grid_defaults = _simulation_grid_defaults(model_type)
+    ordered_keys = list(grid_defaults.keys())
+
+    candidate_lists = {}
+    total = 1
+    for key in ordered_keys:
+        candidates, _ = _parse_grid_candidates(form, key, grid_defaults[key])
+        candidate_lists[key] = candidates
+        total *= len(candidates)
+
+    if total > MAX_SIMULATION_GRID_COMBINATIONS:
+        raise ValueError(
+            f"Grid expands to {total} simulations; maximum allowed is {MAX_SIMULATION_GRID_COMBINATIONS}."
+        )
+
+    expanded_forms = []
+    for combo in product(*(candidate_lists[key] for key in ordered_keys)):
+        trial_form = dict(form)
+        trial_form["sim_run_mode"] = "grid"
+        for key, value in zip(ordered_keys, combo):
+            trial_form[key] = _to_form_value(value)
+        expanded_forms.append(trial_form)
+
+    if not expanded_forms:
+        raise ValueError("No simulations generated from the selected parameter grid.")
+    return run_mode, expanded_forms
+
+
 def _ensure_sequence(value, name):
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"'{name}' must be a list or tuple.")
@@ -187,6 +444,49 @@ def _field_potential_dirs():
         os.path.join(temp_dir, "field_potential_kernel"),
         os.path.join(temp_dir, "field_potential_meeg"),
     ]
+
+
+def _infer_field_potential_type_from_filename(filename):
+    lower_name = os.path.basename(filename or "").lower()
+    if not lower_name:
+        return None
+
+    if lower_name.startswith("proxy") or "proxy" in lower_name:
+        return "proxy"
+    if lower_name in {"kernel_approx_cdm.pkl", "current_dipole_moment.pkl"} or "cdm" in lower_name:
+        return "cdm"
+    if lower_name in {"gauss_cylinder_potential.pkl", "probe_outputs.pkl", "lfp.pkl"} or "lfp" in lower_name:
+        return "lfp"
+    if lower_name == "eeg.pkl" or "eeg" in lower_name:
+        return "eeg"
+    if lower_name == "meg.pkl" or "meg" in lower_name:
+        return "meg"
+    if lower_name == "meeg.pkl":
+        return "meeg"
+    return None
+
+
+def _field_potential_output_name(fp_type, safe_name):
+    lower_name = (safe_name or "").lower()
+
+    if fp_type == "proxy":
+        return safe_name if lower_name.startswith("proxy") else "proxy_loaded.pkl"
+    if fp_type == "cdm":
+        if lower_name in {"kernel_approx_cdm.pkl", "current_dipole_moment.pkl"}:
+            return safe_name
+        return "kernel_approx_cdm.pkl"
+    if fp_type == "lfp":
+        if lower_name in {"gauss_cylinder_potential.pkl", "probe_outputs.pkl", "lfp.pkl"}:
+            return safe_name
+        return "gauss_cylinder_potential.pkl"
+    if fp_type == "eeg":
+        return "eeg.pkl"
+    if fp_type == "meg":
+        return "meg.pkl"
+    if fp_type == "meeg":
+        return "meeg.pkl"
+
+    return safe_name
 
 
 def _features_data_dir(create=False):
@@ -332,6 +632,105 @@ def _list_predictions_data_files():
             rel_path = os.path.relpath(abs_path, predictions_dir)
             files.append(rel_path)
     return sorted(files)
+
+
+def _list_simulation_data_files():
+    simulation_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    if not os.path.isdir(simulation_dir):
+        return []
+    files = []
+    for name in os.listdir(simulation_dir):
+        lower = name.lower()
+        if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+            continue
+        abs_path = os.path.join(simulation_dir, name)
+        if not os.path.isfile(abs_path):
+            continue
+        files.append(name)
+    return sorted(files)
+
+
+def _list_field_potential_detected_files():
+    entries = []
+    seen_paths = set()
+    unique_roots = []
+    for root in _field_potential_dirs():
+        real_root = os.path.realpath(root)
+        if real_root in unique_roots:
+            continue
+        unique_roots.append(real_root)
+
+    for root in unique_roots:
+        if not os.path.isdir(root):
+            continue
+        root_label = os.path.basename(root)
+        if "proxy" in root_label:
+            mode_label = "Field Potential Proxy"
+        elif "kernel" in root_label:
+            mode_label = "Field Potential Kernel"
+        elif "meeg" in root_label:
+            mode_label = "Field Potential M/EEG"
+        else:
+            mode_label = "Field Potential"
+
+        for current_root, _, files in os.walk(root):
+            for name in files:
+                lower = name.lower()
+                if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                    continue
+                abs_path = os.path.realpath(os.path.join(current_root, name))
+                if not os.path.isfile(abs_path):
+                    continue
+                if abs_path in seen_paths:
+                    continue
+                seen_paths.add(abs_path)
+                rel_name = os.path.relpath(abs_path, root)
+                entries.append({
+                    "key": f"field_potential::{abs_path}",
+                    "name": rel_name,
+                    "source": "field_potential",
+                    "label": mode_label,
+                    "path": abs_path,
+                })
+    entries.sort(key=lambda item: (item["label"], item["name"]))
+    return entries
+
+
+def _list_detected_analysis_data_files():
+    entries = []
+
+    features_root = _features_data_dir(create=False)
+    for name in _list_features_data_files():
+        entries.append({
+            "key": f"features::{name}",
+            "name": name,
+            "source": "features",
+            "label": "Features",
+            "path": os.path.join(features_root, name),
+        })
+
+    predictions_root = _predictions_data_dir(create=False)
+    for name in _list_predictions_data_files():
+        entries.append({
+            "key": f"predictions::{name}",
+            "name": name,
+            "source": "predictions",
+            "label": "Predictions",
+            "path": os.path.join(predictions_root, name),
+        })
+
+    simulation_root = os.path.join(tempfile.gettempdir(), "simulation_data")
+    for name in _list_simulation_data_files():
+        entries.append({
+            "key": f"simulation::{name}",
+            "name": name,
+            "source": "simulation",
+            "label": "Simulation",
+            "path": os.path.join(simulation_root, name),
+        })
+
+    entries.extend(_list_field_potential_detected_files())
+    return entries
 
 
 def _bootstrap_predictions_data_from_previous_steps():
@@ -1390,7 +1789,15 @@ def _estimate_duration_seconds(form, defaults, model_type):
     return max(120.0, min(3600.0, estimated))
 
 
-def _run_process_with_progress(cmd, cwd, job_status, job_id, estimate_seconds):
+def _run_process_with_progress(
+    cmd,
+    cwd,
+    job_status,
+    job_id,
+    estimate_seconds,
+    progress_callback=None,
+    line_callback=None,
+):
     output_lines = []
     progress_seen = threading.Event()
     output_buffer = deque(maxlen=MAX_OUTPUT_LINES)
@@ -1421,12 +1828,15 @@ def _run_process_with_progress(cmd, cwd, job_status, job_id, estimate_seconds):
         except ValueError:
             return
         pct = max(0, min(99, pct))
-        job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), pct)
-        progress_seen.set()
-        if pct >= 5:
-            elapsed = time.time() - start
-            est_total = elapsed / (pct / 100.0)
-            job_status[job_id]["estimated_time_remaining"] = start + est_total
+        if progress_callback is not None:
+            progress_callback(pct)
+        else:
+            job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), pct)
+            progress_seen.set()
+            if pct >= 5:
+                elapsed = time.time() - start
+                est_total = elapsed / (pct / 100.0)
+                job_status[job_id]["estimated_time_remaining"] = start + est_total
 
     def _reader():
         if process.stdout is None:
@@ -1437,6 +1847,8 @@ def _run_process_with_progress(cmd, cwd, job_status, job_id, estimate_seconds):
             output_buffer.append(line)
             if job_id in job_status:
                 job_status[job_id]["output"] = "".join(output_buffer)
+            if line_callback is not None:
+                line_callback(line)
         process.stdout.close()
 
     reader_thread = threading.Thread(target=_reader, daemon=True)
@@ -1468,6 +1880,40 @@ def _build_simulation_params(form, defaults):
         f"dt = {dt}",
         "",
     ])
+
+
+def _enforce_simulation_chunk_seconds(simulation_py_path, chunk_ms=1000.0):
+    """Force _simulate_with_progress to use fixed chunk duration in milliseconds."""
+    try:
+        with open(simulation_py_path, "r", encoding="utf-8") as f:
+            source = f.read()
+    except OSError:
+        return
+
+    # Replace legacy adaptive chunking if present.
+    updated = source
+    updated = re.sub(
+        r"step\s*=\s*max\(\s*dt\s*,\s*tstop\s*/\s*50(?:\.0)?\s*\)",
+        f"step = max(dt, {float(chunk_ms):.1f})",
+        updated,
+    )
+
+    # Ensure fixed chunking is present in _simulate_with_progress.
+    if "_simulate_with_progress" in updated:
+        updated = re.sub(
+            r"step\s*=\s*max\(\s*dt\s*,\s*[0-9]+(?:\.[0-9]+)?\s*\)",
+            f"step = max(dt, {float(chunk_ms):.1f})",
+            updated,
+        )
+
+    if updated == source:
+        return
+
+    try:
+        with open(simulation_py_path, "w", encoding="utf-8") as f:
+            f.write(updated)
+    except OSError:
+        return
 
 
 def _build_hagen_network_params(form):
@@ -1702,27 +2148,61 @@ def upload_sim_files():
 
 @app.route("/clear_simulation_data", methods=["POST"])
 def clear_simulation_data():
-    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
-    if os.path.isdir(simulation_data_dir):
-        for name in os.listdir(simulation_data_dir):
-            if not name.endswith(".pkl"):
-                continue
-            path = os.path.join(simulation_data_dir, name)
-            if os.path.isfile(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+    _clear_simulation_data_files()
+    _clear_field_potential_data_files()
+    _clear_features_data_files()
+    _clear_predictions_data_files()
+    _clear_analysis_state()
     return redirect(url_for('dashboard'))
 
 @app.route("/clear_field_potential_data", methods=["POST"])
 def clear_field_potential_data():
+    _clear_field_potential_data_files()
+    _clear_features_data_files()
+    _clear_predictions_data_files()
+    _clear_analysis_state()
+    return redirect(url_for('dashboard'))
+
+
+@app.route("/clear_features_data", methods=["POST"])
+def clear_features_data():
+    _clear_features_data_files()
+    _clear_predictions_data_files()
+    _clear_analysis_state()
+    return redirect(url_for('dashboard'))
+
+
+@app.route("/clear_predictions_data", methods=["POST"])
+def clear_predictions_data():
+    _clear_predictions_data_files()
+    _clear_analysis_state()
+    return redirect(url_for('dashboard'))
+
+
+def _clear_simulation_data_files():
+    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    if not os.path.isdir(simulation_data_dir):
+        return
+    for name in os.listdir(simulation_data_dir):
+        lower = name.lower()
+        if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+            continue
+        path = os.path.join(simulation_data_dir, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _clear_field_potential_data_files():
     for fp_dir in _field_potential_dirs():
         if not os.path.isdir(fp_dir):
             continue
         for root, _, files in os.walk(fp_dir):
             for name in files:
-                if not name.endswith(".pkl"):
+                lower = name.lower()
+                if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
                     continue
                 path = os.path.join(root, name)
                 if os.path.isfile(path):
@@ -1730,39 +2210,96 @@ def clear_field_potential_data():
                         os.remove(path)
                     except OSError:
                         pass
-    return redirect(url_for('dashboard'))
 
 
-@app.route("/clear_features_data", methods=["POST"])
-def clear_features_data():
+def _clear_features_data_files():
     features_data_dir = _features_data_dir(create=False)
-    if os.path.isdir(features_data_dir):
-        for name in os.listdir(features_data_dir):
-            if not (name.endswith(".pkl") or name.endswith(".pickle")):
-                continue
-            path = os.path.join(features_data_dir, name)
-            if os.path.isfile(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-    return redirect(url_for('dashboard'))
+    if not os.path.isdir(features_data_dir):
+        return
+    for name in os.listdir(features_data_dir):
+        if not (name.endswith(".pkl") or name.endswith(".pickle")):
+            continue
+        path = os.path.join(features_data_dir, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
-@app.route("/clear_predictions_data", methods=["POST"])
-def clear_predictions_data():
+def _clear_predictions_data_files():
     predictions_data_dir = _predictions_data_dir(create=False)
-    if os.path.isdir(predictions_data_dir):
-        for name in os.listdir(predictions_data_dir):
-            if not (name.endswith(".pkl") or name.endswith(".pickle")):
-                continue
-            path = os.path.join(predictions_data_dir, name)
-            if os.path.isfile(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
-    return redirect(url_for('dashboard'))
+    if not os.path.isdir(predictions_data_dir):
+        return
+    for name in os.listdir(predictions_data_dir):
+        if not (name.endswith(".pkl") or name.endswith(".pickle")):
+            continue
+        path = os.path.join(predictions_data_dir, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _clear_analysis_state():
+    _clear_analysis_data_files()
+    _clear_analysis_selection_mode()
+    _clear_analysis_selected_simulation_keys()
+
+
+def _clear_downstream_data_for_module(module_key):
+    """Clear data produced by downstream modules in the processing pipeline."""
+    key = (module_key or "").strip().lower()
+    cleared = []
+    if key == "simulation":
+        _clear_field_potential_data_files()
+        _clear_features_data_files()
+        _clear_predictions_data_files()
+        _clear_analysis_state()
+        cleared = ["field_potential", "features", "inference", "analysis"]
+    elif key == "field_potential":
+        _clear_features_data_files()
+        _clear_predictions_data_files()
+        _clear_analysis_state()
+        cleared = ["features", "inference", "analysis"]
+    elif key == "features":
+        _clear_predictions_data_files()
+        _clear_analysis_state()
+        cleared = ["inference", "analysis"]
+    elif key == "inference":
+        _clear_analysis_state()
+        cleared = ["analysis"]
+    return cleared
+
+
+def _run_job_with_post_success_cleanup(job_id, module_key, func, *func_args):
+    """Run a background job and clear downstream data only on successful completion."""
+    try:
+        func(job_id, job_status, *func_args)
+    except Exception as exc:
+        app.logger.exception("[compute %s] unhandled worker exception in %s", job_id, getattr(func, "__name__", "worker"))
+        status = job_status.get(job_id)
+        if isinstance(status, dict) and status.get("status") not in {"finished", "failed"}:
+            status.update({
+                "status": "failed",
+                "error": str(exc),
+                "progress": status.get("progress", 0),
+            })
+        return
+
+    status = job_status.get(job_id, {})
+    if status.get("status") != "finished" or bool(status.get("error")):
+        return
+
+    cleared = _clear_downstream_data_for_module(module_key)
+    if cleared:
+        app.logger.warning(
+            "[compute %s] upstream '%s' finished; cleared downstream data: %s",
+            job_id,
+            module_key,
+            ", ".join(cleared),
+        )
 
 @app.route("/simulation/new_sim")
 def new_sim():
@@ -1784,77 +2321,168 @@ def new_sim_custom():
 def _simulation_computation(job_id, job_status, params):
     try:
         model_type = params["model_type"]
-        form = params["form"]
-        estimate_seconds = params.get("estimate_seconds", 60.0)
+        run_mode = params.get("run_mode", "single")
+        run_forms = params.get("run_forms") or [params["form"]]
+        estimate_seconds = float(params.get("estimate_seconds", 60.0))
+        per_run_estimate = max(1.0, estimate_seconds / max(1, len(run_forms)))
 
         repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         if model_type == "hagen":
             example_root = os.path.join(
                 repo_root, "examples", "simulation", "Hagen_model", "simulation"
             )
-            network_params_content = _build_hagen_network_params(form)
             sim_defaults = HAGEN_DEFAULTS
         else:
             example_root = os.path.join(
                 repo_root, "examples", "simulation", "four_area_cortical_model", "simulation"
             )
-            network_params_content = _build_four_area_network_params(form)
             sim_defaults = FOUR_AREA_DEFAULTS
-
-        simulation_params_content = _build_simulation_params(form, sim_defaults)
-
-        run_id = str(uuid.uuid4())
-        run_root = os.path.join(tempfile.gettempdir(), "simulation_runs", run_id)
-        params_dir = os.path.join(run_root, "params")
-        python_dir = os.path.join(run_root, "python")
-        os.makedirs(params_dir, exist_ok=True)
-        os.makedirs(python_dir, exist_ok=True)
 
         output_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
         os.makedirs(output_dir, exist_ok=True)
+        for name in os.listdir(output_dir):
+            if name.endswith(".pkl"):
+                path = os.path.join(output_dir, name)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
 
-        with open(os.path.join(params_dir, "network_params.py"), "w", encoding="utf-8") as f:
-            f.write(network_params_content)
-        with open(os.path.join(params_dir, "simulation_params.py"), "w", encoding="utf-8") as f:
-            f.write(simulation_params_content)
+        total_runs = len(run_forms)
+        is_grid = run_mode == "grid"
+        if is_grid:
+            _append_job_output(job_status, job_id, f"Parameter grid mode enabled with {total_runs} simulation(s).")
+        else:
+            _append_job_output(job_status, job_id, "Single trial mode enabled.")
 
-        shutil.copy(
-            os.path.join(example_root, "python", "network.py"),
-            os.path.join(python_dir, "network.py"),
-        )
-        shutil.copy(
-            os.path.join(example_root, "python", "simulation.py"),
-            os.path.join(python_dir, "simulation.py"),
-        )
+        job_status[job_id]["simulation_total"] = total_runs
+        job_status[job_id]["simulation_completed"] = 0
+        job_status[job_id]["estimated_time_remaining"] = time.time() + estimate_seconds
 
-        example_script_path = os.path.join(run_root, "example_model_simulation.py")
-        example_script = "\n".join([
-            "import ncpi",
-            "",
-            "if __name__ == \"__main__\":",
-            "    # Create a Simulation object",
-            "    sim = ncpi.Simulation(param_folder='params', python_folder='python', output_folder=%s)"
-            % repr(output_dir),
-            "",
-            "    # Run the network and simulation scripts (analysis is intentionally skipped)",
-            "    sim.network('network.py', 'network_params.py')",
-            "    sim.simulate('simulation.py', 'simulation_params.py')",
-            "",
-        ])
-        with open(example_script_path, "w", encoding="utf-8") as f:
-            f.write(example_script)
+        aggregated_outputs = {}
+        generated_files = None
 
-        returncode, output_text = _run_process_with_progress(
-            ["python", "example_model_simulation.py"],
-            run_root,
-            job_status,
-            job_id,
-            estimate_seconds,
-        )
+        for run_idx, form in enumerate(run_forms, start=1):
+            if model_type == "hagen":
+                network_params_content = _build_hagen_network_params(form)
+            else:
+                network_params_content = _build_four_area_network_params(form)
+            simulation_params_content = _build_simulation_params(form, sim_defaults)
 
-        if returncode != 0:
-            error_msg = output_text or "Unknown error"
-            raise RuntimeError(error_msg)
+            run_id = str(uuid.uuid4())
+            run_root = os.path.join(tempfile.gettempdir(), "simulation_runs", run_id)
+            params_dir = os.path.join(run_root, "params")
+            python_dir = os.path.join(run_root, "python")
+            trial_output_dir = os.path.join(run_root, "output")
+            os.makedirs(params_dir, exist_ok=True)
+            os.makedirs(python_dir, exist_ok=True)
+            os.makedirs(trial_output_dir, exist_ok=True)
+
+            with open(os.path.join(params_dir, "network_params.py"), "w", encoding="utf-8") as f:
+                f.write(network_params_content)
+            with open(os.path.join(params_dir, "simulation_params.py"), "w", encoding="utf-8") as f:
+                f.write(simulation_params_content)
+
+            shutil.copy(
+                os.path.join(example_root, "python", "network.py"),
+                os.path.join(python_dir, "network.py"),
+            )
+            shutil.copy(
+                os.path.join(example_root, "python", "simulation.py"),
+                os.path.join(python_dir, "simulation.py"),
+            )
+            _enforce_simulation_chunk_seconds(os.path.join(python_dir, "simulation.py"), chunk_ms=1000.0)
+
+            example_script_path = os.path.join(run_root, "example_model_simulation.py")
+            example_script = "\n".join([
+                "import ncpi",
+                "",
+                "if __name__ == \"__main__\":",
+                "    # Create a Simulation object",
+                "    sim = ncpi.Simulation(param_folder='params', python_folder='python', output_folder=%s)"
+                % repr(trial_output_dir),
+                "",
+                "    # Run the network and simulation scripts (analysis is intentionally skipped)",
+                "    sim.network('network.py', 'network_params.py')",
+                "    sim.simulate('simulation.py', 'simulation_params.py')",
+                "",
+            ])
+            with open(example_script_path, "w", encoding="utf-8") as f:
+                f.write(example_script)
+
+            if total_runs > 1:
+                _append_job_output(job_status, job_id, f"Starting simulation {run_idx}/{total_runs}...")
+
+            def _grid_progress(pct, current_run=run_idx):
+                if total_runs <= 1:
+                    return
+                completed = current_run - 1
+                overall = int(((completed + (pct / 100.0)) / total_runs) * 99)
+                overall = max(0, min(99, overall))
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), overall)
+
+            returncode, output_text = _run_process_with_progress(
+                ["python", "example_model_simulation.py"],
+                run_root,
+                job_status,
+                job_id,
+                per_run_estimate,
+                progress_callback=_grid_progress if total_runs > 1 else None,
+            )
+
+            if returncode != 0:
+                error_msg = output_text or "Unknown error"
+                raise RuntimeError(f"Simulation {run_idx}/{total_runs} failed.\n{error_msg}")
+
+            trial_files = sorted(
+                name for name in os.listdir(trial_output_dir)
+                if name.endswith(".pkl") and os.path.isfile(os.path.join(trial_output_dir, name))
+            )
+            if not trial_files:
+                raise RuntimeError(f"No .pkl simulation outputs produced for run {run_idx}/{total_runs}.")
+
+            if generated_files is None:
+                generated_files = trial_files
+            else:
+                missing = [name for name in generated_files if name not in trial_files]
+                if missing:
+                    raise RuntimeError(
+                        f"Simulation {run_idx}/{total_runs} did not produce expected files: {missing}"
+                    )
+
+            if total_runs == 1:
+                for name in trial_files:
+                    shutil.copy2(os.path.join(trial_output_dir, name), os.path.join(output_dir, name))
+            else:
+                for name in generated_files:
+                    src = os.path.join(trial_output_dir, name)
+                    with open(src, "rb") as handle:
+                        payload = pickle.load(handle)
+                    aggregated_outputs.setdefault(name, []).append(payload)
+
+            job_status[job_id]["simulation_completed"] = run_idx
+            if total_runs > 1:
+                coarse = int((run_idx / total_runs) * 99)
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), coarse)
+                _append_job_output(job_status, job_id, f"Completed simulation {run_idx}/{total_runs}.")
+                remaining = total_runs - run_idx
+                job_status[job_id]["estimated_time_remaining"] = time.time() + (remaining * per_run_estimate)
+            else:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
+
+            shutil.rmtree(run_root, ignore_errors=True)
+
+        if total_runs > 1:
+            for name, payload_list in aggregated_outputs.items():
+                dst = os.path.join(output_dir, name)
+                with open(dst, "wb") as handle:
+                    pickle.dump(payload_list, handle)
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Stored grid outputs in {output_dir} ({total_runs} entries per file).",
+            )
 
         job_status[job_id].update({
             "status": "finished",
@@ -1889,6 +2517,7 @@ def _simulation_computation_custom(job_id, job_status, params):
         shutil.copy(input_paths["simulation_params"], os.path.join(params_dir, "simulation_params.py"))
         shutil.copy(input_paths["network_py"], os.path.join(python_dir, "network.py"))
         shutil.copy(input_paths["simulation_py"], os.path.join(python_dir, "simulation.py"))
+        _enforce_simulation_chunk_seconds(os.path.join(python_dir, "simulation.py"), chunk_ms=1000.0)
 
         output_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
         os.makedirs(output_dir, exist_ok=True)
@@ -1949,12 +2578,28 @@ def run_trial_simulation(model_type):
         return "Model type is not valid", 400
 
     form = request.form.to_dict()
+    ref_page = "new_sim_brunel" if model_type == "hagen" else "new_sim_four_area"
+
+    try:
+        run_mode, run_forms = _expand_simulation_forms(model_type, form)
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect(request.referrer or url_for(ref_page))
 
     if model_type == "hagen":
         sim_defaults = HAGEN_DEFAULTS
     else:
         sim_defaults = FOUR_AREA_DEFAULTS
-    estimated_duration = _estimate_duration_seconds(form, sim_defaults, model_type)
+
+    try:
+        estimated_duration = sum(
+            _estimate_duration_seconds(run_form, sim_defaults, model_type)
+            for run_form in run_forms
+        )
+    except Exception as exc:
+        flash(f"Invalid simulation parameters: {exc}", "error")
+        return redirect(request.referrer or url_for(ref_page))
+    estimated_duration = max(60.0, min(24 * 3600.0, float(estimated_duration)))
 
     job_id = str(uuid.uuid4())
     start_time = time.time()
@@ -1967,13 +2612,23 @@ def run_trial_simulation(model_type):
         "error": False,
         "progress_mode": "manual",
         "output": "",
+        "simulation_total": len(run_forms),
+        "simulation_completed": 0,
+        "simulation_mode": run_mode,
     }
 
     executor.submit(
-        _simulation_computation,
+        _run_job_with_post_success_cleanup,
         job_id,
-        job_status,
-        {"model_type": model_type, "form": form, "estimate_seconds": estimated_duration},
+        "simulation",
+        _simulation_computation,
+        {
+            "model_type": model_type,
+            "form": form,
+            "run_forms": run_forms,
+            "run_mode": run_mode,
+            "estimate_seconds": estimated_duration,
+        },
     )
 
     return redirect(url_for("job_status_page", job_id=job_id, computation_type="simulation"))
@@ -2022,9 +2677,10 @@ def run_trial_simulation_custom():
     }
 
     executor.submit(
-        _simulation_computation_custom,
+        _run_job_with_post_success_cleanup,
         job_id,
-        job_status,
+        "simulation",
+        _simulation_computation_custom,
         {"input_paths": input_paths, "upload_root": upload_root, "estimate_seconds": estimated_duration},
     )
 
@@ -2038,13 +2694,22 @@ def field_potential():
 
 @app.route("/field_potential/load")
 def field_potential_load():
-    return render_template("2.3.field_potential_load.html")
+    field_potential_entries = _list_field_potential_detected_files()
+    field_potential_files = [
+        f"{entry.get('label', 'Field Potential')}: {entry.get('name', '')}"
+        for entry in field_potential_entries
+    ]
+    return render_template(
+        "2.3.field_potential_load.html",
+        field_potential_files=field_potential_files,
+        has_field_potential_data=bool(field_potential_files),
+    )
 
 
 @app.route("/field_potential/load_precomputed", methods=["POST"])
 def field_potential_load_precomputed():
     upload = request.files.get("precomputed_fp_file")
-    fp_type = (request.form.get("precomputed_fp_type") or "proxy").strip().lower()
+    fp_type = (request.form.get("precomputed_fp_type") or "").strip().lower()
 
     if upload is None or not upload.filename:
         flash("Upload a precomputed field potential file (.pkl/.pickle).", "error")
@@ -2060,19 +2725,22 @@ def field_potential_load_precomputed():
         flash("Precomputed field potential must be a pickle file (.pkl/.pickle).", "error")
         return redirect(request.referrer or url_for("field_potential_load"))
 
-    destination_map = {
-        "proxy": (os.path.join(tempfile.gettempdir(), "field_potential_proxy"), "proxy_loaded.pkl"),
-        "cdm": (os.path.join(tempfile.gettempdir(), "field_potential_kernel"), "kernel_approx_cdm.pkl"),
-        "lfp": (os.path.join(tempfile.gettempdir(), "field_potential_kernel"), "gauss_cylinder_potential.pkl"),
-        "eeg": (os.path.join(tempfile.gettempdir(), "field_potential_meeg"), "eeg.pkl"),
-        "meg": (os.path.join(tempfile.gettempdir(), "field_potential_meeg"), "meg.pkl"),
+    if not fp_type:
+        fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
+
+    destination_roots = {
+        "proxy": os.path.join(tempfile.gettempdir(), "field_potential_proxy"),
+        "cdm": os.path.join(tempfile.gettempdir(), "field_potential_kernel"),
+        "lfp": os.path.join(tempfile.gettempdir(), "field_potential_kernel"),
+        "eeg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
+        "meg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
+        "meeg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
     }
+    if fp_type not in destination_roots:
+        fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
 
-    if fp_type not in destination_map:
-        flash("Unknown precomputed field potential type.", "error")
-        return redirect(request.referrer or url_for("field_potential_load"))
-
-    output_root, output_name = destination_map[fp_type]
+    output_root = destination_roots[fp_type]
+    output_name = _field_potential_output_name(fp_type, safe_name)
     run_dir = os.path.join(output_root, f"loaded_{uuid.uuid4().hex[:12]}")
     os.makedirs(run_dir, exist_ok=True)
     output_path = os.path.join(run_dir, output_name)
@@ -2113,9 +2781,15 @@ def field_potential_kernel():
     kernel_output_root = "/tmp/field_potential_kernel"
     preferred_cdm = []
     for fname in ("kernel_approx_cdm.pkl", "current_dipole_moment.pkl"):
+        direct_path = os.path.join(kernel_output_root, fname)
+        if os.path.isfile(direct_path):
+            preferred_cdm.append(direct_path)
         preferred_cdm.extend(glob.glob(os.path.join(kernel_output_root, "*", fname)))
     fallback_cdm = []
     for fname in ("gauss_cylinder_potential.pkl",):
+        direct_path = os.path.join(kernel_output_root, fname)
+        if os.path.isfile(direct_path):
+            fallback_cdm.append(direct_path)
         fallback_cdm.extend(glob.glob(os.path.join(kernel_output_root, "*", fname)))
     default_cdm_path = None
     if preferred_cdm:
@@ -2477,49 +3151,214 @@ def compute_predictions():
         default_feature_file=default_feature_file,
     )
 
+
+@app.route("/inference/detect_model_backend", methods=["POST"])
+def inference_detect_model_backend():
+    upload = request.files.get("model_file")
+    if upload is None or not upload.filename:
+        return jsonify({"ok": False, "error": "Upload a model file first."}), 400
+
+    safe_name = secure_filename(upload.filename)
+    if not safe_name:
+        return jsonify({"ok": False, "error": "Invalid uploaded file name."}), 400
+
+    ext = Path(safe_name).suffix.lower()
+    if ext not in PICKLE_EXTENSIONS:
+        return jsonify({"ok": False, "error": "Model auto-detection supports .pkl/.pickle files."}), 400
+
+    os.makedirs(temp_uploaded_files, exist_ok=True)
+    temp_path = os.path.join(temp_uploaded_files, f"detect_model_{uuid.uuid4().hex}_{safe_name}")
+    upload.save(temp_path)
+
+    try:
+        model_obj = compute_utils._load_pickle_file(temp_path)
+        backend, inferred_type = compute_utils._infer_artifact_backend(model_obj)
+        if backend not in {"sbi", "sklearn"}:
+            return jsonify({
+                "ok": False,
+                "error": f"Could not infer backend from uploaded model artifact type '{inferred_type}'.",
+                "backend": "",
+                "inferred_type": inferred_type,
+            }), 200
+        return jsonify({
+            "ok": True,
+            "backend": backend,
+            "inferred_type": inferred_type,
+            "is_sbi": backend == "sbi",
+        }), 200
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 200
+    finally:
+        if os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
 # Analysis configuration page
+def _analysis_data_dir(create=False):
+    path = os.path.join(tempfile.gettempdir(), "analysis_data")
+    if create:
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
+def _analysis_mode_path():
+    return os.path.join(_analysis_data_dir(create=True), ".selection_mode")
+
+
+def _analysis_selected_keys_path():
+    return os.path.join(_analysis_data_dir(create=True), ".selected_simulation_keys.json")
+
+
+def _set_analysis_selected_simulation_keys(keys):
+    selected = [
+        str(key).strip()
+        for key in (keys or [])
+        if str(key).strip()
+    ]
+    try:
+        with open(_analysis_selected_keys_path(), "w", encoding="utf-8") as f:
+            json.dump(selected, f)
+    except OSError:
+        pass
+
+
+def _get_analysis_selected_simulation_keys():
+    path = _analysis_selected_keys_path()
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return [str(item).strip() for item in data if str(item).strip()]
+
+
+def _clear_analysis_selected_simulation_keys():
+    path = _analysis_selected_keys_path()
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _set_analysis_selection_mode(mode):
+    mode_value = (mode or "").strip().lower()
+    if not mode_value:
+        _clear_analysis_selection_mode()
+        return
+    try:
+        with open(_analysis_mode_path(), "w", encoding="utf-8") as f:
+            f.write(mode_value)
+    except OSError:
+        pass
+
+
+def _get_analysis_selection_mode():
+    path = _analysis_mode_path()
+    if not os.path.isfile(path):
+        return ""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return (f.read() or "").strip().lower()
+    except OSError:
+        return ""
+
+
+def _clear_analysis_selection_mode():
+    path = _analysis_mode_path()
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def _list_analysis_data_files():
+    analysis_data_dir = _analysis_data_dir(create=False)
+    if not os.path.isdir(analysis_data_dir):
+        return []
+    return sorted(
+        f for f in os.listdir(analysis_data_dir)
+        if (f.endswith(".pkl") or f.endswith(".pickle"))
+        and os.path.isfile(os.path.join(analysis_data_dir, f))
+    )
+
+
+def _clear_analysis_data_files():
+    removed_files = []
+    analysis_data_dir = _analysis_data_dir(create=False)
+    if not os.path.isdir(analysis_data_dir):
+        return removed_files
+    for name in os.listdir(analysis_data_dir):
+        if not (name.endswith(".pkl") or name.endswith(".pickle")):
+            continue
+        path = os.path.join(analysis_data_dir, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+                removed_files.append(name)
+            except OSError:
+                pass
+    return removed_files
+
+
 @app.route("/analysis")
 def analysis():
-    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
-    if os.path.isdir(analysis_data_dir):
-        analysis_data_files = sorted(
-            f for f in os.listdir(analysis_data_dir)
-            if (f.endswith(".pkl") or f.endswith(".pickle"))
-            and os.path.isfile(os.path.join(analysis_data_dir, f))
-        )
+    analysis_data_files = _list_analysis_data_files()
+    selection_mode = _get_analysis_selection_mode()
+    preselected_simulation_keys = _get_analysis_selected_simulation_keys() if selection_mode == "simulation" else []
+    if selection_mode == "simulation":
+        has_analysis_dataframe = False
+    elif selection_mode == "dataframe":
+        has_analysis_dataframe = bool(analysis_data_files)
     else:
-        analysis_data_files = []
+        # Backward compatibility with existing persisted files from older sessions.
+        has_analysis_dataframe = bool(analysis_data_files)
     feature_data_files = _list_features_data_files()
     predictions_data_files = _list_predictions_data_files()
-    detected_data_files = []
-    for name in feature_data_files:
-        detected_data_files.append({
-            "key": f"features::{name}",
-            "name": name,
-            "source": "features",
-            "label": "Features",
-        })
-    for name in predictions_data_files:
-        detected_data_files.append({
-            "key": f"predictions::{name}",
-            "name": name,
-            "source": "predictions",
-            "label": "Predictions",
-        })
+    detected_data_files = [
+        {k: v for k, v in entry.items() if k != "path"}
+        for entry in _list_detected_analysis_data_files()
+    ]
+    simulation_available = False
+    simulation_trials = 0
+    simulation_model = ""
+    try:
+        sim_data = _load_simulation_outputs()
+        simulation_available = True
+        simulation_trials = _simulation_trial_count(sim_data)
+        simulation_model = _simulation_model_type(sim_data)
+    except Exception:
+        simulation_available = False
+        simulation_trials = 0
+        simulation_model = ""
     return render_template(
         "5.analysis.html",
         analysis_data_files=analysis_data_files,
         has_analysis_data=bool(analysis_data_files),
+        has_analysis_dataframe=has_analysis_dataframe,
         feature_data_files=feature_data_files,
         has_feature_data=bool(feature_data_files),
         predictions_data_files=predictions_data_files,
         has_predictions_data=bool(predictions_data_files),
         detected_data_files=detected_data_files,
+        preselected_simulation_keys=preselected_simulation_keys,
+        simulation_available=simulation_available,
+        simulation_trials=simulation_trials,
+        simulation_model=simulation_model,
     )
 
 
 def _analysis_data_path():
-    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    if _get_analysis_selection_mode() == "simulation":
+        return None
+    analysis_data_dir = _analysis_data_dir(create=False)
     if not os.path.isdir(analysis_data_dir):
         return None
     candidates = []
@@ -2534,62 +3373,333 @@ def _analysis_data_path():
     return max(candidates, key=os.path.getmtime)
 
 
+def _simulation_output_root():
+    return os.path.join(tempfile.gettempdir(), "simulation_data")
+
+
+def _simulation_output_file(name):
+    path = os.path.join(_simulation_output_root(), name)
+    return path if os.path.isfile(path) else None
+
+
+def _load_simulation_outputs():
+    required = ["times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"]
+    paths = {name: _simulation_output_file(name) for name in required}
+    missing = [name for name, path in paths.items() if path is None]
+    if missing:
+        raise FileNotFoundError(
+            f"Missing simulation output files in {_simulation_output_root()}: {', '.join(missing)}"
+        )
+
+    payload = {}
+    for name, path in paths.items():
+        with open(path, "rb") as f:
+            payload[name] = pickle.load(f)
+
+    return {
+        "times": payload["times.pkl"],
+        "gids": payload["gids.pkl"],
+        "dt": payload["dt.pkl"],
+        "tstop": payload["tstop.pkl"],
+        "network": payload["network.pkl"],
+    }
+
+
+def _simulation_trial_count(sim_data):
+    times = sim_data["times"]
+    return len(times) if isinstance(times, list) else 1
+
+
+def _simulation_model_type(sim_data):
+    net = sim_data.get("network", {}) or {}
+    if isinstance(net, dict) and "areas" in net:
+        return "four_area"
+    return "hagen"
+
+
+def _simulation_trial_data(sim_data, trial_idx):
+    times_all = sim_data["times"]
+    gids_all = sim_data["gids"]
+    dt_all = sim_data["dt"]
+    tstop_all = sim_data["tstop"]
+    trial_count = _simulation_trial_count(sim_data)
+    if trial_idx < 0 or trial_idx >= trial_count:
+        raise IndexError(f"Trial index {trial_idx} out of bounds for {trial_count} trial(s).")
+
+    def _pick(obj):
+        if isinstance(obj, list):
+            return obj[trial_idx]
+        return obj
+
+    return {
+        "times": _pick(times_all),
+        "gids": _pick(gids_all),
+        "dt": float(_pick(dt_all)),
+        "tstop": float(_pick(tstop_all)),
+        "network": sim_data["network"],
+    }
+
+
+def _population_color(name, idx):
+    if str(name).upper().startswith("E"):
+        return "C0"
+    if str(name).upper().startswith("I"):
+        return "C1"
+    return f"C{idx % 10}"
+
+
+def _spike_rate(times, dt, tstop):
+    bins = np.arange(0.0, tstop + dt, dt)
+    hist, _ = np.histogram(np.asarray(times), bins=bins)
+    return bins[:-1], hist.astype(float)
+
+
+def _compute_trial_cdm_proxy(trial):
+    dt = float(trial["dt"])
+    tstop = float(trial["tstop"])
+    times = trial["times"]
+    model = _simulation_model_type({"network": trial["network"]})
+    bins = np.arange(0.0, tstop + dt, dt)
+    centers = bins[:-1]
+
+    if model == "hagen":
+        cdm = np.zeros_like(centers, dtype=float)
+        for pop_name, pop_times in times.items():
+            hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
+            sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
+            cdm += sign * hist.astype(float)
+        return centers, cdm
+
+    # four_area
+    cdm = np.zeros_like(centers, dtype=float)
+    for area_data in times.values():
+        for pop_name, pop_times in area_data.items():
+            hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
+            sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
+            cdm += sign * hist.astype(float)
+    return centers, cdm
+
+
+def _parse_selected_analysis_file_keys(selected_keys):
+    simulation_files = set()
+    field_potential_paths = []
+    for raw_key in selected_keys:
+        if not isinstance(raw_key, str):
+            continue
+        key = raw_key.strip()
+        if not key:
+            continue
+        if key.startswith("simulation::"):
+            try:
+                _, name = key.split("::", 1)
+            except ValueError:
+                continue
+            name = (name or "").strip()
+            if name:
+                simulation_files.add(name)
+            continue
+        if key.startswith("field_potential::"):
+            try:
+                _, path = key.split("::", 1)
+            except ValueError:
+                continue
+            path = (path or "").strip()
+            if path and os.path.isfile(path):
+                field_potential_paths.append(path)
+    return simulation_files, field_potential_paths
+
+
+def _pick_trial_value(value, trial_idx):
+    if isinstance(value, list):
+        if not value:
+            return None
+        if 0 <= trial_idx < len(value):
+            return value[trial_idx]
+        return value[-1]
+    return value
+
+
+def _to_1d_signal(value):
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim == 0:
+        return np.asarray([float(arr)], dtype=float)
+    if arr.ndim == 1:
+        return arr
+    if arr.ndim == 2:
+        if arr.shape[0] == 3:
+            return arr[2]
+        if arr.shape[1] == 3:
+            return arr[:, 2]
+        if arr.shape[0] <= arr.shape[1]:
+            return np.sum(arr, axis=0)
+        return np.sum(arr, axis=1)
+    return np.ravel(arr)
+
+
+def _sum_signals(base, extra):
+    if base is None:
+        return np.array(extra, dtype=float, copy=True)
+    n = min(base.size, extra.size)
+    if n <= 0:
+        return base
+    base[:n] += extra[:n]
+    return base
+
+
+def _extract_area_from_signal_key(key, areas):
+    key_str = str(key)
+    # Support keys like "E(frontal):I(parietal)" by extracting parenthesized tokens first.
+    paren_tokens = re.findall(r"\(([^()]+)\)", key_str)
+    candidates = [key_str]
+    candidates.extend(paren_tokens)
+    for sep in (":", "/", "|", "-", "_"):
+        split_tokens = []
+        for item in candidates:
+            split_tokens.extend(item.split(sep))
+        candidates.extend(split_tokens)
+    lowered = {str(area).lower(): str(area) for area in areas}
+    for token in candidates:
+        area = lowered.get(str(token).strip().lower())
+        if area:
+            return area
+    return None
+
+
+def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
+    obj = _pick_trial_value(payload, trial_idx)
+    if obj is None:
+        return {}, None
+
+    dt_ms = None
+    raw_signals = None
+    data_signal = None
+
+    if isinstance(obj, pd.DataFrame):
+        if obj.empty:
+            return {}, None
+        row = obj.iloc[0]
+        if "dt_ms" in row:
+            try:
+                dt_ms = float(row["dt_ms"])
+            except Exception:
+                dt_ms = None
+        raw_signals = row.get("raw_signals") if "raw_signals" in row else None
+        data_signal = row.get("data") if "data" in row else None
+    elif isinstance(obj, dict):
+        raw_signals = obj.get("raw_signals")
+        data_signal = obj.get("data")
+        if obj.get("dt_ms") is not None:
+            try:
+                dt_ms = float(obj.get("dt_ms"))
+            except Exception:
+                dt_ms = None
+    else:
+        data_signal = obj
+
+    series_by_area = {}
+    if isinstance(raw_signals, dict) and raw_signals:
+        for signal_key, signal_val in raw_signals.items():
+            signal = _to_1d_signal(signal_val)
+            if signal.size == 0:
+                continue
+            if model == "four_area":
+                area = _extract_area_from_signal_key(signal_key, areas)
+                if area is None:
+                    continue
+            else:
+                area = "global"
+            series_by_area[area] = _sum_signals(series_by_area.get(area), signal)
+
+    if not series_by_area and data_signal is not None:
+        arr = np.asarray(data_signal, dtype=float)
+        if model == "four_area":
+            if arr.ndim == 2 and arr.shape[0] == len(areas):
+                for i, area in enumerate(areas):
+                    series_by_area[area] = _to_1d_signal(arr[i])
+            elif arr.ndim == 2 and arr.shape[1] == len(areas):
+                for i, area in enumerate(areas):
+                    series_by_area[area] = _to_1d_signal(arr[:, i])
+            elif arr.ndim == 1:
+                # Proxy outputs can be global 1D signals; broadcast to all areas for plotting.
+                for area in areas:
+                    series_by_area[area] = _to_1d_signal(arr)
+        else:
+            series_by_area["global"] = _to_1d_signal(arr)
+
+    if model == "four_area" and areas:
+        # If only a global signal is available, broadcast it across all areas.
+        if "global" in series_by_area:
+            global_sig = _to_1d_signal(series_by_area["global"])
+            for area in areas:
+                series_by_area.setdefault(area, np.array(global_sig, copy=True))
+            series_by_area.pop("global", None)
+
+        # If no explicit area keys were found but there is exactly one signal, reuse it for all areas.
+        if not all(area in series_by_area for area in areas) and len(series_by_area) == 1:
+            only_sig = _to_1d_signal(next(iter(series_by_area.values())))
+            series_by_area = {area: np.array(only_sig, copy=True) for area in areas}
+
+    return series_by_area, dt_ms
+
+
 @app.route("/analysis/select_features_file", methods=["POST"])
 def analysis_select_features_file():
     selector = (request.form.get("data_file_key") or request.form.get("features_file") or "").strip()
     if not selector:
         return jsonify({"error": "Select a detected file."}), 400
 
-    if "::" in selector:
-        source, filename = selector.split("::", 1)
-        source = source.strip().lower()
-        filename = filename.strip()
-    else:
-        # Backward compatibility: treat plain value as features file.
-        source = "features"
-        filename = selector
+    detected_entries = _list_detected_analysis_data_files()
+    by_key = {entry["key"]: entry for entry in detected_entries}
 
-    source_dirs = {
-        "features": _features_data_dir(create=False),
-        "predictions": _predictions_data_dir(create=False),
-    }
-    source_list_fn = {
-        "features": _list_features_data_files,
-        "predictions": _list_predictions_data_files,
-    }
-    if source not in source_dirs:
-        return jsonify({"error": f"Unsupported data source '{source}'."}), 400
+    selected = by_key.get(selector)
+    if selected is None:
+        # Backward compatibility for old keys/plain filenames.
+        if "::" in selector:
+            source, filename = selector.split("::", 1)
+            fallback_key = f"{source.strip().lower()}::{filename.strip()}"
+        else:
+            fallback_key = f"features::{selector}"
+        selected = by_key.get(fallback_key)
 
-    available = set(source_list_fn[source]())
-    if filename not in available:
+    if selected is None:
         return jsonify({"error": "Selected file is not available. Refresh the page and try again."}), 400
 
-    src_path = os.path.join(source_dirs[source], filename)
-    if not os.path.isfile(src_path):
+    source = selected.get("source", "unknown")
+    filename = selected.get("name", "")
+    src_path = selected.get("path")
+    if not src_path or not os.path.isfile(src_path):
         return jsonify({"error": "Selected file was not found on disk."}), 404
 
-    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
-    os.makedirs(analysis_data_dir, exist_ok=True)
-    for existing in os.listdir(analysis_data_dir):
-        if not (existing.endswith(".pkl") or existing.endswith(".pickle")):
-            continue
-        existing_path = os.path.join(analysis_data_dir, existing)
-        if os.path.isfile(existing_path):
-            try:
-                os.remove(existing_path)
-            except OSError:
-                pass
+    analysis_data_dir = _analysis_data_dir(create=True)
+    _clear_analysis_data_files()
 
     dst_name = secure_filename(filename)
     dst_path = os.path.join(analysis_data_dir, dst_name)
     shutil.copy2(src_path, dst_path)
+
+    if source in {"simulation", "field_potential"}:
+        _set_analysis_selection_mode("simulation")
+        _set_analysis_selected_simulation_keys([selected["key"]])
+        return jsonify({
+            "columns": [],
+            "filename": dst_name,
+            "source": source,
+            "is_dataframe": False,
+        })
 
     try:
         df = compute_utils.read_df_file(dst_path)
         if not isinstance(df, pd.DataFrame):
             raise ValueError("Selected file is not a pandas dataframe.")
         columns = [str(col) for col in df.columns]
-        return jsonify({"columns": columns, "filename": dst_name, "source": source})
+        _set_analysis_selection_mode("dataframe")
+        _clear_analysis_selected_simulation_keys()
+        return jsonify({
+            "columns": columns,
+            "filename": dst_name,
+            "source": source,
+            "is_dataframe": True,
+        })
     except Exception as exc:
         try:
             if os.path.exists(dst_path):
@@ -2597,6 +3707,59 @@ def analysis_select_features_file():
         except OSError:
             pass
         return jsonify({"error": str(exc)}), 400
+
+
+@app.route("/analysis/sync_selected_simulation_files", methods=["POST"])
+def analysis_sync_selected_simulation_files():
+    selected_keys = [
+        (key or "").strip()
+        for key in request.form.getlist("selected_keys")
+        if (key or "").strip()
+    ]
+
+    detected_entries = _list_detected_analysis_data_files()
+    by_key = {entry["key"]: entry for entry in detected_entries}
+    selected_entries = []
+    for key in selected_keys:
+        entry = by_key.get(key)
+        if entry is None:
+            continue
+        if entry.get("source") not in {"simulation", "field_potential"}:
+            continue
+        src_path = entry.get("path")
+        if not src_path or not os.path.isfile(src_path):
+            continue
+        selected_entries.append(entry)
+
+    analysis_data_dir = _analysis_data_dir(create=True)
+    _clear_analysis_data_files()
+
+    copied_files = []
+    used_names = set()
+    for idx, entry in enumerate(selected_entries):
+        src_path = entry["path"]
+        src_name = os.path.basename(entry.get("name") or src_path)
+        safe_name = secure_filename(src_name) or f"analysis_selected_{idx + 1}.pkl"
+        stem, ext = os.path.splitext(safe_name)
+        ext = ext or ".pkl"
+        candidate = safe_name
+        suffix = 1
+        while candidate in used_names:
+            candidate = f"{stem}_{suffix}{ext}"
+            suffix += 1
+        used_names.add(candidate)
+        dst_path = os.path.join(analysis_data_dir, candidate)
+        shutil.copy2(src_path, dst_path)
+        copied_files.append(candidate)
+
+    if copied_files:
+        _set_analysis_selection_mode("simulation")
+        _set_analysis_selected_simulation_keys(selected_keys)
+    else:
+        _clear_analysis_selection_mode()
+        _clear_analysis_selected_simulation_keys()
+
+    return jsonify({"ok": True, "copied_files": copied_files})
 
 
 def _analysis_plot_error(message, status=400, log_output=""):
@@ -2661,23 +3824,16 @@ def analysis_columns():
     if file_extension not in {".pkl", ".pickle"}:
         return jsonify({"error": "Only .pkl/.pickle files are supported."}), 400
 
-    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
-    os.makedirs(analysis_data_dir, exist_ok=True)
-    for existing in os.listdir(analysis_data_dir):
-        if not (existing.endswith(".pkl") or existing.endswith(".pickle")):
-            continue
-        existing_path = os.path.join(analysis_data_dir, existing)
-        if os.path.isfile(existing_path):
-            try:
-                os.remove(existing_path)
-            except OSError:
-                pass
+    analysis_data_dir = _analysis_data_dir(create=True)
+    _clear_analysis_data_files()
     temp_path = os.path.join(analysis_data_dir, filename)
     upload.save(temp_path)
 
     try:
         df = compute_utils.read_df_file(temp_path)
         columns = [str(col) for col in df.columns]
+        _set_analysis_selection_mode("dataframe")
+        _clear_analysis_selected_simulation_keys()
         return jsonify({"columns": columns})
     except Exception as exc:
         try:
@@ -3603,19 +4759,429 @@ def analysis_plot_topomap():
     )
 
 
+@app.route("/analysis/plot/simulation", methods=["POST"])
+def analysis_plot_simulation():
+    try:
+        sim_data = _load_simulation_outputs()
+    except Exception as exc:
+        return _analysis_plot_error(str(exc), status=400)
+
+    total_trials = _simulation_trial_count(sim_data)
+    model = _simulation_model_type(sim_data)
+
+    def _parse_int(value, default):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    range_start = _parse_int(request.form.get("sim_trial_start"), 0)
+    range_end = _parse_int(request.form.get("sim_trial_end"), total_trials - 1)
+    range_start = max(0, range_start)
+    range_end = min(total_trials - 1, range_end)
+    if range_start > range_end:
+        return _analysis_plot_error("Trial range is invalid: start must be <= end.", status=400)
+
+    trial_indices = list(range(range_start, range_end + 1))
+    if not trial_indices:
+        return _analysis_plot_error("No trials selected to plot.", status=400)
+
+    plot_type = (request.form.get("sim_plot_type") or "raster").strip().lower()
+    selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
+    selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
+    def _parse_float(value, default):
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    time_start = _parse_float(request.form.get("sim_time_start"), 4000.0)
+    time_end = _parse_float(request.form.get("sim_time_end"), 4100.0)
+    if time_start > time_end:
+        time_start, time_end = time_end, time_start
+
+    freq_min = _parse_float(request.form.get("sim_freq_min"), 20.0)
+    freq_max = _parse_float(request.form.get("sim_freq_max"), 200.0)
+    if freq_min > freq_max:
+        freq_min, freq_max = freq_max, freq_min
+
+    def _parse_optional_int(field_name, label, min_value=0):
+        raw = request.form.get(field_name)
+        if raw is None:
+            return None, None
+        text = str(raw).strip()
+        if text == "":
+            return None, None
+        try:
+            value = int(text)
+        except ValueError:
+            return None, f"{label} must be an integer."
+        if value < min_value:
+            return None, f"{label} must be >= {min_value}."
+        return value, None
+
+    welch_nperseg, err = _parse_optional_int("sim_welch_nperseg", "Welch nperseg", min_value=1)
+    if err:
+        return _analysis_plot_error(err, status=400)
+    welch_noverlap, err = _parse_optional_int("sim_welch_noverlap", "Welch noverlap", min_value=0)
+    if err:
+        return _analysis_plot_error(err, status=400)
+    welch_nfft, err = _parse_optional_int("sim_welch_nfft", "Welch nfft", min_value=1)
+    if err:
+        return _analysis_plot_error(err, status=400)
+    if welch_nperseg is not None and welch_noverlap is not None and welch_noverlap >= welch_nperseg:
+        return _analysis_plot_error("Welch noverlap must be smaller than nperseg.", status=400)
+    if welch_nperseg is not None and welch_nfft is not None and welch_nfft < welch_nperseg:
+        return _analysis_plot_error("Welch nfft must be >= nperseg.", status=400)
+
+    welch_kwargs = {}
+    if welch_nperseg is not None:
+        welch_kwargs["nperseg"] = welch_nperseg
+    if welch_noverlap is not None:
+        welch_kwargs["noverlap"] = welch_noverlap
+    if welch_nfft is not None:
+        welch_kwargs["nfft"] = welch_nfft
+
+    allowed_types = {"raster", "firing_rates", "cdm", "cdm_psd"}
+    if plot_type not in allowed_types:
+        return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
+
+    required_by_plot = {
+        "raster": {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"},
+        "firing_rates": {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"},
+        "cdm": set(),
+        "cdm_psd": set(),
+    }
+    required_files = required_by_plot[plot_type]
+    if plot_type in {"raster", "firing_rates"}:
+        if not selected_sim_files:
+            return _analysis_plot_error(
+                "No simulation files selected. Select the required simulation output files first.",
+                status=400,
+            )
+        missing_selected = sorted(required_files - selected_sim_files)
+        if missing_selected:
+            return _analysis_plot_error(
+                "Selected files are incomplete for this plot type. Missing: "
+                + ", ".join(missing_selected),
+                status=400,
+            )
+
+    cdm_payload = None
+    cdm_payload_name = ""
+    if plot_type in {"cdm", "cdm_psd"}:
+        if not selected_fp_paths:
+            return _analysis_plot_error(
+                "Field-potential plots require a computed field-potential output file. Select a field-potential file first.",
+                status=400,
+            )
+        loaded_candidates = []
+        for path in selected_fp_paths:
+            try:
+                with open(path, "rb") as f:
+                    loaded_candidates.append((path, pickle.load(f)))
+            except Exception:
+                continue
+        if not loaded_candidates:
+            return _analysis_plot_error(
+                "Unable to load selected field-potential files. Select a valid field-potential output file.",
+                status=400,
+            )
+
+        preferred = None
+        for path, payload in loaded_candidates:
+            name = os.path.basename(path).lower()
+            if "cdm" in name or "dipole" in name:
+                preferred = (path, payload)
+                break
+        if preferred is None:
+            preferred = loaded_candidates[0]
+
+        cdm_payload_name = os.path.basename(preferred[0])
+        cdm_payload = preferred[1]
+
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        import scipy.signal as ss
+    except Exception as exc:
+        return _analysis_plot_error(f"Plot dependencies are unavailable: {exc}", status=500)
+
+    import math
+
+    if plot_type == "cdm_psd":
+        areas = sim_data.get("network", {}).get("areas", []) if model == "four_area" else []
+        if model == "four_area":
+            cols = min(2, max(1, len(areas)))
+            rows = int(math.ceil(len(areas) / cols))
+            fig, axs = plt.subplots(rows, cols, figsize=(5.4 * cols, 4.2 * rows), dpi=160, squeeze=False)
+            flat_ax = axs.ravel()
+            for area_idx, area_name in enumerate(areas):
+                ax = flat_ax[area_idx]
+                plotted = 0
+                for trial_idx in trial_indices:
+                    trial = _simulation_trial_data(sim_data, trial_idx)
+                    series_by_area, dt_fp = _field_potential_payload_to_area_series(
+                        cdm_payload,
+                        model,
+                        areas,
+                        trial_idx,
+                    )
+                    if area_name not in series_by_area:
+                        continue
+                    cdm = np.asarray(series_by_area[area_name], dtype=float)
+                    if cdm.size < 8:
+                        continue
+                    dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
+                    fs = 1000.0 / max(dt_local, 1e-9)
+                    freqs, psd = ss.welch(cdm, fs=fs, **welch_kwargs)
+                    if psd.size == 0:
+                        continue
+                    psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
+                    mask = (freqs >= freq_min) & (freqs <= freq_max)
+                    ax.semilogy(freqs[mask], psd_norm[mask], linewidth=1.0, label=f"trial {trial_idx}")
+                    plotted += 1
+                ax.set_title(f"{area_name} PSD")
+                ax.set_xlabel("f (Hz)")
+                ax.set_ylabel("PSD (a.u./Hz)")
+                ax.grid(alpha=0.2)
+                if plotted and len(trial_indices) <= 20:
+                    ax.legend(fontsize=7, loc="best")
+            for extra_idx in range(len(areas), len(flat_ax)):
+                flat_ax[extra_idx].axis("off")
+            fig.tight_layout()
+            subtitle = (
+                f"Field-potential power spectra by area. Model: {model}. Trials {range_start} to {range_end} "
+                f"({freq_min:g}-{freq_max:g} Hz). Source: {cdm_payload_name}. "
+                f"Welch: nperseg={welch_kwargs.get('nperseg', 'default')}, "
+                f"noverlap={welch_kwargs.get('noverlap', 'default')}, "
+                f"nfft={welch_kwargs.get('nfft', 'default')}."
+            )
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 5), dpi=160)
+            for trial_idx in trial_indices:
+                trial = _simulation_trial_data(sim_data, trial_idx)
+                series_by_area, dt_fp = _field_potential_payload_to_area_series(
+                    cdm_payload,
+                    model,
+                    [],
+                    trial_idx,
+                )
+                cdm = np.asarray(series_by_area.get("global", []), dtype=float)
+                if cdm.size < 8:
+                    continue
+                dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
+                fs = 1000.0 / max(dt_local, 1e-9)
+                freqs, psd = ss.welch(cdm, fs=fs, **welch_kwargs)
+                if psd.size == 0:
+                    continue
+                psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
+                mask = (freqs >= freq_min) & (freqs <= freq_max)
+                ax.semilogy(freqs[mask], psd_norm[mask], linewidth=1.2, label=f"trial {trial_idx}")
+            ax.set_xlabel("f (Hz)")
+            ax.set_ylabel("PSD (a.u./Hz)")
+            ax.set_title("Field-potential power spectra (overlaid trials)")
+            ax.grid(alpha=0.2)
+            if len(trial_indices) <= 20:
+                ax.legend(fontsize=8, loc="best")
+            fig.tight_layout()
+            subtitle = (
+                f"Model: {model}. Trials {range_start} to {range_end} (overlaid spectra, {freq_min:g}-{freq_max:g} Hz). "
+                f"Source: {cdm_payload_name}. "
+                f"Welch: nperseg={welch_kwargs.get('nperseg', 'default')}, "
+                f"noverlap={welch_kwargs.get('noverlap', 'default')}, "
+                f"nfft={welch_kwargs.get('nfft', 'default')}."
+            )
+    else:
+        if model == "four_area":
+            areas = sim_data.get("network", {}).get("areas", [])
+            if not areas:
+                return _analysis_plot_error("Four-area model detected but no areas were found in network parameters.", status=400)
+            area_cols = min(2, max(1, len(areas)))
+            area_rows = int(math.ceil(len(areas) / area_cols))
+            total_rows = len(trial_indices) * area_rows
+            fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.0 * area_cols, 3.3 * total_rows), dpi=160, squeeze=False)
+            for trial_pos, trial_idx in enumerate(trial_indices):
+                trial = _simulation_trial_data(sim_data, trial_idx)
+                times = trial["times"]
+                gids = trial["gids"]
+                dt = trial["dt"]
+                tstop = trial["tstop"]
+
+                area_series = None
+                dt_fp = None
+                if plot_type == "cdm":
+                    area_series, dt_fp = _field_potential_payload_to_area_series(
+                        cdm_payload,
+                        model,
+                        areas,
+                        trial_idx,
+                    )
+                    missing = [area for area in areas if area not in area_series]
+                    if missing:
+                        return _analysis_plot_error(
+                            "Selected field-potential file does not contain area-resolved signals for all four-area regions. "
+                            f"Missing: {', '.join(missing)}",
+                            status=400,
+                        )
+
+                for area_idx, area_name in enumerate(areas):
+                    grid_row = trial_pos * area_rows + (area_idx // area_cols)
+                    grid_col = area_idx % area_cols
+                    ax = axs[grid_row][grid_col]
+                    if plot_type == "raster":
+                        area_times = times.get(area_name, {})
+                        area_gids = gids.get(area_name, {})
+                        for pop_i, pop_name in enumerate(sorted(area_times.keys())):
+                            t = np.asarray(area_times[pop_name])
+                            g = np.asarray(area_gids.get(pop_name, []))
+                            mask_t = (t >= time_start) & (t <= time_end)
+                            ax.plot(
+                                t[mask_t],
+                                g[mask_t],
+                                ".",
+                                ms=0.9,
+                                color=_population_color(pop_name, pop_i),
+                                alpha=0.7,
+                                label=str(pop_name),
+                            )
+                        ax.set_ylabel("gid")
+                        ax.set_xlabel("t (ms)")
+                        ax.set_xlim(time_start, time_end)
+                        ax.set_title(f"Trial {trial_idx} | {area_name} raster")
+                        if trial_pos == 0 and area_idx == 0:
+                            ax.legend(fontsize=7, loc="best")
+
+                    elif plot_type == "firing_rates":
+                        area_times = times.get(area_name, {})
+                        for pop_i, pop_name in enumerate(sorted(area_times.keys())):
+                            tb, rate = _spike_rate(area_times[pop_name], dt, tstop)
+                            mask_t = (tb >= time_start) & (tb <= time_end)
+                            ax.plot(
+                                tb[mask_t],
+                                rate[mask_t],
+                                linewidth=1.0,
+                                color=_population_color(pop_name, pop_i),
+                                label=str(pop_name),
+                            )
+                        ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
+                        ax.set_xlabel("t (ms)")
+                        ax.set_xlim(time_start, time_end)
+                        ax.set_title(f"Trial {trial_idx} | {area_name} rates")
+                        if trial_pos == 0 and area_idx == 0:
+                            ax.legend(fontsize=7, loc="best")
+
+                    elif plot_type == "cdm":
+                        cdm = np.asarray(area_series[area_name], dtype=float)
+                        dt_local = float(dt_fp) if dt_fp is not None else float(dt)
+                        t_cdm = np.arange(cdm.size, dtype=float) * dt_local
+                        mask_t = (t_cdm >= time_start) & (t_cdm <= time_end)
+                        ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
+                        ax.set_ylabel("Field potential (a.u.)")
+                        ax.set_xlabel("t (ms)")
+                        ax.set_xlim(time_start, time_end)
+                        ax.set_title(f"Trial {trial_idx} | {area_name} field potential")
+                # Hide unused cells in this trial's area grid block.
+                for extra_idx in range(len(areas), area_rows * area_cols):
+                    grid_row = trial_pos * area_rows + (extra_idx // area_cols)
+                    grid_col = extra_idx % area_cols
+                    axs[grid_row][grid_col].axis("off")
+        else:
+            n = len(trial_indices)
+            cols = min(3, n)
+            rows = int(math.ceil(n / cols))
+            fig, axs = plt.subplots(rows, cols, figsize=(5.2 * cols, 3.4 * rows), dpi=160, squeeze=False)
+            flat_ax = axs.ravel()
+            for pos, trial_idx in enumerate(trial_indices):
+                ax = flat_ax[pos]
+                trial = _simulation_trial_data(sim_data, trial_idx)
+                times = trial["times"]
+                gids = trial["gids"]
+                dt = trial["dt"]
+                tstop = trial["tstop"]
+
+                if plot_type == "raster":
+                    for pop_i, pop_name in enumerate(sorted(times.keys())):
+                        t = np.asarray(times[pop_name])
+                        g = np.asarray(gids[pop_name])
+                        mask_t = (t >= time_start) & (t <= time_end)
+                        ax.plot(t[mask_t], g[mask_t], ".", ms=1.0, color=_population_color(pop_name, pop_i), alpha=0.7, label=str(pop_name))
+                    ax.set_ylabel("gid")
+                    ax.set_xlabel("t (ms)")
+                    ax.set_title(f"Trial {trial_idx} raster")
+                    if pos == 0:
+                        ax.legend(fontsize=7, loc="best")
+                    ax.set_xlim(time_start, time_end)
+
+                elif plot_type == "firing_rates":
+                    for pop_i, pop_name in enumerate(sorted(times.keys())):
+                        tb, rate = _spike_rate(times[pop_name], dt, tstop)
+                        mask_t = (tb >= time_start) & (tb <= time_end)
+                        ax.plot(tb[mask_t], rate[mask_t], linewidth=1.0, color=_population_color(pop_name, pop_i), label=str(pop_name))
+                    ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
+                    ax.set_xlabel("t (ms)")
+                    ax.set_title(f"Trial {trial_idx} firing rates")
+                    if pos == 0:
+                        ax.legend(fontsize=7, loc="best")
+                    ax.set_xlim(time_start, time_end)
+
+                elif plot_type == "cdm":
+                    series_by_area, dt_fp = _field_potential_payload_to_area_series(
+                        cdm_payload,
+                        model,
+                        [],
+                        trial_idx,
+                    )
+                    cdm = np.asarray(series_by_area.get("global", []), dtype=float)
+                    if cdm.size == 0:
+                        continue
+                    dt_local = float(dt_fp) if dt_fp is not None else float(dt)
+                    t_cdm = np.arange(cdm.size, dtype=float) * dt_local
+                    mask_t = (t_cdm >= time_start) & (t_cdm <= time_end)
+                    ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
+                    ax.set_ylabel("Field potential (a.u.)")
+                    ax.set_xlabel("t (ms)")
+                    ax.set_title(f"Trial {trial_idx} field potential")
+                    ax.set_xlim(time_start, time_end)
+
+            for pos in range(len(trial_indices), len(flat_ax)):
+                flat_ax[pos].axis("off")
+
+        fig.tight_layout()
+        pretty_name = {
+            "raster": "Raster plots",
+            "firing_rates": "Firing rates",
+            "cdm": "Field potential",
+        }.get(plot_type, plot_type)
+        selected_info = f" Selected files: {len(selected_keys)}." if selected_keys else ""
+        source_info = f" Source: {cdm_payload_name}." if plot_type == "cdm" and cdm_payload_name else ""
+        subtitle = (
+            f"{pretty_name}. Model: {model}. Trials {range_start} to {range_end} "
+            f"({time_start:g}-{time_end:g} ms).{selected_info}{source_info}"
+        )
+
+    output = io.BytesIO()
+    fig.savefig(output, format="png", dpi=160)
+    plt.close(fig)
+    output.seek(0)
+    return _render_analysis_plot(
+        title="Simulation outputs",
+        subtitle=subtitle,
+        image_bytes=output.getvalue(),
+        log_output="",
+    )
+
+
 @app.route("/clear_analysis_data", methods=["POST"])
 def clear_analysis_data():
-    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
-    if os.path.isdir(analysis_data_dir):
-        for name in os.listdir(analysis_data_dir):
-            if not (name.endswith(".pkl") or name.endswith(".pickle")):
-                continue
-            path = os.path.join(analysis_data_dir, name)
-            if os.path.isfile(path):
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
+    removed_files = _clear_analysis_data_files()
+    _clear_analysis_selection_mode()
+    _clear_analysis_selected_simulation_keys()
+    accept_header = (request.headers.get("Accept") or "").lower()
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    if is_ajax or "application/json" in accept_header:
+        return jsonify({"ok": True, "removed_files": removed_files})
     return redirect(request.referrer or url_for('dashboard'))
 
 
@@ -4167,6 +5733,14 @@ def start_computation_redirect(computation_type):
 
     # Submit the long-running task according to the computation type.
     # For features, defer start slightly so the redirect response is sent first.
+    upstream_module_by_type = {
+        "field_potential_proxy": "field_potential",
+        "field_potential_kernel": "field_potential",
+        "field_potential_meeg": "field_potential",
+        "features": "features",
+        "inference": "inference",
+    }
+    upstream_module = upstream_module_by_type.get(computation_type)
     if computation_type == "features":
         app.logger.warning(
             "[compute %s] enqueue features job after redirect (route elapsed %.1f s)",
@@ -4175,10 +5749,24 @@ def start_computation_redirect(computation_type):
         )
         threading.Timer(
             0.05,
-            lambda: executor.submit(func, job_id, job_status, data, temp_uploaded_files),
+            lambda: executor.submit(
+                _run_job_with_post_success_cleanup,
+                job_id,
+                upstream_module,
+                func,
+                data,
+                temp_uploaded_files,
+            ),
         ).start()
     else:
-        executor.submit(func, job_id, job_status, data, temp_uploaded_files)
+        executor.submit(
+            _run_job_with_post_success_cleanup,
+            job_id,
+            upstream_module,
+            func,
+            data,
+            temp_uploaded_files,
+        )
 
     # Redirect immediately to the loading page (PRG pattern)
     app.logger.warning(
@@ -4243,6 +5831,9 @@ def get_status(job_id):
         "estimated_time_remaining": status["estimated_time_remaining"],
         "error": status.get("error", False),
         "output": status.get("output", ""),
+        "simulation_total": status.get("simulation_total"),
+        "simulation_completed": status.get("simulation_completed"),
+        "simulation_mode": status.get("simulation_mode"),
     })
 
 

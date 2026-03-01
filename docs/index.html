@@ -1,222 +1,74 @@
-<!DOCTYPE html>
-<html>
+<!doctype html>
+<html lang="en">
 <head>
-    <title>ncpi</title>
-    <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <style>
-        body {
-            margin: 0;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-            background-color: #ffffff;
-            color: #333;
-        }
-
-        .container {
-            display: flex;
-            min-height: 100vh;
-            align-items: flex-start;
-        }
-
-        nav {
-            width: 200px;
-            background-color: #f6f8fa;
-            padding: 1.5em;
-            border-right: 1px solid #ddd;
-            position: sticky;
-            top: 0;
-            height: 100vh;
-            overflow-y: auto;
-        }
-
-        nav ul {
-            list-style-type: none;
-            padding: 0;
-        }
-
-        nav ul li {
-            margin-bottom: 0.8em;
-        }
-
-        nav ul li a {
-            color: #0366d6;
-            text-decoration: none;
-        }
-
-        nav ul li a:hover {
-            text-decoration: underline;
-        }
-
-        nav ul li a.active {
-            font-weight: bold;
-            color: #24292e;
-        }
-
-        main {
-            flex: 1;
-            padding: 2em;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-
-        aside {
-            width: 200px;
-            background-color: #f9f9f9;
-            padding: 1.5em;
-            border-left: 1px solid #ddd;
-            position: sticky;
-            top: 0;
-            height: 100vh;
-            overflow-y: auto;
-        }
-
-        h1, h2, h3 {
-            color: #24292e;
-            border-bottom: 1px solid #e1e4e8;
-            padding-bottom: 0.3em;
-        }
-
-        code {
-            background-color: #f6f8fa;
-            padding: 0.2em 0.4em;
-            border-radius: 6px;
-            font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
-            font-size: 90%;
-        }
-
-        pre {
-            background-color: #f6f8fa;
-            padding: 1em;
-            border-radius: 6px;
-            overflow-x: auto;
-        }
-
-        a {
-            color: #0366d6;
-            text-decoration: none;
-        }
-
-        a:hover {
-            text-decoration: underline;
-        }
-
-        aside ul {
-            list-style-type: none;
-            padding-left: 0;
-        }
-
-        aside ul li {
-            margin-bottom: 0.5em;
-        }
-
-        aside h2 {
-            font-size: 1.1em;
-            margin-bottom: 0.6em;
-        }
-
-        /* Under construction banner */
-        .construction-banner {
-            background-color: #fff8e6;
-            border-left: 4px solid #ffcc00;
-            padding: 1em;
-            margin-bottom: 2em;
-            border-radius: 0 4px 4px 0;
-            display: flex;
-            align-items: center;
-        }
-
-        .construction-banner:before {
-            content: "🚧";
-            margin-right: 0.5em;
-            font-size: 1.2em;
-        }
-
-        @media (max-width: 1100px) {
-            nav,
-            aside {
-                display: none;
-            }
-        
-            main {
-                padding: 1em;
-                margin: 0;
-                max-width: 100%;
-            }
-        }
-
-
-    </style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Documentation</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #f1f5f9;
+      color: #0f172a;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+    }
+    .wrap {
+      width: min(860px, 92vw);
+    }
+    h1 {
+      margin: 0 0 20px 0;
+      text-align: center;
+      font-size: 2rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: #ffffff;
+      border: 1px solid #dbeafe;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+    }
+    .card h2 {
+      margin: 0 0 8px 0;
+      font-size: 1.2rem;
+    }
+    .card p {
+      margin: 0 0 14px 0;
+      color: #334155;
+      line-height: 1.5;
+    }
+    .btn {
+      display: inline-block;
+      text-decoration: none;
+      font-weight: 700;
+      border-radius: 8px;
+      padding: 10px 14px;
+      border: 1px solid #0f766e;
+      color: #0f766e;
+    }
+  </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Navigation Menu (Left) -->
-        <nav>
-            <ul>
-                <li><a href="index.html" class="active">Home</a></li>
-                <li><a href="tutorials.html">Tutorials</a></li>
-                <li><a href="API.html">API</a></li>
-                <li><a href="FAQ.html">FAQ</a></li>
-                <li><a href="Contributing.html">Contributing</a></li>
-                <li><a href="Citation.html">Citation</a></li>
-                <li><a href="Credits.html">Credits</a></li>
-            </ul>
-        </nav>
-
-        <!-- Main Markdown-Style Content (Center) -->
-        <main>
-            <div class="construction-banner">
-                This website is currently under construction.
-            </div>
-
-            <h1 id="home">ncpi: neural circuit parameter inference</h1>
-
-            <ul>
-                <li><code>ncpi</code> is a Python package for model-based inference of neural circuit parameters from
-                    population-level electrophysiological recordings, such as LFP, ECoG, MEG, and EEG.
-                </li>
-                <li><code>ncpi</code> provides a rapid, reproducible, and robust framework for estimating the most
-                    probable neural circuit parameters associated with an empirical observation, streamlining
-                    traditionally complex workflows into a minimal amount of code.
-                </li>
-                <li>Check out the <a href="tutorials/getting_started.html">Getting started with ncpi</a> tutorial
-                    to see how <code>ncpi</code> can accelerate your research and unlock the full
-                    potential of <strong>model-based neural inference</strong>.
-                </li>
-            </ul>
-
-            <div style="background: #f0f0f0; border: 1px solid #ddd; padding: 10px; margin: 10px 0;
-                 display: inline-block;">
-                <p style="margin: 0;">Github repository: 
-                    <a href="https://github.com/necolab-ugr/ncpi">https://github.com/necolab-ugr/ncpi</a></p>
-            </div>
-
-            <h1 id="install">Installation</h1>
-            <p>
-                <code>ncpi</code> requires Python 3.10 or higher. To install <code>ncpi</code>, you can use <code>pip</code>.
-                The package is available on PyPI, so you can install it directly from there.
-            </p>
-
-            <pre><code class="language-bash">
-        # Step 1: Create and activate a conda environment (recommended)
-        conda create -n ncpi-env python=3.10 -y
-        conda activate ncpi-env
-
-        # Step 2: Install ncpi using pip
-        pip install ncpi
-            </code></pre>
-        </main>
-
-
-        <!-- Table of Contents (Right) -->
-        <aside>
-            <h2>Table of Contents</h2>
-            <ul>
-                <li><a href="#home">Home</a></li>
-                <li><a href="#install">Installation</a></li>
-            </ul>
-        </aside>
-
-    </div>
+  <main class="wrap">
+    <h1>ncpi Documentation</h1>
+    <section class="grid">
+      <article class="card">
+        <h2>New Version</h2>
+        <p>Documentation for the new ncpi version, including the graphical interface.</p>
+        <a class="btn" href="./new/index.html">Open new docs</a>
+      </article>
+      <article class="card">
+        <h2>Older Version</h2>
+        <p>Legacy documentation for the previous ncpi version.</p>
+        <a class="btn" href="./old/index.html">Open older docs</a>
+      </article>
+    </section>
+  </main>
 </body>
 </html>

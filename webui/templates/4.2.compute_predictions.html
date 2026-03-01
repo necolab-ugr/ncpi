@@ -43,14 +43,33 @@
     x-data="{
         assetsUploadMode: 'individual',
         modelName: '__auto__',
+        autoDetectedBackend: '',
+        autoDetectedType: '',
+        autoDetectError: '',
+        autoDetectPending: false,
+        autoDetectReady: false,
+        setAutoDetection(payload) {
+            const detail = payload || {};
+            this.autoDetectPending = Boolean(detail.pending);
+            this.autoDetectedBackend = (detail.backend || '').toLowerCase();
+            this.autoDetectedType = detail.inferred_type || '';
+            this.autoDetectError = detail.error || '';
+            this.autoDetectReady = Boolean(this.autoDetectedBackend) || Boolean(this.autoDetectError);
+        },
         isSbiModel() {
             const selected = this.modelName === '__custom__'
                 ? ((this.$refs.customModelName && this.$refs.customModelName.value) ? this.$refs.customModelName.value.trim() : '')
                 : this.modelName;
-            // Keep SBI settings visible in auto mode: backend is inferred from uploaded artifact.
-            return ['__auto__', 'NPE', 'NLE', 'NRE'].includes(selected);
+            if (['NPE', 'NLE', 'NRE'].includes(selected)) {
+                return true;
+            }
+            if (selected === '__auto__') {
+                return this.autoDetectedBackend === 'sbi';
+            }
+            return false;
         }
     }"
+    @auto-model-detection.window="setAutoDetection($event.detail || null)"
     class="max-w-5xl mx-auto"
 >
     <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Compute Predictions</h1>
@@ -75,6 +94,15 @@
                         Features Data <span class="text-red-500">*</span>
                     </label>
                     <div
+                        id="features-loaded-status"
+                        class="mb-3 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
+                        {% if not default_feature_file %}style="display:none;"{% endif %}
+                    >
+                        Loaded:
+                        <span id="features-loaded-name">{{ default_feature_file | default('') }}</span>
+                        (detected from previous steps)
+                    </div>
+                    <div
                         onclick="document.getElementById('file-upload-features').click()"
                         class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
                         <div class="space-y-1 text-center">
@@ -92,15 +120,6 @@
                                 .pkl only
                             </p>
                         </div>
-                    </div>
-                    <div
-                        id="features-loaded-status"
-                        class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
-                        {% if not default_feature_file %}style="display:none;"{% endif %}
-                    >
-                        Loaded:
-                        <span id="features-loaded-name">{{ default_feature_file | default('') }}</span>
-                        (detected from previous steps)
                     </div>
                     <div
                         id="features-uploaded-status"
@@ -165,7 +184,7 @@
                                     </label>
                                 </div>
                                 <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    Required unless provided via folder upload
+                                    model.pkl
                                 </p>
                             </div>
                         </div>
@@ -262,27 +281,19 @@
                                 </p>
                             </div>
                         </div>
-                        <div id="asset-folder-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
+                        <div id="asset-folder-results"
+                            class="mt-3 w-full rounded-lg bg-green-50 dark:bg-green-900/20 border border-green-300 dark:border-green-700 text-green-800 dark:text-green-300 px-4 py-3 text-sm"
                             style="display:none;">
-                            Selected folder files: <span id="asset-folder-count"></span>
-                        </div>
-                        <div id="asset-folder-detected-status"
-                            class="mt-2 w-full rounded-md bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 text-[10px] font-semibold px-2 py-1"
-                            style="display:none;">
-                            <div class="text-[11px] font-semibold mb-1">Detected key assets</div>
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-1 text-[11px]">
-                                <div>model: <span id="asset-folder-detected-model"></span></div>
-                                <div>scaler: <span id="asset-folder-detected-scaler"></span></div>
-                                <div>density: <span id="asset-folder-detected-density"></span></div>
+                            <div class="font-semibold mb-2">Assets uploaded from folder</div>
+                            <div class="space-y-1">
+                                <div>Total files: <span id="asset-folder-result-count" class="font-semibold"></span></div>
+                                <div>model: <span id="asset-folder-result-model" class="font-semibold"></span></div>
+                                <div>scaler: <span id="asset-folder-result-scaler" class="font-semibold"></span></div>
+                                <div>density estimator: <span id="asset-folder-result-density" class="font-semibold"></span></div>
                             </div>
-                        </div>
-                        <div id="asset-folder-files-status"
-                            class="mt-2 w-full rounded-md bg-slate-50 dark:bg-slate-900/40 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 px-2 py-2"
-                            style="display:none;">
-                            <div class="text-[11px] font-semibold mb-1">Loaded files</div>
-                            <ul id="asset-folder-files-list" class="text-[11px] font-mono max-h-32 overflow-y-auto space-y-0.5"></ul>
-                            <div id="asset-folder-files-more" class="text-[11px] text-slate-500 dark:text-slate-400 mt-1"></div>
+                            <div class="mt-3 text-xs font-semibold">Loaded files</div>
+                            <ul id="asset-folder-result-files-list" class="mt-1 text-xs font-mono max-h-32 overflow-y-auto space-y-0.5"></ul>
+                            <div id="asset-folder-result-files-more" class="text-xs mt-1"></div>
                         </div>
                     </div>
                 </div>
@@ -322,6 +333,16 @@
                         <option value="__custom__">Custom model name...</option>
                     </select>
                     <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Recommended: keep Auto to infer type/backend from uploaded model artifact.</p>
+                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-show="modelName === '__auto__' && autoDetectPending" x-cloak>
+                        Auto-detecting backend from uploaded model file...
+                    </p>
+                    <p class="mt-2 text-xs text-emerald-700 dark:text-emerald-300" x-show="modelName === '__auto__' && !autoDetectPending && autoDetectedBackend" x-cloak>
+                        Auto-detected backend: <span class="font-semibold" x-text="autoDetectedBackend"></span>
+                        <template x-if="autoDetectedType">
+                            <span>(type: <span class="font-semibold" x-text="autoDetectedType"></span>)</span>
+                        </template>
+                    </p>
+                    <p class="mt-2 text-xs text-amber-700 dark:text-amber-300" x-show="modelName === '__auto__' && !autoDetectPending && autoDetectError" x-cloak x-text="autoDetectError"></p>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="inference-model-name-custom">
@@ -368,7 +389,7 @@
                             step="1"
                             name="inference_n_jobs"
                             class="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-background-light dark:bg-[#191e33] text-sm text-slate-900 dark:text-white"
-                            placeholder="Optional"
+                            value="1"
                         />
                     </label>
                     <label class="text-sm">
@@ -396,14 +417,14 @@
                 </div>
             </div>
 
-            <div class="mt-6" x-show="isSbiModel()" x-cloak>
+            <div class="mt-6">
                 <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Other Settings (SBI)</h3>
                 <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
                     Optional parameters. If left empty: <code>num_posterior_samples=500</code>, <code>sbi_batch_size=256</code>.
                 </p>
             </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="isSbiModel()" x-cloak>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6" :class="{ 'opacity-60': !isSbiModel() }">
                 <div>
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="sbi-num-posterior-samples">
                         num_posterior_samples (optional)
@@ -415,6 +436,7 @@
                         name="sbi_num_posterior_samples"
                         placeholder="500"
                         type="number"
+                        :disabled="!isSbiModel()"
                     />
                 </div>
                 <div>
@@ -428,6 +450,7 @@
                         name="sbi_batch_size"
                         placeholder="256"
                         type="number"
+                        :disabled="!isSbiModel()"
                     />
                 </div>
                 <div>
@@ -438,6 +461,7 @@
                         class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         id="sbi-summary-mode"
                         name="sbi_summary_mode"
+                        :disabled="!isSbiModel()"
                     >
                         <option value="mean">Posterior mean</option>
                         <option value="median">Posterior median</option>
@@ -454,13 +478,14 @@
                         placeholder='{}'
                         type="text"
                         value="{}"
+                        :disabled="!isSbiModel()"
                     />
                 </div>
             </div>
 
             <div class="mt-6" x-show="!isSbiModel()" x-cloak>
                 <p class="text-xs text-slate-500 dark:text-slate-400">
-                    SBI-specific controls are hidden because the selected model is not NPE/NLE/NRE.
+                    SBI settings are not available for non-SBI models.
                 </p>
             </div>
         </section>
@@ -554,23 +579,19 @@
 
     function bindAssetsFolderStatus() {
         const input = byId("file-upload-assets-folder");
-        const status = byId("asset-folder-status");
-        const countEl = byId("asset-folder-count");
-        const detectedStatus = byId("asset-folder-detected-status");
-        const filesStatus = byId("asset-folder-files-status");
-        const filesList = byId("asset-folder-files-list");
-        const filesMore = byId("asset-folder-files-more");
-        const modelEl = byId("asset-folder-detected-model");
-        const scalerEl = byId("asset-folder-detected-scaler");
-        const densityEl = byId("asset-folder-detected-density");
-        if (!input || !status || !countEl || !detectedStatus || !filesStatus || !filesList || !filesMore || !modelEl || !scalerEl || !densityEl) return;
+        const resultsBox = byId("asset-folder-results");
+        const countEl = byId("asset-folder-result-count");
+        const filesList = byId("asset-folder-result-files-list");
+        const filesMore = byId("asset-folder-result-files-more");
+        const modelEl = byId("asset-folder-result-model");
+        const scalerEl = byId("asset-folder-result-scaler");
+        const densityEl = byId("asset-folder-result-density");
+        if (!input || !resultsBox || !countEl || !filesList || !filesMore || !modelEl || !scalerEl || !densityEl) return;
 
         const refresh = () => {
             const files = input.files ? Array.from(input.files) : [];
             if (files.length === 0) {
-                status.style.display = "none";
-                detectedStatus.style.display = "none";
-                filesStatus.style.display = "none";
+                resultsBox.style.display = "none";
                 filesList.innerHTML = "";
                 filesMore.textContent = "";
                 modelEl.textContent = "";
@@ -580,7 +601,7 @@
             }
 
             countEl.textContent = String(files.length);
-            status.style.display = "";
+            resultsBox.style.display = "";
 
             let model = "";
             let scaler = "";
@@ -594,7 +615,6 @@
             modelEl.textContent = model || "not found";
             scalerEl.textContent = scaler || "not found";
             densityEl.textContent = density || "not found";
-            detectedStatus.style.display = "";
 
             filesList.innerHTML = "";
             const MAX_PREVIEW_FILES = 12;
@@ -609,7 +629,6 @@
             }
             const remaining = names.length - preview.length;
             filesMore.textContent = remaining > 0 ? `...and ${remaining} more file(s)` : "";
-            filesStatus.style.display = "";
         };
 
         input.addEventListener("change", refresh);
@@ -626,15 +645,13 @@
         const modelStatus = byId("asset-model-status");
         const scalerStatus = byId("asset-scaler-status");
         const densityStatus = byId("asset-density-status");
-        const folderStatus = byId("asset-folder-status");
-        const folderDetectedStatus = byId("asset-folder-detected-status");
-        const folderFilesStatus = byId("asset-folder-files-status");
-        const folderFilesList = byId("asset-folder-files-list");
-        const folderFilesMore = byId("asset-folder-files-more");
-        const folderCount = byId("asset-folder-count");
-        const folderDetectedModel = byId("asset-folder-detected-model");
-        const folderDetectedScaler = byId("asset-folder-detected-scaler");
-        const folderDetectedDensity = byId("asset-folder-detected-density");
+        const folderResults = byId("asset-folder-results");
+        const folderFilesList = byId("asset-folder-result-files-list");
+        const folderFilesMore = byId("asset-folder-result-files-more");
+        const folderCount = byId("asset-folder-result-count");
+        const folderDetectedModel = byId("asset-folder-result-model");
+        const folderDetectedScaler = byId("asset-folder-result-scaler");
+        const folderDetectedDensity = byId("asset-folder-result-density");
 
         if (!individualRadio || !folderRadio || !modelInput || !scalerInput || !densityInput || !folderInput) return;
 
@@ -649,9 +666,7 @@
 
         const clearFolder = () => {
             folderInput.value = "";
-            if (folderStatus) folderStatus.style.display = "none";
-            if (folderDetectedStatus) folderDetectedStatus.style.display = "none";
-            if (folderFilesStatus) folderFilesStatus.style.display = "none";
+            if (folderResults) folderResults.style.display = "none";
             if (folderFilesList) folderFilesList.innerHTML = "";
             if (folderFilesMore) folderFilesMore.textContent = "";
             if (folderCount) folderCount.textContent = "";
@@ -679,6 +694,120 @@
         sync();
     }
 
+    function bindAutoModelDetection() {
+        const modelSelect = byId("inference-model-name");
+        const modelInput = byId("file-upload-model");
+        const folderInput = byId("file-upload-assets-folder");
+        const individualRadio = byId("assets-mode-individual");
+        const folderRadio = byId("assets-mode-folder");
+        if (!modelSelect || !modelInput || !folderInput || !individualRadio || !folderRadio) return;
+
+        const detectUrl = "{{ url_for('inference_detect_model_backend') }}";
+        let requestCounter = 0;
+
+        const emit = (detail) => {
+            window.dispatchEvent(new CustomEvent("auto-model-detection", { detail: detail || {} }));
+        };
+
+        const pickModelFileFromFolder = (files) => {
+            const candidates = Array.isArray(files) ? files : [];
+            if (!candidates.length) return null;
+            for (const file of candidates) {
+                const relativePath = (file.webkitRelativePath || file.name || "").toLowerCase();
+                const baseName = (file.name || "").toLowerCase();
+                if (baseName === "model.pkl" || baseName === "model.pickle") {
+                    return file;
+                }
+                if (relativePath.endsWith("/model.pkl") || relativePath.endsWith("/model.pickle")) {
+                    return file;
+                }
+            }
+            for (const file of candidates) {
+                const baseName = (file.name || "").toLowerCase();
+                if (baseName.startsWith("model") && (baseName.endsWith(".pkl") || baseName.endsWith(".pickle"))) {
+                    return file;
+                }
+            }
+            return null;
+        };
+
+        const detectFromFile = async (file) => {
+            requestCounter += 1;
+            const requestId = requestCounter;
+
+            if (!file) {
+                emit({});
+                return;
+            }
+
+            const fileName = (file.name || "").toLowerCase();
+            if (!(fileName.endsWith(".pkl") || fileName.endsWith(".pickle"))) {
+                emit({ error: "Auto-detection expects a .pkl/.pickle model file." });
+                return;
+            }
+
+            emit({ pending: true });
+            try {
+                const formData = new FormData();
+                formData.append("model_file", file, file.name || "model.pkl");
+                const response = await fetch(detectUrl, {
+                    method: "POST",
+                    body: formData,
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (requestId !== requestCounter) return;
+
+                if (response.ok && payload && payload.ok && payload.backend) {
+                    emit({
+                        backend: payload.backend,
+                        inferred_type: payload.inferred_type || "",
+                    });
+                    return;
+                }
+
+                emit({
+                    error: (payload && payload.error) ? payload.error : "Could not auto-detect model backend.",
+                });
+            } catch (err) {
+                if (requestId !== requestCounter) return;
+                emit({ error: (err && err.message) ? err.message : "Could not auto-detect model backend." });
+            }
+        };
+
+        const refresh = () => {
+            if (modelSelect.value !== "__auto__") {
+                requestCounter += 1;
+                emit({});
+                return;
+            }
+
+            if (folderRadio.checked) {
+                const folderFiles = folderInput.files ? Array.from(folderInput.files) : [];
+                const modelFile = pickModelFileFromFolder(folderFiles);
+                if (!modelFile) {
+                    emit({});
+                    return;
+                }
+                detectFromFile(modelFile);
+                return;
+            }
+
+            const selectedModelFile = (modelInput.files && modelInput.files[0]) ? modelInput.files[0] : null;
+            if (!selectedModelFile) {
+                emit({});
+                return;
+            }
+            detectFromFile(selectedModelFile);
+        };
+
+        modelSelect.addEventListener("change", refresh);
+        modelInput.addEventListener("change", refresh);
+        folderInput.addEventListener("change", refresh);
+        individualRadio.addEventListener("change", refresh);
+        folderRadio.addEventListener("change", refresh);
+        refresh();
+    }
+
     window.handleInferenceFeaturesInputChange = refreshFeaturesLoadStatus;
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -692,6 +821,7 @@
         bindSingleFileStatus("file-upload-density-estimator", "asset-density-status", "asset-density-name");
         bindAssetsFolderStatus();
         bindAssetsModeExclusivity();
+        bindAutoModelDetection();
         refreshFeaturesLoadStatus();
     });
 })();

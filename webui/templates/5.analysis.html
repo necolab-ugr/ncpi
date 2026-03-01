@@ -29,6 +29,7 @@
     window.__featureDataFiles = {{ feature_data_files | tojson }};
     window.__predictionsDataFiles = {{ predictions_data_files | tojson }};
     window.__detectedAnalysisFiles = {{ detected_data_files | tojson }};
+    window.__preselectedSimulationKeys = {{ preselected_simulation_keys | tojson }};
 </script>
 <style>
     body {
@@ -44,7 +45,7 @@
 {% block content %}
 <div x-data="{
             activeTab: 'upload-data',
-            tabOrder: ['upload-data', 'boxplot', 'topomap'],
+            tabOrder: ['upload-data', 'boxplot', 'topomap', 'simulation-outputs'],
             uploads: {},
             dfColumns: [],
             columnsLoading: false,
@@ -69,14 +70,154 @@
             topomapGroupBy: '',
             topomapValueCol: '',
             topomapMode: 'per_sensor',
-            hasExistingData: {{ 'true' if has_analysis_data else 'false' }},
+            hasExistingData: {{ 'true' if has_analysis_dataframe else 'false' }},
             existingDataFiles: (window.__analysisDataFiles || []),
             featureDataFiles: (window.__featureDataFiles || []),
             predictionsDataFiles: (window.__predictionsDataFiles || []),
             detectedAnalysisFiles: (window.__detectedAnalysisFiles || []),
+            preselectedSimulationKeys: (window.__preselectedSimulationKeys || []),
+            simulationAvailable: {{ 'true' if simulation_available else 'false' }},
+            simulationTrials: {{ simulation_trials | int }},
+            simulationModel: {{ simulation_model | tojson | forceescape }},
+            simPlotType: 'raster',
+            simTrialStart: 0,
+            simTrialEnd: Math.max(0, {{ simulation_trials | int }} - 1),
+            simTimeStart: 4000,
+            simTimeEnd: 4100,
+            simFreqMin: 20,
+            simFreqMax: 200,
+            simWelchNperseg: '',
+            simWelchNoverlap: '',
+            simWelchNfft: '',
+            selectedSimulationFiles: [],
+            selectedDataframeName: '',
             isUploaded(id) { return this.uploads[id]?.uploaded === true; },
             getFileName(id) { return this.uploads[id]?.name || ''; },
+            isDataframeSelected() {
+                return !!String(this.selectedDataframeName || '').trim();
+            },
+            isSimulationSelectionActive() {
+                return Array.isArray(this.selectedSimulationFiles) && this.selectedSimulationFiles.length > 0;
+            },
+            canSelectDataframe() {
+                return !this.isSimulationSelectionActive();
+            },
+            canSelectSimulation() {
+                return !this.isDataframeSelected();
+            },
+            isSimulationEntry(entry) {
+                return !!(entry && (entry.source === 'simulation' || entry.source === 'field_potential'));
+            },
+            isDetectedEntryDisabled(entry) {
+                return this.isSimulationEntry(entry) ? !this.canSelectSimulation() : !this.canSelectDataframe();
+            },
             currentDataFile() { return this.existingDataFiles.length ? this.existingDataFiles[0] : ''; },
+            selectedFilesForAnalysis() {
+                const files = [];
+                const selectedDf = (this.selectedDataframeName || '').trim();
+                if (selectedDf) {
+                    files.push({
+                        key: `dataframe::${selectedDf}`,
+                        label: 'Dataframe',
+                        name: selectedDf,
+                    });
+                }
+                for (const item of this.selectedSimulationFiles) {
+                    files.push({
+                        key: item.key,
+                        label: item.label || 'Simulation',
+                        name: item.name || '',
+                    });
+                }
+                return files;
+            },
+            hasSelectedFieldPotentialFile() {
+                return this.selectedSimulationFiles.some(item =>
+                    item && typeof item.key === 'string' && item.key.startsWith('field_potential::')
+                );
+            },
+            async syncSelectedSimulationFilesOnServer() {
+                try {
+                    const formData = new FormData();
+                    for (const item of this.selectedSimulationFiles) {
+                        if (item && item.key) {
+                            formData.append('selected_keys', item.key);
+                        }
+                    }
+                    const response = await fetch('{{ url_for("analysis_sync_selected_simulation_files") }}', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const data = await response.json();
+                    if (!response.ok || data.error) {
+                        throw new Error(data.error || 'Failed to sync selected simulation files.');
+                    }
+                    this.hasExistingData = false;
+                    this.existingDataFiles = [];
+                    this.dfColumns = [];
+                } catch (err) {
+                    const message = err && err.message ? err.message : 'Failed to sync selected simulation files.';
+                    this.columnsError = message;
+                }
+            },
+            async clearAnalysisDataOnServer() {
+                try {
+                    const response = await fetch('{{ url_for("clear_analysis_data") }}', {
+                        method: 'POST',
+                        headers: {
+                            'X-Requested-With': 'XMLHttpRequest',
+                            'Accept': 'application/json',
+                        },
+                    });
+                    if (!response.ok) {
+                        throw new Error('Failed to clear analysis data from temporary storage.');
+                    }
+                } catch (err) {
+                    const message = err && err.message ? err.message : 'Failed to clear analysis data from temporary storage.';
+                    this.columnsError = message;
+                }
+            },
+            async unselectDataframe() {
+                this.selectedDataframeName = '';
+                if (this.uploads && this.uploads['dataframe-upload']) {
+                    delete this.uploads['dataframe-upload'];
+                }
+                this.hasExistingData = false;
+                this.existingDataFiles = [];
+                this.dfColumns = [];
+                this.columnsLoading = false;
+                this.boxplotGroupBy = '';
+                this.boxplotValueCol = '';
+                this.boxplotControlGroup = '';
+                this.boxplotGroupValues = [];
+                this.boxplotGroupValuesError = '';
+                this.boxplotLastGroupColumn = '';
+                this.topomapGroupBy = '';
+                this.topomapValueCol = '';
+                this.topomapControlGroup = '';
+                this.topomapGroupValues = [];
+                this.topomapGroupValuesError = '';
+                this.topomapLastGroupColumn = '';
+                await this.clearAnalysisDataOnServer();
+            },
+            async unselectSimulationFile(key) {
+                const idx = this.selectedSimulationFiles.findIndex(item => item && item.key === key);
+                if (idx >= 0) {
+                    this.selectedSimulationFiles.splice(idx, 1);
+                }
+                if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                    this.simPlotType = 'raster';
+                }
+                await this.syncSelectedSimulationFilesOnServer();
+            },
+            async unselectAnalysisFile(item) {
+                if (!item || !item.key) return;
+                if (String(item.key).startsWith('dataframe::')) {
+                    await this.unselectDataframe();
+                    return;
+                }
+                await this.unselectSimulationFile(item.key);
+            },
             nextTab() {
                 const idx = this.tabOrder.indexOf(this.activeTab);
                 if (idx >= 0 && idx < this.tabOrder.length - 1) {
@@ -93,13 +234,68 @@
                 if (this.hasExistingData) {
                     const name = this.currentDataFile();
                     if (name) {
+                        this.selectedDataframeName = name;
                         this.uploads['dataframe-upload'] = { name: name, uploaded: true, persisted: true };
                     }
                     this.loadColumnsFromServer();
+                    return;
+                }
+
+                // Restore persisted simulation/file selections from server-side state.
+                if (Array.isArray(this.preselectedSimulationKeys) && this.preselectedSimulationKeys.length) {
+                    const byKey = {};
+                    for (const entry of this.detectedAnalysisFiles) {
+                        if (entry && entry.key) {
+                            byKey[entry.key] = entry;
+                        }
+                    }
+                    this.selectedSimulationFiles = this.preselectedSimulationKeys
+                        .map(key => byKey[key])
+                        .filter(Boolean)
+                        .filter(entry => this.isSimulationEntry(entry))
+                        .map(entry => ({
+                            key: entry.key,
+                            name: entry.name || '',
+                            source: entry.source || 'simulation',
+                            label: entry.label || 'Simulation'
+                        }));
+                    return;
+                }
+
+                // Fallback for legacy sessions: infer selected simulation outputs by filename
+                // from files currently persisted in analysis_data.
+                if (Array.isArray(this.existingDataFiles) && this.existingDataFiles.length) {
+                    const used = new Set();
+                    const inferred = [];
+                    for (const persistedName of this.existingDataFiles) {
+                        const match = this.detectedAnalysisFiles.find(entry => {
+                            if (!entry || !entry.key || !this.isSimulationEntry(entry) || used.has(entry.key)) {
+                                return false;
+                            }
+                            const entryName = String(entry.name || '');
+                            const entryBase = entryName.split('/').pop();
+                            return entryName === persistedName || entryBase === persistedName;
+                        });
+                        if (match) {
+                            used.add(match.key);
+                            inferred.push({
+                                key: match.key,
+                                name: match.name || '',
+                                source: match.source || 'simulation',
+                                label: match.label || 'Simulation'
+                            });
+                        }
+                    }
+                    if (inferred.length) {
+                        this.selectedSimulationFiles = inferred;
+                    }
                 }
             },
             onFileSelected(file, inputId) {
                 if (inputId !== 'dataframe-upload') {
+                    return;
+                }
+                if (!this.canSelectDataframe()) {
                     return;
                 }
                 this.loadColumns(file);
@@ -152,6 +348,9 @@
                 }
             },
             handleFileDrop(event) {
+                if (!this.canSelectDataframe()) {
+                    return;
+                }
                 const file = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
                 if (!file) {
                     return;
@@ -201,6 +400,10 @@
                 }
             },
             async loadColumns(file) {
+                if (!this.canSelectDataframe()) {
+                    this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
+                    return;
+                }
                 this.columnsError = '';
                 this.dfColumns = [];
                 this.columnsLoading = true;
@@ -247,6 +450,7 @@
                     this.dfColumns = Array.isArray(data.columns) ? data.columns : [];
                     this.existingDataFiles = [file.name];
                     this.hasExistingData = true;
+                    this.selectedDataframeName = file.name;
                     if (!this.uploads['dataframe-upload']) {
                         this.uploads['dataframe-upload'] = { name: file.name, uploaded: true };
                     } else {
@@ -262,6 +466,30 @@
             },
             async useDetectedFeaturesFile(entry) {
                 if (!entry || !entry.key) {
+                    return;
+                }
+                if (this.isSimulationEntry(entry)) {
+                    if (!this.canSelectSimulation()) {
+                        return;
+                    }
+                    const existing = this.selectedSimulationFiles.findIndex(item => item.key === entry.key);
+                    if (existing >= 0) {
+                        this.selectedSimulationFiles.splice(existing, 1);
+                    } else {
+                        this.selectedSimulationFiles.push({
+                            key: entry.key,
+                            name: entry.name || '',
+                            source: entry.source || 'simulation',
+                            label: entry.label || 'Simulation'
+                        });
+                    }
+                    if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                        this.simPlotType = 'raster';
+                    }
+                    await this.syncSelectedSimulationFilesOnServer();
+                    return;
+                }
+                if (!this.canSelectDataframe()) {
                     return;
                 }
                 this.columnsError = '';
@@ -281,10 +509,14 @@
                     if (!response.ok || data.error) {
                         throw new Error(data.error || 'Failed to load detected file.');
                     }
+                    if (data.is_dataframe === false) {
+                        return;
+                    }
                     this.dfColumns = Array.isArray(data.columns) ? data.columns : [];
                     const selected = data.filename || entry.name || '';
                     this.existingDataFiles = [selected];
                     this.hasExistingData = true;
+                    this.selectedDataframeName = selected;
                     this.uploads['dataframe-upload'] = { name: selected, uploaded: true, persisted: true };
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load detected file.';
@@ -314,7 +546,63 @@
                     :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'topomap', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'topomap' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Topomap</button>
+                <button @click="activeTab = 'simulation-outputs'" type="button"
+                    :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'simulation-outputs', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'simulation-outputs' }"
+                    class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
+                    Simulation outputs</button>
             </nav>
+        </div>
+
+        <div x-show="selectedFilesForAnalysis().length" class="mt-6 rounded-md border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50/70 dark:bg-emerald-900/20 px-4 py-3">
+            <p class="text-sm font-semibold text-emerald-900 dark:text-emerald-200">Selected files for analysis</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+                <template x-for="item in selectedFilesForAnalysis()" :key="item.key">
+                    <span class="inline-flex items-center gap-1 rounded-full bg-emerald-100 dark:bg-emerald-900/40 px-2 py-1 text-[11px] font-medium text-emerald-800 dark:text-emerald-200">
+                        <span x-text="item.label"></span>
+                        <span>:</span>
+                        <span x-text="item.name"></span>
+                        <button type="button"
+                            @click="unselectAnalysisFile(item)"
+                            class="ml-1 inline-flex items-center justify-center rounded-full hover:bg-emerald-200 dark:hover:bg-emerald-800/60 px-1"
+                            title="Unselect">
+                            <span class="material-symbols-outlined text-[14px] leading-none">close</span>
+                        </button>
+                    </span>
+                </template>
+            </div>
+            <p x-show="isDataframeSelected()" class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                Dataframe mode is active. Simulation-output selection is disabled until the dataframe is unselected.
+            </p>
+            <p x-show="isSimulationSelectionActive()" class="mt-2 text-xs text-emerald-700 dark:text-emerald-300">
+                Simulation-output mode is active. Dataframe selection is disabled until all selected simulation files are unselected.
+            </p>
+        </div>
+        <div x-show="detectedAnalysisFiles.length" class="mt-4 rounded-md border border-sky-200 dark:border-sky-800/50 bg-sky-50/70 dark:bg-sky-900/20 px-4 py-3">
+            <p class="text-sm font-semibold text-sky-900 dark:text-sky-200">Detected data files from previous modules</p>
+            <p class="mt-1 text-xs text-sky-700 dark:text-sky-300">Simulation, Field Potential, Features, and Inference outputs are listed here.</p>
+            <div class="mt-3 flex flex-wrap gap-2">
+                <template x-for="entry in detectedAnalysisFiles" :key="entry.key">
+                    <button type="button"
+                        @click="if (!isDetectedEntryDisabled(entry)) { useDetectedFeaturesFile(entry); }"
+                        :disabled="isDetectedEntryDisabled(entry)"
+                        :class="isDetectedEntryDisabled(entry)
+                            ? 'inline-flex items-center gap-1 rounded-md border border-slate-300 dark:border-slate-700 px-2.5 py-1.5 text-xs font-medium text-slate-400 dark:text-slate-500 cursor-not-allowed opacity-70'
+                            : (isSimulationEntry(entry) && selectedSimulationFiles.some(item => item.key === entry.key)
+                                ? 'inline-flex items-center gap-1 rounded-md border border-emerald-400 dark:border-emerald-600 px-2.5 py-1.5 text-xs font-medium text-emerald-800 dark:text-emerald-200 bg-emerald-100/60 dark:bg-emerald-900/30'
+                                : 'inline-flex items-center gap-1 rounded-md border border-sky-300 dark:border-sky-700 px-2.5 py-1.5 text-xs font-medium text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-colors')">
+                        <span class="material-symbols-outlined text-sm">dataset</span>
+                        <span class="font-semibold" x-text="entry.label"></span>
+                        <span>:</span>
+                        <span x-text="entry.name"></span>
+                    </button>
+                </template>
+            </div>
+            <p x-show="isDataframeSelected()" class="mt-2 text-xs text-sky-700 dark:text-sky-300">
+                Dataframe selected. Simulation/Field Potential detected entries are disabled.
+            </p>
+            <p x-show="isSimulationSelectionActive()" class="mt-2 text-xs text-sky-700 dark:text-sky-300">
+                Simulation outputs selected. Features/Predictions detected entries are disabled.
+            </p>
         </div>
 
         <!-- Form action -->
@@ -323,105 +611,91 @@
             <div class="mt-12 space-y-8">
                 <!-- Load Data Tab -->
                 <div x-show="activeTab === 'upload-data'" x-cloak>
-                    <section
-                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Upload dataframe (.pkl)</h3>
-                        <div x-show="hasExistingData" class="mt-3 rounded-md border border-emerald-200 dark:border-emerald-800/50 bg-emerald-50/70 dark:bg-emerald-900/30 px-4 py-3 text-sm text-emerald-800 dark:text-emerald-200 flex flex-wrap items-center gap-3">
-                            <span class="font-semibold">Current dataframe:</span>
-                            <span x-text="currentDataFile()"></span>
-                            <form action="{{ url_for('clear_analysis_data') }}" method="POST">
-                                <button type="submit"
-                                    class="text-xs font-semibold uppercase tracking-wider text-red-600 dark:text-red-400 border border-red-200 dark:border-red-700/60 rounded-md px-2 py-1 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors">
-                                    Clear data
-                                </button>
-                            </form>
-                        </div>
-                        <div x-show="detectedAnalysisFiles.length" class="mt-4 rounded-md border border-sky-200 dark:border-sky-800/50 bg-sky-50/70 dark:bg-sky-900/20 px-4 py-3">
-                            <p class="text-sm font-semibold text-sky-900 dark:text-sky-200">Detected features/predictions files in tmp</p>
-                            <p class="mt-1 text-xs text-sky-700 dark:text-sky-300">Select one to use directly in Analysis.</p>
-                            <div class="mt-3 flex flex-wrap gap-2">
-                                <template x-for="entry in detectedAnalysisFiles" :key="entry.key">
-                                    <button type="button"
-                                        @click="useDetectedFeaturesFile(entry)"
-                                        class="inline-flex items-center gap-1 rounded-md border border-sky-300 dark:border-sky-700 px-2.5 py-1.5 text-xs font-medium text-sky-800 dark:text-sky-200 hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-colors">
-                                        <span class="material-symbols-outlined text-sm">dataset</span>
-                                        <span class="font-semibold" x-text="entry.label"></span>
-                                        <span>:</span>
-                                        <span x-text="entry.name"></span>
-                                    </button>
-                                </template>
-                            </div>
-                        </div>
-                        <div
-                            class="mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 py-10"
-                            @dragenter.prevent
-                            @dragover.prevent
-                            @drop.prevent="handleFileDrop($event)">
-                            <div class="text-center">
-                                <span class="material-icons text-4xl text-slate-400 mx-auto">upload_file</span>
-                                <div class="mt-4 flex text-sm leading-6 text-slate-600 dark:text-slate-400">
-                                    <label
-                                        class="relative cursor-pointer rounded-md bg-white dark:bg-transparent font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 dark:focus-within:ring-offset-slate-900 hover:text-indigo-500 dark:text-primary-dark"
-                                        for="dataframe-upload">
-                                        <span>Drag &amp; drop your .pkl file here</span>
-                                        <input class="sr-only" id="dataframe-upload" name="dataframe" type="file"
-                                            accept=".pkl,.pickle" @change="handleFileUpload($event)" />
-                                    </label>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+                        <section
+                            class="lg:col-span-2 bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                            <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Upload dataframe (.pkl)</h3>
+                            <div
+                                :class="canSelectDataframe() ? 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 py-10' : 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 px-6 py-10 opacity-60'"
+                                @dragenter.prevent
+                                @dragover.prevent
+                                @drop.prevent="handleFileDrop($event)">
+                                <div class="text-center">
+                                    <span class="material-icons text-4xl text-slate-400 mx-auto">upload_file</span>
+                                    <div class="mt-4 flex text-sm leading-6 text-slate-600 dark:text-slate-400">
+                                        <label
+                                            :class="canSelectDataframe()
+                                                ? 'relative cursor-pointer rounded-md bg-white dark:bg-transparent font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 dark:focus-within:ring-offset-slate-900 hover:text-indigo-500 dark:text-primary-dark'
+                                                : 'relative cursor-not-allowed rounded-md bg-white dark:bg-transparent font-semibold text-slate-400 dark:text-slate-500'"
+                                            for="dataframe-upload">
+                                            <span>Drag &amp; drop your .pkl file here</span>
+                                            <input class="sr-only" id="dataframe-upload" name="dataframe" type="file"
+                                                accept=".pkl,.pickle" @change="handleFileUpload($event)" :disabled="!canSelectDataframe()" />
+                                        </label>
+                                    </div>
+                                    <p class="text-xs leading-5 text-slate-500 dark:text-slate-500">or</p>
+                                    <button @click="document.getElementById('dataframe-upload').click()"
+                                        :disabled="!canSelectDataframe()"
+                                        :class="canSelectDataframe()
+                                            ? 'mt-2 rounded-md bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'
+                                            : 'mt-2 rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-sm font-semibold text-slate-400 dark:text-slate-500 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 cursor-not-allowed'"
+                                        type="button">Browse file</button>
                                 </div>
-                                <p class="text-xs leading-5 text-slate-500 dark:text-slate-500">or</p>
-                                <button @click="document.getElementById('dataframe-upload').click()"
-                                    class="mt-2 rounded-md bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700"
-                                    type="button">Browse file</button>
                             </div>
-                        </div>
-                        <div x-show="uploadInProgress" class="mt-4">
-                            <div class="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
-                                <span>Uploading...</span>
-                                <span x-text="`${uploadProgress}%`"></span>
+                            <p x-show="!canSelectDataframe()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                                Unselect simulation outputs first to enable dataframe selection.
+                            </p>
+                            <div x-show="uploadInProgress" class="mt-4">
+                                <div class="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
+                                    <span>Uploading...</span>
+                                    <span x-text="`${uploadProgress}%`"></span>
+                                </div>
+                                <div class="mt-2 h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700">
+                                    <div class="h-2 rounded-full bg-primary transition-all duration-200"
+                                        :style="`width: ${uploadProgress}%`"></div>
+                                </div>
+                                <div x-show="uploadTotal" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                    <span x-text="formatBytes(uploadLoaded)"></span>
+                                    <span>/</span>
+                                    <span x-text="formatBytes(uploadTotal)"></span>
+                                </div>
                             </div>
-                            <div class="mt-2 h-2 w-full rounded-full bg-slate-200 dark:bg-slate-700">
-                                <div class="h-2 rounded-full bg-primary transition-all duration-200"
-                                    :style="`width: ${uploadProgress}%`"></div>
+                            <p class="mt-2 text-xs text-slate-500 dark:text-slate-500">Supported format: .pkl/.pickle only.</p>
+                            <!-- Upload status indicator -->
+                            <div x-show="isUploaded('dataframe-upload') && isDataframeSelected()" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                                <span class="material-symbols-outlined">check_circle</span>
+                                <span>Data uploaded successfully</span>
+                                <span x-show="getFileName('dataframe-upload')" class="font-semibold">(<span x-text="getFileName('dataframe-upload')"></span>)</span>
                             </div>
-                            <div x-show="uploadTotal" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                <span x-text="formatBytes(uploadLoaded)"></span>
-                                <span>/</span>
-                                <span x-text="formatBytes(uploadTotal)"></span>
-                            </div>
-                        </div>
-                        <p class="mt-2 text-xs text-slate-500 dark:text-slate-500">Supported format: .pkl/.pickle only.</p>
-                        <!-- Upload status indicator -->
-                        <div x-show="isUploaded('dataframe-upload')" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
-                            <span class="material-symbols-outlined">check_circle</span>
-                            <span>Data uploaded successfully</span>
-                            <span x-show="getFileName('dataframe-upload')" class="font-semibold">(<span x-text="getFileName('dataframe-upload')"></span>)</span>
-                        </div>
-                    </section>
+                        </section>
 
-                    <section
-                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
-                        <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Detected columns</h3>
-                        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">Column names are extracted from the uploaded dataframe.</p>
+                        <section
+                            class="lg:col-span-1 bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700 lg:sticky lg:top-6">
+                            <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Detected columns</h3>
+                            <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">Column names are extracted from the uploaded dataframe.</p>
 
-                        <div class="mt-4">
-                            <div x-show="columnsLoading" class="text-sm text-slate-500 dark:text-slate-400">Loading columns...</div>
-                            <div x-show="columnsError" class="text-sm text-red-600 dark:text-red-400" x-text="columnsError"></div>
+                            <div class="mt-4">
+                                <div x-show="columnsLoading" class="text-sm text-slate-500 dark:text-slate-400">Loading columns...</div>
+                                <div x-show="columnsError" class="text-sm text-red-600 dark:text-red-400" x-text="columnsError"></div>
 
-                            <div x-show="!columnsLoading && !columnsError && !dfColumns.length" class="text-sm text-slate-500 dark:text-slate-400">Upload a dataframe to populate the variable list.</div>
+                                <div x-show="!columnsLoading && !columnsError && !dfColumns.length" class="text-sm text-slate-500 dark:text-slate-400">Upload a dataframe to populate the variable list.</div>
 
-                            <div x-show="dfColumns.length" class="flex flex-wrap gap-2">
-                                <template x-for="col in dfColumns" :key="col">
-                                    <span class="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-700/60 px-2.5 py-1 text-xs font-medium text-slate-700 dark:text-slate-200" x-text="col"></span>
-                                </template>
+                                <div x-show="dfColumns.length" class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40 max-h-80 overflow-y-auto">
+                                    <template x-for="col in dfColumns" :key="col">
+                                        <div class="px-3 py-2 text-xs font-medium text-slate-700 dark:text-slate-200 border-b border-slate-200 dark:border-slate-800 last:border-b-0" x-text="col"></div>
+                                    </template>
+                                </div>
+                                <div x-show="dfColumns.length" class="mt-3 text-xs text-slate-500 dark:text-slate-400">Columns found: <span x-text="dfColumns.length"></span></div>
                             </div>
-                            <div x-show="dfColumns.length" class="mt-3 text-xs text-slate-500 dark:text-slate-400">Columns found: <span x-text="dfColumns.length"></span></div>
-                        </div>
-                    </section>
+                        </section>
+                    </div>
                 </div>
 
                 <!-- Boxplot configuration -->
                 <div x-show="activeTab === 'boxplot'" class="mt-12 space-y-8" x-cloak>
                     <section
+                        x-show="isDataframeSelected()"
+                        x-cloak
                         class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
                         <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Boxplot configuration</h2>
                         <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">Configure the grouping factor used on the x-axis.</p>
@@ -563,11 +837,31 @@
                             </div>
                         </div>
                     </section>
+                    <section
+                        x-show="isSimulationSelectionActive()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Boxplot configuration</h2>
+                        <div class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            Boxplot is not available for simulation outputs. Unselect simulation files and select a dataframe in Load data.
+                        </div>
+                    </section>
+                    <section
+                        x-show="!isDataframeSelected() && !isSimulationSelectionActive()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Boxplot configuration</h2>
+                        <div class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            No data selected. Select either a dataframe or simulation outputs in Load data to enable plotting.
+                        </div>
+                    </section>
                 </div>
 
                 <!-- Topomap configuration -->
                 <div class="mt-12 space-y-8" x-show="activeTab === 'topomap'" x-cloak>
                     <section
+                        x-show="isDataframeSelected()"
+                        x-cloak
                         class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
                         <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Brain topographic plot</h2>
                         <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">Select how data should be grouped for the topomap and configure plotting parameters.</p>
@@ -746,6 +1040,144 @@
                                     Plot topomap
                                 </button>
                             </div>
+                        </div>
+                    </section>
+                    <section
+                        x-show="isSimulationSelectionActive()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Brain topographic plot</h2>
+                        <div class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            Topomap is not available for simulation outputs. Unselect simulation files and select a dataframe in Load data.
+                        </div>
+                    </section>
+                    <section
+                        x-show="!isDataframeSelected() && !isSimulationSelectionActive()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Brain topographic plot</h2>
+                        <div class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            No data selected. Select either a dataframe or simulation outputs in Load data to enable plotting.
+                        </div>
+                    </section>
+                </div>
+
+                <!-- Simulation outputs configuration -->
+                <div class="mt-12 space-y-8" x-show="activeTab === 'simulation-outputs'" x-cloak>
+                    <section
+                        x-show="isSimulationSelectionActive()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Simulation outputs</h2>
+                        <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
+                            Plot raster spikes, firing rates, field potentials, or power spectra of field potentials.
+                        </p>
+
+                        <div x-show="!simulationAvailable" class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            No simulation outputs were detected in the simulation output folder.
+                        </div>
+
+                        <div x-show="simulationAvailable" class="mt-6 grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-6">
+                            <div class="sm:col-span-3">
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-plot-type">Plot type</label>
+                                <select id="sim-plot-type" name="sim_plot_type" x-model="simPlotType"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm">
+                                    <option value="raster">Raster plot of spikes</option>
+                                    <option value="firing_rates">Firing rates</option>
+                                    <option value="cdm" :disabled="!hasSelectedFieldPotentialFile()">Field potential</option>
+                                    <option value="cdm_psd" :disabled="!hasSelectedFieldPotentialFile()">Power spectra of field potentials</option>
+                                </select>
+                                <p x-show="!hasSelectedFieldPotentialFile()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                                    Select at least one field-potential output file to enable field potential and spectra plots.
+                                </p>
+                            </div>
+                            <div class="sm:col-span-3">
+                                <p class="mt-7 text-xs text-slate-500 dark:text-slate-400">
+                                    Detected model: <span class="font-semibold" x-text="simulationModel || 'unknown'"></span>
+                                    | Trials: <span class="font-semibold" x-text="simulationTrials"></span>
+                                </p>
+                            </div>
+                            <div class="sm:col-span-3">
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-trial-start">Trial start index</label>
+                                <input id="sim-trial-start" name="sim_trial_start" type="number" min="0" step="1" x-model="simTrialStart"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-3">
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-trial-end">Trial end index</label>
+                                <input id="sim-trial-end" name="sim_trial_end" type="number" min="0" step="1" x-model="simTrialEnd"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-3" x-show="simPlotType !== 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-time-start">Time start (ms)</label>
+                                <input id="sim-time-start" name="sim_time_start" type="number" step="any" x-model="simTimeStart"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-3" x-show="simPlotType !== 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-time-end">Time end (ms)</label>
+                                <input id="sim-time-end" name="sim_time_end" type="number" step="any" x-model="simTimeEnd"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-3" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-freq-min">Frequency min (Hz)</label>
+                                <input id="sim-freq-min" name="sim_freq_min" type="number" step="any" x-model="simFreqMin"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-3" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-freq-max">Frequency max (Hz)</label>
+                                <input id="sim-freq-max" name="sim_freq_max" type="number" step="any" x-model="simFreqMax"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-welch-nperseg">Welch nperseg</label>
+                                <input id="sim-welch-nperseg" name="sim_welch_nperseg" type="number" min="1" step="1" x-model="simWelchNperseg"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-welch-noverlap">Welch noverlap</label>
+                                <input id="sim-welch-noverlap" name="sim_welch_noverlap" type="number" min="0" step="1" x-model="simWelchNoverlap"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                                <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-welch-nfft">Welch nfft</label>
+                                <input id="sim-welch-nfft" name="sim_welch_nfft" type="number" min="1" step="1" x-model="simWelchNfft"
+                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
+                            </div>
+                            <div class="sm:col-span-6" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                                <p class="text-xs text-slate-500 dark:text-slate-400">
+                                    If Welch parameters are left empty, default values are used.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div class="mt-6 flex flex-wrap items-center gap-3">
+                            <template x-for="item in selectedSimulationFiles" :key="'hidden-' + item.key">
+                                <input type="hidden" name="sim_selected_file_keys" :value="item.key" />
+                            </template>
+                            <button type="submit"
+                                formaction="{{ url_for('analysis_plot_simulation') }}"
+                                data-plot-action="simulation"
+                                class="flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
+                                :disabled="!simulationAvailable">
+                                Plot simulation outputs
+                            </button>
+                        </div>
+                    </section>
+                    <section
+                        x-show="isDataframeSelected()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Simulation outputs</h2>
+                        <div class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            Simulation output plots are not available for dataframe data. Unselect the dataframe and select simulation outputs in Load data.
+                        </div>
+                    </section>
+                    <section
+                        x-show="!isDataframeSelected() && !isSimulationSelectionActive()"
+                        x-cloak
+                        class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+                        <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Simulation outputs</h2>
+                        <div class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            No data selected. Select either a dataframe or simulation outputs in Load data to enable plotting.
                         </div>
                     </section>
                 </div>

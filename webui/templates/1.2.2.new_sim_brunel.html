@@ -169,6 +169,20 @@
 
 
 <form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='hagen') }}">
+    <section class="flex flex-col gap-4 px-4 pb-2">
+        <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Simulation mode</h2>
+        <div class="flex flex-col md:flex-row gap-4">
+            <label class="flex items-center gap-2 text-slate-800 dark:text-white text-sm font-medium">
+                <input type="radio" name="sim_run_mode" value="single" checked class="text-primary focus:ring-primary" />
+                Single trial
+            </label>
+            <label class="flex items-center gap-2 text-slate-800 dark:text-white text-sm font-medium">
+                <input type="radio" name="sim_run_mode" value="grid" class="text-primary focus:ring-primary" />
+                Parameter grid search
+            </label>
+        </div>
+    </section>
+
     <!-- Container where input parameters will be appended with their default values -->
     <div id="parameter-container">
     </div>
@@ -189,7 +203,7 @@
         </div>
         <button type="submit"
             class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
-            <span class="truncate">Run trial simulation</span>
+            <span id="run-simulation-button-label" class="truncate">Run trial simulation</span>
         </button>
     </div>
 </form>

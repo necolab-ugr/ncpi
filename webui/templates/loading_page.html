@@ -39,9 +39,11 @@
         <p class="mt-2 text-sm text-text-light-secondary dark:text-[#929bc9]">
             Progress: <span x-text="progress + '%'"></span>
         </p>
+        <p class="text-sm text-text-light-secondary dark:text-[#929bc9]" x-show="simulationTotal > 1">
+            Simulations done: <span x-text="`${simulationCompleted}/${simulationTotal}`"></span>
+        </p>
         <p class="text-sm text-text-light-secondary dark:text-[#929bc9]">
-            Elapsed: <span x-text="elapsedTime"></span> | 
-            Remaining: <span x-text="estimatedTimeRemaining"></span>
+            Elapsed: <span x-text="elapsedTime"></span>
         </p>
 
         <!-- Error message section - only shows when error exists -->
@@ -135,12 +137,13 @@ document.addEventListener('alpine:init', () => {
         pending,
         progress: 0,
         elapsedTime: '00:00',
-        estimatedTimeRemaining: 'Calculating...',
         hasBeenClicked : false,
         error: null, 
         output: "",
         uploadProgress: 0,
         uploadMessage: "",
+        simulationTotal: 0,
+        simulationCompleted: 0,
         
         init() {
             this.startTime = Date.now();
@@ -159,7 +162,6 @@ document.addEventListener('alpine:init', () => {
                     this.pending = false;
                     this.startTime = Date.now();
                     this.progress = 0;
-                    this.estimatedTimeRemaining = 'Calculating...';
                     this.pollStatus();
                     return;
                 }
@@ -189,6 +191,8 @@ document.addEventListener('alpine:init', () => {
                 .then(data => {
                     this.progress = data.progress;
                     this.output = data.output || "";
+                    this.simulationTotal = Number(data.simulation_total || 0);
+                    this.simulationCompleted = Number(data.simulation_completed || 0);
                     this.$nextTick(() => {
                         if (this.$refs.log) {
                             this.$refs.log.scrollTop = this.$refs.log.scrollHeight;
@@ -197,30 +201,14 @@ document.addEventListener('alpine:init', () => {
                     
                     if (data.status === 'finished') {
                         this.progress = 100; // Finalize display
-                        this.estimatedTimeRemaining = '00:00';
                         console.log('Computation finished. Save results button active.');
                         // Polling stops automatically here as it doesn't set a new timeout
 
                     } else if (data.status === 'in_progress') {
-                        
-                        if (data.estimated_time_remaining) {
-                            const remainingMs = data.estimated_time_remaining * 1000 - Date.now();
-                            // Check if estimate time remaining has passed
-                            if (remainingMs < 0) {
-                                this.estimatedTimeRemaining = 'It\'s taking longer than expected. Please wait... It may take up to 4 minutes more';
-                            } else {
-                                const remainingSeconds = Math.floor(remainingMs / 1000);
-                                this.estimatedTimeRemaining = formatTime(remainingSeconds);
-                            }
-
-                        } else {
-                            this.estimatedTimeRemaining = 'Calculating...';
-                        }
                         // Poll again after 1 second (simplest polling interval)
                         setTimeout(() => this.pollStatus(), 1500); 
 
                     } else { // Failed
-                        this.estimatedTimeRemaining = 'Failed';
                         this.error = data.error;  // Set error message
                         this.progress = data.progress || 0;
                         // Polling stops on failure

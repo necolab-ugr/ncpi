@@ -122,8 +122,8 @@ class LIF_network(object):
 def _simulate_with_progress(tstop, dt):
     if tstop <= 0:
         return
-    # Aim for ~50 progress updates, align to dt
-    step = max(dt, tstop / 50.0)
+    # Use 1-second chunks (aligned to dt) to reduce simulation-loop overhead.
+    step = max(dt, 1000.0)
     step = max(dt, round(step / dt) * dt)
     sim_time = 0.0
     while sim_time < tstop:
