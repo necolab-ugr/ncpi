@@ -86,20 +86,6 @@ pip uninstall scikit-learn numpy -y
 pip install scikit-learn==1.5.0 numpy
 ```
 
-## Installation of web GUI
-You'll need activate the virtual environment with conda to run the application.
-```bash
-conda activate ncpi-env
-```
-
-**Run the web application**
-Open a terminal window. Go to `webui/` folder. Then, run the application with:
-```bash
-flask run
-```
-
-To access the frontend in the same computer you are running this web application, visit http://localhost:5000/ in your browser (or the URL flask indicates in the terminal window).
-
 # Folder Structure
 
 - `ncpi/`: Contains the source code for the library, organized into modules and classes.
