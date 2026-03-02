@@ -70,6 +70,9 @@ MAX_OUTPUT_LINES = 200
 FEATURES_PARSER_FILE_EXTENSIONS = {
     ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather"
 }
+FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
+FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_ID_METADATA_LITERAL = "file_ID"
 PICKLE_EXTENSIONS = {".pkl", ".pickle"}
 MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
 MAX_SIMULATION_GRID_COMBINATIONS = 256
@@ -817,6 +820,101 @@ def _validate_simulation_file_path(file_path):
     return candidate
 
 
+def _extract_filename_text_label(file_name):
+    chains = _extract_filename_text_chains(file_name)
+    return chains[-1] if chains else ""
+
+
+def _extract_filename_text_chains(file_name):
+    stem = Path(str(file_name or "")).stem
+    if not stem:
+        return []
+    return [tok for tok in re.findall(r"[A-Za-z]+", stem) if tok]
+
+
+def _build_file_extracted_virtual_fields(file_names):
+    chain_rows = [_extract_filename_text_chains(name) for name in (file_names or [])]
+    max_chains = max((len(row) for row in chain_rows), default=0)
+    fields = []
+
+    for idx in range(max_chains):
+        ordered_values = []
+        seen = set()
+        for row in chain_rows:
+            if idx >= len(row):
+                continue
+            token = str(row[idx] or "").strip()
+            if not token:
+                continue
+            key = token.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            ordered_values.append(token)
+        if not ordered_values:
+            continue
+        preview = "/".join(ordered_values[:6])
+        if len(ordered_values) > 6:
+            preview += "/..."
+        fields.append({
+            "key": f"{FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX}{idx}",
+            "label": f"file extracted: {preview}",
+            "values": ordered_values,
+        })
+
+    return fields
+
+
+def _attach_file_extracted_virtual_field(description, file_names):
+    field_infos = _build_file_extracted_virtual_fields(file_names)
+    if not field_infos:
+        return description
+    enriched = dict(description or {})
+    candidates = [str(v) for v in (enriched.get("candidate_fields") or [])]
+    virtual_labels = dict(enriched.get("virtual_field_labels") or {})
+    extracted_values = dict(enriched.get("file_extracted_values") or {})
+    for field_info in field_infos:
+        key = str(field_info.get("key") or "").strip()
+        if not key:
+            continue
+        if key not in candidates:
+            candidates.append(key)
+        virtual_labels[key] = field_info.get("label") or key
+        extracted_values[key] = list(field_info.get("values") or [])
+    enriched["candidate_fields"] = candidates
+    enriched["virtual_field_labels"] = virtual_labels
+    enriched["file_extracted_values"] = extracted_values
+    return enriched
+
+
+def _file_extracted_chain_index(locator):
+    if not isinstance(locator, str):
+        return None
+    if locator == FILE_EXTRACTED_VIRTUAL_FIELD:
+        # Backward compatibility with previous single extracted field.
+        return -1
+    if not locator.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
+        return None
+    suffix = locator[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
+    if not suffix.isdigit():
+        return None
+    return int(suffix)
+
+
+def _resolve_file_extracted_value(file_name, locator):
+    index = _file_extracted_chain_index(locator)
+    if index is None:
+        return None
+    chains = _extract_filename_text_chains(file_name)
+    if not chains:
+        return None
+    if index < 0:
+        return chains[-1]
+    if index >= len(chains):
+        return None
+    return chains[index]
+
+
 def _collect_feature_pipeline_inputs():
     source_labels = {
         "field_potential_proxy": "Field Potential Proxy",
@@ -1009,6 +1107,21 @@ def _optional_float(raw_value):
         return float(_safe_eval_numeric_expression(value))
 
 
+def _parse_nonnegative_int(raw_value, default=0, field_name="value"):
+    if raw_value is None:
+        return int(default)
+    value = str(raw_value).strip()
+    if value == "":
+        return int(default)
+    try:
+        parsed = int(value)
+    except Exception:
+        raise ValueError(f"{field_name} must be a non-negative integer.")
+    if parsed < 0:
+        raise ValueError(f"{field_name} must be a non-negative integer.")
+    return parsed
+
+
 def _safe_eval_numeric_expression(expr):
     tree = ast.parse(expr, mode="eval")
 
@@ -1134,7 +1247,22 @@ def _parse_aggregate_labels(raw_value):
     return {str(k): str(v) for k, v in parsed.items()}
 
 
-def _estimate_sensor_count(value):
+def _parse_metadata_field_source(form, source_key, value_key):
+    source = (form.get(source_key) or "").strip()
+    if source == "__none__":
+        return None
+    if source == "__file_id__":
+        return FILE_ID_METADATA_LITERAL
+    if source == "__value__":
+        value = (form.get(value_key) or "").strip()
+        return value or None
+    if source:
+        return source
+    value = (form.get(value_key) or "").strip()
+    return value or None
+
+
+def _estimate_sensor_count(value, axis=None):
     if isinstance(value, dict):
         keys = [k for k in value.keys() if not str(k).startswith("__")]
         if not keys:
@@ -1149,6 +1277,16 @@ def _estimate_sensor_count(value):
         arr = np.asarray(value)
     except Exception:
         return None
+
+    if axis is not None:
+        try:
+            axis_idx = int(axis)
+        except Exception:
+            axis_idx = None
+        if axis_idx is not None and arr.ndim > 0 and 0 <= axis_idx < arr.ndim:
+            axis_size = int(arr.shape[axis_idx])
+            if axis_size > 0:
+                return axis_size
 
     if arr.ndim == 0:
         return 1
@@ -1183,8 +1321,8 @@ def _estimate_sensor_count(value):
     return None
 
 
-def _auto_channel_names(value):
-    count = _estimate_sensor_count(value)
+def _auto_channel_names(value, axis=None):
+    count = _estimate_sensor_count(value, axis=axis)
     if count is None or count < 1:
         count = 1
     return [f"ch{i}" for i in range(int(count))]
@@ -1411,6 +1549,18 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
     ch_value = None
     if isinstance(fields.ch_names, str):
         ch_value = _extract_dataframe_channel_names(df, fields.ch_names)
+    elif callable(fields.ch_names):
+        try:
+            ch_value = fields.ch_names(df)
+        except Exception:
+            ch_value = None
+        if isinstance(ch_value, np.ndarray):
+            if ch_value.ndim == 1:
+                ch_value = [str(v) for v in ch_value.tolist()]
+            else:
+                ch_value = None
+        elif isinstance(ch_value, (list, tuple)):
+            ch_value = [str(v) for v in ch_value]
     elif isinstance(fields.ch_names, np.ndarray):
         if fields.ch_names.ndim == 1:
             ch_value = [str(v) for v in fields.ch_names.tolist()]
@@ -1453,6 +1603,8 @@ def _describe_parser_source(path):
             "recording_type": _pick_field_guess(columns, ["recording_type", "modality", "recording", "type"]),
             "subject_id": _pick_field_guess(columns, ["subject_id", "subject", "subj", "participant"]),
             "group": _pick_field_guess(columns, ["group", "cohort", "class"]),
+            "species": _pick_field_guess(columns, ["species", "animal", "organism"]),
+            "condition": _pick_field_guess(columns, ["condition", "state", "task"]),
         }
         if fs_hint_hz is None and defaults["fs"] and defaults["fs"] in source_obj.columns:
             fs_series = pd.to_numeric(source_obj[defaults["fs"]], errors="coerce").dropna()
@@ -1504,6 +1656,8 @@ def _describe_parser_source(path):
                 "recording_type": "",
                 "subject_id": "",
                 "group": "",
+                "species": "",
+                "condition": "",
             },
             "summary": f"NumPy array with shape {list(source_obj.shape)}.",
             "sensor_count_estimate": sensor_count,
@@ -1520,6 +1674,8 @@ def _describe_parser_source(path):
         "recording_type": _pick_field_guess(candidate_fields, ["recording_type", "modality", "recording", "type"]),
         "subject_id": _pick_field_guess(candidate_fields, ["subject_id", "subject", "subj", "participant"]),
         "group": _pick_field_guess(candidate_fields, ["group", "cohort", "class"]),
+        "species": _pick_field_guess(candidate_fields, ["species", "animal", "organism"]),
+        "condition": _pick_field_guess(candidate_fields, ["condition", "state", "task"]),
     }
 
     if isinstance(source_obj, dict):
@@ -1615,6 +1771,8 @@ def _build_parse_config_from_form(form):
     recording_type = (form.get("parser_recording_type") or "").strip()
     subject_id_locator = (form.get("parser_subject_id_locator") or "").strip() or None
     group_locator = (form.get("parser_group_locator") or "").strip() or None
+    species_locator = (form.get("parser_species_locator") or "").strip() or None
+    condition_locator = (form.get("parser_condition_locator") or "").strip() or None
     if recording_type_source == "__value__":
         recording_type_value = recording_type or "LFP"
     elif recording_type_source == "__none__":
@@ -1631,12 +1789,27 @@ def _build_parse_config_from_form(form):
     sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
     ch_names_source = (form.get("parser_ch_names_source") or "").strip()
     ch_names_locator = (form.get("parser_ch_names_locator") or "").strip() or None
+    ch_names_autocomplete_axis = _parse_nonnegative_int(
+        form.get("parser_ch_names_autocomplete_axis"),
+        default=0,
+        field_name="Autocomplete channel axis",
+    )
     if ch_names_source == "__manual__":
         if sensor_names is None:
             raise ValueError("Provide manual channel names when channel names source is set to manual.")
         ch_names_value = sensor_names
     elif ch_names_source == "__autocomplete__":
-        ch_names_value = None
+        def _auto_ch_names_locator(
+            obj,
+            locator=data_locator,
+            axis=ch_names_autocomplete_axis,
+        ):
+            data_candidate = obj if locator == "__self__" else _resolve_locator_value(obj, locator)
+            if data_candidate is None:
+                return None
+            return _auto_channel_names(data_candidate, axis=axis)
+
+        ch_names_value = _auto_ch_names_locator
     elif ch_names_source == "__none__":
         ch_names_value = None
     elif ch_names_source:
@@ -1646,13 +1819,49 @@ def _build_parse_config_from_form(form):
         ch_names_value = sensor_names if sensor_names is not None else ch_names_locator
 
     if data_source_kind in {"pipeline", "new-simulation"}:
-        metadata = {
-            "subject_id": 0,
-            "group": "simulation",
-            "species": "simulated",
-            "condition": "simulation_pipeline",
-            "recording_type": recording_type_value,
-        }
+        metadata_mode = (form.get("parser_metadata_mode") or "empirical").strip().lower()
+        if metadata_mode not in {"simulated", "empirical"}:
+            metadata_mode = "empirical"
+
+        metadata = {}
+        if recording_type_value is not None:
+            metadata["recording_type"] = recording_type_value
+
+        if metadata_mode == "simulated":
+            metadata.setdefault("subject_id", 0)
+            metadata.setdefault("group", "simulation")
+            metadata.setdefault("species", "simulated")
+            metadata.setdefault("condition", "simulation_pipeline")
+        else:
+            subject_id_value = _parse_metadata_field_source(
+                form,
+                "parser_metadata_subject_id_source",
+                "parser_metadata_subject_id",
+            )
+            group_value = _parse_metadata_field_source(
+                form,
+                "parser_metadata_group_source",
+                "parser_metadata_group",
+            )
+            species_value = _parse_metadata_field_source(
+                form,
+                "parser_metadata_species_source",
+                "parser_metadata_species",
+            )
+            condition_value = _parse_metadata_field_source(
+                form,
+                "parser_metadata_condition_source",
+                "parser_metadata_condition",
+            )
+            if subject_id_value:
+                metadata["subject_id"] = subject_id_value
+            if group_value:
+                metadata["group"] = group_value
+            if species_value:
+                metadata["species"] = species_value
+            if condition_value:
+                metadata["condition"] = condition_value
+
         fields = CanonicalFields(
             data=data_locator,
             fs=fs_value,
@@ -1676,9 +1885,13 @@ def _build_parse_config_from_form(form):
     metadata = {"recording_type": recording_type_value}
     if data_source_kind == "new-empirical":
         if subject_id_locator:
-            metadata["subject_id"] = "file_ID" if subject_id_locator == "__file_id__" else subject_id_locator
+            metadata["subject_id"] = FILE_ID_METADATA_LITERAL if subject_id_locator == "__file_id__" else subject_id_locator
         if group_locator:
-            metadata["group"] = group_locator
+            metadata["group"] = FILE_ID_METADATA_LITERAL if group_locator == "__file_id__" else group_locator
+        if species_locator:
+            metadata["species"] = FILE_ID_METADATA_LITERAL if species_locator == "__file_id__" else species_locator
+        if condition_locator:
+            metadata["condition"] = FILE_ID_METADATA_LITERAL if condition_locator == "__file_id__" else condition_locator
 
     fields = CanonicalFields(
         data=data_locator,
@@ -1734,6 +1947,24 @@ def _normalize_features_input_path(source_path, form, job_id):
 
     parser = EphysDatasetParser(parser_cfg)
     parsed_df = parser.parse(parser_source)
+    metadata_map = dict(parser_cfg.fields.metadata or {})
+    file_id_fields = [
+        str(key)
+        for key, locator in metadata_map.items()
+        if isinstance(locator, str) and locator == FILE_ID_METADATA_LITERAL
+    ]
+    file_extracted_fields = {
+        str(key): str(locator)
+        for key, locator in metadata_map.items()
+        if _file_extracted_chain_index(locator) is not None
+    }
+    source_label = os.path.basename(str(source_path or ""))
+    if file_id_fields:
+        for col_name in file_id_fields:
+            parsed_df[col_name] = source_label if source_label else None
+    if file_extracted_fields:
+        for col_name, locator in file_extracted_fields.items():
+            parsed_df[col_name] = _resolve_file_extracted_value(source_label, locator)
     normalized_path = os.path.join(temp_uploaded_files, f"features_data_file_0_{job_id}_parsed.pkl")
     parsed_df.to_pickle(normalized_path)
     return normalized_path
@@ -3166,30 +3397,42 @@ def features_parser_inspect():
     empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
     simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
     simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
+    listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
     upload = request.files.get("file")
     inspect_path = None
     cleanup_path = None
+    name_candidates = list(listed_file_names)
 
     try:
         if existing_data_path:
             inspect_path = _validate_feature_existing_path(existing_data_path)
             file_name = os.path.basename(inspect_path)
+            if not name_candidates:
+                name_candidates.append(file_name)
         elif empirical_folder_path:
             folder_files = _collect_empirical_folder_files(empirical_folder_path)
             inspect_path = folder_files[0]
             file_name = os.path.basename(inspect_path)
+            if not name_candidates:
+                name_candidates = [os.path.basename(path) for path in folder_files]
         elif simulation_file_path:
             inspect_path = _validate_simulation_file_path(simulation_file_path)
             file_name = os.path.basename(inspect_path)
+            if not name_candidates:
+                name_candidates.append(file_name)
         elif simulation_folder_path:
             # Backward-compatible support for older form payloads.
             folder_files = _collect_simulation_folder_files(simulation_folder_path)
             inspect_path = folder_files[0]
             file_name = os.path.basename(inspect_path)
+            if not name_candidates:
+                name_candidates = [os.path.basename(path) for path in folder_files]
         elif upload and upload.filename:
             file_name = secure_filename(upload.filename)
             if not file_name:
                 return jsonify({"error": "Invalid file name."}), 400
+            if not name_candidates:
+                name_candidates.append(file_name)
             ext = Path(file_name).suffix.lower()
             if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                 return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
@@ -3200,9 +3443,10 @@ def features_parser_inspect():
             upload.save(inspect_path)
             cleanup_path = inspect_path
         else:
-            return jsonify({"error": "Provide an existing pipeline file, a simulation file path, an empirical folder path, or upload a file to inspect."}), 400
+            return jsonify({"error": "Provide an existing pipeline file, a simulation folder path, an empirical folder path, or upload a file to inspect."}), 400
 
         description = _describe_parser_source(inspect_path)
+        description = _attach_file_extracted_virtual_field(description, name_candidates)
         description["source_name"] = file_name
         if empirical_folder_path or simulation_folder_path:
             description["folder_file_count"] = len(folder_files)
@@ -5626,7 +5870,15 @@ def start_computation_redirect(computation_type):
                     flash('Provide manual channel names (comma-separated).', 'error')
                     return redirect(request.referrer or url_for('features'))
             elif ch_names_source == "__autocomplete__":
-                pass
+                try:
+                    _parse_nonnegative_int(
+                        request.form.get("parser_ch_names_autocomplete_axis"),
+                        default=0,
+                        field_name="Autocomplete channel axis",
+                    )
+                except Exception as exc:
+                    flash(str(exc), 'error')
+                    return redirect(request.referrer or url_for('features'))
             elif ch_names_source:
                 pass
             else:
@@ -5640,23 +5892,42 @@ def start_computation_redirect(computation_type):
                 flash(str(exc), 'error')
                 return redirect(request.referrer or url_for('features'))
         elif data_source_kind == "new-simulation":
-            simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
-            data_upload = _ensure_files_parsed().get("data_file")
-            has_upload = data_upload is not None and bool(data_upload.filename)
-            if not has_upload:
-                if not simulation_file_path:
-                    flash('Provide a simulation output file path or upload a simulation output dataframe.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+            simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
+            simulation_uploads = [f for f in _ensure_files_parsed().getlist("data_file") if f and f.filename]
+            has_upload = len(simulation_uploads) > 0
+            if has_upload and simulation_folder_path:
+                flash('Use either a local simulation folder upload or a server simulation folder path, not both.', 'error')
+                return redirect(request.referrer or url_for('features'))
+            if simulation_folder_path:
                 try:
-                    simulation_path = _validate_simulation_file_path(simulation_file_path)
+                    simulation_paths = _collect_simulation_folder_files(simulation_folder_path)
                     app.logger.warning(
-                        "[compute %s] simulation file mode path=%s",
+                        "[compute %s] simulation folder mode path=%s files=%d",
                         job_id,
-                        simulation_path,
+                        os.path.realpath(simulation_folder_path) if simulation_folder_path else "",
+                        len(simulation_paths),
                     )
                 except Exception as exc:
-                    flash(f"Invalid simulation output file path: {exc}", 'error')
+                    flash(f"Invalid simulation outputs folder path: {exc}", 'error')
                     return redirect(request.referrer or url_for('features'))
+            elif has_upload:
+                supported_uploads = []
+                for upload in simulation_uploads:
+                    ext = Path(str(upload.filename or "")).suffix.lower()
+                    if ext in FEATURES_PARSER_FILE_EXTENSIONS:
+                        supported_uploads.append(upload)
+                app.logger.warning(
+                    "[compute %s] simulation local upload count=%d supported=%d",
+                    job_id,
+                    len(simulation_uploads),
+                    len(supported_uploads),
+                )
+                if not supported_uploads:
+                    flash('No supported simulation output files were found in the selected local folder.', 'error')
+                    return redirect(request.referrer or url_for('features'))
+            else:
+                flash('Provide a simulation outputs folder path or upload a local simulation outputs folder.', 'error')
+                return redirect(request.referrer or url_for('features'))
         elif data_source_kind == "new-empirical":
             if empirical_source_mode == "server-path":
                 empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
@@ -5914,34 +6185,83 @@ def start_computation_redirect(computation_type):
                 return redirect(request.referrer or url_for('features'))
 
         elif data_source_kind == "new-simulation":
-            simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
-            if simulation_file_path:
-                try:
-                    source_path = _validate_simulation_file_path(simulation_file_path)
-                    copied_name = f"features_data_file_0_{job_id}_{os.path.basename(source_path)}"
-                    copied_path = os.path.join(temp_uploaded_files, copied_name)
-                    shutil.copy2(source_path, copied_path)
-                    normalized_path = _normalize_features_input_path(copied_path, request.form, job_id)
-                    if normalized_path != copied_path and os.path.exists(copied_path):
-                        os.remove(copied_path)
-                    file_paths["data_file"] = normalized_path
-                except Exception as exc:
-                    flash(f"Failed to prepare simulation file from file path: {exc}", "error")
-                    return redirect(request.referrer or url_for('features'))
-            else:
-                file = _ensure_files_parsed().get("data_file")
-                safe_name = secure_filename(file.filename)
-                unique_filename = f"{computation_type}_data_file_0_{job_id}_{safe_name}"
-                file_path = os.path.join(temp_uploaded_files, unique_filename)
-                file.save(file_path)
-                try:
-                    normalized_path = _normalize_features_input_path(file_path, request.form, job_id)
-                    if normalized_path != file_path and os.path.exists(file_path):
-                        os.remove(file_path)
-                    file_paths["data_file"] = normalized_path
-                except Exception as exc:
-                    flash(f"Failed to prepare uploaded simulation file: {exc}", "error")
-                    return redirect(request.referrer or url_for('features'))
+            try:
+                cfg_started = time.perf_counter()
+                parse_cfg = _build_parse_config_from_form(request.form)
+                app.logger.warning(
+                    "[compute %s] simulation parser config built in %.1f ms",
+                    job_id,
+                    (time.perf_counter() - cfg_started) * 1000.0,
+                )
+                parser_config_obj = parse_cfg
+                empirical_upload_paths = []
+
+                simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
+                if simulation_folder_path:
+                    source_paths = _collect_simulation_folder_files(simulation_folder_path)
+                    for source_path in source_paths:
+                        safe_name = os.path.basename(source_path)
+                        ext = Path(safe_name).suffix.lower()
+                        empirical_upload_paths.append({
+                            "name": safe_name,
+                            "ext": ext,
+                            "path": source_path,
+                        })
+                    app.logger.warning(
+                        "[compute %s] using simulation server-path files=%d",
+                        job_id,
+                        len(empirical_upload_paths),
+                    )
+                else:
+                    uploads = [f for f in _ensure_files_parsed().getlist("data_file") if f and f.filename]
+                    save_started = time.perf_counter()
+                    saved_bytes = 0
+                    for idx, upload in enumerate(uploads):
+                        safe_name = secure_filename(upload.filename)
+                        if not safe_name:
+                            continue
+                        ext = Path(safe_name).suffix.lower()
+                        if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                            continue
+                        unique_filename = f"features_simulation_file_{idx}_{job_id}_{safe_name}"
+                        file_path = os.path.join(temp_uploaded_files, unique_filename)
+                        save_one_started = time.perf_counter()
+                        upload.save(file_path)
+                        save_one_ms = (time.perf_counter() - save_one_started) * 1000.0
+                        if not os.path.exists(file_path) or os.path.getsize(file_path) <= 0:
+                            continue
+                        file_size = os.path.getsize(file_path)
+                        saved_bytes += file_size
+                        file_paths[f"simulation_file_{idx}"] = file_path
+                        empirical_upload_paths.append({
+                            "name": safe_name,
+                            "ext": ext,
+                            "path": file_path,
+                        })
+                        if idx == 0 or (idx + 1) % 25 == 0 or (idx + 1) == len(uploads):
+                            app.logger.warning(
+                                "[compute %s] saved simulation file %d/%d (%.2f MB, %.1f ms, cumulative %.2f MB)",
+                                job_id,
+                                idx + 1,
+                                len(uploads),
+                                file_size / (1024 * 1024),
+                                save_one_ms,
+                                saved_bytes / (1024 * 1024),
+                            )
+                    app.logger.warning(
+                        "[compute %s] simulation staging finished: files=%d total=%.2f MB in %.1f s",
+                        job_id,
+                        len(empirical_upload_paths),
+                        saved_bytes / (1024 * 1024),
+                        time.perf_counter() - save_started,
+                    )
+
+                if not empirical_upload_paths:
+                    raise ValueError("No supported simulation output files were provided.")
+            except Exception as exc:
+                app.logger.exception("[compute %s] simulation staging failed", job_id)
+                flash(f"Simulation parser configuration failed: {exc}", "error")
+                return redirect(request.referrer or url_for('features'))
 
         elif data_source_kind == "new-empirical":
             try:

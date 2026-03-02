@@ -194,6 +194,48 @@ def _append_job_output(job_status, job_id, message):
 
 _PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
 _FOLD_PROGRESS_RE = re.compile(r"Fold\s+(\d+)\s*/\s*(\d+)")
+FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
+FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_ID_METADATA_LITERAL = "file_ID"
+
+
+def _extract_filename_text_label(file_name):
+    chains = _extract_filename_text_chains(file_name)
+    return chains[-1] if chains else ""
+
+
+def _extract_filename_text_chains(file_name):
+    stem = os.path.splitext(os.path.basename(str(file_name or "")))[0]
+    if not stem:
+        return []
+    return [tok for tok in re.findall(r"[A-Za-z]+", stem) if tok]
+
+
+def _file_extracted_chain_index(locator):
+    if not isinstance(locator, str):
+        return None
+    if locator == FILE_EXTRACTED_VIRTUAL_FIELD:
+        return -1
+    if not locator.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
+        return None
+    suffix = locator[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
+    if not suffix.isdigit():
+        return None
+    return int(suffix)
+
+
+def _resolve_file_extracted_value(file_name, locator):
+    index = _file_extracted_chain_index(locator)
+    if index is None:
+        return None
+    chains = _extract_filename_text_chains(file_name)
+    if not chains:
+        return None
+    if index < 0:
+        return chains[-1]
+    if index >= len(chains):
+        return None
+    return chains[index]
 
 
 class _JobOutputCapture(io.TextIOBase):
@@ -1187,16 +1229,26 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 raise ValueError("Missing parser configuration for empirical uploads.")
             from ncpi.EphysDatasetParser import EphysDatasetParser
             parser = EphysDatasetParser(parse_cfg)
-            subject_id_cfg = ((parse_cfg.fields.metadata or {}).get("subject_id")
-                              if getattr(parse_cfg, "fields", None) is not None else None)
-            use_file_subject_id = isinstance(subject_id_cfg, str) and subject_id_cfg == "file_ID"
+            metadata_locators = (
+                dict(parse_cfg.fields.metadata or {})
+                if getattr(parse_cfg, "fields", None) is not None
+                else {}
+            )
+            file_id_metadata_fields = []
+            for meta_key, locator in metadata_locators.items():
+                if isinstance(locator, str) and locator == FILE_ID_METADATA_LITERAL:
+                    file_id_metadata_fields.append(str(meta_key))
+            file_extracted_metadata_fields = {}
+            for meta_key, locator in metadata_locators.items():
+                if _file_extracted_chain_index(locator) is not None:
+                    file_extracted_metadata_fields[str(meta_key)] = str(locator)
 
             empirical_uploads = list(params.get("empirical_upload_paths") or [])
             total_uploads = len(empirical_uploads)
             if total_uploads == 0:
                 raise ValueError("No empirical uploads were provided.")
 
-            _append_job_output(job_status, job_id, f"Parsing {total_uploads} empirical file(s)...")
+            _append_job_output(job_status, job_id, f"Parsing {total_uploads} input file(s)...")
             parsed_frames = []
             log_every = max(1, total_uploads // 20)
             for idx, payload in enumerate(empirical_uploads, start=1):
@@ -1211,7 +1263,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 _append_job_output(
                     job_status,
                     job_id,
-                    f"Loading empirical file {idx}/{total_uploads}: {name} ({size_mb:.2f} MB)."
+                    f"Loading input file {idx}/{total_uploads}: {name} ({size_mb:.2f} MB)."
                 )
                 source_obj = _load_uploaded_source_path(
                     source_path,
@@ -1221,13 +1273,18 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 parsed = parser.parse(source_obj)
                 if not isinstance(parsed, pd.DataFrame):
                     raise ValueError(f"Parser output for '{name}' is not a dataframe.")
-                if use_file_subject_id:
-                    parsed["subject_id"] = str(name)
+                if file_id_metadata_fields:
+                    file_id_value = str(name)
+                    for col_name in file_id_metadata_fields:
+                        parsed[col_name] = file_id_value
+                if file_extracted_metadata_fields:
+                    for col_name, locator in file_extracted_metadata_fields.items():
+                        parsed[col_name] = _resolve_file_extracted_value(name, locator)
                 parsed_frames.append(parsed)
 
                 # Do not advance global progress bar during data loading.
                 if idx == 1 or idx == total_uploads or (idx % log_every == 0):
-                    _append_job_output(job_status, job_id, f"Parsed empirical file {idx}/{total_uploads}.")
+                    _append_job_output(job_status, job_id, f"Parsed input file {idx}/{total_uploads}.")
 
             df = pd.concat(parsed_frames, ignore_index=True)
             _append_job_output(job_status, job_id, f"Merged empirical parsed dataframe shape: {df.shape}.")
