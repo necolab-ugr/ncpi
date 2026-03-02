@@ -617,21 +617,22 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const openFallbackPicker = (textInput) => {
-        const picker = document.createElement('input');
-        picker.type = 'file';
-        picker.webkitdirectory = true;
-        picker.directory = true;
-        picker.multiple = true;
-        picker.addEventListener('change', () => {
-            if (!picker.files || picker.files.length === 0) {
-                return;
-            }
-            const relPath = picker.files[0].webkitRelativePath || picker.files[0].name;
-            const folderPath = relPath.split('/').slice(0, -1).join('/') || relPath;
-            textInput.value = folderPath;
+    const pickServerPath = async (mode) => {
+        const formData = new FormData();
+        formData.append('mode', mode);
+        const response = await fetch('{{ url_for("features_select_folder") }}', {
+            method: 'POST',
+            body: formData,
         });
-        picker.click();
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Path selection cancelled.');
+        }
+        const selectedPath = String(payload.path || '').trim();
+        if (!selectedPath) {
+            throw new Error('No path selected.');
+        }
+        return selectedPath;
     };
 
     document.querySelectorAll('.folder-picker').forEach((icon) => {
@@ -641,18 +642,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!textInput) {
                 return;
             }
-            if (window.showDirectoryPicker) {
-                try {
-                    const handle = await window.showDirectoryPicker();
-                    textInput.value = handle.name;
-                    return;
-                } catch (err) {
-                    if (err && err.name !== 'AbortError') {
-                        alert('Your browser blocked access to that folder. Choose a non-system folder or type the path manually.');
-                    }
-                }
+            try {
+                const selectedPath = await pickServerPath('folder');
+                textInput.value = selectedPath;
+                textInput.dispatchEvent(new Event('input', { bubbles: true }));
+            } catch (err) {
+                const msg = (err && err.message) ? err.message : 'Failed to select folder on server.';
+                alert(msg);
             }
-            openFallbackPicker(textInput);
         });
     });
 

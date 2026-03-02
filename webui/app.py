@@ -3812,22 +3812,38 @@ def _pick_value_column(df, exclude):
 
 @app.route("/analysis/columns", methods=["POST"])
 def analysis_columns():
+    dataframe_path = (request.form.get("dataframe_path") or "").strip()
     upload = request.files.get("dataframe")
-    if upload is None or upload.filename == "":
-        return jsonify({"error": "No dataframe file uploaded."}), 400
-
-    filename = secure_filename(upload.filename)
-    if not filename:
-        return jsonify({"error": "Invalid filename."}), 400
-
-    file_extension = os.path.splitext(filename)[1].lower()
-    if file_extension not in {".pkl", ".pickle"}:
-        return jsonify({"error": "Only .pkl/.pickle files are supported."}), 400
-
+    
     analysis_data_dir = _analysis_data_dir(create=True)
     _clear_analysis_data_files()
-    temp_path = os.path.join(analysis_data_dir, filename)
-    upload.save(temp_path)
+
+    if dataframe_path:
+        source_path = os.path.realpath(os.path.expanduser(dataframe_path))
+        if not os.path.isfile(source_path):
+            return jsonify({"error": f"Selected path is not a file: {source_path}"}), 400
+        file_extension = os.path.splitext(source_path)[1].lower()
+        if file_extension not in {".pkl", ".pickle"}:
+            return jsonify({"error": "Only .pkl/.pickle files are supported."}), 400
+        filename = secure_filename(os.path.basename(source_path))
+        if not filename:
+            return jsonify({"error": "Invalid filename."}), 400
+        temp_path = os.path.join(analysis_data_dir, filename)
+        try:
+            shutil.copy2(source_path, temp_path)
+        except OSError as exc:
+            return jsonify({"error": f"Failed to copy selected file: {exc}"}), 400
+    else:
+        if upload is None or upload.filename == "":
+            return jsonify({"error": "No dataframe file uploaded."}), 400
+        filename = secure_filename(upload.filename)
+        if not filename:
+            return jsonify({"error": "Invalid filename."}), 400
+        file_extension = os.path.splitext(filename)[1].lower()
+        if file_extension not in {".pkl", ".pickle"}:
+            return jsonify({"error": "Only .pkl/.pickle files are supported."}), 400
+        temp_path = os.path.join(analysis_data_dir, filename)
+        upload.save(temp_path)
 
     try:
         df = compute_utils.read_df_file(temp_path)

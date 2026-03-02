@@ -464,6 +464,78 @@
                     this.uploadInProgress = false;
                 }
             },
+            async loadColumnsFromServerPath(filePath) {
+                if (!this.canSelectDataframe()) {
+                    this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
+                    return;
+                }
+                const selectedPath = String(filePath || '').trim();
+                if (!selectedPath) {
+                    this.columnsError = 'No server file path was selected.';
+                    return;
+                }
+                this.columnsError = '';
+                this.dfColumns = [];
+                this.columnsLoading = true;
+                this.boxplotGroupValues = [];
+                this.topomapGroupValues = [];
+                this.boxplotControlGroup = '';
+                this.topomapControlGroup = '';
+                try {
+                    const formData = new FormData();
+                    formData.append('dataframe_path', selectedPath);
+                    const response = await fetch('{{ url_for("analysis_columns") }}', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const data = await response.json();
+                    if (!response.ok || data.error) {
+                        throw new Error(data.error || 'Failed to load columns.');
+                    }
+                    const selectedName = selectedPath.split('/').pop() || selectedPath;
+                    this.dfColumns = Array.isArray(data.columns) ? data.columns : [];
+                    this.existingDataFiles = [selectedName];
+                    this.hasExistingData = true;
+                    this.selectedDataframeName = selectedName;
+                    this.uploads['dataframe-upload'] = { name: selectedName, uploaded: true, persisted: true };
+                    const uploadInput = document.getElementById('dataframe-upload');
+                    if (uploadInput) {
+                        uploadInput.value = '';
+                    }
+                } catch (err) {
+                    const message = err && err.message ? err.message : 'Failed to load columns.';
+                    this.columnsError = message;
+                } finally {
+                    this.columnsLoading = false;
+                }
+            },
+            async pickServerDataframe() {
+                if (!this.canSelectDataframe()) {
+                    this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
+                    return;
+                }
+                this.columnsError = '';
+                try {
+                    const formData = new FormData();
+                    formData.append('mode', 'file');
+                    const response = await fetch('{{ url_for("features_select_folder") }}', {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                        throw new Error(payload.error || 'File selection cancelled.');
+                    }
+                    const selectedPath = String(payload.path || '').trim();
+                    if (!selectedPath) {
+                        throw new Error('No file path returned by selector.');
+                    }
+                    await this.loadColumnsFromServerPath(selectedPath);
+                } catch (err) {
+                    const message = err && err.message ? err.message : 'Failed to select file.';
+                    this.columnsError = message;
+                }
+            },
             async useDetectedFeaturesFile(entry) {
                 if (!entry || !entry.key) {
                     return;
@@ -634,7 +706,7 @@
                                         </label>
                                     </div>
                                     <p class="text-xs leading-5 text-slate-500 dark:text-slate-500">or</p>
-                                    <button @click="document.getElementById('dataframe-upload').click()"
+                                    <button @click="pickServerDataframe()"
                                         :disabled="!canSelectDataframe()"
                                         :class="canSelectDataframe()
                                             ? 'mt-2 rounded-md bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'
