@@ -52,16 +52,27 @@
 {% block content %}
 <script>
     window.__featuresPipelineFiles = {{ pipeline_files | tojson }};
+    window.__featuresRuntime = {{ (features_runtime if features_runtime is defined else webui_runtime) | tojson }};
 
     function featuresPage() {
+        const runtime = window.__featuresRuntime || {};
+        const defaultEmpiricalSourceMode = runtime.default_empirical_source_mode || 'server-path';
+        const defaultSimulationSourceMode = runtime.default_simulation_source_mode || 'server-path';
+        const supportedParserFileExtensions = new Set([
+            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather'
+        ]);
         return {
             activeTab: 'entry',
             entryChoice: '',
             uploads: {},
             pipelineFiles: window.__featuresPipelineFiles || [],
+            runtime,
+            defaultEmpiricalSourceMode,
+            defaultSimulationSourceMode,
             selectedPipelinePath: '',
             dataSourceKind: 'new-simulation',
-            empiricalSourceMode: 'server-path',
+            empiricalSourceMode: defaultEmpiricalSourceMode,
+            simulationSourceMode: defaultSimulationSourceMode,
             empiricalFolderPath: '',
             simulationFilePath: '',
             parserInfo: null,
@@ -69,8 +80,24 @@
             parserError: '',
             empiricalFileCount: 0,
             empiricalSampleName: '',
+            empiricalUploadSummary: '',
             simulationFileCount: 0,
             simulationSampleName: '',
+            simulationDropActive: false,
+            serverDirBrowserOpen: false,
+            serverDirBrowserPath: '',
+            serverDirBrowserParent: '',
+            serverDirBrowserEntries: [],
+            serverDirBrowserLoading: false,
+            serverDirBrowserError: '',
+            serverFileBrowserOpen: false,
+            serverFileBrowserPath: '',
+            serverFileBrowserParent: '',
+            serverFileBrowserDirs: [],
+            serverFileBrowserFiles: [],
+            serverFileBrowserLoading: false,
+            serverFileBrowserError: '',
+            serverFileBrowserSelectedPath: '',
             parserDataLocator: '',
             parserFsManual: String(1.0 / (0.0625e-3)),
             parserFsSource: '__none__',
@@ -145,17 +172,209 @@
             getFileName(id) {
                 return this.uploads[id]?.name || '';
             },
+            isServerRuntime() {
+                return !!this.runtime?.is_server_runtime;
+            },
+            clearEmpiricalUploadInput() {
+                const input = document.getElementById('empirical-files');
+                if (input) input.value = '';
+                delete this.uploads['empirical-files'];
+                this.empiricalUploadSummary = '';
+            },
+            clearSimulationUploadInput() {
+                const input = document.getElementById('data-file');
+                if (input) input.value = '';
+                delete this.uploads['data-file'];
+            },
+            setSimulationSourceMode(mode) {
+                const nextMode = mode === 'upload' ? 'upload' : 'server-path';
+                if (this.simulationSourceMode === nextMode) return;
+                this.simulationSourceMode = nextMode;
+                this.parserError = '';
+                this.resetParserConfig();
+                this.simulationDropActive = false;
+                this.simulationFileCount = 0;
+                this.simulationSampleName = '';
+                this.simulationFilePath = '';
+                if (nextMode === 'server-path') {
+                    this.clearSimulationUploadInput();
+                }
+            },
+            async onSimulationUploadSelected(event) {
+                const file = event?.target?.files && event.target.files.length ? event.target.files[0] : null;
+                this.submitError = '';
+                this.parserError = '';
+                this.dataSourceKind = 'new-simulation';
+                this.selectedPipelinePath = '';
+                this.simulationSourceMode = 'upload';
+                this.simulationDropActive = false;
+                this.simulationFilePath = '';
+                this.simulationFileCount = file ? 1 : 0;
+                this.simulationSampleName = file ? (file.name || '') : '';
+                if (file) {
+                    this.uploads['data-file'] = { name: file.name || 'simulation file', uploaded: false };
+                    this.empiricalFolderPath = '';
+                    this.empiricalFileCount = 0;
+                    this.empiricalSampleName = '';
+                    this.empiricalUploadSummary = '';
+                    this.clearEmpiricalUploadInput();
+                    this.resetParserConfig();
+                    await this.inspectParserSource('', file);
+                } else {
+                    delete this.uploads['data-file'];
+                    this.parserInfo = null;
+                }
+            },
+            onSimulationDrop(event) {
+                if (this.simulationSourceMode !== 'upload') return;
+                const files = Array.from(event?.dataTransfer?.files || []);
+                if (!files.length) return;
+                const dataTransfer = new DataTransfer();
+                files.forEach((file) => dataTransfer.items.add(file));
+                const input = document.getElementById('data-file');
+                if (input) {
+                    input.files = dataTransfer.files;
+                }
+                this.simulationDropActive = false;
+                this.onSimulationUploadSelected({ target: { files: dataTransfer.files } });
+            },
+            setEmpiricalSourceMode(mode) {
+                const nextMode = mode === 'upload' ? 'upload' : 'server-path';
+                if (this.empiricalSourceMode === nextMode) return;
+                this.empiricalSourceMode = nextMode;
+                this.parserError = '';
+                this.resetParserConfig();
+                this.empiricalFileCount = 0;
+                this.empiricalSampleName = '';
+                if (nextMode === 'server-path') {
+                    this.clearEmpiricalUploadInput();
+                    this.empiricalFolderPath = '';
+                } else {
+                    this.empiricalFolderPath = '';
+                }
+            },
+            async onEmpiricalUploadSelected(event) {
+                const files = Array.from(event?.target?.files || []);
+                this.submitError = '';
+                this.parserError = '';
+                this.dataSourceKind = 'new-empirical';
+                this.selectedPipelinePath = '';
+                this.empiricalSourceMode = 'upload';
+                this.empiricalFolderPath = '';
+                this.empiricalFileCount = files.length;
+                this.empiricalSampleName = files.length > 0 ? files[0].name : '';
+                this.empiricalUploadSummary = files.length > 0 ? `${files.length} file(s) selected from local folder` : '';
+                if (files.length > 0) {
+                    this.uploads['empirical-files'] = { name: this.empiricalUploadSummary, uploaded: false };
+                    this.resetParserConfig();
+                    const inspectCandidate = files.find((file) => {
+                        const name = String(file?.name || '');
+                        const idx = name.lastIndexOf('.');
+                        if (idx < 0) return false;
+                        return supportedParserFileExtensions.has(name.slice(idx).toLowerCase());
+                    });
+                    if (inspectCandidate) {
+                        this.empiricalSampleName = inspectCandidate.name || this.empiricalSampleName;
+                        await this.inspectParserSource('', inspectCandidate);
+                    } else {
+                        this.parserInfo = null;
+                        this.parserError = 'No supported empirical files found in the selected local folder.';
+                    }
+                } else {
+                    delete this.uploads['empirical-files'];
+                    this.parserInfo = null;
+                }
+            },
+            closeServerDirectoryBrowser() {
+                this.serverDirBrowserOpen = false;
+                this.serverDirBrowserError = '';
+            },
+            closeServerFileBrowser() {
+                this.serverFileBrowserOpen = false;
+                this.serverFileBrowserError = '';
+                this.serverFileBrowserSelectedPath = '';
+            },
+            async loadServerDirectory(path) {
+                this.serverDirBrowserLoading = true;
+                this.serverDirBrowserError = '';
+                try {
+                    const params = new URLSearchParams();
+                    const targetPath = String(path || '').trim();
+                    if (targetPath) params.set('path', targetPath);
+                    const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(payload.error || 'Failed to list server directories.');
+                    this.serverDirBrowserPath = String(payload.path || '');
+                    this.serverDirBrowserParent = String(payload.parent || '');
+                    this.serverDirBrowserEntries = Array.isArray(payload.dirs) ? payload.dirs : [];
+                } catch (error) {
+                    this.serverDirBrowserError = error.message || 'Failed to list server directories.';
+                } finally {
+                    this.serverDirBrowserLoading = false;
+                }
+            },
+            async openServerDirectoryBrowser() {
+                this.serverDirBrowserOpen = true;
+                const startPath = String(this.empiricalFolderPath || '').trim() || String(this.runtime?.server_home_dir || '').trim();
+                await this.loadServerDirectory(startPath);
+            },
+            async loadServerFileBrowser(path) {
+                this.serverFileBrowserLoading = true;
+                this.serverFileBrowserError = '';
+                try {
+                    const params = new URLSearchParams();
+                    const targetPath = String(path || '').trim();
+                    if (targetPath) params.set('path', targetPath);
+                    params.set('include_files', '1');
+                    params.set('extensions', '.mat,.json,.npy,.csv,.parquet,.pkl,.pickle,.xlsx,.xls,.feather');
+                    const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(payload.error || 'Failed to list server files.');
+                    this.serverFileBrowserPath = String(payload.path || '');
+                    this.serverFileBrowserParent = String(payload.parent || '');
+                    this.serverFileBrowserDirs = Array.isArray(payload.dirs) ? payload.dirs : [];
+                    this.serverFileBrowserFiles = Array.isArray(payload.files) ? payload.files : [];
+                } catch (error) {
+                    this.serverFileBrowserError = error.message || 'Failed to list server files.';
+                } finally {
+                    this.serverFileBrowserLoading = false;
+                }
+            },
+            async openServerFileBrowser() {
+                this.serverFileBrowserOpen = true;
+                const current = String(this.simulationFilePath || '').trim();
+                const startPath = current && current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : String(this.runtime?.server_home_dir || '').trim();
+                await this.loadServerFileBrowser(startPath);
+            },
+            async chooseServerFile() {
+                const selectedPath = String(this.serverFileBrowserSelectedPath || '').trim();
+                if (!selectedPath) {
+                    this.serverFileBrowserError = 'Select a file.';
+                    return;
+                }
+                this.simulationFilePath = selectedPath;
+                this.closeServerFileBrowser();
+                await this.inspectSimulationFilePath();
+            },
+            async chooseServerDirectory() {
+                const selectedPath = String(this.serverDirBrowserPath || '').trim();
+                if (!selectedPath) {
+                    this.serverDirBrowserError = 'No server directory selected.';
+                    return;
+                }
+                this.empiricalFolderPath = selectedPath;
+                this.closeServerDirectoryBrowser();
+                await this.inspectEmpiricalFolderPath();
+            },
             resolvedDataSourceKind() {
                 if (this.selectedPipelinePath) return 'pipeline';
                 if (this.dataSourceKind === 'new-simulation' && (this.simulationFileCount > 0 || this.isUploaded('data-file'))) return 'new-simulation';
-                if (this.dataSourceKind === 'new-empirical' && this.empiricalFileCount > 0) return 'new-empirical';
                 if (this.simulationFileCount > 0) return 'new-simulation';
                 if (this.isUploaded('data-file')) return 'new-simulation';
-                if (this.empiricalFileCount > 0) return 'new-empirical';
                 return '';
             },
             activeNewDataMode() {
-                return this.dataSourceKind || 'new-simulation';
+                return 'new-simulation';
             },
             hasAnyData() {
                 return this.resolvedDataSourceKind() !== '';
@@ -210,15 +429,6 @@
                     if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
                 }
-                if (kind === 'new-empirical') {
-                    if (this.empiricalSourceMode === 'server-path') {
-                        if (!String(this.empiricalFolderPath || '').trim()) return false;
-                    } else if (this.empiricalFileCount <= 0) {
-                        return false;
-                    }
-                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
-                    return true;
-                }
                 return false;
             },
             selectedDataDescription() {
@@ -228,17 +438,12 @@
                     return row ? row.name : 'Detected pipeline file';
                 }
                 if (kind === 'new-simulation') {
-                    const filePath = String(this.simulationFilePath || '').trim();
-                    if (filePath) return this.simulationSampleName || filePath;
-                    return this.getFileName('data-file') || 'Uploaded simulation file';
-                }
-                if (kind === 'new-empirical') {
-                    if (this.empiricalSourceMode === 'server-path') {
-                        const folder = String(this.empiricalFolderPath || '').trim();
-                        if (!folder) return 'Empirical server folder path not set';
-                        return `${this.empiricalFileCount || 0} empirical file(s) from ${folder}`;
+                    if (this.simulationSourceMode === 'server-path') {
+                        const filePath = String(this.simulationFilePath || '').trim();
+                        if (filePath) return this.simulationSampleName || filePath;
+                        return 'Simulation server file path not set';
                     }
-                    return `${this.empiricalFileCount} empirical file(s) selected`;
+                    return this.getFileName('data-file') || 'Uploaded simulation file';
                 }
                 return '';
             },
@@ -251,22 +456,21 @@
                 this.uploadBytesTotal = 0;
                 this.uploadProgressKnown = false;
                 this.submitError = '';
-                this.empiricalSourceMode = 'server-path';
-                this.dataSourceKind = kind;
+                this.empiricalSourceMode = this.defaultEmpiricalSourceMode;
+                this.simulationSourceMode = this.defaultSimulationSourceMode;
+                this.dataSourceKind = kind === 'pipeline' ? 'pipeline' : 'new-simulation';
                 this.selectedPipelinePath = '';
-                if (kind !== 'new-simulation') {
-                    delete this.uploads['data-file'];
-                    const simInput = document.getElementById('data-file');
-                    if (simInput) simInput.value = '';
+                if (this.dataSourceKind !== 'new-simulation') {
+                    this.clearSimulationUploadInput();
                     this.simulationFilePath = '';
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
                 }
-                if (kind !== 'new-empirical') {
-                    this.empiricalFolderPath = '';
-                    this.empiricalFileCount = 0;
-                    this.empiricalSampleName = '';
-                }
+                this.empiricalFolderPath = '';
+                this.empiricalFileCount = 0;
+                this.empiricalSampleName = '';
+                this.empiricalUploadSummary = '';
+                this.clearEmpiricalUploadInput();
                 this.resetParserConfig();
             },
             resetParserConfig() {
@@ -306,16 +510,19 @@
                 this.uploadBytesTotal = 0;
                 this.uploadProgressKnown = false;
                 this.submitError = '';
-                this.empiricalSourceMode = 'server-path';
+                this.empiricalSourceMode = this.defaultEmpiricalSourceMode;
+                this.simulationSourceMode = this.defaultSimulationSourceMode;
                 this.empiricalFolderPath = '';
                 this.simulationFilePath = '';
                 this.selectedPipelinePath = path;
                 this.dataSourceKind = 'pipeline';
-                delete this.uploads['data-file'];
+                this.clearSimulationUploadInput();
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
+                this.empiricalUploadSummary = '';
+                this.clearEmpiricalUploadInput();
                 const simInput = document.getElementById('data-file');
                 if (simInput) simInput.value = '';
                 this.resetParserConfig();
@@ -331,7 +538,8 @@
                 this.uploadBytesTotal = 0;
                 this.uploadProgressKnown = false;
                 this.submitError = '';
-                this.empiricalSourceMode = 'server-path';
+                this.empiricalSourceMode = this.defaultEmpiricalSourceMode;
+                this.simulationSourceMode = this.defaultSimulationSourceMode;
                 this.empiricalFolderPath = '';
                 this.simulationFilePath = '';
                 this.dataSourceKind = 'new-simulation';
@@ -340,26 +548,15 @@
                 this.simulationSampleName = '';
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
+                this.empiricalUploadSummary = '';
+                this.clearEmpiricalUploadInput();
                 this.resetParserConfig();
                 this.inspectParserSource('', file);
             },
             async pickSimulationFile() {
                 this.submitError = '';
                 this.parserError = '';
-                try {
-                    const formData = new FormData();
-                    formData.append('mode', 'file');
-                    const response = await fetch('{{ url_for('features_select_folder') }}', { method: 'POST', body: formData });
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.error || 'File selection cancelled.');
-                    this.simulationFilePath = payload.path || '';
-                    if (!this.simulationFilePath) {
-                        throw new Error('No file path returned by selector.');
-                    }
-                    await this.inspectSimulationFilePath();
-                } catch (error) {
-                    this.parserError = error.message || 'Failed to select file.';
-                }
+                await this.openServerFileBrowser();
             },
             async inspectSimulationFilePath() {
                 const filePath = String(this.simulationFilePath || '').trim();
@@ -375,6 +572,8 @@
                 this.parserLoading = true;
                 this.parserInfo = null;
                 try {
+                    this.simulationSourceMode = 'server-path';
+                    this.clearSimulationUploadInput();
                     const formData = new FormData();
                     formData.append('simulation_file_path', filePath);
                     const response = await fetch('{{ url_for('features_parser_inspect') }}', {
@@ -389,9 +588,6 @@
                     this.simulationSampleName = payload.source_name || '';
                     this.dataSourceKind = 'new-simulation';
                     this.selectedPipelinePath = '';
-                    delete this.uploads['data-file'];
-                    const simInput = document.getElementById('data-file');
-                    if (simInput) simInput.value = '';
                 } catch (error) {
                     this.parserError = error.message || 'Failed to inspect simulation file.';
                     this.simulationFileCount = 0;
@@ -403,18 +599,7 @@
             async pickEmpiricalFolder() {
                 this.submitError = '';
                 this.parserError = '';
-                try {
-                    const response = await fetch('{{ url_for('features_select_folder') }}', { method: 'POST' });
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.error || 'Folder selection cancelled.');
-                    this.empiricalFolderPath = payload.path || '';
-                    if (!this.empiricalFolderPath) {
-                        throw new Error('No folder path returned by selector.');
-                    }
-                    await this.inspectEmpiricalFolderPath();
-                } catch (error) {
-                    this.parserError = error.message || 'Failed to select folder.';
-                }
+                await this.openServerDirectoryBrowser();
             },
             async inspectEmpiricalFolderPath() {
                 const folder = String(this.empiricalFolderPath || '').trim();
@@ -430,6 +615,9 @@
                 this.parserLoading = true;
                 this.parserInfo = null;
                 try {
+                    this.empiricalSourceMode = 'server-path';
+                    this.clearEmpiricalUploadInput();
+                    this.empiricalUploadSummary = '';
                     const formData = new FormData();
                     formData.append('empirical_folder_path', folder);
                     const response = await fetch('{{ url_for('features_parser_inspect') }}', {
@@ -568,9 +756,6 @@
                 if (kind === 'new-simulation') {
                     const simInput = document.getElementById('data-file');
                     return !!(simInput && simInput.files && simInput.files.length > 0);
-                }
-                if (kind === 'new-empirical') {
-                    return false;
                 }
                 return false;
             },
@@ -953,13 +1138,41 @@
 
                                 <form id="featuresUploadForm" action="{{ url_for('features_load_precomputed') }}" method="POST" enctype="multipart/form-data">
                                     <input type="file" id="featuresFileInput" name="precomputed_features_file" class="hidden" accept=".pkl,.pickle" />
-                                    <div id="featuresDropZone" onclick="document.getElementById('featuresFileInput').click()"
+                                    <input type="hidden" id="precomputedFeaturesSourceModeInput" name="precomputed_features_source_mode" value="upload" />
+                                    <input type="hidden" id="precomputedFeaturesServerFilePathInput" name="precomputed_features_server_file_path" value="" />
+                                    <div id="featuresDropZone"
                                         class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-[#FAC638]/50 hover:bg-[#FAC638]/5 dark:hover:bg-[#FAC638]/5 transition-all cursor-pointer group">
+                                        <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                            <button type="button" id="precomputedFeaturesModeUploadBtn"
+                                                class="px-3 py-1.5 text-xs rounded-lg border border-[#FAC638] bg-[#FAC638]/10 text-[#FAC638] font-semibold">
+                                                Local upload
+                                            </button>
+                                            <button type="button" id="precomputedFeaturesModeServerBtn"
+                                                class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                                                Server file
+                                            </button>
+                                        </div>
                                         <span class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-[#FAC638] mb-3">upload_file</span>
-                                        <p class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Drag and drop features files or click to browse</p>
+                                        <p id="precomputedFeaturesDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
+                                            Drag and drop features files or click to browse
+                                        </p>
+                                        <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                            <button type="button" id="precomputedFeaturesBrowseLocalBtn"
+                                                class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                                Browse local file
+                                            </button>
+                                            <button type="button" id="precomputedFeaturesBrowseServerBtn"
+                                                class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                                Browse server files
+                                            </button>
+                                        </div>
                                         <div id="selectedFeaturesFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
-                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected files</span>
+                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local file</span>
                                             <div id="selectedFeaturesFilesList" class="mt-2"></div>
+                                        </div>
+                                        <div id="selectedPrecomputedFeaturesServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server file</span>
+                                            <div id="selectedPrecomputedFeaturesServerFilePath" class="mt-2 font-mono break-all"></div>
                                         </div>
                                     </div>
                                 </form>
@@ -1099,65 +1312,59 @@
                                 <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
                             </div>
                             <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                                Load one of two data types: a simulation output representing field potentials, or empirical electrophysiological recordings.
+                                Load data files for feature extraction from local upload or server storage.
                             </p>
 
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-                                <button type="button" @click="setNewDataMode('new-simulation')"
-                                    class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                    :class="activeNewDataMode() === 'new-simulation' ? 'bg-primary/10 border-primary text-primary' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                    Simulation output
-                                </button>
-                                <button type="button" @click="setNewDataMode('new-empirical')"
-                                    class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                    :class="activeNewDataMode() === 'new-empirical' ? 'bg-primary/10 border-primary text-primary' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                    Empirical recordings
-                                </button>
+                            <input id="data-file" name="data_file" type="file" class="hidden" accept=".mat,.json,.npy,.csv,.parquet,.pkl,.pickle,.xlsx,.xls,.feather" @change="onSimulationUploadSelected($event)">
+                            <div
+                                class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
+                                :class="(simulationDropActive && simulationSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
+                                @click="if (simulationSourceMode === 'upload') { document.getElementById('data-file').click(); } else { pickSimulationFile(); }"
+                                @dragenter.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
+                                @dragover.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
+                                @dragleave.prevent="simulationDropActive = false"
+                                @drop.prevent="onSimulationDrop($event)">
+                                <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                    <button type="button" @click.stop="setSimulationSourceMode('upload')"
+                                        class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                        :class="simulationSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                        Local upload
+                                    </button>
+                                    <button type="button" @click.stop="setSimulationSourceMode('server-path')"
+                                        class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                        :class="simulationSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                        Server file
+                                    </button>
+                                </div>
+                                <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
+                                <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'upload'" x-cloak>
+                                    Select an existing local file
+                                </p>
+                                <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'server-path'" x-cloak>
+                                    Select an existing server file
+                                </p>
+                                <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                    <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="document.getElementById('data-file').click()"
+                                        class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                        Browse local files
+                                    </button>
+                                    <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFile()"
+                                        class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                        Browse server files
+                                    </button>
+                                </div>
+                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
+                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local file</span>
+                                    <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
+                                </div>
+                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && simulationFilePath" x-cloak>
+                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server file</span>
+                                    <div class="mt-2 font-mono break-all" x-text="simulationFilePath"></div>
+                                </div>
                             </div>
-
-                            <div x-show="activeNewDataMode() === 'new-simulation'" x-cloak>
-                                <div class="space-y-3">
-                                    <label class="text-sm block">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Simulation output file path on server *</span>
-                                        <input type="text" x-model="simulationFilePath" @keydown.enter.prevent="inspectSimulationFilePath()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
-                                            placeholder="/absolute/path/to/simulation_output.pkl">
-                                    </label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button type="button" @click="pickSimulationFile()"
-                                            class="h-10 px-4 border border-gray-300 dark:border-[#323b67] text-sm rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#191e33] transition-colors">
-                                            Browse file
-                                        </button>
-                                    </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Data is read directly from server path (no HTTP upload).</p>
-                                </div>
-                                <div x-show="simulationFileCount > 0" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg">
-                                    <p>1 file detected.</p>
-                                    <p class="text-xs opacity-80">Sample inspected: <span x-text="simulationSampleName"></span></p>
-                                </div>
-                            </div>
-
-                            <div x-show="activeNewDataMode() === 'new-empirical'" x-cloak>
-                                <div class="space-y-3">
-                                    <label class="text-sm block">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Empirical folder path on server *</span>
-                                        <input type="text" x-model="empiricalFolderPath" @keydown.enter.prevent="inspectEmpiricalFolderPath()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
-                                            placeholder="/absolute/path/to/empirical/folder">
-                                    </label>
-                                    <div class="flex flex-wrap gap-2">
-                                        <button type="button" @click="pickEmpiricalFolder()"
-                                            class="h-10 px-4 border border-gray-300 dark:border-[#323b67] text-sm rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-[#191e33] transition-colors">
-                                            Browse folder
-                                        </button>
-                                    </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">Data is read directly from server path (no HTTP upload).</p>
-                                </div>
-
-                                <div x-show="empiricalFileCount > 0" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg">
-                                    <p><span x-text="empiricalFileCount"></span> file(s) detected.</p>
-                                    <p class="text-xs opacity-80">Sample inspected: <span x-text="empiricalSampleName"></span></p>
-                                </div>
+                            <div x-show="simulationFileCount > 0" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg">
+                                <p><span x-text="simulationFileCount"></span> file(s) detected.</p>
+                                <p class="text-xs opacity-80">Sample inspected: <span x-text="simulationSampleName"></span></p>
                             </div>
                         </div>
                     </div>
@@ -1979,6 +2186,133 @@
                 </template>
             </div>
         </form>
+
+        <div x-show="serverDirBrowserOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @keydown.escape.window="closeServerDirectoryBrowser()">
+            <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl shadow-xl overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-[#34495E] dark:text-white">Browse server folders</h3>
+                    <button type="button" @click="closeServerDirectoryBrowser()" class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Close</button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 break-all">
+                        Current folder:
+                        <span class="font-mono" x-text="serverDirBrowserPath || '/'"></span>
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" @click="loadServerDirectory(serverDirBrowserParent)" :disabled="!serverDirBrowserParent || serverDirBrowserLoading"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
+                            Up
+                        </button>
+                        <button type="button" @click="loadServerDirectory(serverDirBrowserPath)" :disabled="serverDirBrowserLoading"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
+                            Refresh
+                        </button>
+                        <button type="button" @click="chooseServerDirectory()" :disabled="serverDirBrowserLoading"
+                            class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10 disabled:opacity-50">
+                            Select this folder
+                        </button>
+                    </div>
+                    <div x-show="serverDirBrowserError" class="text-xs text-red-600 dark:text-red-400" x-text="serverDirBrowserError"></div>
+                    <div x-show="serverDirBrowserLoading" class="text-xs text-gray-500 dark:text-gray-400">Loading directories...</div>
+                    <div class="max-h-80 overflow-y-auto border border-gray-200 dark:border-[#323b67] rounded-lg divide-y divide-gray-100 dark:divide-[#323b67]">
+                        <template x-for="entry in serverDirBrowserEntries" :key="entry.path">
+                            <button type="button" @click="loadServerDirectory(entry.path)"
+                                class="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                <span class="font-mono" x-text="entry.name"></span>
+                            </button>
+                        </template>
+                        <p x-show="!serverDirBrowserLoading && serverDirBrowserEntries.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                            No subdirectories found.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="serverFileBrowserOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @keydown.escape.window="closeServerFileBrowser()">
+            <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl shadow-xl overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-[#34495E] dark:text-white">Browse server files</h3>
+                    <button type="button" @click="closeServerFileBrowser()" class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Close</button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 break-all">
+                        Current folder:
+                        <span class="font-mono" x-text="serverFileBrowserPath || '/'"></span>
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" @click="loadServerFileBrowser(serverFileBrowserParent)" :disabled="!serverFileBrowserParent || serverFileBrowserLoading"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
+                            Up
+                        </button>
+                        <button type="button" @click="loadServerFileBrowser(serverFileBrowserPath)" :disabled="serverFileBrowserLoading"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
+                            Refresh
+                        </button>
+                        <button type="button" @click="chooseServerFile()" :disabled="serverFileBrowserLoading"
+                            class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10 disabled:opacity-50">
+                            Select file
+                        </button>
+                    </div>
+                    <div x-show="serverFileBrowserError" class="text-xs text-red-600 dark:text-red-400" x-text="serverFileBrowserError"></div>
+                    <div x-show="serverFileBrowserLoading" class="text-xs text-gray-500 dark:text-gray-400">Loading server paths...</div>
+                    <div class="max-h-80 overflow-y-auto border border-gray-200 dark:border-[#323b67] rounded-lg divide-y divide-gray-100 dark:divide-[#323b67]">
+                        <template x-for="entry in serverFileBrowserDirs" :key="entry.path">
+                            <button type="button" @click="loadServerFileBrowser(entry.path)"
+                                class="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                <span class="font-mono" x-text="entry.name"></span>
+                                <span class="ml-2 text-xs text-gray-500">/</span>
+                            </button>
+                        </template>
+                        <template x-for="entry in serverFileBrowserFiles" :key="entry.path">
+                            <label class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33] cursor-pointer">
+                                <input type="radio" name="server-file-browser-selected" :value="entry.path" x-model="serverFileBrowserSelectedPath"
+                                    class="text-primary focus:ring-primary">
+                                <span class="font-mono" x-text="entry.name"></span>
+                            </label>
+                        </template>
+                        <p x-show="!serverFileBrowserLoading && serverFileBrowserDirs.length === 0 && serverFileBrowserFiles.length === 0"
+                            class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                            No matching files or subdirectories found.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div id="precomputedFeaturesServerFileModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+            <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl shadow-xl overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-[#34495E] dark:text-white">Browse server files</h3>
+                    <button type="button" id="precomputedFeaturesServerFileBrowserClose"
+                        class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Close</button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 break-all">
+                        Current folder:
+                        <span id="precomputedFeaturesServerFileBrowserPath" class="font-mono"></span>
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" id="precomputedFeaturesServerFileBrowserUp"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300">
+                            Up
+                        </button>
+                        <button type="button" id="precomputedFeaturesServerFileBrowserRefresh"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300">
+                            Refresh
+                        </button>
+                        <button type="button" id="precomputedFeaturesServerFileBrowserSelect"
+                            class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                            Select file
+                        </button>
+                    </div>
+                    <div id="precomputedFeaturesServerFileBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+                    <div id="precomputedFeaturesServerFileBrowserLoading" class="hidden text-xs text-gray-500 dark:text-gray-400">Loading server paths...</div>
+                    <div id="precomputedFeaturesServerFileBrowserEntries"
+                        class="max-h-80 overflow-y-auto border border-gray-200 dark:border-[#323b67] rounded-lg divide-y divide-gray-100 dark:divide-[#323b67]"></div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -1988,16 +2322,57 @@
 <script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
 <script>
     (() => {
+        const runtime = window.__featuresRuntime || {};
         const featuresUploadForm = document.getElementById('featuresUploadForm');
         const featuresFileInput = document.getElementById('featuresFileInput');
         const featuresDropZone = document.getElementById('featuresDropZone');
+        const precomputedFeaturesSourceModeInput = document.getElementById('precomputedFeaturesSourceModeInput');
+        const precomputedFeaturesServerFilePathInput = document.getElementById('precomputedFeaturesServerFilePathInput');
+        const precomputedFeaturesModeUploadBtn = document.getElementById('precomputedFeaturesModeUploadBtn');
+        const precomputedFeaturesModeServerBtn = document.getElementById('precomputedFeaturesModeServerBtn');
+        const precomputedFeaturesBrowseLocalBtn = document.getElementById('precomputedFeaturesBrowseLocalBtn');
+        const precomputedFeaturesBrowseServerBtn = document.getElementById('precomputedFeaturesBrowseServerBtn');
+        const precomputedFeaturesDropZoneHint = document.getElementById('precomputedFeaturesDropZoneHint');
+        const selectedFeaturesFiles = document.getElementById('selectedFeaturesFiles');
+        const selectedPrecomputedFeaturesServerFile = document.getElementById('selectedPrecomputedFeaturesServerFile');
+        const selectedPrecomputedFeaturesServerFilePath = document.getElementById('selectedPrecomputedFeaturesServerFilePath');
 
-        if (!featuresUploadForm || !featuresFileInput || !featuresDropZone) {
+        const precomputedFeaturesServerFileModal = document.getElementById('precomputedFeaturesServerFileModal');
+        const precomputedFeaturesServerFileBrowserPath = document.getElementById('precomputedFeaturesServerFileBrowserPath');
+        const precomputedFeaturesServerFileBrowserEntries = document.getElementById('precomputedFeaturesServerFileBrowserEntries');
+        const precomputedFeaturesServerFileBrowserError = document.getElementById('precomputedFeaturesServerFileBrowserError');
+        const precomputedFeaturesServerFileBrowserLoading = document.getElementById('precomputedFeaturesServerFileBrowserLoading');
+        const precomputedFeaturesServerFileBrowserUp = document.getElementById('precomputedFeaturesServerFileBrowserUp');
+        const precomputedFeaturesServerFileBrowserRefresh = document.getElementById('precomputedFeaturesServerFileBrowserRefresh');
+        const precomputedFeaturesServerFileBrowserSelect = document.getElementById('precomputedFeaturesServerFileBrowserSelect');
+        const precomputedFeaturesServerFileBrowserClose = document.getElementById('precomputedFeaturesServerFileBrowserClose');
+
+        let precomputedFeaturesSourceMode = 'upload';
+        let precomputedFeaturesServerBrowserCurrentPath = '';
+        let precomputedFeaturesServerBrowserParentPath = '';
+        let precomputedFeaturesServerBrowserSelectedPath = '';
+
+        if (
+            !featuresUploadForm || !featuresFileInput || !featuresDropZone ||
+            !precomputedFeaturesSourceModeInput || !precomputedFeaturesServerFilePathInput ||
+            !precomputedFeaturesModeUploadBtn || !precomputedFeaturesModeServerBtn ||
+            !precomputedFeaturesBrowseLocalBtn || !precomputedFeaturesBrowseServerBtn ||
+            !precomputedFeaturesDropZoneHint || !selectedFeaturesFiles ||
+            !selectedPrecomputedFeaturesServerFile || !selectedPrecomputedFeaturesServerFilePath ||
+            !precomputedFeaturesServerFileModal || !precomputedFeaturesServerFileBrowserPath ||
+            !precomputedFeaturesServerFileBrowserEntries || !precomputedFeaturesServerFileBrowserError ||
+            !precomputedFeaturesServerFileBrowserLoading || !precomputedFeaturesServerFileBrowserUp ||
+            !precomputedFeaturesServerFileBrowserRefresh || !precomputedFeaturesServerFileBrowserSelect ||
+            !precomputedFeaturesServerFileBrowserClose
+        ) {
             return;
         }
 
         const submitFeaturesIfReady = () => {
-            if (featuresFileInput.files && featuresFileInput.files.length > 0) {
+            if (precomputedFeaturesSourceMode === 'upload' && featuresFileInput.files && featuresFileInput.files.length > 0) {
+                featuresUploadForm.submit();
+            }
+            if (precomputedFeaturesSourceMode === 'server-path' && precomputedFeaturesServerFilePathInput.value.trim()) {
                 featuresUploadForm.submit();
             }
         };
@@ -2018,20 +2393,193 @@
             selectedFiles.classList.remove('hidden');
         };
 
+        const setPrecomputedFeaturesSourceMode = (mode) => {
+            precomputedFeaturesSourceMode = mode === 'server-path' ? 'server-path' : 'upload';
+            precomputedFeaturesSourceModeInput.value = precomputedFeaturesSourceMode;
+
+            const activeClasses = ['border-[#FAC638]', 'bg-[#FAC638]/10', 'text-[#FAC638]', 'font-semibold'];
+            const inactiveClasses = ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+            precomputedFeaturesModeUploadBtn.classList.remove(...activeClasses);
+            precomputedFeaturesModeUploadBtn.classList.add(...inactiveClasses);
+            precomputedFeaturesModeServerBtn.classList.remove(...activeClasses);
+            precomputedFeaturesModeServerBtn.classList.add(...inactiveClasses);
+
+            if (precomputedFeaturesSourceMode === 'upload') {
+                precomputedFeaturesModeUploadBtn.classList.add(...activeClasses);
+                precomputedFeaturesModeUploadBtn.classList.remove(...inactiveClasses);
+                precomputedFeaturesDropZoneHint.textContent = 'Drag and drop features files or click to browse';
+                precomputedFeaturesBrowseLocalBtn.classList.remove('hidden');
+                precomputedFeaturesBrowseServerBtn.classList.add('hidden');
+                selectedPrecomputedFeaturesServerFile.classList.add('hidden');
+                precomputedFeaturesServerFilePathInput.value = '';
+            } else {
+                precomputedFeaturesModeServerBtn.classList.add(...activeClasses);
+                precomputedFeaturesModeServerBtn.classList.remove(...inactiveClasses);
+                precomputedFeaturesDropZoneHint.textContent = 'Select a features pickle file from the server';
+                precomputedFeaturesBrowseLocalBtn.classList.add('hidden');
+                precomputedFeaturesBrowseServerBtn.classList.remove('hidden');
+                selectedFeaturesFiles.classList.add('hidden');
+            }
+        };
+
+        const setSelectedPrecomputedFeaturesServerFile = (filePath) => {
+            const cleanPath = String(filePath || '').trim();
+            precomputedFeaturesServerFilePathInput.value = cleanPath;
+            selectedPrecomputedFeaturesServerFilePath.textContent = cleanPath;
+            selectedPrecomputedFeaturesServerFile.classList.toggle('hidden', !cleanPath);
+        };
+
         const setFeaturesInputFiles = (files) => {
             const dataTransfer = new DataTransfer();
             Array.from(files).forEach((file) => dataTransfer.items.add(file));
             featuresFileInput.files = dataTransfer.files;
         };
 
+        const showPrecomputedFeaturesServerBrowserError = (message) => {
+            const clean = String(message || '').trim();
+            precomputedFeaturesServerFileBrowserError.textContent = clean;
+            precomputedFeaturesServerFileBrowserError.classList.toggle('hidden', !clean);
+        };
+
+        const setPrecomputedFeaturesServerBrowserLoading = (loading) => {
+            precomputedFeaturesServerFileBrowserLoading.classList.toggle('hidden', !loading);
+        };
+
+        const renderPrecomputedFeaturesServerBrowserEntries = (dirs, files) => {
+            precomputedFeaturesServerFileBrowserEntries.innerHTML = '';
+            const directoryItems = Array.isArray(dirs) ? dirs : [];
+            const fileItems = Array.isArray(files) ? files : [];
+
+            directoryItems.forEach((entry) => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]';
+                button.textContent = `${entry.name}/`;
+                button.addEventListener('click', () => {
+                    loadPrecomputedFeaturesServerFiles(entry.path);
+                });
+                precomputedFeaturesServerFileBrowserEntries.appendChild(button);
+            });
+
+            fileItems.forEach((entry) => {
+                const label = document.createElement('label');
+                label.className = 'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33] cursor-pointer';
+                const input = document.createElement('input');
+                input.type = 'radio';
+                input.name = 'precomputed-features-server-file-selected';
+                input.value = entry.path;
+                input.className = 'text-primary focus:ring-primary';
+                if (precomputedFeaturesServerBrowserSelectedPath === entry.path) {
+                    input.checked = true;
+                }
+                input.addEventListener('change', () => {
+                    precomputedFeaturesServerBrowserSelectedPath = entry.path;
+                });
+                const span = document.createElement('span');
+                span.className = 'font-mono';
+                span.textContent = entry.name;
+                label.appendChild(input);
+                label.appendChild(span);
+                precomputedFeaturesServerFileBrowserEntries.appendChild(label);
+            });
+
+            if (directoryItems.length === 0 && fileItems.length === 0) {
+                const empty = document.createElement('p');
+                empty.className = 'px-3 py-2 text-xs text-gray-500 dark:text-gray-400';
+                empty.textContent = 'No matching files or subdirectories found.';
+                precomputedFeaturesServerFileBrowserEntries.appendChild(empty);
+            }
+        };
+
+        const loadPrecomputedFeaturesServerFiles = async (path) => {
+            setPrecomputedFeaturesServerBrowserLoading(true);
+            showPrecomputedFeaturesServerBrowserError('');
+            try {
+                const params = new URLSearchParams();
+                const targetPath = String(path || '').trim();
+                if (targetPath) {
+                    params.set('path', targetPath);
+                }
+                params.set('include_files', '1');
+                params.set('extensions', '.pkl,.pickle');
+                const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Failed to list server files.');
+                }
+                precomputedFeaturesServerBrowserCurrentPath = String(payload.path || '');
+                precomputedFeaturesServerBrowserParentPath = String(payload.parent || '');
+                precomputedFeaturesServerFileBrowserPath.textContent = precomputedFeaturesServerBrowserCurrentPath || '/';
+                renderPrecomputedFeaturesServerBrowserEntries(payload.dirs || [], payload.files || []);
+                precomputedFeaturesServerFileBrowserUp.disabled = !precomputedFeaturesServerBrowserParentPath;
+                if (precomputedFeaturesServerBrowserSelectedPath) {
+                    const stillPresent = (payload.files || []).some((entry) => entry.path === precomputedFeaturesServerBrowserSelectedPath);
+                    if (!stillPresent) precomputedFeaturesServerBrowserSelectedPath = '';
+                }
+            } catch (error) {
+                showPrecomputedFeaturesServerBrowserError(error.message || 'Failed to list server files.');
+            } finally {
+                setPrecomputedFeaturesServerBrowserLoading(false);
+            }
+        };
+
+        const openPrecomputedFeaturesServerFileModal = async () => {
+            precomputedFeaturesServerFileModal.classList.remove('hidden');
+            precomputedFeaturesServerFileModal.classList.add('flex');
+            const current = precomputedFeaturesServerFilePathInput.value.trim();
+            const startPath = current && current.includes('/')
+                ? current.slice(0, current.lastIndexOf('/'))
+                : String(runtime.server_home_dir || '').trim();
+            precomputedFeaturesServerBrowserSelectedPath = current;
+            await loadPrecomputedFeaturesServerFiles(startPath);
+        };
+
+        const closePrecomputedFeaturesServerFileModal = () => {
+            precomputedFeaturesServerFileModal.classList.add('hidden');
+            precomputedFeaturesServerFileModal.classList.remove('flex');
+            showPrecomputedFeaturesServerBrowserError('');
+        };
+
         featuresFileInput.addEventListener('change', () => {
             renderSelectedFeaturesFiles(featuresFileInput.files);
+            setSelectedPrecomputedFeaturesServerFile('');
             submitFeaturesIfReady();
+        });
+
+        featuresDropZone.addEventListener('click', () => {
+            if (precomputedFeaturesSourceMode === 'upload') {
+                featuresFileInput.click();
+            } else {
+                openPrecomputedFeaturesServerFileModal();
+            }
+        });
+
+        precomputedFeaturesModeUploadBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setPrecomputedFeaturesSourceMode('upload');
+        });
+
+        precomputedFeaturesModeServerBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setPrecomputedFeaturesSourceMode('server-path');
+        });
+
+        precomputedFeaturesBrowseLocalBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (precomputedFeaturesSourceMode !== 'upload') return;
+            featuresFileInput.click();
+        });
+
+        precomputedFeaturesBrowseServerBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            if (precomputedFeaturesSourceMode !== 'server-path') return;
+            openPrecomputedFeaturesServerFileModal();
         });
 
         ['dragenter', 'dragover'].forEach((eventName) => {
             featuresDropZone.addEventListener(eventName, (event) => {
                 event.preventDefault();
+                if (precomputedFeaturesSourceMode !== 'upload') return;
                 featuresDropZone.classList.add('simulation-accent-border');
             });
         });
@@ -2039,19 +2587,54 @@
         ['dragleave', 'drop'].forEach((eventName) => {
             featuresDropZone.addEventListener(eventName, (event) => {
                 event.preventDefault();
+                if (precomputedFeaturesSourceMode !== 'upload') return;
                 featuresDropZone.classList.remove('simulation-accent-border');
             });
         });
 
         featuresDropZone.addEventListener('drop', (event) => {
+            if (precomputedFeaturesSourceMode !== 'upload') {
+                return;
+            }
             const files = event.dataTransfer.files;
             if (!files || files.length === 0) {
                 return;
             }
             setFeaturesInputFiles(files);
             renderSelectedFeaturesFiles(files);
+            setSelectedPrecomputedFeaturesServerFile('');
             submitFeaturesIfReady();
         });
+
+        precomputedFeaturesServerFileBrowserUp.addEventListener('click', () => {
+            if (precomputedFeaturesServerBrowserParentPath) {
+                loadPrecomputedFeaturesServerFiles(precomputedFeaturesServerBrowserParentPath);
+            }
+        });
+
+        precomputedFeaturesServerFileBrowserRefresh.addEventListener('click', () => {
+            loadPrecomputedFeaturesServerFiles(precomputedFeaturesServerBrowserCurrentPath);
+        });
+
+        precomputedFeaturesServerFileBrowserSelect.addEventListener('click', () => {
+            if (!precomputedFeaturesServerBrowserSelectedPath) {
+                showPrecomputedFeaturesServerBrowserError('Select a file.');
+                return;
+            }
+            setSelectedPrecomputedFeaturesServerFile(precomputedFeaturesServerBrowserSelectedPath);
+            closePrecomputedFeaturesServerFileModal();
+            submitFeaturesIfReady();
+        });
+
+        precomputedFeaturesServerFileBrowserClose.addEventListener('click', closePrecomputedFeaturesServerFileModal);
+        precomputedFeaturesServerFileModal.addEventListener('click', (event) => {
+            if (event.target === precomputedFeaturesServerFileModal) {
+                closePrecomputedFeaturesServerFileModal();
+            }
+        });
+
+        const runtimeDefaultMode = (runtime.default_simulation_source_mode || '').toLowerCase();
+        setPrecomputedFeaturesSourceMode(runtimeDefaultMode === 'server-path' ? 'server-path' : 'upload');
     })();
 </script>
 {% endblock %}

@@ -3,6 +3,9 @@
 
 {% block head %}
 {{ super() }}
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
 <script id="tailwind-config">
     tailwind.config = {
         darkMode: "class",
@@ -54,7 +57,8 @@
 
 {% block content %}
 <div class="bg-container-light dark:bg-[#111422] rounded-xl border border-border-light dark:border-[#323b67]/50 p-6"
-    x-data="{ activeTab: '{{ initial_tab }}' }">
+    x-data="{ activeTab: '{{ initial_tab }}', browseSourceMode: ((window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path') }">
+    <input id="kernel-browse-source-mode" type="hidden" :value="browseSourceMode" />
 
     <!-- Menu tabs -->
     <div class="mb-6 border-b border-border-light dark:border-[#323b67]/50">
@@ -97,6 +101,27 @@
                             <h3 class="text-lg font-bold">1. Paths</h3>
                         </div>
                         <div class="space-y-1">
+                            <div class="mb-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
+                                <p class="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Browse source</p>
+                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    <button type="button" @click="browseSourceMode = 'local-picker'"
+                                        class="px-3 py-2 text-xs rounded-lg border transition-colors"
+                                        :class="browseSourceMode === 'local-picker' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                                        Local picker
+                                    </button>
+                                    <button type="button" @click="browseSourceMode = 'server-path'"
+                                        class="px-3 py-2 text-xs rounded-lg border transition-colors"
+                                        :class="browseSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                                        Server folders
+                                    </button>
+                                </div>
+                                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-show="browseSourceMode === 'local-picker'">
+                                    Uses native picker on the host where the web app is running.
+                                </p>
+                                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-show="browseSourceMode === 'server-path'">
+                                    Browse directories directly on the server filesystem.
+                                </p>
+                            </div>
                             <div class="input-group">
                                 <label class="input-label">Multicompartment neuron model folder</label>
                                 <p class="input-subtext">Path to the folder containing the multicompartment neuron model
@@ -164,17 +189,45 @@
                             <p class="input-subtext">Module or object containing the full specification of the multicompartment
                                 network model (for an example implementation, see:
                                 examples/simulation/Hagen_model/simulation/params/analysis_params.py.)</p>
+                            <input type="hidden" id="kernel-params-browse-mode" name="kernel_params_module_source_mode" value="server-path" />
+                            <input class="hidden" type="file" id="kernelParamsModuleFile" name="kernel_params_file" accept=".py" />
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
+                                <button type="button" id="kernel-params-mode-local"
+                                    class="px-3 py-2 text-xs rounded-lg border transition-colors">
+                                    Local upload
+                                </button>
+                                <button type="button" id="kernel-params-mode-server"
+                                    class="px-3 py-2 text-xs rounded-lg border transition-colors">
+                                    Server files
+                                </button>
+                            </div>
+                            <div class="flex flex-wrap items-center gap-2 mb-2">
+                                <button type="button" id="kernel-params-browse-local"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    Browse local file
+                                </button>
+                                <button type="button" id="kernel-params-browse-server"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    Browse server files
+                                </button>
+                            </div>
+                            <div id="kernel-params-local-selected" class="hidden text-xs text-slate-500 dark:text-slate-400 mb-2">
+                                <span class="font-semibold text-slate-600 dark:text-slate-300">Selected local file:</span>
+                                <span id="kernel-params-local-selected-name" class="font-mono"></span>
+                            </div>
                             <div class="relative">
-                                <input class="input-field pr-10" type="text" name="kernel_params_module" value="{{ kernel_params_default }}" />
-                                <span
-                                    class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer">attach_file</span>
+                                <input class="input-field" type="text" name="kernel_params_module" value="{{ kernel_params_default }}" />
                             </div>
                         </div>
                         <div class="input-group !mb-0">
                             <label class="input-label">Biophysical membrane properties (biophys)</label>
-                            <p class="input-subtext">List of biophysical property callables or names (see ncpi.neuron_utils).</p>
-                            <input class="input-field" type="text" name="biophys"
-                                value="['set_Ih_linearized_hay2011','make_cell_uniform']" />
+                            <p class="input-subtext">Add one property per field (see ncpi.neuron_utils).</p>
+                            <div id="biophysItems" class="space-y-2"></div>
+                            <button type="button" id="biophysAddBtn"
+                                class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                Add property
+                            </button>
+                            <input type="hidden" name="biophys" id="biophysHidden" />
                         </div>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div class="input-group !mb-0">
@@ -242,12 +295,15 @@
                             <p class="input-subtext">Dict of spike times.</p>
                             <div id="kernelSpikeTimesUpload"
                                 data-upload="kernelSpikeTimesFile"
+                                data-source-mode-input="kernel_spike_times_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelSpikeTimesFile" name="kernel_spike_times_file" accept=".pkl" />
+                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="upload" />
+                                <input type="hidden" name="kernel_spike_times_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
                                 <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.times }}</p>
-                                <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                                <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
                                 <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.times %}hidden{% endif %}"
                                     data-uploaded data-default-name="{{ 'times.pkl' if default_sim.times else '' }}">
                                     <span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span>
@@ -259,12 +315,15 @@
                             <p class="input-subtext">Optional dict of population sizes to normalize spike rates (Hz).</p>
                             <div id="kernelPopulationSizesUpload"
                                 data-upload="kernelPopulationSizesFile"
+                                data-source-mode-input="kernel_population_sizes_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelPopulationSizesFile" name="kernel_population_sizes_file" accept=".pkl" />
+                                <input type="hidden" name="kernel_population_sizes_file_source_mode" value="upload" />
+                                <input type="hidden" name="kernel_population_sizes_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Population sizes (population_sizes.pkl)</span>
                                 <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.population_sizes }}</p>
-                                <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                                <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
                                 <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.population_sizes %}hidden{% endif %}"
                                     data-uploaded data-default-name="{{ 'population_sizes.pkl' if default_sim.population_sizes else '' }}">
                                     <span data-uploaded-label>{% if default_sim.population_sizes %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.population_sizes %}population_sizes.pkl{% endif %}</span>
@@ -276,11 +335,14 @@
                             <p class="input-subtext">Upload a .pkl dict. If omitted, defaults to KernelParams.electrodeParameters.</p>
                             <div id="kernelElectrodeParametersUpload"
                                 data-upload="kernelElectrodeParametersFile"
+                                data-source-mode-input="electrode_parameters_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelElectrodeParametersFile" name="electrode_parameters_file" accept=".pkl" />
+                                <input type="hidden" name="electrode_parameters_file_source_mode" value="upload" />
+                                <input type="hidden" name="electrode_parameters_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Electrode parameters (.pkl)</span>
-                                <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                                <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
                                 <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 hidden"
                                     data-uploaded data-default-name="">
                                     <span data-uploaded-label>Uploaded</span>: <span data-uploaded-name></span>
@@ -329,8 +391,12 @@
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="component">Component</label>
-                            <p class="input-subtext">Component index (e.g., 2 is z). Use empty for all.</p>
-                            <input class="input-field" id="component" placeholder="None" type="number" name="cdm_component" value="2" />
+                            <p class="input-subtext">Select dipole component axis (x, y, z).</p>
+                            <select class="input-field" id="component" name="cdm_component">
+                                <option value="x">x</option>
+                                <option value="y">y</option>
+                                <option selected="" value="z">z</option>
+                            </select>
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="conv-mode">Convolution mode</label>
@@ -418,12 +484,15 @@
                         </p>
                         <div id="meegCdmUpload"
                             data-upload="meegCdmFile"
+                            data-source-mode-input="meeg_cdm_file_source_mode"
                             class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                             <input class="hidden" type="file" id="meegCdmFile" name="meeg_cdm_file" accept=".pkl" />
+                            <input type="hidden" name="meeg_cdm_file_source_mode" value="upload" />
+                            <input type="hidden" name="meeg_cdm_file_server_path" value="" />
                             <span class="material-symbols-outlined text-slate-400">upload_file</span>
                             <span class="text-xs font-bold lowercase tracking-wider text-slate-500">CDM (.pkl)</span>
                             <p class="text-[10px] text-slate-400">Current dipole moment time series</p>
-                            <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                            <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
                             <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_meeg.cdm_exists %}hidden{% endif %}"
                                 data-uploaded data-default-name="{{ default_meeg.cdm_name }}">
                                 <span data-uploaded-label>{% if default_meeg.cdm_exists %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_meeg.cdm_exists %}{{ default_meeg.cdm_name }}{% endif %}</span>
@@ -439,18 +508,35 @@
                     </p>
                     <div id="meegDipoleUpload"
                         data-upload="meegDipoleFile"
+                        data-source-mode-input="meeg_dipole_file_source_mode"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="meegDipoleFile" name="meeg_dipole_file" accept=".pkl" />
+                        <input type="hidden" name="meeg_dipole_file_source_mode" value="upload" />
+                        <input type="hidden" name="meeg_dipole_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Dipole locations (.pkl)</span>
                         <p class="text-[10px] text-slate-400">Locations matching CDM</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
                         <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                             data-uploaded>
                             Uploaded: <span data-uploaded-name></span>
                         </div>
                     </div>
-                    <input class="input-field mt-3" name="meeg_dipole_locations" placeholder="e.g., [0,0,0] or [[...],[...]]" type="text" />
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label class="flex flex-col gap-1">
+                            <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">X</span>
+                            <input class="input-field" type="number" step="any" id="meegDipoleX" data-coord-group="dipole" data-axis="x" />
+                        </label>
+                        <label class="flex flex-col gap-1">
+                            <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">Y</span>
+                            <input class="input-field" type="number" step="any" id="meegDipoleY" data-coord-group="dipole" data-axis="y" />
+                        </label>
+                        <label class="flex flex-col gap-1">
+                            <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">Z</span>
+                            <input class="input-field" type="number" step="any" id="meegDipoleZ" data-coord-group="dipole" data-axis="z" />
+                        </label>
+                    </div>
+                    <input type="hidden" name="meeg_dipole_locations" id="meegDipoleLocationsHidden" />
                     <label class="checkbox-wrapper mt-3">
                         <div class="flex items-center h-5">
                             <input
@@ -471,18 +557,35 @@
                     </p>
                     <div id="meegSensorUpload"
                         data-upload="meegSensorFile"
+                        data-source-mode-input="meeg_sensor_file_source_mode"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="meegSensorFile" name="meeg_sensor_file" accept=".pkl" />
+                        <input type="hidden" name="meeg_sensor_file_source_mode" value="upload" />
+                        <input type="hidden" name="meeg_sensor_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Sensor locations (.pkl)</span>
                         <p class="text-[10px] text-slate-400">Sensor/electrode locations</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
                         <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                             data-uploaded>
                             Uploaded: <span data-uploaded-name></span>
                         </div>
                     </div>
-                    <input class="input-field mt-3" name="meeg_sensor_locations" placeholder="e.g., [[0,0,90000]] or [0, 1, 2]" type="text" />
+                    <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <label class="flex flex-col gap-1">
+                            <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">X</span>
+                            <input class="input-field" type="number" step="any" id="meegSensorX" data-coord-group="sensor" data-axis="x" />
+                        </label>
+                        <label class="flex flex-col gap-1">
+                            <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">Y</span>
+                            <input class="input-field" type="number" step="any" id="meegSensorY" data-coord-group="sensor" data-axis="y" />
+                        </label>
+                        <label class="flex flex-col gap-1">
+                            <span class="text-xs font-semibold text-slate-600 dark:text-slate-300">Z</span>
+                            <input class="input-field" type="number" step="any" id="meegSensorZ" data-coord-group="sensor" data-axis="z" />
+                        </label>
+                    </div>
+                    <input type="hidden" name="meeg_sensor_locations" id="meegSensorLocationsHidden" />
                     <p class="text-xs text-slate-500 dark:text-slate-400">
                         Disabled for NYHeadModel (sensors are computed internally).
                     </p>
@@ -529,6 +632,70 @@
                 <span class="material-symbols-outlined">arrow_forward</span>
             </button>
         </template>
+    </div>
+
+    <div id="kernel-server-folder-browser" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server folders</h3>
+                <button id="kernel-server-folder-close" type="button" class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                    Current folder:
+                    <span id="kernel-server-folder-current" class="font-mono">/</span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button id="kernel-server-folder-up" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300 disabled:opacity-50">
+                        Up
+                    </button>
+                    <button id="kernel-server-folder-refresh" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Refresh
+                    </button>
+                    <button id="kernel-server-folder-select" type="button"
+                        class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                        Select this folder
+                    </button>
+                </div>
+                <div id="kernel-server-folder-error" class="text-xs text-red-600 dark:text-red-400 hidden"></div>
+                <div id="kernel-server-folder-loading" class="text-xs text-slate-500 dark:text-slate-400 hidden">Loading directories...</div>
+                <div id="kernel-server-folder-list" class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="kernel-server-file-browser" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+                <button id="kernel-server-file-close" type="button" class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                    Current folder:
+                    <span id="kernel-server-file-current" class="font-mono">/</span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button id="kernel-server-file-up" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300 disabled:opacity-50">
+                        Up
+                    </button>
+                    <button id="kernel-server-file-refresh" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Refresh
+                    </button>
+                    <button id="kernel-server-file-select" type="button"
+                        class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                        Select file
+                    </button>
+                </div>
+                <div id="kernel-server-file-error" class="text-xs text-red-600 dark:text-red-400 hidden"></div>
+                <div id="kernel-server-file-loading" class="text-xs text-slate-500 dark:text-slate-400 hidden">Loading files...</div>
+                <div id="kernel-server-file-list" class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}
@@ -617,9 +784,69 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const pickServerPath = async (mode) => {
+    const kernelComputeForm = document.getElementById('kernel-compute-form');
+    const meegComputeForm = document.getElementById('meeg-compute-form');
+    const biophysItemsContainer = document.getElementById('biophysItems');
+    const biophysAddBtn = document.getElementById('biophysAddBtn');
+    const biophysHidden = document.getElementById('biophysHidden');
+    const defaultBiophysItems = ['set_Ih_linearized_hay2011', 'make_cell_uniform'];
+
+    const syncBiophysHidden = () => {
+        if (!biophysItemsContainer || !biophysHidden) {
+            return;
+        }
+        const values = Array.from(biophysItemsContainer.querySelectorAll('[data-biophys-item]'))
+            .map((input) => String(input.value || '').trim())
+            .filter((value) => value !== '');
+        biophysHidden.value = JSON.stringify(values);
+    };
+
+    const createBiophysRow = (value = '') => {
+        if (!biophysItemsContainer) {
+            return;
+        }
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2';
+        row.innerHTML = `
+            <input class="input-field flex-1" type="text" data-biophys-item />
+            <button type="button" class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" data-biophys-remove>
+                Remove
+            </button>
+        `;
+        const input = row.querySelector('[data-biophys-item]');
+        const removeBtn = row.querySelector('[data-biophys-remove]');
+        if (input) {
+            input.value = value;
+            input.addEventListener('input', () => syncBiophysHidden());
+        }
+        if (removeBtn) {
+            removeBtn.addEventListener('click', () => {
+                row.remove();
+                syncBiophysHidden();
+            });
+        }
+        biophysItemsContainer.appendChild(row);
+        syncBiophysHidden();
+    };
+
+    if (biophysItemsContainer) {
+        defaultBiophysItems.forEach((item) => createBiophysRow(item));
+    }
+    if (biophysAddBtn) {
+        biophysAddBtn.addEventListener('click', () => createBiophysRow(''));
+    }
+    if (kernelComputeForm) {
+        kernelComputeForm.addEventListener('submit', () => {
+            syncBiophysHidden();
+        });
+    }
+
+    const pickNativePath = async (mode, extensions = '') => {
         const formData = new FormData();
         formData.append('mode', mode);
+        if (extensions) {
+            formData.append('extensions', extensions);
+        }
         const response = await fetch('{{ url_for("features_select_folder") }}', {
             method: 'POST',
             body: formData,
@@ -635,6 +862,290 @@ document.addEventListener('DOMContentLoaded', () => {
         return selectedPath;
     };
 
+    const serverFolderModal = document.getElementById('kernel-server-folder-browser');
+    const serverFolderClose = document.getElementById('kernel-server-folder-close');
+    const serverFolderUp = document.getElementById('kernel-server-folder-up');
+    const serverFolderRefresh = document.getElementById('kernel-server-folder-refresh');
+    const serverFolderSelect = document.getElementById('kernel-server-folder-select');
+    const serverFolderCurrent = document.getElementById('kernel-server-folder-current');
+    const serverFolderError = document.getElementById('kernel-server-folder-error');
+    const serverFolderLoading = document.getElementById('kernel-server-folder-loading');
+    const serverFolderList = document.getElementById('kernel-server-folder-list');
+    const serverFileModal = document.getElementById('kernel-server-file-browser');
+    const serverFileClose = document.getElementById('kernel-server-file-close');
+    const serverFileUp = document.getElementById('kernel-server-file-up');
+    const serverFileRefresh = document.getElementById('kernel-server-file-refresh');
+    const serverFileSelect = document.getElementById('kernel-server-file-select');
+    const serverFileCurrent = document.getElementById('kernel-server-file-current');
+    const serverFileError = document.getElementById('kernel-server-file-error');
+    const serverFileLoading = document.getElementById('kernel-server-file-loading');
+    const serverFileList = document.getElementById('kernel-server-file-list');
+
+    let serverFolderPath = '';
+    let serverFolderParent = '';
+    let pendingFolderInput = null;
+    let serverFilePath = '';
+    let serverFileParent = '';
+    let serverFileSelectedPath = '';
+    let pendingFileInput = null;
+    let pendingFileExtensions = '.pkl';
+
+    const setServerFolderError = (message) => {
+        if (!serverFolderError) return;
+        if (!message) {
+            serverFolderError.textContent = '';
+            serverFolderError.classList.add('hidden');
+            return;
+        }
+        serverFolderError.textContent = message;
+        serverFolderError.classList.remove('hidden');
+    };
+
+    const toggleServerFolderLoading = (loading) => {
+        if (!serverFolderLoading) return;
+        serverFolderLoading.classList.toggle('hidden', !loading);
+    };
+
+    const closeServerFolderModal = () => {
+        if (!serverFolderModal) return;
+        serverFolderModal.classList.add('hidden');
+        serverFolderModal.classList.remove('flex');
+        setServerFolderError('');
+    };
+
+    const renderServerFolderEntries = (dirs) => {
+        if (!serverFolderList) return;
+        serverFolderList.innerHTML = '';
+        if (!Array.isArray(dirs) || dirs.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'px-3 py-2 text-xs text-slate-500 dark:text-slate-400';
+            empty.textContent = 'No subdirectories found.';
+            serverFolderList.appendChild(empty);
+            return;
+        }
+        dirs.forEach((entry) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60';
+            button.innerHTML = `<span class="font-mono">${entry.name}</span><span class="ml-2 text-xs text-slate-500">/</span>`;
+            button.addEventListener('click', () => {
+                loadServerFolder(entry.path);
+            });
+            serverFolderList.appendChild(button);
+        });
+    };
+
+    const loadServerFolder = async (path) => {
+        toggleServerFolderLoading(true);
+        setServerFolderError('');
+        try {
+            const params = new URLSearchParams();
+            const target = String(path || '').trim();
+            if (target) params.set('path', target);
+            const response = await fetch(`{{ url_for("features_browse_dirs") }}?${params.toString()}`, { method: 'GET' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || 'Failed to list server directories.');
+            }
+            serverFolderPath = String(payload.path || '');
+            serverFolderParent = String(payload.parent || '');
+            if (serverFolderCurrent) {
+                serverFolderCurrent.textContent = serverFolderPath || '/';
+            }
+            if (serverFolderUp) {
+                serverFolderUp.disabled = !serverFolderParent;
+            }
+            renderServerFolderEntries(Array.isArray(payload.dirs) ? payload.dirs : []);
+        } catch (error) {
+            setServerFolderError(error && error.message ? error.message : 'Failed to list server directories.');
+        } finally {
+            toggleServerFolderLoading(false);
+        }
+    };
+
+    const openServerFolderModal = async (targetInput) => {
+        pendingFolderInput = targetInput;
+        if (!serverFolderModal) return;
+        serverFolderModal.classList.remove('hidden');
+        serverFolderModal.classList.add('flex');
+        const startPath = String(targetInput?.value || '').trim() || String((window.__webuiRuntime || {}).server_home_dir || '').trim();
+        await loadServerFolder(startPath);
+    };
+
+    const setServerFileError = (message) => {
+        if (!serverFileError) return;
+        if (!message) {
+            serverFileError.textContent = '';
+            serverFileError.classList.add('hidden');
+            return;
+        }
+        serverFileError.textContent = message;
+        serverFileError.classList.remove('hidden');
+    };
+
+    const toggleServerFileLoading = (loading) => {
+        if (!serverFileLoading) return;
+        serverFileLoading.classList.toggle('hidden', !loading);
+    };
+
+    const closeServerFileModal = () => {
+        if (!serverFileModal) return;
+        serverFileModal.classList.add('hidden');
+        serverFileModal.classList.remove('flex');
+        setServerFileError('');
+        serverFileSelectedPath = '';
+    };
+
+    const renderServerFileEntries = (dirs, files) => {
+        if (!serverFileList) return;
+        serverFileList.innerHTML = '';
+        const dirEntries = Array.isArray(dirs) ? dirs : [];
+        const fileEntries = Array.isArray(files) ? files : [];
+        dirEntries.forEach((entry) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60';
+            button.innerHTML = `<span class="font-mono">${entry.name}</span><span class="ml-2 text-xs text-slate-500">/</span>`;
+            button.addEventListener('click', () => {
+                loadServerFile(entry.path, pendingFileExtensions);
+            });
+            serverFileList.appendChild(button);
+        });
+        fileEntries.forEach((entry) => {
+            const label = document.createElement('label');
+            label.className = 'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60 cursor-pointer';
+            const radio = document.createElement('input');
+            radio.type = 'radio';
+            radio.name = 'kernel-server-file-selected';
+            radio.value = entry.path;
+            radio.className = 'text-primary focus:ring-primary';
+            if (serverFileSelectedPath === entry.path) {
+                radio.checked = true;
+            }
+            radio.addEventListener('change', () => {
+                serverFileSelectedPath = entry.path;
+            });
+            const span = document.createElement('span');
+            span.className = 'font-mono';
+            span.textContent = entry.name;
+            label.appendChild(radio);
+            label.appendChild(span);
+            serverFileList.appendChild(label);
+        });
+        if (dirEntries.length === 0 && fileEntries.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'px-3 py-2 text-xs text-slate-500 dark:text-slate-400';
+            empty.textContent = 'No matching files or subdirectories found.';
+            serverFileList.appendChild(empty);
+        }
+    };
+
+    const loadServerFile = async (path, extensions = '.pkl') => {
+        toggleServerFileLoading(true);
+        setServerFileError('');
+        try {
+            const params = new URLSearchParams();
+            const target = String(path || '').trim();
+            if (target) params.set('path', target);
+            params.set('include_files', '1');
+            params.set('extensions', extensions);
+            const response = await fetch(`{{ url_for("features_browse_dirs") }}?${params.toString()}`, { method: 'GET' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || 'Failed to list server files.');
+            }
+            serverFilePath = String(payload.path || '');
+            serverFileParent = String(payload.parent || '');
+            if (serverFileCurrent) {
+                serverFileCurrent.textContent = serverFilePath || '/';
+            }
+            if (serverFileUp) {
+                serverFileUp.disabled = !serverFileParent;
+            }
+            renderServerFileEntries(
+                Array.isArray(payload.dirs) ? payload.dirs : [],
+                Array.isArray(payload.files) ? payload.files : [],
+            );
+        } catch (error) {
+            setServerFileError(error && error.message ? error.message : 'Failed to list server files.');
+        } finally {
+            toggleServerFileLoading(false);
+        }
+    };
+
+    const openServerFileModal = async (targetInput, extensions = '.pkl') => {
+        pendingFileInput = targetInput;
+        pendingFileExtensions = String(extensions || '.pkl').trim() || '.pkl';
+        if (!serverFileModal) return;
+        serverFileModal.classList.remove('hidden');
+        serverFileModal.classList.add('flex');
+        const inputValue = String(targetInput?.value || '').trim();
+        const startPath = inputValue && inputValue.includes('/')
+            ? inputValue.slice(0, inputValue.lastIndexOf('/'))
+            : String((window.__webuiRuntime || {}).server_home_dir || '').trim();
+        serverFileSelectedPath = inputValue || '';
+        await loadServerFile(startPath, pendingFileExtensions);
+    };
+
+    if (serverFolderClose) {
+        serverFolderClose.addEventListener('click', () => closeServerFolderModal());
+    }
+    if (serverFolderRefresh) {
+        serverFolderRefresh.addEventListener('click', () => loadServerFolder(serverFolderPath));
+    }
+    if (serverFolderUp) {
+        serverFolderUp.addEventListener('click', () => {
+            if (serverFolderParent) loadServerFolder(serverFolderParent);
+        });
+    }
+    if (serverFolderSelect) {
+        serverFolderSelect.addEventListener('click', () => {
+            if (!pendingFolderInput || !serverFolderPath) {
+                setServerFolderError('No target input selected.');
+                return;
+            }
+            pendingFolderInput.value = serverFolderPath;
+            pendingFolderInput.dispatchEvent(new Event('input', { bubbles: true }));
+            closeServerFolderModal();
+        });
+    }
+    if (serverFolderModal) {
+        serverFolderModal.addEventListener('click', (event) => {
+            if (event.target === serverFolderModal) {
+                closeServerFolderModal();
+            }
+        });
+    }
+    if (serverFileClose) {
+        serverFileClose.addEventListener('click', () => closeServerFileModal());
+    }
+    if (serverFileRefresh) {
+        serverFileRefresh.addEventListener('click', () => loadServerFile(serverFilePath, pendingFileExtensions));
+    }
+    if (serverFileUp) {
+        serverFileUp.addEventListener('click', () => {
+            if (serverFileParent) loadServerFile(serverFileParent, pendingFileExtensions);
+        });
+    }
+    if (serverFileSelect) {
+        serverFileSelect.addEventListener('click', () => {
+            if (!pendingFileInput || !serverFileSelectedPath) {
+                setServerFileError('Select a file.');
+                return;
+            }
+            pendingFileInput.value = serverFileSelectedPath;
+            pendingFileInput.dispatchEvent(new Event('input', { bubbles: true }));
+            closeServerFileModal();
+        });
+    }
+    if (serverFileModal) {
+        serverFileModal.addEventListener('click', (event) => {
+            if (event.target === serverFileModal) {
+                closeServerFileModal();
+            }
+        });
+    }
+
     document.querySelectorAll('.folder-picker').forEach((icon) => {
         icon.addEventListener('click', async () => {
             const container = icon.closest('[data-folder-input]') || icon.parentElement;
@@ -643,14 +1154,315 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             try {
-                const selectedPath = await pickServerPath('folder');
-                textInput.value = selectedPath;
-                textInput.dispatchEvent(new Event('input', { bubbles: true }));
+                const sourceInput = document.getElementById('kernel-browse-source-mode');
+                const sourceMode = sourceInput ? String(sourceInput.value || '').trim() : 'server-path';
+                if (sourceMode === 'local-picker') {
+                    const selectedPath = await pickNativePath('folder');
+                    textInput.value = selectedPath;
+                    textInput.dispatchEvent(new Event('input', { bubbles: true }));
+                } else {
+                    await openServerFolderModal(textInput);
+                }
             } catch (err) {
-                const msg = (err && err.message) ? err.message : 'Failed to select folder on server.';
+                const msg = (err && err.message) ? err.message : 'Failed to select folder.';
                 alert(msg);
             }
         });
+    });
+
+    document.querySelectorAll('.file-picker').forEach((icon) => {
+        icon.addEventListener('click', async () => {
+            const container = icon.closest('.relative') || icon.parentElement;
+            const textInput = container ? container.querySelector('input[type="text"]') : null;
+            if (!textInput) {
+                return;
+            }
+            const extensions = String(icon.dataset.fileExtensions || '.pkl').trim() || '.pkl';
+            try {
+                const explicitModeInputId = String(icon.dataset.browseModeInput || '').trim();
+                const sourceInput = document.getElementById('kernel-browse-source-mode');
+                const explicitModeInput = explicitModeInputId ? document.getElementById(explicitModeInputId) : null;
+                const sourceMode = explicitModeInput
+                    ? String(explicitModeInput.value || '').trim()
+                    : (sourceInput ? String(sourceInput.value || '').trim() : 'server-path');
+                if (sourceMode === 'local-picker') {
+                    const selectedPath = await pickNativePath('file', extensions);
+                    textInput.value = selectedPath;
+                    textInput.dispatchEvent(new Event('input', { bubbles: true }));
+                } else {
+                    await openServerFileModal(textInput, extensions);
+                }
+            } catch (err) {
+                const msg = (err && err.message) ? err.message : 'Failed to select file.';
+                alert(msg);
+            }
+        });
+    });
+
+    const kernelParamsBrowseModeInput = document.getElementById('kernel-params-browse-mode');
+    const kernelParamsModeLocalBtn = document.getElementById('kernel-params-mode-local');
+    const kernelParamsModeServerBtn = document.getElementById('kernel-params-mode-server');
+    const kernelParamsBrowseLocalBtn = document.getElementById('kernel-params-browse-local');
+    const kernelParamsBrowseServerBtn = document.getElementById('kernel-params-browse-server');
+    const kernelParamsFileInput = document.getElementById('kernelParamsModuleFile');
+    const kernelParamsLocalSelected = document.getElementById('kernel-params-local-selected');
+    const kernelParamsLocalSelectedName = document.getElementById('kernel-params-local-selected-name');
+    const kernelParamsModuleInput = document.querySelector('input[name="kernel_params_module"]');
+
+    const syncKernelParamsLocalSelection = () => {
+        if (!kernelParamsLocalSelected || !kernelParamsLocalSelectedName || !kernelParamsFileInput) {
+            return;
+        }
+        const selectedFile = (kernelParamsFileInput.files && kernelParamsFileInput.files.length > 0)
+            ? kernelParamsFileInput.files[0]
+            : null;
+        if (selectedFile) {
+            kernelParamsLocalSelectedName.textContent = selectedFile.name;
+            kernelParamsLocalSelected.classList.remove('hidden');
+        } else {
+            kernelParamsLocalSelectedName.textContent = '';
+            kernelParamsLocalSelected.classList.add('hidden');
+        }
+    };
+
+    const clearKernelParamsLocalSelection = () => {
+        if (!kernelParamsFileInput) {
+            return;
+        }
+        kernelParamsFileInput.value = '';
+        syncKernelParamsLocalSelection();
+    };
+
+    const setKernelParamsBrowseMode = (mode) => {
+        if (!kernelParamsBrowseModeInput || !kernelParamsModeLocalBtn || !kernelParamsModeServerBtn) return;
+        const nextMode = mode === 'upload' ? 'upload' : 'server-path';
+        kernelParamsBrowseModeInput.value = nextMode;
+        const activeClasses = ['bg-primary/10', 'border-primary', 'text-primary', 'font-semibold'];
+        const inactiveClasses = ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+        [kernelParamsModeLocalBtn, kernelParamsModeServerBtn].forEach((btn) => {
+            btn.classList.remove(...activeClasses);
+            btn.classList.add(...inactiveClasses);
+        });
+        if (nextMode === 'upload') {
+            kernelParamsModeLocalBtn.classList.add(...activeClasses);
+            kernelParamsModeLocalBtn.classList.remove(...inactiveClasses);
+        } else {
+            kernelParamsModeServerBtn.classList.add(...activeClasses);
+            kernelParamsModeServerBtn.classList.remove(...inactiveClasses);
+            clearKernelParamsLocalSelection();
+        }
+        if (kernelParamsBrowseLocalBtn) {
+            kernelParamsBrowseLocalBtn.classList.toggle('hidden', nextMode !== 'upload');
+        }
+        if (kernelParamsBrowseServerBtn) {
+            kernelParamsBrowseServerBtn.classList.toggle('hidden', nextMode !== 'server-path');
+        }
+    };
+    if (kernelParamsModeLocalBtn) {
+        kernelParamsModeLocalBtn.addEventListener('click', () => setKernelParamsBrowseMode('upload'));
+    }
+    if (kernelParamsModeServerBtn) {
+        kernelParamsModeServerBtn.addEventListener('click', () => setKernelParamsBrowseMode('server-path'));
+    }
+    if (kernelParamsBrowseLocalBtn && kernelParamsFileInput) {
+        kernelParamsBrowseLocalBtn.addEventListener('click', () => {
+            setKernelParamsBrowseMode('upload');
+            kernelParamsFileInput.click();
+        });
+    }
+    if (kernelParamsFileInput) {
+        kernelParamsFileInput.addEventListener('change', () => {
+            setKernelParamsBrowseMode('upload');
+            syncKernelParamsLocalSelection();
+        });
+    }
+    if (kernelParamsBrowseServerBtn && kernelParamsModuleInput) {
+        kernelParamsBrowseServerBtn.addEventListener('click', async () => {
+            setKernelParamsBrowseMode('server-path');
+            await openServerFileModal(kernelParamsModuleInput, '.py');
+        });
+    }
+    setKernelParamsBrowseMode(
+        String(kernelParamsBrowseModeInput ? kernelParamsBrowseModeInput.value : '').trim().toLowerCase() === 'upload'
+            ? 'upload'
+            : 'server-path'
+    );
+    syncKernelParamsLocalSelection();
+
+    const basenameFromPath = (pathValue) => {
+        const value = String(pathValue || '').trim();
+        if (!value) return '';
+        const normalized = value.replace(/\\/g, '/');
+        const parts = normalized.split('/').filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : value;
+    };
+
+    const serverAwareUploads = [
+        {
+            zoneId: 'kernelSpikeTimesUpload',
+            fileInputId: 'kernelSpikeTimesFile',
+            modeInputName: 'kernel_spike_times_file_source_mode',
+            serverPathName: 'kernel_spike_times_file_server_path',
+            extensions: '.pkl,.pickle',
+        },
+        {
+            zoneId: 'kernelPopulationSizesUpload',
+            fileInputId: 'kernelPopulationSizesFile',
+            modeInputName: 'kernel_population_sizes_file_source_mode',
+            serverPathName: 'kernel_population_sizes_file_server_path',
+            extensions: '.pkl,.pickle',
+        },
+        {
+            zoneId: 'kernelElectrodeParametersUpload',
+            fileInputId: 'kernelElectrodeParametersFile',
+            modeInputName: 'electrode_parameters_file_source_mode',
+            serverPathName: 'electrode_parameters_file_server_path',
+            extensions: '.pkl,.pickle',
+        },
+        {
+            zoneId: 'meegCdmUpload',
+            fileInputId: 'meegCdmFile',
+            modeInputName: 'meeg_cdm_file_source_mode',
+            serverPathName: 'meeg_cdm_file_server_path',
+            extensions: '.pkl,.pickle',
+        },
+        {
+            zoneId: 'meegDipoleUpload',
+            fileInputId: 'meegDipoleFile',
+            modeInputName: 'meeg_dipole_file_source_mode',
+            serverPathName: 'meeg_dipole_file_server_path',
+            extensions: '.pkl,.pickle',
+        },
+        {
+            zoneId: 'meegSensorUpload',
+            fileInputId: 'meegSensorFile',
+            modeInputName: 'meeg_sensor_file_source_mode',
+            serverPathName: 'meeg_sensor_file_server_path',
+            extensions: '.pkl,.pickle',
+        },
+    ];
+
+    serverAwareUploads.forEach((cfg) => {
+        const zone = document.getElementById(cfg.zoneId);
+        const fileInput = document.getElementById(cfg.fileInputId);
+        const modeInput = document.querySelector(`input[name="${cfg.modeInputName}"]`);
+        const serverPathInput = document.querySelector(`input[name="${cfg.serverPathName}"]`);
+        if (!zone || !fileInput || !modeInput || !serverPathInput) {
+            return;
+        }
+
+        const controls = document.createElement('div');
+        controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
+        controls.innerHTML = `
+            <button type="button" data-upload-action="true" class="kernel-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
+            <button type="button" data-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
+        `;
+        zone.insertBefore(controls, zone.firstChild);
+
+        const localBtn = controls.querySelector('.kernel-upload-local');
+        const serverBtn = controls.querySelector('.kernel-upload-server');
+        const filenameEl = zone.querySelector('[data-filename]');
+        const uploadedBox = zone.querySelector('[data-uploaded]');
+        const uploadedName = zone.querySelector('[data-uploaded-name]');
+        const uploadedLabel = zone.querySelector('[data-uploaded-label]');
+        const defaultName = uploadedBox ? String(uploadedBox.dataset.defaultName || '') : '';
+
+        const applyModeVisuals = (mode) => {
+            const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
+            const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+            [localBtn, serverBtn].forEach((btn) => {
+                btn.classList.remove(...activeClasses);
+                btn.classList.add(...inactiveClasses);
+            });
+            if (mode === 'server-path') {
+                serverBtn.classList.add(...activeClasses);
+                serverBtn.classList.remove(...inactiveClasses);
+            } else {
+                localBtn.classList.add(...activeClasses);
+                localBtn.classList.remove(...inactiveClasses);
+            }
+        };
+
+        const syncUploadedBoxToDefault = () => {
+            if (!uploadedBox || !uploadedName) return;
+            if (defaultName) {
+                uploadedName.textContent = defaultName;
+                if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
+                uploadedBox.classList.remove('hidden');
+            } else {
+                uploadedName.textContent = '';
+                uploadedBox.classList.add('hidden');
+            }
+        };
+
+        const syncServerSelectionUi = () => {
+            const selected = serverPathInput.value.trim();
+            if (filenameEl) {
+                filenameEl.textContent = selected ? basenameFromPath(selected) : 'Server file not selected';
+            }
+            if (uploadedBox && uploadedName) {
+                if (selected) {
+                    uploadedName.textContent = basenameFromPath(selected);
+                    if (uploadedLabel) uploadedLabel.textContent = 'Selected';
+                    uploadedBox.classList.remove('hidden');
+                } else {
+                    syncUploadedBoxToDefault();
+                }
+            }
+        };
+
+        const setMode = (mode) => {
+            const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+            modeInput.value = nextMode;
+            applyModeVisuals(nextMode);
+            if (nextMode === 'upload') {
+                serverPathInput.value = '';
+                if (filenameEl && (!fileInput.files || !fileInput.files[0])) {
+                    filenameEl.textContent = 'Local file not selected';
+                }
+                if (!fileInput.files || !fileInput.files[0]) {
+                    syncUploadedBoxToDefault();
+                }
+            } else {
+                fileInput.value = '';
+                syncServerSelectionUi();
+            }
+        };
+
+        localBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setMode('upload');
+        });
+        serverBtn.addEventListener('click', (event) => {
+            event.stopPropagation();
+            setMode('server-path');
+        });
+
+        zone.addEventListener('click', async (event) => {
+            if (event.target && event.target.closest('[data-upload-action]')) {
+                return;
+            }
+            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
+                await openServerFileModal(serverPathInput, cfg.extensions);
+                syncServerSelectionUi();
+            }
+        });
+
+        serverPathInput.addEventListener('input', () => {
+            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
+                syncServerSelectionUi();
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (String(modeInput.value || '').trim().toLowerCase() !== 'upload') {
+                return;
+            }
+            serverPathInput.value = '';
+        });
+
+        const runtimeDefault = String((window.__webuiRuntime || {}).default_simulation_source_mode || '').trim().toLowerCase();
+        setMode(runtimeDefault === 'server-path' ? 'server-path' : 'upload');
     });
 
     const cdmApproxCheckbox = document.querySelector('input[name="probe_kernel_approx"]');
@@ -667,20 +1479,92 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const modelSelect = document.getElementById('meeg-model');
-    const dipoleInput = document.querySelector('input[name="meeg_dipole_locations"]');
-    const sensorInput = document.querySelector('input[name="meeg_sensor_locations"]');
     const auto1020 = document.getElementById('meegAuto1020');
     const dipoleUpload = document.getElementById('meegDipoleUpload');
     const sensorUpload = document.getElementById('meegSensorUpload');
-    const modelDefaults = {
-        NYHeadModel: { dipole: '[0.0, 0.0, 0.0]', sensor: '' },
-        FourSphereVolumeConductor: { dipole: '[0.0, 0.0, 78000.0]', sensor: '[[0.0, 0.0, 90000.0]]' },
-        InfiniteVolumeConductor: { dipole: '[0.0, 0.0, 0.0]', sensor: '[[0.0, 0.0, 90000.0]]' },
-        InfiniteHomogeneousVolCondMEG: { dipole: '[0.0, 0.0, 0.0]', sensor: '[[10000.0, 0.0, 0.0]]' },
-        SphericallySymmetricVolCondMEG: { dipole: '[0.0, 0.0, 90000.0]', sensor: '[[0.0, 0.0, 92000.0]]' },
+    const dipoleHidden = document.getElementById('meegDipoleLocationsHidden');
+    const sensorHidden = document.getElementById('meegSensorLocationsHidden');
+    const dipoleInputs = {
+        x: document.getElementById('meegDipoleX'),
+        y: document.getElementById('meegDipoleY'),
+        z: document.getElementById('meegDipoleZ'),
     };
+    const sensorInputs = {
+        x: document.getElementById('meegSensorX'),
+        y: document.getElementById('meegSensorY'),
+        z: document.getElementById('meegSensorZ'),
+    };
+    const modelDefaults = {
+        NYHeadModel: { dipole: { x: 0.0, y: 0.0, z: 0.0 }, sensor: null },
+        FourSphereVolumeConductor: { dipole: { x: 0.0, y: 0.0, z: 78000.0 }, sensor: { x: 0.0, y: 0.0, z: 90000.0 } },
+        InfiniteVolumeConductor: { dipole: { x: 0.0, y: 0.0, z: 0.0 }, sensor: { x: 0.0, y: 0.0, z: 90000.0 } },
+        InfiniteHomogeneousVolCondMEG: { dipole: { x: 0.0, y: 0.0, z: 0.0 }, sensor: { x: 10000.0, y: 0.0, z: 0.0 } },
+        SphericallySymmetricVolCondMEG: { dipole: { x: 0.0, y: 0.0, z: 90000.0 }, sensor: { x: 0.0, y: 0.0, z: 92000.0 } },
+    };
+
+    const parseCoordGroup = (inputs) => {
+        const raw = ['x', 'y', 'z'].map((axis) => String(inputs[axis]?.value || '').trim());
+        const allBlank = raw.every((value) => value === '');
+        if (allBlank) {
+            return { empty: true, valid: true, values: [] };
+        }
+        if (raw.some((value) => value === '')) {
+            return { empty: false, valid: false, values: [] };
+        }
+        const nums = raw.map((value) => Number(value));
+        if (nums.some((value) => !Number.isFinite(value))) {
+            return { empty: false, valid: false, values: [] };
+        }
+        return { empty: false, valid: true, values: nums };
+    };
+
+    const syncCoordHidden = (inputs, hiddenInput) => {
+        if (!hiddenInput) {
+            return;
+        }
+        const parsed = parseCoordGroup(inputs);
+        if (parsed.empty || !parsed.valid) {
+            hiddenInput.value = '';
+            return;
+        }
+        hiddenInput.value = `[${parsed.values[0]}, ${parsed.values[1]}, ${parsed.values[2]}]`;
+    };
+
+    const clearCoordInputs = (inputs, markAuto = true) => {
+        ['x', 'y', 'z'].forEach((axis) => {
+            const input = inputs[axis];
+            if (!input) return;
+            input.value = '';
+            input.dataset.auto = markAuto ? 'true' : 'false';
+        });
+    };
+
+    const setCoordDefaultsIfAuto = (inputs, values) => {
+        if (!values) {
+            return;
+        }
+        ['x', 'y', 'z'].forEach((axis) => {
+            const input = inputs[axis];
+            if (!input) return;
+            const isAuto = input.dataset.auto === 'true';
+            if (input.value.trim() === '' || isAuto) {
+                input.value = String(values[axis]);
+                input.dataset.auto = 'true';
+            }
+        });
+    };
+
+    const validateCoordGroup = (inputs, label) => {
+        const parsed = parseCoordGroup(inputs);
+        if (!parsed.valid) {
+            window.alert(`${label} must have exactly 3 numeric values (X, Y, Z), or be left fully empty.`);
+            return false;
+        }
+        return true;
+    };
+
     const updateAutoDipoleUI = () => {
-        if (!modelSelect || !auto1020 || !dipoleInput) {
+        if (!modelSelect || !auto1020) {
             return;
         }
         const isNy = modelSelect.value === 'NYHeadModel';
@@ -691,55 +1575,67 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!isNy) {
             auto1020.checked = false;
         }
-        const disableInputs = isNy && auto1020.checked;
-        dipoleInput.disabled = disableInputs;
-        if (dipoleUpload) {
-            dipoleUpload.classList.toggle('opacity-50', disableInputs);
-            dipoleUpload.classList.toggle('pointer-events-none', disableInputs);
-        }
-        if (sensorInput) {
-            sensorInput.disabled = isNy;
-            if (isNy) {
-                sensorInput.value = '';
-                sensorInput.dataset.auto = 'true';
+
+        const disableDipoleInputs = isNy && auto1020.checked;
+        ['x', 'y', 'z'].forEach((axis) => {
+            if (dipoleInputs[axis]) {
+                dipoleInputs[axis].disabled = disableDipoleInputs;
             }
+        });
+        if (dipoleUpload) {
+            dipoleUpload.classList.toggle('opacity-50', disableDipoleInputs);
+            dipoleUpload.classList.toggle('pointer-events-none', disableDipoleInputs);
+        }
+
+        ['x', 'y', 'z'].forEach((axis) => {
+            if (sensorInputs[axis]) {
+                sensorInputs[axis].disabled = isNy;
+            }
+        });
+        if (isNy) {
+            clearCoordInputs(sensorInputs, true);
         }
         if (sensorUpload) {
             sensorUpload.classList.toggle('opacity-50', isNy);
             sensorUpload.classList.toggle('pointer-events-none', isNy);
         }
+
+        syncCoordHidden(dipoleInputs, dipoleHidden);
+        syncCoordHidden(sensorInputs, sensorHidden);
     };
 
     const applyMeegDefaults = () => {
-        if (!modelSelect || !dipoleInput || !sensorInput) {
+        if (!modelSelect) {
             return;
         }
         const defaults = modelDefaults[modelSelect.value] || modelDefaults.NYHeadModel;
-        const setIfAuto = (input, value) => {
-            const isAuto = input.dataset.auto === 'true';
-            if (input.value.trim() === '' || isAuto) {
-                input.value = value;
-                input.dataset.auto = value ? 'true' : 'false';
-            }
-        };
-        setIfAuto(dipoleInput, defaults.dipole);
+        setCoordDefaultsIfAuto(dipoleInputs, defaults.dipole);
         if (modelSelect.value === 'NYHeadModel') {
-            sensorInput.value = '';
-            sensorInput.dataset.auto = 'true';
+            clearCoordInputs(sensorInputs, true);
         } else {
-            setIfAuto(sensorInput, defaults.sensor);
+            setCoordDefaultsIfAuto(sensorInputs, defaults.sensor);
         }
+        syncCoordHidden(dipoleInputs, dipoleHidden);
+        syncCoordHidden(sensorInputs, sensorHidden);
     };
-    if (dipoleInput) {
-        dipoleInput.addEventListener('input', () => {
-            dipoleInput.dataset.auto = 'false';
-        });
-    }
-    if (sensorInput) {
-        sensorInput.addEventListener('input', () => {
-            sensorInput.dataset.auto = 'false';
-        });
-    }
+
+    ['x', 'y', 'z'].forEach((axis) => {
+        if (dipoleInputs[axis]) {
+            dipoleInputs[axis].dataset.auto = 'true';
+            dipoleInputs[axis].addEventListener('input', () => {
+                dipoleInputs[axis].dataset.auto = 'false';
+                syncCoordHidden(dipoleInputs, dipoleHidden);
+            });
+        }
+        if (sensorInputs[axis]) {
+            sensorInputs[axis].dataset.auto = 'true';
+            sensorInputs[axis].addEventListener('input', () => {
+                sensorInputs[axis].dataset.auto = 'false';
+                syncCoordHidden(sensorInputs, sensorHidden);
+            });
+        }
+    });
+
     if (modelSelect) {
         modelSelect.addEventListener('change', () => {
             applyMeegDefaults();
@@ -754,6 +1650,23 @@ document.addEventListener('DOMContentLoaded', () => {
             applyMeegDefaults();
         });
     }
+    if (meegComputeForm) {
+        meegComputeForm.addEventListener('submit', (event) => {
+            if (!validateCoordGroup(dipoleInputs, 'Dipole locations')) {
+                event.preventDefault();
+                return;
+            }
+            if (modelSelect && modelSelect.value !== 'NYHeadModel') {
+                if (!validateCoordGroup(sensorInputs, 'Sensor locations')) {
+                    event.preventDefault();
+                    return;
+                }
+            }
+            syncCoordHidden(dipoleInputs, dipoleHidden);
+            syncCoordHidden(sensorInputs, sensorHidden);
+        });
+    }
+
     applyMeegDefaults();
     updateAutoDipoleUI();
 });

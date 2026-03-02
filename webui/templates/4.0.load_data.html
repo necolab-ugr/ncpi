@@ -21,6 +21,9 @@
         },
     }
 </script>
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
 <style type="text/tailwindcss">
     .material-symbols-outlined {
         font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24
@@ -62,13 +65,41 @@
 
                     <form id="inferenceUploadForm" action="{{ url_for('inference_load_precomputed') }}" method="POST" enctype="multipart/form-data">
                         <input type="file" id="inferenceFileInput" name="precomputed_predictions_file" class="hidden" accept=".pkl,.pickle" />
-                        <div id="inferenceDropZone" onclick="document.getElementById('inferenceFileInput').click()"
+                        <input type="hidden" id="inferenceSourceModeInput" name="precomputed_predictions_source_mode" value="upload" />
+                        <input type="hidden" id="inferenceServerFilePathInput" name="precomputed_predictions_server_file_path" value="" />
+                        <div id="inferenceDropZone"
                             class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
+                            <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" id="inferenceModeUploadBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
+                                    Local upload
+                                </button>
+                                <button type="button" id="inferenceModeServerBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                                    Server file
+                                </button>
+                            </div>
                             <span class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">upload_file</span>
-                            <p class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">Drag and drop predictions files or click to browse</p>
+                            <p id="inferenceDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
+                                Drag and drop predictions files or click to browse
+                            </p>
+                            <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" id="inferenceBrowseLocalBtn"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    Browse local file
+                                </button>
+                                <button type="button" id="inferenceBrowseServerBtn"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    Browse server files
+                                </button>
+                            </div>
                             <div id="selectedInferenceFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
-                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected files</span>
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local file</span>
                                 <div id="selectedInferenceFilesList" class="mt-2"></div>
+                            </div>
+                            <div id="selectedInferenceServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server file</span>
+                                <div id="selectedInferenceServerFilePath" class="mt-2 font-mono break-all"></div>
                             </div>
                         </div>
                     </form>
@@ -159,22 +190,83 @@
         </div>
     </aside>
 </div>
+
+<div id="inferenceServerFileModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+            <button type="button" id="inferenceServerFileBrowserClose"
+                class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+        </div>
+        <div class="p-4 space-y-3">
+            <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                Current folder: <span id="inferenceServerFileBrowserPath" class="font-mono"></span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="inferenceServerFileBrowserUp"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Up
+                </button>
+                <button type="button" id="inferenceServerFileBrowserRefresh"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Refresh
+                </button>
+                <button type="button" id="inferenceServerFileBrowserSelect"
+                    class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                    Select file
+                </button>
+            </div>
+            <div id="inferenceServerFileBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+            <div id="inferenceServerFileBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+            <div id="inferenceServerFileBrowserEntries"
+                class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+    const runtime = window.__webuiRuntime || {};
     const inferenceUploadForm = document.getElementById('inferenceUploadForm');
     const inferenceFileInput = document.getElementById('inferenceFileInput');
     const inferenceDropZone = document.getElementById('inferenceDropZone');
+    const inferenceSourceModeInput = document.getElementById('inferenceSourceModeInput');
+    const inferenceServerFilePathInput = document.getElementById('inferenceServerFilePathInput');
+    const inferenceModeUploadBtn = document.getElementById('inferenceModeUploadBtn');
+    const inferenceModeServerBtn = document.getElementById('inferenceModeServerBtn');
+    const inferenceBrowseLocalBtn = document.getElementById('inferenceBrowseLocalBtn');
+    const inferenceBrowseServerBtn = document.getElementById('inferenceBrowseServerBtn');
+    const inferenceDropZoneHint = document.getElementById('inferenceDropZoneHint');
+    const selectedInferenceFiles = document.getElementById('selectedInferenceFiles');
+    const selectedInferenceServerFile = document.getElementById('selectedInferenceServerFile');
+    const selectedInferenceServerFilePath = document.getElementById('selectedInferenceServerFilePath');
+
+    const inferenceServerFileModal = document.getElementById('inferenceServerFileModal');
+    const inferenceServerFileBrowserPath = document.getElementById('inferenceServerFileBrowserPath');
+    const inferenceServerFileBrowserEntries = document.getElementById('inferenceServerFileBrowserEntries');
+    const inferenceServerFileBrowserError = document.getElementById('inferenceServerFileBrowserError');
+    const inferenceServerFileBrowserLoading = document.getElementById('inferenceServerFileBrowserLoading');
+    const inferenceServerFileBrowserUp = document.getElementById('inferenceServerFileBrowserUp');
+    const inferenceServerFileBrowserRefresh = document.getElementById('inferenceServerFileBrowserRefresh');
+    const inferenceServerFileBrowserSelect = document.getElementById('inferenceServerFileBrowserSelect');
+    const inferenceServerFileBrowserClose = document.getElementById('inferenceServerFileBrowserClose');
+
+    let inferenceSourceMode = 'upload';
+    let inferenceServerBrowserCurrentPath = '';
+    let inferenceServerBrowserParentPath = '';
+    let inferenceServerBrowserSelectedPath = '';
 
     const submitInferenceIfReady = () => {
-        if (inferenceFileInput.files && inferenceFileInput.files.length > 0) {
+        if (inferenceSourceMode === 'upload' && inferenceFileInput.files && inferenceFileInput.files.length > 0) {
+            inferenceUploadForm.submit();
+        }
+        if (inferenceSourceMode === 'server-path' && inferenceServerFilePathInput.value.trim()) {
             inferenceUploadForm.submit();
         }
     };
 
     const renderSelectedInferenceFiles = (files) => {
-        const selectedFiles = document.getElementById('selectedInferenceFiles');
         const selectedFilesList = document.getElementById('selectedInferenceFilesList');
         selectedFilesList.innerHTML = '';
         Array.from(files).forEach((file) => {
@@ -183,7 +275,43 @@
             line.textContent = file.name;
             selectedFilesList.appendChild(line);
         });
-        selectedFiles.classList.remove('hidden');
+        selectedInferenceFiles.classList.remove('hidden');
+    };
+
+    const setInferenceSourceMode = (mode) => {
+        inferenceSourceMode = mode === 'server-path' ? 'server-path' : 'upload';
+        inferenceSourceModeInput.value = inferenceSourceMode;
+
+        const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
+        const inactiveClasses = ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+        inferenceModeUploadBtn.classList.remove(...activeClasses);
+        inferenceModeUploadBtn.classList.add(...inactiveClasses);
+        inferenceModeServerBtn.classList.remove(...activeClasses);
+        inferenceModeServerBtn.classList.add(...inactiveClasses);
+
+        if (inferenceSourceMode === 'upload') {
+            inferenceModeUploadBtn.classList.add(...activeClasses);
+            inferenceModeUploadBtn.classList.remove(...inactiveClasses);
+            inferenceDropZoneHint.textContent = 'Drag and drop predictions files or click to browse';
+            inferenceBrowseLocalBtn.classList.remove('hidden');
+            inferenceBrowseServerBtn.classList.add('hidden');
+            selectedInferenceServerFile.classList.add('hidden');
+            inferenceServerFilePathInput.value = '';
+        } else {
+            inferenceModeServerBtn.classList.add(...activeClasses);
+            inferenceModeServerBtn.classList.remove(...inactiveClasses);
+            inferenceDropZoneHint.textContent = 'Select a predictions pickle file from the server';
+            inferenceBrowseLocalBtn.classList.add('hidden');
+            inferenceBrowseServerBtn.classList.remove('hidden');
+            selectedInferenceFiles.classList.add('hidden');
+        }
+    };
+
+    const setSelectedInferenceServerFile = (filePath) => {
+        const cleanPath = String(filePath || '').trim();
+        inferenceServerFilePathInput.value = cleanPath;
+        selectedInferenceServerFilePath.textContent = cleanPath;
+        selectedInferenceServerFile.classList.toggle('hidden', !cleanPath);
     };
 
     const setInferenceInputFiles = (files) => {
@@ -192,14 +320,149 @@
         inferenceFileInput.files = dataTransfer.files;
     };
 
+    const showInferenceServerBrowserError = (message) => {
+        const clean = String(message || '').trim();
+        inferenceServerFileBrowserError.textContent = clean;
+        inferenceServerFileBrowserError.classList.toggle('hidden', !clean);
+    };
+
+    const setInferenceServerBrowserLoading = (loading) => {
+        inferenceServerFileBrowserLoading.classList.toggle('hidden', !loading);
+    };
+
+    const renderInferenceServerBrowserEntries = (dirs, files) => {
+        inferenceServerFileBrowserEntries.innerHTML = '';
+        const directoryItems = Array.isArray(dirs) ? dirs : [];
+        const fileItems = Array.isArray(files) ? files : [];
+
+        directoryItems.forEach((entry) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800';
+            button.textContent = `${entry.name}/`;
+            button.addEventListener('click', () => {
+                loadInferenceServerFiles(entry.path);
+            });
+            inferenceServerFileBrowserEntries.appendChild(button);
+        });
+
+        fileItems.forEach((entry) => {
+            const label = document.createElement('label');
+            label.className = 'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer';
+            const input = document.createElement('input');
+            input.type = 'radio';
+            input.name = 'inference-server-file-selected';
+            input.value = entry.path;
+            input.className = 'text-primary focus:ring-primary';
+            if (inferenceServerBrowserSelectedPath === entry.path) {
+                input.checked = true;
+            }
+            input.addEventListener('change', () => {
+                inferenceServerBrowserSelectedPath = entry.path;
+            });
+            const span = document.createElement('span');
+            span.className = 'font-mono';
+            span.textContent = entry.name;
+            label.appendChild(input);
+            label.appendChild(span);
+            inferenceServerFileBrowserEntries.appendChild(label);
+        });
+
+        if (directoryItems.length === 0 && fileItems.length === 0) {
+            const empty = document.createElement('p');
+            empty.className = 'px-3 py-2 text-xs text-slate-500 dark:text-slate-400';
+            empty.textContent = 'No matching files or subdirectories found.';
+            inferenceServerFileBrowserEntries.appendChild(empty);
+        }
+    };
+
+    const loadInferenceServerFiles = async (path) => {
+        setInferenceServerBrowserLoading(true);
+        showInferenceServerBrowserError('');
+        try {
+            const params = new URLSearchParams();
+            const targetPath = String(path || '').trim();
+            if (targetPath) {
+                params.set('path', targetPath);
+            }
+            params.set('include_files', '1');
+            params.set('extensions', '.pkl,.pickle');
+            const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || 'Failed to list server files.');
+            }
+            inferenceServerBrowserCurrentPath = String(payload.path || '');
+            inferenceServerBrowserParentPath = String(payload.parent || '');
+            inferenceServerFileBrowserPath.textContent = inferenceServerBrowserCurrentPath || '/';
+            renderInferenceServerBrowserEntries(payload.dirs || [], payload.files || []);
+            inferenceServerFileBrowserUp.disabled = !inferenceServerBrowserParentPath;
+            if (inferenceServerBrowserSelectedPath) {
+                const stillPresent = (payload.files || []).some((entry) => entry.path === inferenceServerBrowserSelectedPath);
+                if (!stillPresent) inferenceServerBrowserSelectedPath = '';
+            }
+        } catch (error) {
+            showInferenceServerBrowserError(error.message || 'Failed to list server files.');
+        } finally {
+            setInferenceServerBrowserLoading(false);
+        }
+    };
+
+    const openInferenceServerFileModal = async () => {
+        inferenceServerFileModal.classList.remove('hidden');
+        inferenceServerFileModal.classList.add('flex');
+        const current = inferenceServerFilePathInput.value.trim();
+        const startPath = current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : (runtime.server_home_dir || '').trim();
+        inferenceServerBrowserSelectedPath = current;
+        await loadInferenceServerFiles(startPath);
+    };
+
+    const closeInferenceServerFileModal = () => {
+        inferenceServerFileModal.classList.add('hidden');
+        inferenceServerFileModal.classList.remove('flex');
+        showInferenceServerBrowserError('');
+    };
+
     inferenceFileInput.addEventListener('change', () => {
         renderSelectedInferenceFiles(inferenceFileInput.files);
+        setSelectedInferenceServerFile('');
         submitInferenceIfReady();
+    });
+
+    inferenceDropZone.addEventListener('click', () => {
+        if (inferenceSourceMode === 'upload') {
+            inferenceFileInput.click();
+        } else {
+            openInferenceServerFileModal();
+        }
+    });
+
+    inferenceModeUploadBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setInferenceSourceMode('upload');
+    });
+
+    inferenceModeServerBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setInferenceSourceMode('server-path');
+    });
+
+    inferenceBrowseLocalBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (inferenceSourceMode !== 'upload') return;
+        inferenceFileInput.click();
+    });
+
+    inferenceBrowseServerBtn.addEventListener('click', (event) => {
+        event.stopPropagation();
+        if (inferenceSourceMode !== 'server-path') return;
+        openInferenceServerFileModal();
     });
 
     ['dragenter', 'dragover'].forEach((eventName) => {
         inferenceDropZone.addEventListener(eventName, (event) => {
             event.preventDefault();
+            if (inferenceSourceMode !== 'upload') return;
             inferenceDropZone.classList.add('border-primary');
         });
     });
@@ -207,18 +470,53 @@
     ['dragleave', 'drop'].forEach((eventName) => {
         inferenceDropZone.addEventListener(eventName, (event) => {
             event.preventDefault();
+            if (inferenceSourceMode !== 'upload') return;
             inferenceDropZone.classList.remove('border-primary');
         });
     });
 
     inferenceDropZone.addEventListener('drop', (event) => {
+        if (inferenceSourceMode !== 'upload') {
+            return;
+        }
         const files = event.dataTransfer.files;
         if (!files || files.length === 0) {
             return;
         }
         setInferenceInputFiles(files);
         renderSelectedInferenceFiles(files);
+        setSelectedInferenceServerFile('');
         submitInferenceIfReady();
     });
+
+    inferenceServerFileBrowserUp.addEventListener('click', () => {
+        if (inferenceServerBrowserParentPath) {
+            loadInferenceServerFiles(inferenceServerBrowserParentPath);
+        }
+    });
+
+    inferenceServerFileBrowserRefresh.addEventListener('click', () => {
+        loadInferenceServerFiles(inferenceServerBrowserCurrentPath);
+    });
+
+    inferenceServerFileBrowserSelect.addEventListener('click', () => {
+        if (!inferenceServerBrowserSelectedPath) {
+            showInferenceServerBrowserError('Select a file.');
+            return;
+        }
+        setSelectedInferenceServerFile(inferenceServerBrowserSelectedPath);
+        closeInferenceServerFileModal();
+        submitInferenceIfReady();
+    });
+
+    inferenceServerFileBrowserClose.addEventListener('click', closeInferenceServerFileModal);
+    inferenceServerFileModal.addEventListener('click', (event) => {
+        if (event.target === inferenceServerFileModal) {
+            closeInferenceServerFileModal();
+        }
+    });
+
+    const runtimeDefaultMode = (runtime.default_simulation_source_mode || '').toLowerCase();
+    setInferenceSourceMode(runtimeDefaultMode === 'server-path' ? 'server-path' : 'upload');
 </script>
 {% endblock %}

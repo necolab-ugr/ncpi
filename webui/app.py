@@ -2128,21 +2128,39 @@ def upload_sim():
 
 @app.route("/upload_sim_files", methods=["POST"])
 def upload_sim_files():
-    files = request.files.getlist("simulation_files")
-    uploaded_files = [f for f in files if f and f.filename]
-
-    if len(uploaded_files) == 0:
-        flash('No files uploaded, please try again.', 'error')
-        return redirect(request.referrer or url_for('upload_sim'))
-
+    source_mode = (request.form.get("simulation_source_mode") or "upload").strip().lower()
     simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
     os.makedirs(simulation_data_dir, exist_ok=True)
 
-    for file in uploaded_files:
-        filename = secure_filename(file.filename)
-        if not filename:
-            continue
-        file.save(os.path.join(simulation_data_dir, filename))
+    if source_mode == "server-path":
+        folder_path = (request.form.get("simulation_server_folder_path") or "").strip()
+        try:
+            source_files = _collect_pickle_files_from_folder(folder_path, recursive=True)
+        except Exception as exc:
+            flash(f"Invalid simulation server folder path: {exc}", "error")
+            return redirect(request.referrer or url_for('upload_sim'))
+
+        copied = 0
+        for source_path in source_files:
+            filename = secure_filename(os.path.basename(source_path))
+            if not filename:
+                continue
+            shutil.copy2(source_path, os.path.join(simulation_data_dir, filename))
+            copied += 1
+        if copied == 0:
+            flash("No valid simulation files were copied from server folder.", "error")
+            return redirect(request.referrer or url_for('upload_sim'))
+    else:
+        files = request.files.getlist("simulation_files")
+        uploaded_files = [f for f in files if f and f.filename]
+        if len(uploaded_files) == 0:
+            flash('No files uploaded, please try again.', 'error')
+            return redirect(request.referrer or url_for('upload_sim'))
+        for file in uploaded_files:
+            filename = secure_filename(file.filename)
+            if not filename:
+                continue
+            file.save(os.path.join(simulation_data_dir, filename))
 
     return redirect(url_for('upload_sim'))
 
@@ -2643,23 +2661,42 @@ def run_trial_simulation_custom():
         "simulation_py_file": "simulation_py",
     }
 
-    missing = [field for field in required_fields if field not in request.files]
-    if missing:
-        flash("Missing required files for custom simulation.", "error")
-        return redirect(request.referrer or url_for("new_sim_custom"))
-
     run_id = str(uuid.uuid4())
     upload_root = os.path.join(tempfile.gettempdir(), "simulation_custom_uploads", run_id)
     os.makedirs(upload_root, exist_ok=True)
 
     input_paths = {}
     for field, key in required_fields.items():
-        file = request.files.get(field)
-        if not file or not file.filename:
-            flash("All custom simulation files are required.", "error")
-            return redirect(request.referrer or url_for("new_sim_custom"))
+        source_mode = (request.form.get(f"{field}_source_mode") or "upload").strip().lower()
         dest_path = os.path.join(upload_root, f"{key}.py")
-        file.save(dest_path)
+
+        if source_mode == "server-path":
+            server_path_raw = (request.form.get(f"{field}_server_path") or "").strip()
+            server_path = os.path.realpath(os.path.expanduser(server_path_raw))
+            if not server_path:
+                flash("All custom simulation files are required.", "error")
+                return redirect(request.referrer or url_for("new_sim_custom"))
+            if not os.path.isfile(server_path):
+                flash(f"Server file not found: {server_path}", "error")
+                return redirect(request.referrer or url_for("new_sim_custom"))
+            if Path(server_path).suffix.lower() != ".py":
+                flash(f"Server file must be a .py file: {server_path}", "error")
+                return redirect(request.referrer or url_for("new_sim_custom"))
+            shutil.copy2(server_path, dest_path)
+        else:
+            file = request.files.get(field)
+            if not file or not file.filename:
+                flash("All custom simulation files are required.", "error")
+                return redirect(request.referrer or url_for("new_sim_custom"))
+            filename = secure_filename(file.filename)
+            if not filename:
+                flash("Invalid uploaded file name for custom simulation.", "error")
+                return redirect(request.referrer or url_for("new_sim_custom"))
+            if Path(filename).suffix.lower() != ".py":
+                flash("Custom simulation uploads must be Python files (.py).", "error")
+                return redirect(request.referrer or url_for("new_sim_custom"))
+            file.save(dest_path)
+
         input_paths[key] = dest_path
 
     job_id = str(uuid.uuid4())
@@ -2708,22 +2745,30 @@ def field_potential_load():
 
 @app.route("/field_potential/load_precomputed", methods=["POST"])
 def field_potential_load_precomputed():
+    source_mode = (request.form.get("precomputed_fp_source_mode") or "upload").strip().lower()
     upload = request.files.get("precomputed_fp_file")
+    server_file_path = (request.form.get("precomputed_fp_server_file_path") or "").strip()
     fp_type = (request.form.get("precomputed_fp_type") or "").strip().lower()
 
-    if upload is None or not upload.filename:
-        flash("Upload a precomputed field potential file (.pkl/.pickle).", "error")
-        return redirect(request.referrer or url_for("field_potential_load"))
-
-    safe_name = secure_filename(upload.filename)
-    if not safe_name:
-        flash("Invalid uploaded file name.", "error")
-        return redirect(request.referrer or url_for("field_potential_load"))
-
-    ext = Path(safe_name).suffix.lower()
-    if ext not in PICKLE_EXTENSIONS:
-        flash("Precomputed field potential must be a pickle file (.pkl/.pickle).", "error")
-        return redirect(request.referrer or url_for("field_potential_load"))
+    if source_mode == "server-path":
+        try:
+            source_path = _validate_existing_pickle_file_path(server_file_path, "Field potential server file")
+            safe_name = secure_filename(os.path.basename(source_path))
+        except Exception as exc:
+            flash(str(exc), "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+    else:
+        if upload is None or not upload.filename:
+            flash("Upload a precomputed field potential file (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+        safe_name = secure_filename(upload.filename)
+        if not safe_name:
+            flash("Invalid uploaded file name.", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+        ext = Path(safe_name).suffix.lower()
+        if ext not in PICKLE_EXTENSIONS:
+            flash("Precomputed field potential must be a pickle file (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
 
     if not fp_type:
         fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
@@ -2744,7 +2789,10 @@ def field_potential_load_precomputed():
     run_dir = os.path.join(output_root, f"loaded_{uuid.uuid4().hex[:12]}")
     os.makedirs(run_dir, exist_ok=True)
     output_path = os.path.join(run_dir, output_name)
-    upload.save(output_path)
+    if source_mode == "server-path":
+        shutil.copy2(source_path, output_path)
+    else:
+        upload.save(output_path)
 
     return redirect(url_for("field_potential"))
 
@@ -2830,23 +2878,166 @@ def field_potential_proxy():
         "nu_ext": os.path.join(default_dir, "nu_ext.pkl"),
     }
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
+    webui_runtime = _detect_webui_runtime_context(request)
     return render_template(
         "2.2.field_potential_proxy.html",
         default_sim=default_sim,
         default_sim_paths=default_paths,
+        webui_runtime=webui_runtime,
     )
+
+
+def _is_loopback_identifier(value):
+    candidate = (value or "").strip().lower()
+    if not candidate:
+        return False
+    if "," in candidate:
+        candidate = candidate.split(",", 1)[0].strip()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1]
+    if ":" in candidate and candidate.count(":") == 1 and "." in candidate:
+        host_part, _ = candidate.rsplit(":", 1)
+        if host_part:
+            candidate = host_part.strip().lower()
+    return candidate in {"localhost", "::1", "0:0:0:0:0:0:0:1"} or candidate.startswith("127.")
+
+
+def _detect_webui_runtime_context(req):
+    host_header = (req.host or "").strip()
+    host_only = host_header.split(":", 1)[0].strip().lower() if host_header else ""
+    forwarded_for = (req.headers.get("X-Forwarded-For") or "").strip()
+    forwarded_host = (req.headers.get("X-Forwarded-Host") or "").strip()
+    remote_addr = (req.remote_addr or "").strip()
+
+    client_addr = forwarded_for.split(",", 1)[0].strip() if forwarded_for else remote_addr
+    effective_host = forwarded_host.split(",", 1)[0].strip().split(":", 1)[0].lower() if forwarded_host else host_only
+
+    forced_mode = (os.environ.get("NCPI_WEBUI_RUNTIME_MODE") or "").strip().lower()
+    if forced_mode in {"server", "remote", "cluster"}:
+        is_server_runtime = True
+    elif forced_mode in {"local", "desktop"}:
+        is_server_runtime = False
+    else:
+        is_server_runtime = not (_is_loopback_identifier(effective_host) and _is_loopback_identifier(client_addr))
+
+    return {
+        "is_server_runtime": is_server_runtime,
+        "native_picker_available": bool(shutil.which("zenity") and os.environ.get("DISPLAY")),
+        "default_empirical_source_mode": "server-path" if is_server_runtime else "upload",
+        "default_simulation_source_mode": "server-path" if is_server_runtime else "upload",
+        "default_analysis_source_mode": "server-path" if is_server_runtime else "upload",
+        "default_path_picker_source_mode": "server-path" if is_server_runtime else "local-picker",
+        "server_home_dir": os.path.realpath(os.path.expanduser("~")),
+    }
+
+
+def _validate_existing_file_path(path_value, label, allowed_extensions=None):
+    resolved = os.path.realpath(os.path.expanduser((path_value or "").strip()))
+    if not resolved:
+        raise ValueError(f"{label} path is required.")
+    if not os.path.isfile(resolved):
+        raise ValueError(f"{label} file does not exist: {resolved}")
+    if allowed_extensions:
+        normalized_allowed = set()
+        for raw_ext in allowed_extensions:
+            ext = str(raw_ext or "").strip().lower()
+            if not ext:
+                continue
+            if not ext.startswith("."):
+                ext = f".{ext}"
+            normalized_allowed.add(ext)
+        if normalized_allowed:
+            ext = Path(resolved).suffix.lower()
+            if ext not in normalized_allowed:
+                allowed_display = ", ".join(sorted(normalized_allowed))
+                raise ValueError(f"{label} must have one of these extensions ({allowed_display}): {resolved}")
+    return resolved
+
+
+def _validate_existing_pickle_file_path(path_value, label):
+    return _validate_existing_file_path(path_value, label, allowed_extensions=PICKLE_EXTENSIONS)
+
+
+def _collect_pickle_files_from_folder(folder_path, recursive=True):
+    root = os.path.realpath(os.path.expanduser((folder_path or "").strip()))
+    if not root:
+        raise ValueError("Server folder path is required.")
+    if not os.path.isdir(root):
+        raise ValueError(f"Server folder does not exist: {root}")
+
+    found = []
+    if recursive:
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames.sort()
+            for filename in sorted(filenames):
+                ext = Path(filename).suffix.lower()
+                if ext not in PICKLE_EXTENSIONS:
+                    continue
+                abs_path = os.path.realpath(os.path.join(dirpath, filename))
+                if os.path.isfile(abs_path):
+                    found.append(abs_path)
+    else:
+        with os.scandir(root) as entries:
+            for entry in sorted(entries, key=lambda item: item.name.lower()):
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+                ext = Path(entry.name).suffix.lower()
+                if ext not in PICKLE_EXTENSIONS:
+                    continue
+                found.append(os.path.realpath(entry.path))
+
+    if not found:
+        raise ValueError(f"No .pkl/.pickle files found in server folder: {root}")
+    return found
+
+
+def _collect_inference_assets_folder_files(folder_path):
+    root = os.path.realpath(os.path.expanduser((folder_path or "").strip()))
+    if not root:
+        raise ValueError("Inference assets server folder path is required.")
+    if not os.path.isdir(root):
+        raise ValueError(f"Inference assets server folder does not exist: {root}")
+
+    matched = {}
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            lower = filename.lower()
+            ext = Path(filename).suffix.lower()
+            if ext not in PICKLE_EXTENSIONS:
+                continue
+            key = None
+            if lower.startswith("model") or lower == "model.pkl":
+                key = "model_file"
+            elif lower.startswith("scaler") or lower == "scaler.pkl":
+                key = "scaler_file"
+            elif "density_estimator" in lower or lower.startswith("density"):
+                key = "density_estimator_file"
+            if key and key not in matched:
+                abs_path = os.path.realpath(os.path.join(dirpath, filename))
+                if os.path.isfile(abs_path):
+                    matched[key] = abs_path
+    return matched
+
+
+@app.context_processor
+def inject_webui_runtime_context():
+    return {"webui_runtime": _detect_webui_runtime_context(request)}
+
 
 # Features configuration page
 @app.route("/features", methods=["GET", "POST"])
 def features():
     pipeline_files = _collect_feature_pipeline_inputs()
     features_data_files = _list_features_data_files()
+    runtime_context = _detect_webui_runtime_context(request)
     return render_template(
         "3.features.html",
         pipeline_files=pipeline_files,
         has_pipeline_files=bool(pipeline_files),
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
+        features_runtime=runtime_context,
     )
 
 
@@ -2861,12 +3052,34 @@ def features_browse_dirs():
     if not os.path.isdir(current):
         return jsonify({"error": f"Not a directory: {current}"}), 400
 
+    include_files = (request.args.get("include_files") or "").strip().lower() in {"1", "true", "yes", "on"}
+    requested_exts = (request.args.get("extensions") or "").strip()
+    allowed_exts = set()
+    if requested_exts:
+        for raw in requested_exts.split(","):
+            ext = raw.strip().lower()
+            if not ext:
+                continue
+            if not ext.startswith("."):
+                ext = f".{ext}"
+            allowed_exts.add(ext)
+
     try:
         dirs = []
+        files = []
         with os.scandir(current) as entries:
             for entry in entries:
                 if entry.is_dir(follow_symlinks=False):
                     dirs.append({
+                        "name": entry.name,
+                        "path": os.path.realpath(entry.path),
+                    })
+                    continue
+                if include_files and entry.is_file(follow_symlinks=False):
+                    ext = Path(entry.name).suffix.lower()
+                    if allowed_exts and ext not in allowed_exts:
+                        continue
+                    files.append({
                         "name": entry.name,
                         "path": os.path.realpath(entry.path),
                     })
@@ -2876,14 +3089,19 @@ def features_browse_dirs():
         return jsonify({"error": f"Failed to list directory: {exc}"}), 400
 
     dirs.sort(key=lambda item: item["name"].lower())
+    if include_files:
+        files.sort(key=lambda item: item["name"].lower())
     parent = os.path.dirname(current)
     if parent == current:
         parent = ""
-    return jsonify({
+    payload = {
         "path": current,
         "parent": parent,
         "dirs": dirs[:1000],
-    })
+    }
+    if include_files:
+        payload["files"] = files[:1000]
+    return jsonify(payload)
 
 
 @app.route("/features/select_folder", methods=["POST"])
@@ -2891,6 +3109,16 @@ def features_select_folder():
     # Opens a native path picker on the machine running the Flask server.
     # This is intended for local desktop usage.
     mode = (request.form.get("mode") or "folder").strip().lower()
+    requested_exts = (request.form.get("extensions") or "").strip()
+    allowed_exts = set()
+    if requested_exts:
+        for raw in requested_exts.split(","):
+            ext = raw.strip().lower()
+            if not ext:
+                continue
+            if not ext.startswith("."):
+                ext = f".{ext}"
+            allowed_exts.add(ext)
     if shutil.which("zenity"):
         try:
             cmd = ["zenity", "--file-selection"]
@@ -2918,7 +3146,10 @@ def features_select_folder():
                 if not os.path.isfile(picked):
                     return jsonify({"error": f"Selected path is not a file: {picked}"}), 400
                 ext = Path(picked).suffix.lower()
-                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                if allowed_exts:
+                    if ext not in allowed_exts:
+                        return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
+                elif ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                     return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
             return jsonify({"path": picked})
         except subprocess.TimeoutExpired:
@@ -2992,24 +3223,36 @@ def features_parser_inspect():
 
 @app.route("/features/load_precomputed", methods=["POST"])
 def features_load_precomputed():
+    source_mode = (request.form.get("precomputed_features_source_mode") or "upload").strip().lower()
     upload = request.files.get("precomputed_features_file")
-    if upload is None or not upload.filename:
-        flash("Upload a precomputed features dataframe (.pkl/.pickle).", "error")
-        return redirect(request.referrer or url_for("features"))
+    server_file_path = (request.form.get("precomputed_features_server_file_path") or "").strip()
 
-    safe_name = secure_filename(upload.filename)
-    if not safe_name:
-        flash("Invalid uploaded file name.", "error")
-        return redirect(request.referrer or url_for("features"))
-
-    ext = Path(safe_name).suffix.lower()
-    if ext not in PICKLE_EXTENSIONS:
-        flash("Precomputed features must be a pickle file (.pkl/.pickle).", "error")
-        return redirect(request.referrer or url_for("features"))
+    if source_mode == "server-path":
+        try:
+            source_path = _validate_existing_pickle_file_path(server_file_path, "Features server file")
+            safe_name = secure_filename(os.path.basename(source_path))
+        except Exception as exc:
+            flash(str(exc), "error")
+            return redirect(request.referrer or url_for("features"))
+    else:
+        if upload is None or not upload.filename:
+            flash("Upload a precomputed features dataframe (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("features"))
+        safe_name = secure_filename(upload.filename)
+        if not safe_name:
+            flash("Invalid uploaded file name.", "error")
+            return redirect(request.referrer or url_for("features"))
+        ext = Path(safe_name).suffix.lower()
+        if ext not in PICKLE_EXTENSIONS:
+            flash("Precomputed features must be a pickle file (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("features"))
 
     features_dir = _features_data_dir(create=True)
     temp_path = os.path.join(features_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
-    upload.save(temp_path)
+    if source_mode == "server-path":
+        shutil.copy2(source_path, temp_path)
+    else:
+        upload.save(temp_path)
     try:
         df = compute_utils.read_df_file(temp_path)
         if not isinstance(df, pd.DataFrame):
@@ -3054,24 +3297,36 @@ def inference_load_data():
 
 @app.route("/inference/load_precomputed", methods=["POST"])
 def inference_load_precomputed():
+    source_mode = (request.form.get("precomputed_predictions_source_mode") or "upload").strip().lower()
     upload = request.files.get("precomputed_predictions_file")
-    if upload is None or not upload.filename:
-        flash("Upload a precomputed predictions dataframe (.pkl/.pickle).", "error")
-        return redirect(request.referrer or url_for("inference_load_data"))
+    server_file_path = (request.form.get("precomputed_predictions_server_file_path") or "").strip()
 
-    safe_name = secure_filename(upload.filename)
-    if not safe_name:
-        flash("Invalid uploaded file name.", "error")
-        return redirect(request.referrer or url_for("inference_load_data"))
-
-    ext = Path(safe_name).suffix.lower()
-    if ext not in PICKLE_EXTENSIONS:
-        flash("Precomputed predictions must be a pickle file (.pkl/.pickle).", "error")
-        return redirect(request.referrer or url_for("inference_load_data"))
+    if source_mode == "server-path":
+        try:
+            source_path = _validate_existing_pickle_file_path(server_file_path, "Predictions server file")
+            safe_name = secure_filename(os.path.basename(source_path))
+        except Exception as exc:
+            flash(str(exc), "error")
+            return redirect(request.referrer or url_for("inference_load_data"))
+    else:
+        if upload is None or not upload.filename:
+            flash("Upload a precomputed predictions dataframe (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("inference_load_data"))
+        safe_name = secure_filename(upload.filename)
+        if not safe_name:
+            flash("Invalid uploaded file name.", "error")
+            return redirect(request.referrer or url_for("inference_load_data"))
+        ext = Path(safe_name).suffix.lower()
+        if ext not in PICKLE_EXTENSIONS:
+            flash("Precomputed predictions must be a pickle file (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("inference_load_data"))
 
     predictions_dir = _predictions_data_dir(create=True)
     temp_path = os.path.join(predictions_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
-    upload.save(temp_path)
+    if source_mode == "server-path":
+        shutil.copy2(source_path, temp_path)
+    else:
+        upload.save(temp_path)
     try:
         df = compute_utils.read_df_file(temp_path)
         if not isinstance(df, pd.DataFrame):
@@ -5251,6 +5506,14 @@ def start_computation_redirect(computation_type):
 
     files = None
     uploaded_files = []
+    inference_features_source_mode = "upload"
+    inference_model_assets_source = "upload"
+    inference_features_server_path = ""
+    inference_assets_server_files = {}
+    inference_training_features_source_mode = "upload"
+    inference_training_parameters_source_mode = "upload"
+    inference_training_features_server_path = ""
+    inference_training_parameters_server_path = ""
 
     def _ensure_files_parsed():
         nonlocal files, uploaded_files
@@ -5429,7 +5692,7 @@ def start_computation_redirect(computation_type):
 
     if computation_type != 'features':
         _ensure_files_parsed()
-    if computation_type != 'features' and len(uploaded_files) == 0 and computation_type not in {'inference', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
+    if computation_type != 'features' and len(uploaded_files) == 0 and computation_type not in {'inference', 'inference_training', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
         flash('No files uploaded, please try again.', 'error')
         return redirect(request.referrer)
 
@@ -5443,10 +5706,49 @@ def start_computation_redirect(computation_type):
                     return True
             return False
 
+        inference_training_features_source_mode = (request.form.get("training_features_source_mode") or "upload").strip().lower()
+        inference_training_parameters_source_mode = (request.form.get("training_parameters_source_mode") or "upload").strip().lower()
+        training_features_server_file_path = (request.form.get("training_features_server_file_path") or "").strip()
+        training_parameters_server_file_path = (request.form.get("training_parameters_server_file_path") or "").strip()
+
+        if inference_training_features_source_mode not in {"upload", "server-path"}:
+            inference_training_features_source_mode = "upload"
+        if inference_training_parameters_source_mode not in {"upload", "server-path"}:
+            inference_training_parameters_source_mode = "upload"
+
         has_features = _has_upload("training_features_file", "file-upload-x", "features_train_file")
         has_parameters = _has_upload("training_parameters_file", "file-upload-y", "parameters_train_file")
-        if not has_features or not has_parameters:
-            flash('Upload both Features Data and Parameters Data for training.', 'error')
+
+        if inference_training_features_source_mode == "server-path":
+            if has_features:
+                flash('Use either a local features upload or a server features file path for training, not both.', 'error')
+                return redirect(request.referrer or url_for('new_training'))
+            try:
+                inference_training_features_server_path = _validate_existing_file_path(
+                    training_features_server_file_path,
+                    "Training features server file",
+                )
+            except Exception as exc:
+                flash(str(exc), 'error')
+                return redirect(request.referrer or url_for('new_training'))
+        elif not has_features:
+            flash('Provide Features Data for training (local upload or server file).', 'error')
+            return redirect(request.referrer or url_for('new_training'))
+
+        if inference_training_parameters_source_mode == "server-path":
+            if has_parameters:
+                flash('Use either a local parameters upload or a server parameters file path for training, not both.', 'error')
+                return redirect(request.referrer or url_for('new_training'))
+            try:
+                inference_training_parameters_server_path = _validate_existing_file_path(
+                    training_parameters_server_file_path,
+                    "Training parameters server file",
+                )
+            except Exception as exc:
+                flash(str(exc), 'error')
+                return redirect(request.referrer or url_for('new_training'))
+        elif not has_parameters:
+            flash('Provide Parameters Data for training (local upload or server file).', 'error')
             return redirect(request.referrer or url_for('new_training'))
 
         model_name = (request.form.get("training_model_name") or "").strip()
@@ -5471,10 +5773,31 @@ def start_computation_redirect(computation_type):
                     return True
             return False
 
+        inference_features_source_mode = (request.form.get("features_source_mode") or "upload").strip().lower()
+        inference_model_assets_source = (request.form.get("model_assets_source") or "upload").strip().lower()
+        features_server_file_path = (request.form.get("features_server_file_path") or "").strip()
+        inference_assets_server_folder_path = (request.form.get("inference_assets_server_folder_path") or "").strip()
+        inference_model_server_file_path = (request.form.get("inference_model_server_file_path") or "").strip()
+        inference_scaler_server_file_path = (request.form.get("inference_scaler_server_file_path") or "").strip()
+        inference_density_server_file_path = (request.form.get("inference_density_server_file_path") or "").strip()
+
         has_uploaded_features = _has_upload("features_predict_file", "features_predict", "file-upload-features")
-        if not has_uploaded_features and not has_existing_features:
-            flash('Upload features data or use an auto-loaded features file.', 'error')
-            return redirect(request.referrer or url_for('inference'))
+        if inference_features_source_mode == "server-path":
+            if has_uploaded_features:
+                flash('Use either a local features upload or a server features file path, not both.', 'error')
+                return redirect(request.referrer or url_for('inference'))
+            try:
+                inference_features_server_path = _validate_existing_pickle_file_path(
+                    features_server_file_path,
+                    "Inference features server file",
+                )
+            except Exception as exc:
+                flash(str(exc), 'error')
+                return redirect(request.referrer or url_for('inference'))
+        else:
+            if not has_uploaded_features and not has_existing_features:
+                flash('Upload features data or use an auto-loaded features file.', 'error')
+                return redirect(request.referrer or url_for('inference'))
 
         has_uploaded_model = _has_upload("model_file", "model-file", "file-upload-model")
         has_uploaded_scaler = _has_upload("scaler_file", "scaler-file", "file-upload-scaler")
@@ -5483,26 +5806,75 @@ def start_computation_redirect(computation_type):
         has_folder_uploads = bool(folder_uploads)
         has_individual_assets = has_uploaded_model or has_uploaded_scaler or has_uploaded_density
         assets_upload_mode = (request.form.get("assets_upload_mode") or "").strip().lower()
+        if assets_upload_mode not in {"individual", "folder"}:
+            assets_upload_mode = "individual"
+        inference_assets_server_files = {}
 
-        if has_folder_uploads and has_individual_assets:
-            flash('Use only one assets upload mode: either individual files or one folder.', 'error')
-            return redirect(request.referrer or url_for('inference'))
-        if assets_upload_mode == "folder" and has_individual_assets:
-            flash('Assets upload mode is set to folder, so individual asset files are not allowed.', 'error')
-            return redirect(request.referrer or url_for('inference'))
-        if assets_upload_mode == "individual" and has_folder_uploads:
-            flash('Assets upload mode is set to individual files, so folder upload is not allowed.', 'error')
-            return redirect(request.referrer or url_for('inference'))
+        if inference_model_assets_source == "server-path":
+            if has_folder_uploads or has_individual_assets:
+                flash('Use either server assets folder mode or browser upload mode, not both.', 'error')
+                return redirect(request.referrer or url_for('inference'))
+            if assets_upload_mode == "folder":
+                try:
+                    inference_assets_server_files = _collect_inference_assets_folder_files(
+                        inference_assets_server_folder_path
+                    )
+                except Exception as exc:
+                    flash(str(exc), 'error')
+                    return redirect(request.referrer or url_for('inference'))
+                if "model_file" not in inference_assets_server_files:
+                    flash(
+                        'Server assets folder must contain a model pickle file (e.g. model.pkl).',
+                        'error',
+                    )
+                    return redirect(request.referrer or url_for('inference'))
+            else:
+                try:
+                    inference_assets_server_files["model_file"] = _validate_existing_pickle_file_path(
+                        inference_model_server_file_path,
+                        "Inference server model file",
+                    )
+                except Exception as exc:
+                    flash(str(exc), 'error')
+                    return redirect(request.referrer or url_for('inference'))
+                if inference_scaler_server_file_path:
+                    try:
+                        inference_assets_server_files["scaler_file"] = _validate_existing_pickle_file_path(
+                            inference_scaler_server_file_path,
+                            "Inference server scaler file",
+                        )
+                    except Exception as exc:
+                        flash(str(exc), 'error')
+                        return redirect(request.referrer or url_for('inference'))
+                if inference_density_server_file_path:
+                    try:
+                        inference_assets_server_files["density_estimator_file"] = _validate_existing_pickle_file_path(
+                            inference_density_server_file_path,
+                            "Inference server density estimator file",
+                        )
+                    except Exception as exc:
+                        flash(str(exc), 'error')
+                        return redirect(request.referrer or url_for('inference'))
+        else:
+            if has_folder_uploads and has_individual_assets:
+                flash('Use only one assets upload mode: either individual files or one folder.', 'error')
+                return redirect(request.referrer or url_for('inference'))
+            if assets_upload_mode == "folder" and has_individual_assets:
+                flash('Assets upload mode is set to folder, so individual asset files are not allowed.', 'error')
+                return redirect(request.referrer or url_for('inference'))
+            if assets_upload_mode == "individual" and has_folder_uploads:
+                flash('Assets upload mode is set to individual files, so folder upload is not allowed.', 'error')
+                return redirect(request.referrer or url_for('inference'))
 
-        folder_has_model = False
-        for folder_upload in folder_uploads:
-            base = os.path.basename(folder_upload.filename or "").lower()
-            if base.startswith("model") or base == "model.pkl":
-                folder_has_model = True
-                break
-        if not has_uploaded_model and not folder_has_model:
-            flash('Upload a model file, or upload a folder that contains a model file (e.g. model.pkl).', 'error')
-            return redirect(request.referrer or url_for('inference'))
+            folder_has_model = False
+            for folder_upload in folder_uploads:
+                base = os.path.basename(folder_upload.filename or "").lower()
+                if base.startswith("model") or base == "model.pkl":
+                    folder_has_model = True
+                    break
+            if not has_uploaded_model and not folder_has_model:
+                flash('Upload a model file, or upload a folder that contains a model file (e.g. model.pkl).', 'error')
+                return redirect(request.referrer or url_for('inference'))
 
         estimated_time_remaining = time.time() + 130 # 130 seconds of estimated time remaining
 
@@ -5519,6 +5891,7 @@ def start_computation_redirect(computation_type):
 
     # If everything is OK, save/prepare the file(s)
     file_paths = {}
+    kernel_params_module_override = None
     prepared_features_df = None
     empirical_upload_paths = None
     parser_config_obj = None
@@ -5683,49 +6056,150 @@ def start_computation_redirect(computation_type):
             if computation_type == "inference":
                 normalized_key = inference_file_key_map.get(file_key, file_key)
             file_paths[normalized_key] = file_path
-        if computation_type == "inference":
-            folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
-            for idx, upload in enumerate(folder_uploads):
-                raw_name = upload.filename or ""
-                base_name = os.path.basename(raw_name)
-                safe_name = secure_filename(base_name)
-                if not safe_name:
+        if computation_type in {"field_potential_proxy", "field_potential_kernel", "field_potential_meeg"}:
+            server_file_keys = []
+            redirect_target = "field_potential_kernel"
+            if computation_type == "field_potential_proxy":
+                redirect_target = "field_potential_proxy"
+                server_file_keys = [
+                    "times_file",
+                    "gids_file",
+                    "vm_file",
+                    "ampa_file",
+                    "gaba_file",
+                ]
+            elif computation_type == "field_potential_kernel":
+                server_file_keys = [
+                    "kernel_spike_times_file",
+                    "kernel_population_sizes_file",
+                    "electrode_parameters_file",
+                ]
+            elif computation_type == "field_potential_meeg":
+                redirect_target = "field_potential_meeg"
+                server_file_keys = [
+                    "meeg_cdm_file",
+                    "meeg_dipole_file",
+                    "meeg_sensor_file",
+                ]
+            for file_key in server_file_keys:
+                source_mode = (request.form.get(f"{file_key}_source_mode") or "upload").strip().lower()
+                if source_mode != "server-path":
                     continue
-                unique_filename = f"{computation_type}_inference_assets_folder_{idx}_{job_id}_{safe_name}"
-                file_path = os.path.join(temp_uploaded_files, unique_filename)
-                upload.save(file_path)
+                server_path_raw = (request.form.get(f"{file_key}_server_path") or "").strip()
+                if not server_path_raw:
+                    continue
+                try:
+                    source_path = _validate_existing_pickle_file_path(server_path_raw, f"{file_key} server file")
+                except Exception as exc:
+                    flash(str(exc), "error")
+                    return redirect(request.referrer or url_for(redirect_target))
+                copied_name = f"{computation_type}_{file_key}_{job_id}_{os.path.basename(source_path)}"
+                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                shutil.copy2(source_path, copied_path)
+                file_paths[file_key] = copied_path
+        if computation_type == "field_potential_kernel":
+            kernel_params_source_mode = (request.form.get("kernel_params_module_source_mode") or "server-path").strip().lower()
+            if kernel_params_source_mode not in {"upload", "server-path"}:
+                kernel_params_source_mode = "server-path"
 
-                lower = safe_name.lower()
-                normalized_key = None
-                if lower.startswith("model") or lower == "model.pkl":
-                    normalized_key = "model_file"
-                elif lower.startswith("scaler") or lower == "scaler.pkl":
-                    normalized_key = "scaler_file"
-                elif "density_estimator" in lower or lower.startswith("density"):
-                    normalized_key = "density_estimator_file"
+            if kernel_params_source_mode == "upload":
+                uploaded_kernel_params = file_paths.get("kernel_params_file")
+                if uploaded_kernel_params:
+                    if Path(uploaded_kernel_params).suffix.lower() != ".py":
+                        flash("Kernel parameters local upload must be a Python file (.py).", "error")
+                        return redirect(request.referrer or url_for("field_potential_kernel"))
+                    kernel_params_module_override = uploaded_kernel_params
 
-                # Do not override explicit single-file uploads from dedicated controls.
-                if normalized_key and normalized_key not in file_paths:
-                    file_paths[normalized_key] = file_path
-                else:
+            if kernel_params_module_override is None:
+                kernel_params_path_raw = (request.form.get("kernel_params_module") or "").strip()
+                if kernel_params_path_raw:
                     try:
-                        if os.path.exists(file_path):
-                            os.remove(file_path)
-                    except OSError:
-                        pass
+                        source_path = _validate_existing_file_path(
+                            kernel_params_path_raw,
+                            "Kernel parameters module",
+                            allowed_extensions={".py"},
+                        )
+                    except Exception as exc:
+                        flash(str(exc), "error")
+                        return redirect(request.referrer or url_for("field_potential_kernel"))
+                    copied_name = f"{computation_type}_kernel_params_module_{job_id}_{os.path.basename(source_path)}"
+                    copied_path = os.path.join(temp_uploaded_files, copied_name)
+                    shutil.copy2(source_path, copied_path)
+                    file_paths["kernel_params_module_file"] = copied_path
+                    kernel_params_module_override = copied_path
         if computation_type == "inference":
-            existing_features_file = (request.form.get("existing_features_file") or "").strip()
-            if "features_predict" not in file_paths and existing_features_file:
-                available = set(_list_features_data_files())
-                if existing_features_file in available:
-                    src_path = os.path.join(_features_data_dir(create=False), existing_features_file)
-                    if os.path.isfile(src_path):
-                        copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(src_path)}"
-                        copied_path = os.path.join(temp_uploaded_files, copied_name)
-                        shutil.copy2(src_path, copied_path)
-                        file_paths["features_predict"] = copied_path
+            if inference_model_assets_source != "server-path":
+                folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
+                for idx, upload in enumerate(folder_uploads):
+                    raw_name = upload.filename or ""
+                    base_name = os.path.basename(raw_name)
+                    safe_name = secure_filename(base_name)
+                    if not safe_name:
+                        continue
+                    unique_filename = f"{computation_type}_inference_assets_folder_{idx}_{job_id}_{safe_name}"
+                    file_path = os.path.join(temp_uploaded_files, unique_filename)
+                    upload.save(file_path)
+
+                    lower = safe_name.lower()
+                    normalized_key = None
+                    if lower.startswith("model") or lower == "model.pkl":
+                        normalized_key = "model_file"
+                    elif lower.startswith("scaler") or lower == "scaler.pkl":
+                        normalized_key = "scaler_file"
+                    elif "density_estimator" in lower or lower.startswith("density"):
+                        normalized_key = "density_estimator_file"
+
+                    # Do not override explicit single-file uploads from dedicated controls.
+                    if normalized_key and normalized_key not in file_paths:
+                        file_paths[normalized_key] = file_path
+                    else:
+                        try:
+                            if os.path.exists(file_path):
+                                os.remove(file_path)
+                        except OSError:
+                            pass
+
+            if inference_features_source_mode == "server-path" and inference_features_server_path:
+                copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(inference_features_server_path)}"
+                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                shutil.copy2(inference_features_server_path, copied_path)
+                file_paths["features_predict"] = copied_path
+            else:
+                existing_features_file = (request.form.get("existing_features_file") or "").strip()
+                if "features_predict" not in file_paths and existing_features_file:
+                    available = set(_list_features_data_files())
+                    if existing_features_file in available:
+                        src_path = os.path.join(_features_data_dir(create=False), existing_features_file)
+                        if os.path.isfile(src_path):
+                            copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(src_path)}"
+                            copied_path = os.path.join(temp_uploaded_files, copied_name)
+                            shutil.copy2(src_path, copied_path)
+                            file_paths["features_predict"] = copied_path
+
+            if inference_model_assets_source == "server-path":
+                for asset_key in ("model_file", "scaler_file", "density_estimator_file"):
+                    source_path = inference_assets_server_files.get(asset_key)
+                    if not source_path:
+                        continue
+                    copied_name = f"inference_{asset_key}_{job_id}_{os.path.basename(source_path)}"
+                    copied_path = os.path.join(temp_uploaded_files, copied_name)
+                    shutil.copy2(source_path, copied_path)
+                    file_paths[asset_key] = copied_path
+        if computation_type == "inference_training":
+            if inference_training_features_source_mode == "server-path" and inference_training_features_server_path:
+                copied_name = f"inference_training_features_{job_id}_{os.path.basename(inference_training_features_server_path)}"
+                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                shutil.copy2(inference_training_features_server_path, copied_path)
+                file_paths["training_features_file"] = copied_path
+            if inference_training_parameters_source_mode == "server-path" and inference_training_parameters_server_path:
+                copied_name = f"inference_training_parameters_{job_id}_{os.path.basename(inference_training_parameters_server_path)}"
+                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                shutil.copy2(inference_training_parameters_server_path, copied_path)
+                file_paths["training_parameters_file"] = copied_path
 
     data = request.form.to_dict() # Get parameters from form POST
+    if kernel_params_module_override is not None:
+        data["kernel_params_module"] = kernel_params_module_override
     # Add file information to the data dictionary
     data['file_paths'] = file_paths
     if prepared_features_df is not None:

@@ -22,51 +22,128 @@
         },
     }
 </script>
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
+<style type="text/tailwindcss">
+    .drop-zone {
+        border-style: dashed;
+    }
+</style>
 {% endblock %}
 
 <!-- Main content of the simulation page -->
 {% block content %}
 
 <form id="custom-simulation-form" method="POST" action="{{ url_for('run_trial_simulation_custom') }}" enctype="multipart/form-data">
-    <!-- Upload section (hidden) -->
     <div id="upload-section">
         <section id="custom-upload" class="upload-section config-content flex flex-col gap-6">
             <h2
                 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
                 Upload custom configuration</h2>
+
+            <div id="custom-form-error" class="hidden mx-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300"></div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
-                <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Network
-                        parameters</span>
-                    <input
-                        name="network_params_file"
-                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
-                        type="file" required />
-                </label>
-                <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Network
-                        implementation (.py)</span>
-                    <input
-                        name="network_py_file"
-                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
-                        type="file" required />
-                </label>
-                <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation
-                        parameters</span>
-                    <input
-                        name="simulation_params_file"
-                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
-                        type="file" required />
-                </label>
-                <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation
-                        implementation (.py)</span>
-                    <input
-                        name="simulation_py_file"
-                        class="form-input block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary/10 dark:file:bg-primary/20 file:text-primary dark:file:text-primary dark:text-slate-400 hover:file:bg-primary/20 dark:hover:file:bg-primary/30 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33]"
-                        type="file" required />
-                </label>
+                <div class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer" data-field="network_params_file" data-label="Network parameters (.py)">
+                    <input id="network_params_file_input" name="network_params_file" type="file" class="hidden" accept=".py" />
+                    <input id="network_params_file_source_mode" name="network_params_file_source_mode" type="hidden" value="upload" />
+                    <input id="network_params_file_server_path" name="network_params_file_server_path" type="hidden" value="" />
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                        <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                    </div>
+                    <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                    <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Network parameters (.py)</p>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop a local file or click to browse.</p>
+                    <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                        <button type="button" class="custom-browse-local-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse local file</button>
+                        <button type="button" class="custom-browse-server-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse server files</button>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="local-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected local file:</span>
+                        <span class="block" data-role="local-name"></span>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="server-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected server file:</span>
+                        <span class="block font-mono break-all" data-role="server-path"></span>
+                    </div>
+                </div>
+
+                <div class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer" data-field="network_py_file" data-label="Network implementation (.py)">
+                    <input id="network_py_file_input" name="network_py_file" type="file" class="hidden" accept=".py" />
+                    <input id="network_py_file_source_mode" name="network_py_file_source_mode" type="hidden" value="upload" />
+                    <input id="network_py_file_server_path" name="network_py_file_server_path" type="hidden" value="" />
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                        <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                    </div>
+                    <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">code</span>
+                    <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Network implementation (.py)</p>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop a local file or click to browse.</p>
+                    <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                        <button type="button" class="custom-browse-local-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse local file</button>
+                        <button type="button" class="custom-browse-server-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse server files</button>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="local-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected local file:</span>
+                        <span class="block" data-role="local-name"></span>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="server-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected server file:</span>
+                        <span class="block font-mono break-all" data-role="server-path"></span>
+                    </div>
+                </div>
+
+                <div class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer" data-field="simulation_params_file" data-label="Simulation parameters (.py)">
+                    <input id="simulation_params_file_input" name="simulation_params_file" type="file" class="hidden" accept=".py" />
+                    <input id="simulation_params_file_source_mode" name="simulation_params_file_source_mode" type="hidden" value="upload" />
+                    <input id="simulation_params_file_server_path" name="simulation_params_file_server_path" type="hidden" value="" />
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                        <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                    </div>
+                    <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">tune</span>
+                    <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Simulation parameters (.py)</p>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop a local file or click to browse.</p>
+                    <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                        <button type="button" class="custom-browse-local-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse local file</button>
+                        <button type="button" class="custom-browse-server-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse server files</button>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="local-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected local file:</span>
+                        <span class="block" data-role="local-name"></span>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="server-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected server file:</span>
+                        <span class="block font-mono break-all" data-role="server-path"></span>
+                    </div>
+                </div>
+
+                <div class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer" data-field="simulation_py_file" data-label="Simulation implementation (.py)">
+                    <input id="simulation_py_file_input" name="simulation_py_file" type="file" class="hidden" accept=".py" />
+                    <input id="simulation_py_file_source_mode" name="simulation_py_file_source_mode" type="hidden" value="upload" />
+                    <input id="simulation_py_file_server_path" name="simulation_py_file_server_path" type="hidden" value="" />
+                    <div class="flex flex-wrap justify-center gap-2">
+                        <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                        <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                    </div>
+                    <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">terminal</span>
+                    <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Simulation implementation (.py)</p>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop a local file or click to browse.</p>
+                    <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                        <button type="button" class="custom-browse-local-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse local file</button>
+                        <button type="button" class="custom-browse-server-btn h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold">Browse server files</button>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="local-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected local file:</span>
+                        <span class="block" data-role="local-name"></span>
+                    </div>
+                    <div class="mt-3 text-xs text-slate-500 dark:text-slate-400 hidden" data-role="server-summary">
+                        <span class="font-semibold text-slate-700 dark:text-slate-200">Selected server file:</span>
+                        <span class="block font-mono break-all" data-role="server-path"></span>
+                    </div>
+                </div>
             </div>
         </section>
     </div>
@@ -92,4 +169,415 @@
     </div>
 </form>
 
+<div id="custom-sim-server-file-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+            <button type="button" id="custom-sim-server-file-close"
+                class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+        </div>
+        <div class="p-4 space-y-3">
+            <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                Current folder: <span id="custom-sim-server-file-path" class="font-mono"></span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="custom-sim-server-file-up"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">Up</button>
+                <button type="button" id="custom-sim-server-file-refresh"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">Refresh</button>
+                <button type="button" id="custom-sim-server-file-select"
+                    class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">Select file</button>
+            </div>
+            <div id="custom-sim-server-file-error" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+            <div id="custom-sim-server-file-loading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+            <div id="custom-sim-server-file-entries" class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+    const runtime = window.__webuiRuntime || {};
+    const defaultMode = String(runtime.default_simulation_source_mode || "upload").toLowerCase() === "server-path" ? "server-path" : "upload";
+    const form = document.getElementById("custom-simulation-form");
+    const formError = document.getElementById("custom-form-error");
+
+    const modal = document.getElementById("custom-sim-server-file-modal");
+    const modalPath = document.getElementById("custom-sim-server-file-path");
+    const modalEntries = document.getElementById("custom-sim-server-file-entries");
+    const modalError = document.getElementById("custom-sim-server-file-error");
+    const modalLoading = document.getElementById("custom-sim-server-file-loading");
+    const modalUp = document.getElementById("custom-sim-server-file-up");
+    const modalRefresh = document.getElementById("custom-sim-server-file-refresh");
+    const modalSelect = document.getElementById("custom-sim-server-file-select");
+    const modalClose = document.getElementById("custom-sim-server-file-close");
+
+    let activeField = "";
+    let currentPath = "";
+    let parentPath = "";
+    let selectedPath = "";
+
+    const cards = Array.from(document.querySelectorAll(".custom-file-card"));
+
+    const basenameFromPath = (path) => {
+        const value = String(path || "").trim();
+        if (!value) return "";
+        const normalized = value.replace(/\\/g, "/");
+        const parts = normalized.split("/").filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : value;
+    };
+
+    const getCard = (field) => cards.find((card) => card.dataset.field === field);
+    const getModeInput = (field) => document.getElementById(`${field}_source_mode`);
+    const getServerInput = (field) => document.getElementById(`${field}_server_path`);
+    const getFileInput = (field) => document.getElementById(`${field}_input`);
+
+    const showError = (message) => {
+        const clean = String(message || "").trim();
+        formError.textContent = clean;
+        formError.classList.toggle("hidden", !clean);
+    };
+
+    const setModeVisuals = (field, mode) => {
+        const card = getCard(field);
+        if (!card) return;
+        const uploadBtn = card.querySelector(".custom-mode-upload-btn");
+        const serverBtn = card.querySelector(".custom-mode-server-btn");
+        const localBrowse = card.querySelector(".custom-browse-local-btn");
+        const serverBrowse = card.querySelector(".custom-browse-server-btn");
+        const hint = card.querySelector('[data-role="hint"]');
+        const localSummary = card.querySelector('[data-role="local-summary"]');
+        const serverSummary = card.querySelector('[data-role="server-summary"]');
+
+        const activeClasses = ["border-primary", "bg-primary/10", "text-primary", "font-semibold"];
+        const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
+
+        [uploadBtn, serverBtn].forEach((btn) => {
+            btn.classList.remove(...activeClasses);
+            btn.classList.add(...inactiveClasses);
+        });
+
+        if (mode === "server-path") {
+            serverBtn.classList.add(...activeClasses);
+            serverBtn.classList.remove(...inactiveClasses);
+            localBrowse.classList.add("hidden");
+            serverBrowse.classList.remove("hidden");
+            hint.textContent = "Select an existing .py file from the server.";
+            localSummary.classList.add("hidden");
+        } else {
+            uploadBtn.classList.add(...activeClasses);
+            uploadBtn.classList.remove(...inactiveClasses);
+            localBrowse.classList.remove("hidden");
+            serverBrowse.classList.add("hidden");
+            hint.textContent = "Drag and drop a local file or click to browse.";
+            serverSummary.classList.add("hidden");
+        }
+    };
+
+    const setMode = (field, mode) => {
+        const normalized = mode === "server-path" ? "server-path" : "upload";
+        const modeInput = getModeInput(field);
+        const fileInput = getFileInput(field);
+        const serverInput = getServerInput(field);
+        if (!modeInput || !fileInput || !serverInput) return;
+        modeInput.value = normalized;
+        if (normalized === "server-path") {
+            fileInput.value = "";
+            const card = getCard(field);
+            const localName = card ? card.querySelector('[data-role="local-name"]') : null;
+            const localSummary = card ? card.querySelector('[data-role="local-summary"]') : null;
+            if (localName) localName.textContent = "";
+            if (localSummary) localSummary.classList.add("hidden");
+        } else {
+            serverInput.value = "";
+            const card = getCard(field);
+            const serverPathEl = card ? card.querySelector('[data-role="server-path"]') : null;
+            const serverSummary = card ? card.querySelector('[data-role="server-summary"]') : null;
+            if (serverPathEl) serverPathEl.textContent = "";
+            if (serverSummary) serverSummary.classList.add("hidden");
+        }
+        setModeVisuals(field, normalized);
+        showError("");
+    };
+
+    const setLocalSelection = (field, fileName) => {
+        const card = getCard(field);
+        if (!card) return;
+        const localName = card.querySelector('[data-role="local-name"]');
+        const localSummary = card.querySelector('[data-role="local-summary"]');
+        const serverSummary = card.querySelector('[data-role="server-summary"]');
+        const serverInput = getServerInput(field);
+        if (localName) localName.textContent = fileName || "";
+        if (localSummary) localSummary.classList.toggle("hidden", !fileName);
+        if (serverSummary) serverSummary.classList.add("hidden");
+        if (serverInput) serverInput.value = "";
+    };
+
+    const setServerSelection = (field, pathValue) => {
+        const card = getCard(field);
+        const serverInput = getServerInput(field);
+        if (!card || !serverInput) return;
+        const cleanPath = String(pathValue || "").trim();
+        serverInput.value = cleanPath;
+        const serverPathEl = card.querySelector('[data-role="server-path"]');
+        const serverSummary = card.querySelector('[data-role="server-summary"]');
+        const localSummary = card.querySelector('[data-role="local-summary"]');
+        const localName = card.querySelector('[data-role="local-name"]');
+        const fileInput = getFileInput(field);
+
+        if (serverPathEl) serverPathEl.textContent = cleanPath;
+        if (serverSummary) serverSummary.classList.toggle("hidden", !cleanPath);
+        if (localSummary) localSummary.classList.add("hidden");
+        if (localName) localName.textContent = "";
+        if (fileInput) fileInput.value = "";
+    };
+
+    const setModalLoading = (loading) => {
+        modalLoading.classList.toggle("hidden", !loading);
+    };
+
+    const setModalError = (message) => {
+        const clean = String(message || "").trim();
+        modalError.textContent = clean;
+        modalError.classList.toggle("hidden", !clean);
+    };
+
+    const renderModalEntries = (dirs, files) => {
+        modalEntries.innerHTML = "";
+        const dirItems = Array.isArray(dirs) ? dirs : [];
+        const fileItems = Array.isArray(files) ? files : [];
+
+        dirItems.forEach((entry) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800";
+            btn.textContent = `${entry.name}/`;
+            btn.addEventListener("click", () => {
+                loadServerFiles(entry.path);
+            });
+            modalEntries.appendChild(btn);
+        });
+
+        fileItems.forEach((entry) => {
+            const label = document.createElement("label");
+            label.className = "w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer";
+            const input = document.createElement("input");
+            input.type = "radio";
+            input.name = "custom-sim-server-file-selected";
+            input.value = entry.path;
+            input.className = "text-primary focus:ring-primary";
+            if (selectedPath && selectedPath === entry.path) {
+                input.checked = true;
+            }
+            input.addEventListener("change", () => {
+                selectedPath = entry.path;
+            });
+            const span = document.createElement("span");
+            span.className = "font-mono";
+            span.textContent = entry.name;
+            label.appendChild(input);
+            label.appendChild(span);
+            modalEntries.appendChild(label);
+        });
+
+        if (dirItems.length === 0 && fileItems.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "px-3 py-2 text-xs text-slate-500 dark:text-slate-400";
+            empty.textContent = "No matching files or subdirectories found.";
+            modalEntries.appendChild(empty);
+        }
+    };
+
+    const loadServerFiles = async (pathValue) => {
+        setModalLoading(true);
+        setModalError("");
+        try {
+            const params = new URLSearchParams();
+            const targetPath = String(pathValue || "").trim();
+            if (targetPath) {
+                params.set("path", targetPath);
+            }
+            params.set("include_files", "1");
+            params.set("extensions", ".py");
+
+            const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || "Failed to list server files.");
+            }
+
+            currentPath = String(payload.path || "");
+            parentPath = String(payload.parent || "");
+            modalPath.textContent = currentPath || "/";
+            modalUp.disabled = !parentPath;
+            renderModalEntries(payload.dirs || [], payload.files || []);
+
+            if (selectedPath) {
+                const stillPresent = (payload.files || []).some((entry) => entry.path === selectedPath);
+                if (!stillPresent) selectedPath = "";
+            }
+        } catch (error) {
+            setModalError(error && error.message ? error.message : "Failed to list server files.");
+        } finally {
+            setModalLoading(false);
+        }
+    };
+
+    const openModalForField = async (field) => {
+        activeField = field;
+        selectedPath = String(getServerInput(field)?.value || "").trim();
+        const startPath = selectedPath && selectedPath.includes("/")
+            ? selectedPath.slice(0, selectedPath.lastIndexOf("/"))
+            : String(runtime.server_home_dir || "").trim();
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+        await loadServerFiles(startPath);
+    };
+
+    const closeModal = () => {
+        modal.classList.add("hidden");
+        modal.classList.remove("flex");
+        setModalError("");
+    };
+
+    cards.forEach((card) => {
+        const field = card.dataset.field;
+        const fileInput = getFileInput(field);
+        const modeInput = getModeInput(field);
+
+        const uploadBtn = card.querySelector(".custom-mode-upload-btn");
+        const serverBtn = card.querySelector(".custom-mode-server-btn");
+        const browseLocalBtn = card.querySelector(".custom-browse-local-btn");
+        const browseServerBtn = card.querySelector(".custom-browse-server-btn");
+
+        setMode(field, defaultMode);
+
+        uploadBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setMode(field, "upload");
+        });
+
+        serverBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setMode(field, "server-path");
+        });
+
+        browseLocalBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (modeInput.value !== "upload") return;
+            fileInput.click();
+        });
+
+        browseServerBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (modeInput.value !== "server-path") return;
+            openModalForField(field);
+        });
+
+        card.addEventListener("click", () => {
+            if (modeInput.value === "upload") {
+                fileInput.click();
+            } else {
+                openModalForField(field);
+            }
+        });
+
+        fileInput.addEventListener("change", () => {
+            const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+            setLocalSelection(field, file ? file.name : "");
+            showError("");
+        });
+
+        ["dragenter", "dragover"].forEach((eventName) => {
+            card.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (modeInput.value !== "upload") return;
+                card.classList.add("border-primary");
+            });
+        });
+
+        ["dragleave", "drop"].forEach((eventName) => {
+            card.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (modeInput.value !== "upload") return;
+                card.classList.remove("border-primary");
+            });
+        });
+
+        card.addEventListener("drop", (event) => {
+            if (modeInput.value !== "upload") return;
+            const files = event.dataTransfer.files;
+            if (!files || files.length === 0) return;
+            const dt = new DataTransfer();
+            dt.items.add(files[0]);
+            fileInput.files = dt.files;
+            setLocalSelection(field, files[0].name);
+            showError("");
+        });
+    });
+
+    modalUp.addEventListener("click", () => {
+        if (parentPath) loadServerFiles(parentPath);
+    });
+
+    modalRefresh.addEventListener("click", () => {
+        loadServerFiles(currentPath);
+    });
+
+    modalSelect.addEventListener("click", () => {
+        if (!activeField) {
+            setModalError("No target field selected.");
+            return;
+        }
+        if (!selectedPath) {
+            setModalError("Select a file.");
+            return;
+        }
+        setMode(activeField, "server-path");
+        setServerSelection(activeField, selectedPath);
+        closeModal();
+        showError("");
+    });
+
+    modalClose.addEventListener("click", closeModal);
+    modal.addEventListener("click", (event) => {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    form.addEventListener("submit", (event) => {
+        const missing = [];
+
+        cards.forEach((card) => {
+            const field = card.dataset.field;
+            const label = card.dataset.label || field;
+            const mode = String(getModeInput(field)?.value || "upload").trim().toLowerCase();
+            const fileInput = getFileInput(field);
+            const serverPath = String(getServerInput(field)?.value || "").trim();
+
+            if (mode === "server-path") {
+                if (!serverPath) {
+                    missing.push(`${label}: select a server file`);
+                }
+            } else {
+                const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+                if (!file) {
+                    missing.push(`${label}: upload a local file`);
+                }
+            }
+        });
+
+        if (missing.length > 0) {
+            event.preventDefault();
+            showError(`Missing required custom files. ${missing.join("; ")}`);
+        } else {
+            showError("");
+        }
+    });
+})();
+</script>
 {% endblock %}

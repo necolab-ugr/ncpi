@@ -3,6 +3,10 @@
 
 {% block head %}
 {{ super() }}
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+    window.__proxyBrowseDirsUrl = "{{ url_for('features_browse_dirs') }}";
+</script>
 <style type="text/tailwindcss">
     .material-symbols-outlined {
         font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24
@@ -75,8 +79,12 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div id="timesUploadContainer"
                         data-upload="timesFile"
+                        data-source-mode-input="times_file_source_mode"
+                        data-server-path-input="times_file_server_path"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="timesFile" name="times_file" accept=".pkl" />
+                        <input type="hidden" name="times_file_source_mode" value="upload" />
+                        <input type="hidden" name="times_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
                         <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.times }}</p>
@@ -88,8 +96,12 @@
                     </div>
                     <div id="gidsUploadContainer"
                         data-upload="gidsFile"
+                        data-source-mode-input="gids_file_source_mode"
+                        data-server-path-input="gids_file_server_path"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="gidsFile" name="gids_file" accept=".pkl" />
+                        <input type="hidden" name="gids_file_source_mode" value="upload" />
+                        <input type="hidden" name="gids_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike gids (gids.pkl)</span>
                         <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.gids }}</p>
@@ -101,8 +113,12 @@
                     </div>
                     <div id="vmUploadContainer"
                         data-upload="vmFile"
+                        data-source-mode-input="vm_file_source_mode"
+                        data-server-path-input="vm_file_server_path"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="vmFile" name="vm_file" accept=".pkl" />
+                        <input type="hidden" name="vm_file_source_mode" value="upload" />
+                        <input type="hidden" name="vm_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Membrane Potential (Vm)</span>
                         <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.vm }}</p>
@@ -114,8 +130,12 @@
                     </div>
                     <div id="ampaUploadContainer" 
                         data-upload="ampaFile"
+                        data-source-mode-input="ampa_file_source_mode"
+                        data-server-path-input="ampa_file_server_path"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="ampaFile" name="ampa_file" accept=".pkl" />
+                        <input type="hidden" name="ampa_file_source_mode" value="upload" />
+                        <input type="hidden" name="ampa_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">AMPA Currents Data</span>
                         <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.ampa }}</p>
@@ -127,8 +147,12 @@
                     </div>
                     <div id="gabaUploadContainer" 
                         data-upload="gabaFile"
+                        data-source-mode-input="gaba_file_source_mode"
+                        data-server-path-input="gaba_file_server_path"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="gabaFile" name="gaba_file" accept=".pkl" />
+                        <input type="hidden" name="gaba_file_source_mode" value="upload" />
+                        <input type="hidden" name="gaba_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">GABA Currents Data</span>
                         <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.gaba }}</p>
@@ -191,6 +215,39 @@
             <a href="{{url_for('dashboard')}}" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-10 px-6 bg-transparent text-slate-500 dark:text-slate-400 text-sm font-bold leading-normal tracking-[0.015em] border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                 <span class="truncate">Back to the dashboard</span>
             </a>
+        </div>
+    </div>
+</div>
+
+<div id="proxyServerFileBrowserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+            <button type="button" id="proxyServerFileBrowserClose"
+                class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+        </div>
+        <div class="p-4 space-y-3">
+            <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                Current folder: <span id="proxyServerFileBrowserPath" class="font-mono"></span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="proxyServerFileBrowserUp"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Up
+                </button>
+                <button type="button" id="proxyServerFileBrowserRefresh"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Refresh
+                </button>
+                <button type="button" id="proxyServerFileBrowserSelect"
+                    class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                    Select file
+                </button>
+            </div>
+            <div id="proxyServerFileBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+            <div id="proxyServerFileBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+            <div id="proxyServerFileBrowserEntries"
+                class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
         </div>
     </div>
 </div>

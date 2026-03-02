@@ -1907,8 +1907,8 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
         )
 
         model_assets_source = (params.get("model_assets_source") or "upload").strip().lower()
-        if model_assets_source != "upload":
-            raise ValueError("Only uploaded prediction artifacts are supported.")
+        if model_assets_source not in {"upload", "server-path"}:
+            raise ValueError(f"Unsupported prediction artifacts source mode: {model_assets_source}")
 
         model_uploaded = _first_existing_file([file_paths.get("model_file"), file_paths.get("model-file")])
         scaler_uploaded = _first_existing_file([file_paths.get("scaler_file"), file_paths.get("scaler-file")])
@@ -2941,7 +2941,15 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             transient = 0.0
         probe_names = selected_probe_names or ["KernelApproxCurrentDipoleMoment"]
         component_val = params.get("cdm_component")
-        component = None if component_val in (None, "", "None") else int(float(component_val))
+        if component_val in (None, "", "None"):
+            component = None
+        else:
+            component_token = str(component_val).strip().lower()
+            axis_to_index = {"x": 0, "y": 1, "z": 2}
+            if component_token in axis_to_index:
+                component = axis_to_index[component_token]
+            else:
+                component = int(float(component_val))
         mode = params.get("cdm_mode") or "same"
         scale_val = params.get("cdm_scale")
         scale = float(scale_val) if scale_val not in (None, "") else 1.0

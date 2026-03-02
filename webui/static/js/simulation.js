@@ -173,6 +173,71 @@ document.addEventListener('DOMContentLoaded', function() {
         input.insertAdjacentElement('afterend', controls);
     }
 
+    function addSingleArrayControls(input, preset) {
+        const initial = (preset !== undefined && preset !== null) ? preset : (input.value || '');
+        const parsed = parseStructured(initial);
+        if (!Array.isArray(parsed)) {
+            return;
+        }
+
+        const controls = document.createElement('div');
+        controls.className = 'single-array-controls mt-2 grid grid-cols-1 md:grid-cols-2 gap-2';
+        controls.dataset.baseValue = JSON.stringify(parsed);
+
+        const leaves = collectLeaves(parsed);
+        const baseClass = 'single-array-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white';
+
+        leaves.forEach((leaf, index) => {
+            const label = leaf.path.length === 0
+                ? `Component ${index + 1}`
+                : leaf.path.map(idx => `[${idx}]`).join('');
+            controls.insertAdjacentHTML('beforeend', `
+                <label class="flex flex-col gap-1" data-single-array-row="1" data-path="${escapeHtml(JSON.stringify(leaf.path))}">
+                    <span class="text-xs text-slate-600 dark:text-slate-300">${escapeHtml(label)}</span>
+                    <input type="text" class="${baseClass}" value="${escapeHtml(String(leaf.value ?? ''))}" />
+                </label>
+            `);
+        });
+
+        input.insertAdjacentElement('afterend', controls);
+    }
+
+    function normalizeSingleArrayInput(input) {
+        const controls = input.parentElement.querySelector('.single-array-controls');
+        if (!controls) {
+            return { ok: true };
+        }
+
+        const baseValue = parseStructured(controls.dataset.baseValue || input.value || '');
+        if (!Array.isArray(baseValue)) {
+            return { ok: true };
+        }
+
+        const out = JSON.parse(JSON.stringify(baseValue));
+        const leaves = collectLeaves(baseValue);
+        const rows = Array.from(controls.querySelectorAll('[data-single-array-row="1"]'));
+
+        for (let idx = 0; idx < rows.length; idx += 1) {
+            const row = rows[idx];
+            const path = JSON.parse(row.dataset.path || '[]');
+            const template = leaves[idx] ? leaves[idx].value : null;
+            const raw = (row.querySelector('input')?.value ?? '').trim();
+
+            if (typeof template === 'number') {
+                const numeric = Number(raw);
+                if (!Number.isFinite(numeric)) {
+                    return { ok: false, message: `Parameter "${input.name}" ${path.map(i => `[${i}]`).join('')}: numeric value required.` };
+                }
+                setAtPath(out, path, numeric);
+                continue;
+            }
+            setAtPath(out, path, raw);
+        }
+
+        input.value = toPythonLiteral(out);
+        return { ok: true };
+    }
+
     function normalizeGridInput(input) {
         const controls = input.parentElement.querySelector('.grid-parameter-controls');
         if (!controls) {
@@ -290,6 +355,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 input.value = preset;
             }
 
+            addSingleArrayControls(input, preset);
+
             if (!simulationOnlyParams.has(paramName)) {
                 addGridControls(input, preset);
             }
@@ -318,7 +385,13 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('.param-input').forEach(input => {
             const paramName = input.dataset.param || input.name;
             const keepSingle = simulationOnlyParams.has(paramName);
-            input.classList.toggle('hidden', isGrid && !keepSingle);
+            const singleArrayControls = input.parentElement.querySelector('.single-array-controls');
+            if (singleArrayControls) {
+                input.classList.add('hidden');
+                singleArrayControls.classList.toggle('hidden', isGrid);
+            } else {
+                input.classList.toggle('hidden', isGrid && !keepSingle);
+            }
         });
         document.querySelectorAll('.grid-parameter-controls').forEach(ctrl => {
             ctrl.classList.toggle('hidden', !isGrid);
@@ -334,11 +407,21 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.form.addEventListener('submit', (event) => {
             const selected = document.querySelector('input[name="sim_run_mode"]:checked');
             const isGrid = selected && selected.value === 'grid';
+
+            const params = Array.from(elements.form.querySelectorAll('.param-input'));
+            for (const input of params) {
+                const singleResult = normalizeSingleArrayInput(input);
+                if (!singleResult.ok) {
+                    event.preventDefault();
+                    window.alert(singleResult.message);
+                    return;
+                }
+            }
+
             if (!isGrid) {
                 return;
             }
 
-            const params = Array.from(elements.form.querySelectorAll('.param-input'));
             for (const input of params) {
                 const paramName = input.dataset.param || input.name;
                 if (simulationOnlyParams.has(paramName)) {

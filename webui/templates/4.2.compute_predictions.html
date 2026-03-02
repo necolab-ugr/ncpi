@@ -3,6 +3,9 @@
 
 {% block head %}
 {{ super() }}
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
 <style>
     body {
       -webkit-font-smoothing: antialiased;
@@ -41,6 +44,14 @@
 {% block content %}
 <div
     x-data="{
+        runtime: (window.__webuiRuntime || {}),
+        featuresSourceMode: 'upload',
+        featuresServerFilePath: '',
+        assetsSourceMode: 'upload',
+        assetsServerFolderPath: '',
+        assetsModelServerFilePath: '',
+        assetsScalerServerFilePath: '',
+        assetsDensityServerFilePath: '',
         assetsUploadMode: 'individual',
         modelName: '__auto__',
         autoDetectedBackend: '',
@@ -90,6 +101,8 @@
             <div class="grid grid-cols-1 gap-6">
                 <div>
                     <input id="existing-features-file" type="hidden" name="existing_features_file" value="{{ default_feature_file | default('') }}">
+                    <input id="features-source-mode" type="hidden" name="features_source_mode" :value="featuresSourceMode">
+                    <input id="features-server-file-path" type="hidden" name="features_server_file_path" :value="featuresServerFilePath">
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                         Features Data <span class="text-red-500">*</span>
                     </label>
@@ -103,22 +116,44 @@
                         (detected from previous steps)
                     </div>
                     <div
-                        onclick="document.getElementById('file-upload-features').click()"
+                        @click="if (featuresSourceMode === 'upload') { document.getElementById('file-upload-features').click(); }"
                         class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                        <div class="space-y-1 text-center">
-                            <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                            <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                <label
-                                    class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                    for="file-upload-features">
-                                    <span>Upload a file</span>
-                                    <input accept=".pkl" class="sr-only" id="file-upload-features"
-                                        name="features_predict_file" type="file" />
-                                </label>
+                        <div class="space-y-2 text-center">
+                            <div class="flex flex-wrap justify-center gap-2">
+                                <button id="features-source-upload-btn" type="button" @click.stop="featuresSourceMode = 'upload'; featuresServerFilePath = ''"
+                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                    :class="featuresSourceMode === 'upload' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                                    Local upload
+                                </button>
+                                <button id="features-source-server-btn" type="button" @click.stop="featuresSourceMode = 'server-path'"
+                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                    :class="featuresSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                                    Server file
+                                </button>
                             </div>
-                            <p class="text-xs text-slate-500 dark:text-slate-500">
-                                .pkl only
+                            <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
+                            <div class="flex justify-center" x-show="featuresSourceMode === 'upload'" x-cloak>
+                                <input accept=".pkl,.pickle" class="sr-only" id="file-upload-features"
+                                    name="features_predict_file" type="file" :disabled="featuresSourceMode !== 'upload'" />
+                                <button type="button"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                    onclick="document.getElementById('file-upload-features').click()">
+                                    Browse local files
+                                </button>
+                            </div>
+                            <div class="flex justify-center" x-show="featuresSourceMode === 'server-path' && !featuresServerFilePath" x-cloak>
+                                <button type="button" id="features-server-browse-btn"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    Browse server files
+                                </button>
+                            </div>
+                            <p class="text-xs text-slate-500 dark:text-slate-500" x-show="featuresSourceMode === 'upload'" x-cloak>
+                                Select an existing local file.
                             </p>
+                            <p class="text-xs text-slate-500 dark:text-slate-500" x-show="featuresSourceMode === 'server-path'" x-cloak>
+                                Select an existing server file.
+                            </p>
+                            <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="featuresSourceMode === 'server-path' && featuresServerFilePath" x-cloak x-text="featuresServerFilePath"></p>
                         </div>
                     </div>
                     <div
@@ -147,11 +182,31 @@
                 Load Prediction Assets
             </h2>
             <div class="grid grid-cols-1 gap-6">
-                <input type="hidden" name="model_assets_source" value="upload">
+                <input id="model-assets-source" type="hidden" name="model_assets_source" :value="assetsSourceMode">
                 <input type="hidden" name="assets_upload_mode" :value="assetsUploadMode">
+                <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" :value="assetsServerFolderPath">
+                <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" :value="assetsModelServerFilePath">
+                <input id="inference-scaler-server-file-path" type="hidden" name="inference_scaler_server_file_path" :value="assetsScalerServerFilePath">
+                <input id="inference-density-server-file-path" type="hidden" name="inference_density_server_file_path" :value="assetsDensityServerFilePath">
+
+                <div class="rounded-md border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/30">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Assets Source</label>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="assets-source-upload-btn" type="button" data-assets-source-btn="upload" @click="assetsSourceMode = 'upload'; assetsServerFolderPath = ''"
+                            class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                            :class="assetsSourceMode === 'upload' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                            Local files
+                        </button>
+                        <button id="assets-source-server-btn" type="button" data-assets-source-btn="server-path" @click="assetsSourceMode = 'server-path'"
+                            class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                            :class="assetsSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                            Server files
+                        </button>
+                    </div>
+                </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Assets Upload Mode</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Assets Selection Mode</label>
                     <div class="flex flex-col sm:flex-row gap-3">
                         <label class="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
                             <input id="assets-mode-individual" type="radio" class="text-primary focus:ring-primary" x-model="assetsUploadMode" value="individual">
@@ -164,28 +219,101 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsUploadMode === 'individual'" x-cloak>
+                <div x-show="assetsSourceMode === 'server-path' && assetsUploadMode === 'folder'" x-cloak>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Assets Folder <span class="text-red-500">*</span>
+                    </label>
+                    <div class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
+                        <div class="space-y-2 text-center">
+                            <span class="material-symbols-outlined text-4xl text-slate-400">folder_open</span>
+                            <p class="text-xs text-slate-500 dark:text-slate-500">
+                                Select an existing server folder containing model/scaler/density_estimator files.
+                            </p>
+                            <div class="flex justify-center" x-show="!assetsServerFolderPath" x-cloak>
+                                <button type="button" id="assets-server-browse-btn"
+                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                    Browse server folder
+                                </button>
+                            </div>
+                            <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsServerFolderPath" x-cloak x-text="assetsServerFolderPath"></p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'server-path' && assetsUploadMode === 'individual'" x-cloak>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            Model / Posterior <span class="text-red-500">*</span>
+                        </label>
+                        <div class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
+                                <span class="material-symbols-outlined text-4xl text-slate-400">model_training</span>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing server file (.pkl/.pickle).</p>
+                                <div class="flex justify-center" x-show="!assetsModelServerFilePath" x-cloak>
+                                    <button type="button" id="assets-model-server-browse-btn"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse server files
+                                    </button>
+                                </div>
+                                <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsModelServerFilePath" x-cloak x-text="assetsModelServerFilePath"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            Scaler (optional)
+                        </label>
+                        <div class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
+                                <span class="material-symbols-outlined text-4xl text-slate-400">scale</span>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing server file (.pkl/.pickle).</p>
+                                <div class="flex justify-center" x-show="!assetsScalerServerFilePath" x-cloak>
+                                    <button type="button" id="assets-scaler-server-browse-btn"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse server files
+                                    </button>
+                                </div>
+                                <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsScalerServerFilePath" x-cloak x-text="assetsScalerServerFilePath"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                            Density Estimator (optional)
+                        </label>
+                        <div class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
+                                <span class="material-symbols-outlined text-4xl text-slate-400">deployed_code</span>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing server file (.pkl/.pickle).</p>
+                                <div class="flex justify-center" x-show="!assetsDensityServerFilePath" x-cloak>
+                                    <button type="button" id="assets-density-server-browse-btn"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse server files
+                                    </button>
+                                </div>
+                                <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsDensityServerFilePath" x-cloak x-text="assetsDensityServerFilePath"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'upload' && assetsUploadMode === 'individual'" x-cloak>
                     <div>
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="file-upload-model">
                             Model / Posterior <span class="text-red-500">*</span>
                         </label>
+                        <input class="hidden" id="file-upload-model" name="model_file" type="file" />
                         <div
-                            onclick="document.getElementById('file-upload-model').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-1 text-center">
+                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
                                 <span class="material-symbols-outlined text-4xl text-slate-400">model_training</span>
-                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                    <label
-                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                        for="file-upload-model">
-                                        <span>Upload model file</span>
-                                        <input class="sr-only" id="file-upload-model" name="model_file"
-                                            type="file" />
-                                    </label>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local file (.pkl/.pickle).</p>
+                                <div class="flex justify-center">
+                                    <button type="button" onclick="document.getElementById('file-upload-model').click()"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse local files
+                                    </button>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    model.pkl
-                                </p>
                             </div>
                         </div>
                         <div id="asset-model-status"
@@ -196,25 +324,20 @@
                     </div>
                     <div>
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                            Scaler Source
+                            Scaler (optional)
                         </label>
+                        <input class="hidden" id="file-upload-scaler" name="scaler_file" type="file" />
                         <div
-                            onclick="document.getElementById('file-upload-scaler').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-1 text-center">
+                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
                                 <span class="material-symbols-outlined text-4xl text-slate-400">scale</span>
-                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                    <label
-                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                        for="file-upload-scaler">
-                                        <span>Upload scaler</span>
-                                        <input class="sr-only" id="file-upload-scaler"
-                                            name="scaler_file" type="file" />
-                                    </label>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local file (.pkl/.pickle).</p>
+                                <div class="flex justify-center">
+                                    <button type="button" onclick="document.getElementById('file-upload-scaler').click()"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse local files
+                                    </button>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    scaler.pkl
-                                </p>
                             </div>
                         </div>
                         <div id="asset-scaler-status"
@@ -225,28 +348,23 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsUploadMode === 'individual'" x-cloak>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'upload' && assetsUploadMode === 'individual'" x-cloak>
                     <div>
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="file-upload-density-estimator">
                             Density Estimator (optional)
                         </label>
+                        <input class="hidden" id="file-upload-density-estimator" name="density_estimator_file" type="file" />
                         <div
-                            onclick="document.getElementById('file-upload-density-estimator').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-1 text-center">
+                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
                                 <span class="material-symbols-outlined text-4xl text-slate-400">deployed_code</span>
-                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                    <label
-                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                        for="file-upload-density-estimator">
-                                        <span>Upload density_estimator.pkl</span>
-                                        <input class="sr-only" id="file-upload-density-estimator"
-                                            name="density_estimator_file" type="file" />
-                                    </label>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local file (.pkl/.pickle).</p>
+                                <div class="flex justify-center">
+                                    <button type="button" onclick="document.getElementById('file-upload-density-estimator').click()"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse local files
+                                    </button>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    Needed for SBI when model artifact contains inference object(s)
-                                </p>
                             </div>
                         </div>
                         <div id="asset-density-status"
@@ -257,28 +375,24 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsUploadMode === 'folder'" x-cloak>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'upload' && assetsUploadMode === 'folder'" x-cloak>
                     <div class="md:col-span-2">
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="file-upload-assets-folder">
-                            Upload Assets Folder (all at once)
+                            Assets Folder <span class="text-red-500">*</span>
                         </label>
+                        <input class="hidden" id="file-upload-assets-folder"
+                            name="inference_assets_folder" type="file" webkitdirectory directory multiple />
                         <div
-                            onclick="document.getElementById('file-upload-assets-folder').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-1 text-center">
+                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
+                            <div class="space-y-2 text-center">
                                 <span class="material-symbols-outlined text-4xl text-slate-400">folder_open</span>
-                                <div class="flex text-sm text-slate-600 dark:text-slate-400 justify-center">
-                                    <label
-                                        class="relative cursor-pointer rounded-md font-medium text-primary hover:text-primary-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-primary"
-                                        for="file-upload-assets-folder">
-                                        <span>Select folder</span>
-                                        <input class="sr-only" id="file-upload-assets-folder"
-                                            name="inference_assets_folder" type="file" webkitdirectory directory multiple />
-                                    </label>
+                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local folder containing model/scaler/density_estimator files.</p>
+                                <div class="flex justify-center">
+                                    <button type="button" onclick="document.getElementById('file-upload-assets-folder').click()"
+                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
+                                        Browse local folder
+                                    </button>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">
-                                    Folder can contain model/scaler/density_estimator files
-                                </p>
                             </div>
                         </div>
                         <div id="asset-folder-results"
@@ -500,6 +614,72 @@
         </div>
     </form>
 
+    <div id="inferenceServerFileBrowserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+                <button type="button" id="inferenceServerFileBrowserClose"
+                    class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                    Current folder: <span id="inferenceServerFileBrowserPath" class="font-mono"></span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" id="inferenceServerFileBrowserUp"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Up
+                    </button>
+                    <button type="button" id="inferenceServerFileBrowserRefresh"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Refresh
+                    </button>
+                    <button type="button" id="inferenceServerFileBrowserSelect"
+                        class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                        Select file
+                    </button>
+                </div>
+                <div id="inferenceServerFileBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+                <div id="inferenceServerFileBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+                <div id="inferenceServerFileBrowserEntries"
+                    class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="inferenceServerFolderBrowserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server folders</h3>
+                <button type="button" id="inferenceServerFolderBrowserClose"
+                    class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                    Current folder: <span id="inferenceServerFolderBrowserPath" class="font-mono"></span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" id="inferenceServerFolderBrowserUp"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Up
+                    </button>
+                    <button type="button" id="inferenceServerFolderBrowserRefresh"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Refresh
+                    </button>
+                    <button type="button" id="inferenceServerFolderBrowserSelect"
+                        class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                        Select this folder
+                    </button>
+                </div>
+                <div id="inferenceServerFolderBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+                <div id="inferenceServerFolderBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+                <div id="inferenceServerFolderBrowserEntries"
+                    class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Navigation buttons -->
     <div class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
         <!-- Previous/Return Button -->
@@ -522,20 +702,50 @@
         return document.getElementById(id);
     }
 
+    function getInferenceState() {
+        const root = document.querySelector("[x-data]");
+        return (root && root.__x && root.__x.$data) ? root.__x.$data : null;
+    }
+
+    function basenameFromPath(path) {
+        const value = String(path || "").trim();
+        if (!value) return "";
+        const normalized = value.replace(/\\/g, "/");
+        const parts = normalized.split("/").filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : value;
+    }
+
     function refreshFeaturesLoadStatus() {
         const input = byId("file-upload-features");
         const existingInput = byId("existing-features-file");
+        const featuresSourceModeInput = byId("features-source-mode");
+        const featuresServerFilePathInput = byId("features-server-file-path");
         const loadedStatus = byId("features-loaded-status");
         const uploadedStatus = byId("features-uploaded-status");
         const uploadedName = byId("features-uploaded-name");
         const notLoadedStatus = byId("features-not-loaded-status");
 
-        if (!input || !existingInput || !loadedStatus || !uploadedStatus || !notLoadedStatus) {
+        if (!input || !existingInput || !featuresSourceModeInput || !featuresServerFilePathInput || !loadedStatus || !uploadedStatus || !notLoadedStatus) {
             return;
         }
 
+        const sourceMode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
+        const serverPath = String(featuresServerFilePathInput.value || "").trim();
         const file = (input.files && input.files[0]) ? input.files[0] : null;
         const existingName = (existingInput.value || "").trim();
+
+        if (sourceMode === "server-path") {
+            loadedStatus.style.display = "none";
+            if (serverPath) {
+                uploadedName.textContent = basenameFromPath(serverPath);
+                uploadedStatus.style.display = "";
+                notLoadedStatus.style.display = "none";
+            } else {
+                uploadedStatus.style.display = "none";
+                notLoadedStatus.style.display = "";
+            }
+            return;
+        }
 
         if (file) {
             uploadedName.textContent = file.name;
@@ -638,6 +848,8 @@
     function bindAssetsModeExclusivity() {
         const individualRadio = byId("assets-mode-individual");
         const folderRadio = byId("assets-mode-folder");
+        const assetsSourceInput = byId("model-assets-source");
+        const assetsServerFolderInput = byId("inference-assets-server-folder-path");
         const modelInput = byId("file-upload-model");
         const scalerInput = byId("file-upload-scaler");
         const densityInput = byId("file-upload-density-estimator");
@@ -653,7 +865,7 @@
         const folderDetectedScaler = byId("asset-folder-result-scaler");
         const folderDetectedDensity = byId("asset-folder-result-density");
 
-        if (!individualRadio || !folderRadio || !modelInput || !scalerInput || !densityInput || !folderInput) return;
+        if (!individualRadio || !folderRadio || !assetsSourceInput || !assetsServerFolderInput || !modelInput || !scalerInput || !densityInput || !folderInput) return;
 
         const clearIndividual = () => {
             modelInput.value = "";
@@ -676,31 +888,363 @@
         };
 
         const sync = () => {
+            const sourceMode = String(assetsSourceInput.value || "upload").trim().toLowerCase();
             const mode = folderRadio.checked ? "folder" : "individual";
-            const individualEnabled = mode === "individual";
-            modelInput.disabled = !individualEnabled;
-            scalerInput.disabled = !individualEnabled;
-            densityInput.disabled = !individualEnabled;
-            folderInput.disabled = individualEnabled;
-            if (individualEnabled) {
+            if (sourceMode !== "upload") {
+                modelInput.disabled = true;
+                scalerInput.disabled = true;
+                densityInput.disabled = true;
+                folderInput.disabled = true;
+                clearIndividual();
                 clearFolder();
             } else {
-                clearIndividual();
+                const individualEnabled = mode === "individual";
+                modelInput.disabled = !individualEnabled;
+                scalerInput.disabled = !individualEnabled;
+                densityInput.disabled = !individualEnabled;
+                folderInput.disabled = individualEnabled;
+                if (individualEnabled) {
+                    clearFolder();
+                } else {
+                    clearIndividual();
+                }
             }
         };
 
         individualRadio.addEventListener("change", sync);
         folderRadio.addEventListener("change", sync);
         sync();
+        return sync;
+    }
+
+    function bindInferenceServerBrowsers(onAssetsSourceChange) {
+        const runtime = window.__webuiRuntime || {};
+        const state = getInferenceState();
+        const featuresSourceModeInput = byId("features-source-mode");
+        const featuresServerFilePathInput = byId("features-server-file-path");
+        const modelAssetsSourceInput = byId("model-assets-source");
+        const assetsServerFolderInput = byId("inference-assets-server-folder-path");
+        const assetsModelServerFilePathInput = byId("inference-model-server-file-path");
+        const assetsScalerServerFilePathInput = byId("inference-scaler-server-file-path");
+        const assetsDensityServerFilePathInput = byId("inference-density-server-file-path");
+        const featuresBrowseBtn = byId("features-server-browse-btn");
+        const assetsBrowseBtn = byId("assets-server-browse-btn");
+        const assetsModelBrowseBtn = byId("assets-model-server-browse-btn");
+        const assetsScalerBrowseBtn = byId("assets-scaler-server-browse-btn");
+        const assetsDensityBrowseBtn = byId("assets-density-server-browse-btn");
+
+        const fileModal = byId("inferenceServerFileBrowserModal");
+        const filePathEl = byId("inferenceServerFileBrowserPath");
+        const fileEntriesEl = byId("inferenceServerFileBrowserEntries");
+        const fileErrorEl = byId("inferenceServerFileBrowserError");
+        const fileLoadingEl = byId("inferenceServerFileBrowserLoading");
+        const fileUpBtn = byId("inferenceServerFileBrowserUp");
+        const fileRefreshBtn = byId("inferenceServerFileBrowserRefresh");
+        const fileSelectBtn = byId("inferenceServerFileBrowserSelect");
+        const fileCloseBtn = byId("inferenceServerFileBrowserClose");
+
+        const folderModal = byId("inferenceServerFolderBrowserModal");
+        const folderPathEl = byId("inferenceServerFolderBrowserPath");
+        const folderEntriesEl = byId("inferenceServerFolderBrowserEntries");
+        const folderErrorEl = byId("inferenceServerFolderBrowserError");
+        const folderLoadingEl = byId("inferenceServerFolderBrowserLoading");
+        const folderUpBtn = byId("inferenceServerFolderBrowserUp");
+        const folderRefreshBtn = byId("inferenceServerFolderBrowserRefresh");
+        const folderSelectBtn = byId("inferenceServerFolderBrowserSelect");
+        const folderCloseBtn = byId("inferenceServerFolderBrowserClose");
+
+        if (
+            !featuresSourceModeInput || !featuresServerFilePathInput ||
+            !modelAssetsSourceInput || !assetsServerFolderInput ||
+            !assetsModelServerFilePathInput || !assetsScalerServerFilePathInput || !assetsDensityServerFilePathInput ||
+            !featuresBrowseBtn || !assetsBrowseBtn || !assetsModelBrowseBtn || !assetsScalerBrowseBtn || !assetsDensityBrowseBtn ||
+            !fileModal || !filePathEl || !fileEntriesEl || !fileErrorEl || !fileLoadingEl || !fileUpBtn || !fileRefreshBtn || !fileSelectBtn || !fileCloseBtn ||
+            !folderModal || !folderPathEl || !folderEntriesEl || !folderErrorEl || !folderLoadingEl || !folderUpBtn || !folderRefreshBtn || !folderSelectBtn || !folderCloseBtn
+        ) {
+            return;
+        }
+
+        let currentFilePath = "";
+        let parentFilePath = "";
+        let selectedFilePath = "";
+        let activeFileTarget = "features";
+        let currentFolderPath = "";
+        let parentFolderPath = "";
+
+        const setLoading = (el, loading) => {
+            el.classList.toggle("hidden", !loading);
+        };
+
+        const setError = (el, message) => {
+            const text = String(message || "").trim();
+            el.textContent = text;
+            el.classList.toggle("hidden", !text);
+        };
+
+        const closeFileModal = () => {
+            fileModal.classList.add("hidden");
+            fileModal.classList.remove("flex");
+            setError(fileErrorEl, "");
+        };
+
+        const closeFolderModal = () => {
+            folderModal.classList.add("hidden");
+            folderModal.classList.remove("flex");
+            setError(folderErrorEl, "");
+        };
+
+        const renderFileEntries = (dirs, files) => {
+            fileEntriesEl.innerHTML = "";
+            const dirItems = Array.isArray(dirs) ? dirs : [];
+            const fileItems = Array.isArray(files) ? files : [];
+            dirItems.forEach((entry) => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800";
+                btn.textContent = `${entry.name}/`;
+                btn.addEventListener("click", () => loadServerFiles(entry.path));
+                fileEntriesEl.appendChild(btn);
+            });
+            fileItems.forEach((entry) => {
+                const label = document.createElement("label");
+                label.className = "w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer";
+                const input = document.createElement("input");
+                input.type = "radio";
+                input.name = "inference-server-file-selected";
+                input.value = entry.path;
+                input.className = "text-primary focus:ring-primary";
+                if (entry.path === selectedFilePath) input.checked = true;
+                input.addEventListener("change", () => { selectedFilePath = entry.path; });
+                const span = document.createElement("span");
+                span.className = "font-mono";
+                span.textContent = entry.name;
+                label.appendChild(input);
+                label.appendChild(span);
+                fileEntriesEl.appendChild(label);
+            });
+            if (dirItems.length === 0 && fileItems.length === 0) {
+                const empty = document.createElement("p");
+                empty.className = "px-3 py-2 text-xs text-slate-500 dark:text-slate-400";
+                empty.textContent = "No matching files or subdirectories found.";
+                fileEntriesEl.appendChild(empty);
+            }
+        };
+
+        const renderFolderEntries = (dirs) => {
+            folderEntriesEl.innerHTML = "";
+            const dirItems = Array.isArray(dirs) ? dirs : [];
+            dirItems.forEach((entry) => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800";
+                btn.textContent = `${entry.name}/`;
+                btn.addEventListener("click", () => loadServerFolders(entry.path));
+                folderEntriesEl.appendChild(btn);
+            });
+            if (dirItems.length === 0) {
+                const empty = document.createElement("p");
+                empty.className = "px-3 py-2 text-xs text-slate-500 dark:text-slate-400";
+                empty.textContent = "No subdirectories found.";
+                folderEntriesEl.appendChild(empty);
+            }
+        };
+
+        const loadServerFiles = async (path) => {
+            setLoading(fileLoadingEl, true);
+            setError(fileErrorEl, "");
+            try {
+                const params = new URLSearchParams();
+                const targetPath = String(path || "").trim();
+                if (targetPath) params.set("path", targetPath);
+                params.set("include_files", "1");
+                params.set("extensions", ".pkl,.pickle");
+                const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(payload.error || "Failed to list server files.");
+                currentFilePath = String(payload.path || "");
+                parentFilePath = String(payload.parent || "");
+                filePathEl.textContent = currentFilePath || "/";
+                renderFileEntries(payload.dirs || [], payload.files || []);
+                fileUpBtn.disabled = !parentFilePath;
+            } catch (error) {
+                setError(fileErrorEl, error && error.message ? error.message : "Failed to list server files.");
+            } finally {
+                setLoading(fileLoadingEl, false);
+            }
+        };
+
+        const loadServerFolders = async (path) => {
+            setLoading(folderLoadingEl, true);
+            setError(folderErrorEl, "");
+            try {
+                const params = new URLSearchParams();
+                const targetPath = String(path || "").trim();
+                if (targetPath) params.set("path", targetPath);
+                const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(payload.error || "Failed to list server folders.");
+                currentFolderPath = String(payload.path || "");
+                parentFolderPath = String(payload.parent || "");
+                folderPathEl.textContent = currentFolderPath || "/";
+                renderFolderEntries(payload.dirs || []);
+                folderUpBtn.disabled = !parentFolderPath;
+            } catch (error) {
+                setError(folderErrorEl, error && error.message ? error.message : "Failed to list server folders.");
+            } finally {
+                setLoading(folderLoadingEl, false);
+            }
+        };
+
+        const openFileModalAtPath = async (currentSelectionPath) => {
+            fileModal.classList.remove("hidden");
+            fileModal.classList.add("flex");
+            const current = String(currentSelectionPath || "").trim();
+            const startPath = current && current.includes("/")
+                ? current.slice(0, current.lastIndexOf("/"))
+                : String(runtime.server_home_dir || "").trim();
+            selectedFilePath = current;
+            await loadServerFiles(startPath);
+        };
+
+        featuresBrowseBtn.addEventListener("click", async () => {
+            if (state) state.featuresSourceMode = "server-path";
+            featuresSourceModeInput.value = "server-path";
+            activeFileTarget = "features";
+            await openFileModalAtPath(featuresServerFilePathInput.value || "");
+            refreshFeaturesLoadStatus();
+        });
+
+        assetsBrowseBtn.addEventListener("click", async () => {
+            if (state) state.assetsSourceMode = "server-path";
+            modelAssetsSourceInput.value = "server-path";
+            if (state) state.assetsUploadMode = "folder";
+            folderModal.classList.remove("hidden");
+            folderModal.classList.add("flex");
+            const current = String(assetsServerFolderInput.value || "").trim() || String(runtime.server_home_dir || "").trim();
+            await loadServerFolders(current);
+            if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+        });
+
+        assetsModelBrowseBtn.addEventListener("click", async () => {
+            if (state) {
+                state.assetsSourceMode = "server-path";
+                state.assetsUploadMode = "individual";
+            }
+            modelAssetsSourceInput.value = "server-path";
+            activeFileTarget = "assets-model";
+            await openFileModalAtPath(assetsModelServerFilePathInput.value || "");
+            if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+        });
+
+        assetsScalerBrowseBtn.addEventListener("click", async () => {
+            if (state) {
+                state.assetsSourceMode = "server-path";
+                state.assetsUploadMode = "individual";
+            }
+            modelAssetsSourceInput.value = "server-path";
+            activeFileTarget = "assets-scaler";
+            await openFileModalAtPath(assetsScalerServerFilePathInput.value || "");
+            if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+        });
+
+        assetsDensityBrowseBtn.addEventListener("click", async () => {
+            if (state) {
+                state.assetsSourceMode = "server-path";
+                state.assetsUploadMode = "individual";
+            }
+            modelAssetsSourceInput.value = "server-path";
+            activeFileTarget = "assets-density";
+            await openFileModalAtPath(assetsDensityServerFilePathInput.value || "");
+            if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+        });
+
+        fileUpBtn.addEventListener("click", () => {
+            if (parentFilePath) loadServerFiles(parentFilePath);
+        });
+        fileRefreshBtn.addEventListener("click", () => loadServerFiles(currentFilePath));
+        fileSelectBtn.addEventListener("click", () => {
+            if (!selectedFilePath) {
+                setError(fileErrorEl, "Select a file.");
+                return;
+            }
+            if (activeFileTarget === "features") {
+                if (state) {
+                    state.featuresSourceMode = "server-path";
+                    state.featuresServerFilePath = selectedFilePath;
+                }
+                featuresSourceModeInput.value = "server-path";
+                featuresServerFilePathInput.value = selectedFilePath;
+                refreshFeaturesLoadStatus();
+            } else {
+                if (state) {
+                    state.assetsSourceMode = "server-path";
+                    state.assetsUploadMode = "individual";
+                }
+                modelAssetsSourceInput.value = "server-path";
+                assetsServerFolderInput.value = "";
+                if (state) state.assetsServerFolderPath = "";
+                if (activeFileTarget === "assets-model") {
+                    assetsModelServerFilePathInput.value = selectedFilePath;
+                    if (state) state.assetsModelServerFilePath = selectedFilePath;
+                } else if (activeFileTarget === "assets-scaler") {
+                    assetsScalerServerFilePathInput.value = selectedFilePath;
+                    if (state) state.assetsScalerServerFilePath = selectedFilePath;
+                } else if (activeFileTarget === "assets-density") {
+                    assetsDensityServerFilePathInput.value = selectedFilePath;
+                    if (state) state.assetsDensityServerFilePath = selectedFilePath;
+                }
+                if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+            }
+            closeFileModal();
+        });
+        fileCloseBtn.addEventListener("click", closeFileModal);
+        fileModal.addEventListener("click", (event) => {
+            if (event.target === fileModal) closeFileModal();
+        });
+
+        folderUpBtn.addEventListener("click", () => {
+            if (parentFolderPath) loadServerFolders(parentFolderPath);
+        });
+        folderRefreshBtn.addEventListener("click", () => loadServerFolders(currentFolderPath));
+        folderSelectBtn.addEventListener("click", () => {
+            if (!currentFolderPath) {
+                setError(folderErrorEl, "No server folder selected.");
+                return;
+            }
+            if (state) {
+                state.assetsSourceMode = "server-path";
+                state.assetsUploadMode = "folder";
+                state.assetsServerFolderPath = currentFolderPath;
+                state.assetsModelServerFilePath = "";
+                state.assetsScalerServerFilePath = "";
+                state.assetsDensityServerFilePath = "";
+            }
+            modelAssetsSourceInput.value = "server-path";
+            assetsServerFolderInput.value = currentFolderPath;
+            assetsModelServerFilePathInput.value = "";
+            assetsScalerServerFilePathInput.value = "";
+            assetsDensityServerFilePathInput.value = "";
+            closeFolderModal();
+            if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+        });
+        folderCloseBtn.addEventListener("click", closeFolderModal);
+        folderModal.addEventListener("click", (event) => {
+            if (event.target === folderModal) closeFolderModal();
+        });
     }
 
     function bindAutoModelDetection() {
         const modelSelect = byId("inference-model-name");
+        const modelAssetsSourceInput = byId("model-assets-source");
+        const assetsSourceButtons = Array.from(document.querySelectorAll("[data-assets-source-btn]"));
         const modelInput = byId("file-upload-model");
         const folderInput = byId("file-upload-assets-folder");
         const individualRadio = byId("assets-mode-individual");
         const folderRadio = byId("assets-mode-folder");
-        if (!modelSelect || !modelInput || !folderInput || !individualRadio || !folderRadio) return;
+        if (
+            !modelSelect || !modelAssetsSourceInput ||
+            !modelInput || !folderInput || !individualRadio || !folderRadio
+        ) return;
 
         const detectUrl = "{{ url_for('inference_detect_model_backend') }}";
         let requestCounter = 0;
@@ -781,6 +1325,13 @@
                 return;
             }
 
+            const assetsSourceMode = String(modelAssetsSourceInput.value || "upload").trim().toLowerCase();
+            if (assetsSourceMode !== "upload") {
+                requestCounter += 1;
+                emit({});
+                return;
+            }
+
             if (folderRadio.checked) {
                 const folderFiles = folderInput.files ? Array.from(folderInput.files) : [];
                 const modelFile = pickModelFileFromFolder(folderFiles);
@@ -805,13 +1356,29 @@
         folderInput.addEventListener("change", refresh);
         individualRadio.addEventListener("change", refresh);
         folderRadio.addEventListener("change", refresh);
+        assetsSourceButtons.forEach((button) => {
+            button.addEventListener("click", refresh);
+        });
         refresh();
     }
 
     window.handleInferenceFeaturesInputChange = refreshFeaturesLoadStatus;
 
     document.addEventListener("DOMContentLoaded", () => {
+        const state = getInferenceState();
         const input = byId("file-upload-features");
+        const existingInput = byId("existing-features-file");
+        const featuresSourceModeInput = byId("features-source-mode");
+        const featuresServerFilePathInput = byId("features-server-file-path");
+        const featuresSourceUploadBtn = byId("features-source-upload-btn");
+        const featuresSourceServerBtn = byId("features-source-server-btn");
+        const assetsSourceButtons = Array.from(document.querySelectorAll("[data-assets-source-btn]"));
+        const modelAssetsSourceInput = byId("model-assets-source");
+        const assetsServerFolderInput = byId("inference-assets-server-folder-path");
+        const assetsModelServerFilePathInput = byId("inference-model-server-file-path");
+        const assetsScalerServerFilePathInput = byId("inference-scaler-server-file-path");
+        const assetsDensityServerFilePathInput = byId("inference-density-server-file-path");
+
         if (input && !input.dataset.ncpiFeaturesBound) {
             input.addEventListener("change", refreshFeaturesLoadStatus);
             input.dataset.ncpiFeaturesBound = "1";
@@ -820,8 +1387,59 @@
         bindSingleFileStatus("file-upload-scaler", "asset-scaler-status", "asset-scaler-name");
         bindSingleFileStatus("file-upload-density-estimator", "asset-density-status", "asset-density-name");
         bindAssetsFolderStatus();
-        bindAssetsModeExclusivity();
+        const syncAssetsMode = bindAssetsModeExclusivity();
+        bindInferenceServerBrowsers(syncAssetsMode);
+        if (featuresSourceUploadBtn && featuresSourceModeInput && featuresServerFilePathInput) {
+            featuresSourceUploadBtn.addEventListener("click", () => {
+                if (state) {
+                    state.featuresSourceMode = "upload";
+                    state.featuresServerFilePath = "";
+                }
+                featuresSourceModeInput.value = "upload";
+                featuresServerFilePathInput.value = "";
+                refreshFeaturesLoadStatus();
+            });
+        }
+        if (featuresSourceServerBtn && featuresSourceModeInput && input) {
+            featuresSourceServerBtn.addEventListener("click", () => {
+                if (state) {
+                    state.featuresSourceMode = "server-path";
+                }
+                featuresSourceModeInput.value = "server-path";
+                input.value = "";
+                if (existingInput) existingInput.value = "";
+                refreshFeaturesLoadStatus();
+            });
+        }
+        const applyAssetsSourceMode = (mode) => {
+            if (!modelAssetsSourceInput) return;
+            const normalizedMode = String(mode || "upload").trim().toLowerCase() === "server-path" ? "server-path" : "upload";
+            if (state) {
+                state.assetsSourceMode = normalizedMode;
+                if (normalizedMode === "upload") {
+                    state.assetsServerFolderPath = "";
+                    state.assetsModelServerFilePath = "";
+                    state.assetsScalerServerFilePath = "";
+                    state.assetsDensityServerFilePath = "";
+                }
+            }
+            modelAssetsSourceInput.value = normalizedMode;
+            if (normalizedMode === "upload" && assetsServerFolderInput) {
+                assetsServerFolderInput.value = "";
+                if (assetsModelServerFilePathInput) assetsModelServerFilePathInput.value = "";
+                if (assetsScalerServerFilePathInput) assetsScalerServerFilePathInput.value = "";
+                if (assetsDensityServerFilePathInput) assetsDensityServerFilePathInput.value = "";
+            }
+            if (typeof syncAssetsMode === "function") syncAssetsMode();
+        };
+
+        assetsSourceButtons.forEach((button) => {
+            button.addEventListener("click", () => {
+                applyAssetsSourceMode(button.getAttribute("data-assets-source-btn"));
+            });
+        });
         bindAutoModelDetection();
+        if (typeof syncAssetsMode === "function") syncAssetsMode();
         refreshFeaturesLoadStatus();
     });
 })();
