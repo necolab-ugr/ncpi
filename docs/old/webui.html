@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Forward modelling of neural activity</title>
+    <title>API</title>
     <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -46,6 +46,11 @@
 
         nav ul li a:hover {
             text-decoration: underline;
+        }
+
+        nav ul li a.active {
+            font-weight: bold;
+            color: #24292e;
         }
 
         main {
@@ -109,18 +114,37 @@
             font-size: 1.1em;
             margin-bottom: 0.6em;
         }
+
+        /* Under construction banner */
+        .construction-banner {
+            background-color: #fff8e6;
+            border-left: 4px solid #ffcc00;
+            padding: 1em;
+            margin-bottom: 2em;
+            border-radius: 0 4px 4px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .construction-banner:before {
+            content: "🚧";
+            margin-right: 0.5em;
+            font-size: 1.2em;
+        }
+
         @media (max-width: 1100px) {
             nav,
             aside {
                 display: none;
             }
-
+        
             main {
                 padding: 1em;
                 margin: 0;
                 max-width: 100%;
             }
         }
+
 
     </style>
 </head>
@@ -129,28 +153,56 @@
         <!-- Navigation Menu (Left) -->
         <nav>
             <ul>
-                <li><a href="../index.html">Home</a></li>
-                <li><a href="../tutorials.html" class="active">Tutorials</a></li>
-                <li><a href="../API.html">API</a></li>
-                <li><a href="../webui.html">Web interface</a></li>
-                <li><a href="../FAQ.html">FAQ</a></li>
-                <li><a href="../Contributing.html">Contributing</a></li>
-                <li><a href="../Citation.html">Citation</a></li>
-                <li><a href="../Credits.html">Credits</a></li>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="tutorials.html">Tutorials</a></li>
+                <li><a href="API.html">API</a></li>
+                <li><a href="webui.html"  class="active">Web interface</a></li>
+                <li><a href="FAQ.html">FAQ</a></li>
+                <li><a href="Contributing.html">Contributing</a></li>
+                <li><a href="Citation.html">Citation</a></li>
+                <li><a href="Credits.html">Credits</a></li>
             </ul>
         </nav>
 
         <!-- Main Markdown-Style Content (Center) -->
         <main>
-             <h1 id="simulation_lif">Forward modelling of neural activity</h1>
-            <p>
-            <iframe src="../notebooks/simulation_lif.html" width="100%" height="6500px" style="border:none;"></iframe>
-            </p>
+            <section class="class-description">
+                <h1 id="webui">ncpi Web interface</h1>
+                <p>The ncpi Web interface is designed to facilitate the use of ncpi library and data visualization.</p>
+
+                
+                <h3>Installation of web GUI</h3>
+                <p>You'll need to activate the virtual environment with conda to run the application.</p>
+
+                <pre><code class="language-bash">
+conda activate ncpi-env
+                </code></pre>
+                
+
+                <h3>Run the web application</h3>
+                <p>Open a terminal window. Go to <code>webui/</code> folder. Then, run the application with:</p>
+                <pre><code class="language-bash">
+flask run
+                </code></pre>
+
+                <p>To access the frontend in the same computer you are running this web application, visit http://localhost:5000/ in your browser (or the URL flask indicates in the terminal window).
+                </p>
+
+
+                <h3>Use of ncpi Web interface</h3>
+                <p>The Web interface is divided into 5 modules. You can use them individually or as a full pipeline.</p>
+                <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_Webui.png" alt="ncpi Web interface" style="width: 100%; height: auto; display: block;">
+
+            </section>
+
+
         </main>
+
 
         <!-- Table of Contents (Right) -->
         <aside>
         </aside>
+
     </div>
 </body>
 </html>
