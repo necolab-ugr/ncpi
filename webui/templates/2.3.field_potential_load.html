@@ -9,7 +9,7 @@
         theme: {
             extend: {
                 colors: {
-                    "primary": "#FAC638",
+                    "primary": "#EA2831",
                     "background-light": "#f6f6f8",
                     "background-dark": "#101322",
                 },
@@ -58,9 +58,6 @@
                             <span class="material-symbols-outlined text-primary">analytics</span>
                             Load field potential output files
                         </h3>
-                        <button class="text-xs font-semibold text-slate-400 hover:text-red-500 flex items-center gap-1 transition-colors">
-                            <span class="material-symbols-outlined text-sm">delete</span> Clear
-                        </button>
                     </div>
 
                     <form id="fieldPotentialUploadForm" action="{{ url_for('field_potential_load_precomputed') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
@@ -265,6 +262,13 @@
     let fieldPotentialServerBrowserCurrentPath = '';
     let fieldPotentialServerBrowserParentPath = '';
     let fieldPotentialServerBrowserSelectedPaths = [];
+    const allowServerSource = runtime.is_server_runtime !== false;
+
+    if (!allowServerSource) {
+        fieldPotentialModeServerBtn.classList.add('hidden');
+        fieldPotentialBrowseServerBtn.classList.add('hidden');
+        selectedFieldPotentialServerFile.classList.add('hidden');
+    }
 
     const submitFieldPotentialIfReady = () => {
         if (fieldPotentialSourceMode === 'upload' && fieldPotentialFileInput.files && fieldPotentialFileInput.files.length > 0) {
@@ -288,7 +292,7 @@
     };
 
     const setFieldPotentialSourceMode = (mode) => {
-        fieldPotentialSourceMode = mode === 'server-path' ? 'server-path' : 'upload';
+        fieldPotentialSourceMode = allowServerSource && mode === 'server-path' ? 'server-path' : 'upload';
         fieldPotentialSourceModeInput.value = fieldPotentialSourceMode;
 
         const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
@@ -443,6 +447,29 @@
         }
     };
 
+    const pickNativeFieldPotentialServerFiles = async () => {
+        const formData = new FormData();
+        formData.append('mode', 'file');
+        formData.append('extensions', '.pkl,.pickle');
+        formData.append('allow_multiple', '1');
+        const response = await fetch('{{ url_for("features_select_folder") }}', {
+            method: 'POST',
+            body: formData,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Path selection cancelled.');
+        }
+        const paths = Array.isArray(payload.paths)
+            ? payload.paths
+            : (payload.path ? [payload.path] : []);
+        const cleaned = paths.map((item) => String(item || '').trim()).filter(Boolean);
+        if (!cleaned.length) {
+            throw new Error('No files selected.');
+        }
+        return cleaned;
+    };
+
     const openFieldPotentialServerFileModal = async () => {
         fieldPotentialServerFileModal.classList.remove('hidden');
         fieldPotentialServerFileModal.classList.add('flex');
@@ -450,6 +477,18 @@
         const current = fieldPotentialServerBrowserSelectedPaths.length > 0 ? fieldPotentialServerBrowserSelectedPaths[0] : '';
         const startPath = current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : (runtime.server_home_dir || '').trim();
         await loadFieldPotentialServerFiles(startPath);
+    };
+
+    const openFieldPotentialServerFilePicker = async () => {
+        try {
+            const selected = await pickNativeFieldPotentialServerFiles();
+            setSelectedFieldPotentialServerFiles(selected);
+            submitFieldPotentialIfReady();
+            return;
+        } catch (error) {
+            console.debug('Native server picker unavailable, opening in-app browser.', error);
+        }
+        await openFieldPotentialServerFileModal();
     };
 
     const closeFieldPotentialServerFileModal = () => {
@@ -468,7 +507,7 @@
         if (fieldPotentialSourceMode === 'upload') {
             fieldPotentialFileInput.click();
         } else {
-            openFieldPotentialServerFileModal();
+            openFieldPotentialServerFilePicker();
         }
     });
 
@@ -491,7 +530,7 @@
     fieldPotentialBrowseServerBtn.addEventListener('click', (event) => {
         event.stopPropagation();
         if (fieldPotentialSourceMode !== 'server-path') return;
-        openFieldPotentialServerFileModal();
+        openFieldPotentialServerFilePicker();
     });
 
     ['dragenter', 'dragover'].forEach((eventName) => {

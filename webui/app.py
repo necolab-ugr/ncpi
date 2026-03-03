@@ -3364,12 +3364,24 @@ def _detect_webui_runtime_context(req):
     effective_host = forwarded_host.split(",", 1)[0].strip().split(":", 1)[0].lower() if forwarded_host else host_only
 
     forced_mode = (os.environ.get("NCPI_WEBUI_RUNTIME_MODE") or "").strip().lower()
+    has_display = bool((os.environ.get("DISPLAY") or "").strip())
     if forced_mode in {"server", "remote", "cluster"}:
         is_server_runtime = True
     elif forced_mode in {"local", "desktop"}:
         is_server_runtime = False
     else:
-        is_server_runtime = not (_is_loopback_identifier(effective_host) and _is_loopback_identifier(client_addr))
+        loopback_request = _is_loopback_identifier(effective_host) and _is_loopback_identifier(client_addr)
+        ssh_session = any(os.environ.get(key) for key in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"))
+        # When Flask runs on a remote machine and browser traffic arrives via SSH tunneling
+        # (-L localhost:...:localhost:...), both host and client appear loopback.
+        # In that case, treat runtime as server-side. Also default loopback to server-side
+        # when no local GUI session is detected, which is typical for remote/headless runs.
+        if loopback_request and ssh_session:
+            is_server_runtime = True
+        elif loopback_request:
+            is_server_runtime = not has_display
+        else:
+            is_server_runtime = True
 
     return {
         "is_server_runtime": is_server_runtime,
@@ -3609,6 +3621,7 @@ def features_select_folder():
     # Opens a native path picker on the machine running the Flask server.
     # This is intended for local desktop usage.
     mode = (request.form.get("mode") or "folder").strip().lower()
+    allow_multiple = (request.form.get("allow_multiple") or "").strip().lower() in {"1", "true", "yes", "on"}
     requested_exts = (request.form.get("extensions") or "").strip()
     allowed_exts = set()
     if requested_exts:
@@ -3626,6 +3639,8 @@ def features_select_folder():
                 cmd.extend(["--directory", "--title=Select data folder"])
             else:
                 cmd.extend(["--title=Select data file"])
+                if allow_multiple:
+                    cmd.extend(["--multiple", "--separator=\n"])
             proc = subprocess.run(
                 cmd,
                 capture_output=True,
@@ -3635,23 +3650,35 @@ def features_select_folder():
             )
             if proc.returncode != 0:
                 return jsonify({"error": "Path selection cancelled."}), 400
-            picked = (proc.stdout or "").strip()
-            if not picked:
+            raw_output = (proc.stdout or "").replace("\r", "\n")
+            picked_items = [chunk.strip() for chunk in raw_output.split("\n") if chunk.strip()]
+            if not picked_items:
                 return jsonify({"error": "No path selected."}), 400
-            picked = os.path.realpath(os.path.expanduser(picked))
             if mode == "folder":
+                picked = os.path.realpath(os.path.expanduser(picked_items[0]))
                 if not os.path.isdir(picked):
                     return jsonify({"error": f"Selected path is not a directory: {picked}"}), 400
+                return jsonify({"path": picked})
             else:
-                if not os.path.isfile(picked):
-                    return jsonify({"error": f"Selected path is not a file: {picked}"}), 400
-                ext = Path(picked).suffix.lower()
-                if allowed_exts:
-                    if ext not in allowed_exts:
+                normalized_paths = []
+                seen = set()
+                for raw_path in picked_items:
+                    picked = os.path.realpath(os.path.expanduser(raw_path))
+                    if picked in seen:
+                        continue
+                    seen.add(picked)
+                    if not os.path.isfile(picked):
+                        return jsonify({"error": f"Selected path is not a file: {picked}"}), 400
+                    ext = Path(picked).suffix.lower()
+                    if allowed_exts:
+                        if ext not in allowed_exts:
+                            return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
+                    elif ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                         return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
-                elif ext not in FEATURES_PARSER_FILE_EXTENSIONS:
-                    return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
-            return jsonify({"path": picked})
+                    normalized_paths.append(picked)
+                if not normalized_paths:
+                    return jsonify({"error": "No valid files selected."}), 400
+                return jsonify({"path": normalized_paths[0], "paths": normalized_paths})
         except subprocess.TimeoutExpired:
             return jsonify({"error": "Folder selector timed out."}), 408
         except Exception as exc:
