@@ -18,16 +18,16 @@
 
 <div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}', {{ is_pending | tojson }})">
     <div class="flex items-center gap-6">
-        <div x-show="progress < 100 && !error" class="flex flex-col items-center gap-6 text-center">
+        <div x-show="status === 'in_progress' && progress < 100 && !pending" class="flex flex-col items-center gap-6 text-center">
             <div class="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-primary dark:border-primary"></div>
         </div>
-        <div x-show="progress === 100 && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
-        <div x-show="error" class="flex flex-col items-center gap-6 text-center">
+        <div x-show="status === 'finished' && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
+        <div x-show="status === 'failed' || error" class="flex flex-col items-center gap-6 text-center">
             <div class="text-red-500 dark:text-red-400 text-4xl">❌</div>
         </div>
         <div class="flex flex-col gap-2">
-            <p x-text="error ? 'Computation Failed' : (pending ? 'Preparing {{ computation_label }}' : (progress < 100 ? 'Computing {{ computation_label }}' : '{{ completion_title }}'))" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
-            <p x-text="error ? 'An error occurred during computation.' : (pending ? 'Waiting for upload to complete...' : (progress < 100 ? 'Please wait while the computation is in progress...' : 'Your results are ready.'))" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
+            <p x-text="status === 'failed' ? 'Computation Failed' : (pending ? 'Preparing {{ computation_label }}' : (status === 'finished' ? '{{ completion_title }}' : 'Computing {{ computation_label }}'))" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
+            <p x-text="status === 'failed' ? 'An error occurred during computation.' : (pending ? 'Waiting for upload to complete...' : (status === 'finished' ? 'Your results are ready.' : 'Please wait while the computation is in progress...'))" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
         </div>
     </div>
     <div class="w-64 mt-4">
@@ -47,7 +47,7 @@
         </p>
 
         <!-- Error message section - only shows when error exists -->
-        <div x-show="error" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+        <div x-show="status === 'failed' || error" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
             <p class="text-sm font-medium text-red-700 dark:text-red-300">
                 Error: <span x-text="error"></span>
             </p>
@@ -57,11 +57,11 @@
     <div class="w-full max-w-2xl mt-6">
         <div class="flex items-center justify-between text-xs text-text-light-secondary dark:text-[#929bc9] mb-2">
             <span class="font-semibold lowercase tracking-wide">ncpi output</span>
-            <span class="text-green-500" x-show="progress < 100 && !error">live</span>
+            <span class="text-green-500" x-show="status === 'in_progress' && progress < 100">live</span>
         </div>
         <div class="rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-950 text-green-200 shadow-inner">
             <div class="px-3 py-2 text-[11px] text-green-400/80 border-b border-slate-800 flex items-center gap-2">
-                <span class="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" x-show="progress < 100 && !error"></span>
+                <span class="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" x-show="status === 'in_progress' && progress < 100"></span>
                 <span>ncpi terminal</span>
             </div>
             <pre x-ref="log" class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed font-mono"
@@ -71,40 +71,44 @@
     {% endif %}
     <div class="flex justify-end gap-4 mt-10 pt-6">
         {% if computation_type == 'simulation' %}
-        <a x-show="!pending && progress >= 100" href="{{url_for('field_potential')}}"
+        <a x-show="!pending && status === 'finished'" href="{{url_for('field_potential')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Field Potential
         </a>
+        <a x-show="!pending && status === 'failed'" href="{{url_for('simulation')}}"
+            class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
+            Return to Simulation
+        </a>
         {% elif computation_type in ['field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'] %}
-        <a x-show="!pending && progress >= 100" href="{{url_for('features')}}"
+        <a x-show="!pending && status === 'finished'" href="{{url_for('features')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Features
         </a>
         {% if computation_type == 'field_potential_kernel' %}
-        <a x-show="!pending && progress >= 100" href="{{ url_for('field_potential_kernel') }}?tab=meeg"
+        <a x-show="!pending && status === 'finished'" href="{{ url_for('field_potential_kernel') }}?tab=meeg"
             class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
             Compute M/EEG
         </a>
         {% endif %}
         {% elif computation_type == 'features' %}
-        <a x-show="!pending && progress >= 100" href="{{url_for('inference')}}"
+        <a x-show="!pending && status === 'finished'" href="{{url_for('inference')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Inference
         </a>
         {% elif computation_type == 'inference_training' %}
-        <a x-show="!pending && progress >= 100" href="{{url_for('compute_predictions')}}"
+        <a x-show="!pending && status === 'finished'" href="{{url_for('compute_predictions')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Compute Predictions
         </a>
         {% elif computation_type == 'inference' %}
-        <a x-show="!pending && progress >= 100" href="{{url_for('analysis')}}"
+        <a x-show="!pending && status === 'finished'" href="{{url_for('analysis')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Analysis
         </a>
         {% else %}
-        <button :disabled="pending || progress < 100 || hasBeenClicked"
+        <button :disabled="pending || status !== 'finished' || hasBeenClicked"
                 @click="hasBeenClicked = true; window.location.href = `{{url_for('download_results', job_id=job_id, computation_type=computation_type )}}`"
-                :class="pending || progress < 100 || hasBeenClicked
+                :class="pending || status !== 'finished' || hasBeenClicked
                 ? 'px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/50 bg-gray-200 dark:bg-[#2d3358] rounded-lg cursor-not-allowed opacity-50'
                 : 'px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg shadow-md hover:bg-primary-dark transition-colors'">
             Save results
@@ -138,6 +142,7 @@ document.addEventListener('alpine:init', () => {
         progress: 0,
         elapsedTime: '00:00',
         hasBeenClicked : false,
+        status: 'in_progress',
         error: null, 
         output: "",
         uploadProgress: 0,
@@ -189,6 +194,7 @@ document.addEventListener('alpine:init', () => {
             fetch(`/status/${this.jobId}`)
                 .then(response => response.json())
                 .then(data => {
+                    this.status = data.status || 'in_progress';
                     this.progress = data.progress;
                     this.output = data.output || "";
                     this.simulationTotal = Number(data.simulation_total || 0);
@@ -200,16 +206,18 @@ document.addEventListener('alpine:init', () => {
                     });
                     
                     if (data.status === 'finished') {
+                        this.error = null;
                         this.progress = 100; // Finalize display
                         console.log('Computation finished. Save results button active.');
                         // Polling stops automatically here as it doesn't set a new timeout
 
                     } else if (data.status === 'in_progress') {
+                        this.error = null;
                         // Poll again after 1 second (simplest polling interval)
                         setTimeout(() => this.pollStatus(), 1500); 
 
                     } else { // Failed
-                        this.error = data.error;  // Set error message
+                        this.error = data.error || 'Unknown error';  // Set error message
                         this.progress = data.progress || 0;
                         // Polling stops on failure
                     }

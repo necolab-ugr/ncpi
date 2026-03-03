@@ -42,6 +42,59 @@
                 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
                 Upload custom configuration</h2>
 
+            <div class="mx-4 rounded-2xl border border-sky-200 dark:border-sky-800/60 bg-gradient-to-br from-sky-50 to-cyan-50 dark:from-sky-900/30 dark:to-cyan-900/20 px-5 py-4 text-sm text-slate-700 dark:text-slate-200 shadow-sm">
+                <div class="flex items-start gap-3">
+                    <span class="material-symbols-outlined text-sky-700 dark:text-sky-300">info</span>
+                    <div>
+                        <p class="font-semibold text-sky-900 dark:text-sky-200">How custom simulation files are used</p>
+                        <p class="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                            Upload Python scripts for network and simulation steps. The WebUI executes them in order and reads generated outputs.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div class="rounded-lg border border-sky-200/80 dark:border-sky-800/50 bg-white/70 dark:bg-slate-900/30 p-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300">Simulation Categories</p>
+                        <p class="mt-2 text-xs leading-relaxed">
+                            Based on conventions in NEST simulations, <code>ncpi.Simulation</code> is organized in 3 categories:
+                            <code>network</code> (network specification), <code>simulation</code> (network creation + simulation run),
+                            and <code>analysis</code> (post-processing of results).
+                        </p>
+                    </div>
+                    <div class="rounded-lg border border-sky-200/80 dark:border-sky-800/50 bg-white/70 dark:bg-slate-900/30 p-3">
+                        <p class="text-xs font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300">Execution Flow</p>
+                        <ol class="mt-2 space-y-1 text-xs list-decimal pl-4">
+                            <li>Run the network implementation script using values from the network parameters script.</li>
+                            <li>Run the simulation implementation script using values from the simulation parameters script.</li>
+                        </ol>
+                    </div>
+                </div>
+
+                <p class="mt-3 text-xs leading-relaxed">
+                    In this WebUI, the analysis script is intentionally left out because the Analysis module already provides graphical analysis tools.
+                </p>
+                <p class="mt-2 text-xs leading-relaxed">
+                    You have full freedom to design these scripts (single trial or parameter sweep with multiple trials). The only limitation is that
+                    simulation outputs must be saved as <code>.pkl</code> files so they can be loaded by subsequent WebUI modules.
+                </p>
+
+                <div class="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/40 p-3">
+                    <p class="text-xs font-semibold text-slate-700 dark:text-slate-200">Required files in this form</p>
+                    <div class="mt-2 flex flex-wrap gap-2 text-xs">
+                        <span class="px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">Network parameters script</span>
+                        <span class="px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">Network implementation script</span>
+                        <span class="px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">Simulation parameters script</span>
+                        <span class="px-2 py-1 rounded-md bg-slate-100 dark:bg-slate-800">Simulation implementation script</span>
+                    </div>
+                </div>
+
+                <div class="mt-3 flex items-center gap-2 text-xs rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-900/20 px-3 py-2">
+                    <span class="material-symbols-outlined text-amber-700 dark:text-amber-300 text-base">folder</span>
+                    <span>Example files: <code>examples/simulation/Hagen_model/simulation</code></span>
+                </div>
+            </div>
+
             <div id="custom-form-error" class="hidden mx-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300"></div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
@@ -164,7 +217,7 @@
         </div>
         <button type="submit"
             class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
-            <span class="truncate">Run trial simulation</span>
+            <span class="truncate">Run custom simulation</span>
         </button>
     </div>
 </form>

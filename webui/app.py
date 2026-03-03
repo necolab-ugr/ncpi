@@ -77,6 +77,8 @@ PICKLE_EXTENSIONS = {".pkl", ".pickle"}
 MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
 MAX_SIMULATION_GRID_COMBINATIONS = 256
 GRID_PREFIX = "grid="
+SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
+SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
 
 
 HAGEN_DEFAULTS = {
@@ -430,6 +432,90 @@ def _expand_simulation_forms(model_type, form):
     if not expanded_forms:
         raise ValueError("No simulations generated from the selected parameter grid.")
     return run_mode, expanded_forms
+
+
+def _values_equal_for_grid(left, right, tol=1e-12):
+    if isinstance(left, (list, tuple)) and isinstance(right, (list, tuple)):
+        if len(left) != len(right):
+            return False
+        return all(_values_equal_for_grid(lv, rv, tol=tol) for lv, rv in zip(left, right))
+    if isinstance(left, dict) and isinstance(right, dict):
+        if set(left.keys()) != set(right.keys()):
+            return False
+        return all(_values_equal_for_grid(left[k], right[k], tol=tol) for k in left.keys())
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return abs(float(left) - float(right)) <= tol
+    return left == right
+
+
+def _normalize_simulation_form_values(form, defaults):
+    normalized = {}
+    for key, default in defaults.items():
+        candidates, _ = _parse_grid_candidates(form, key, default)
+        normalized[key] = candidates[0] if candidates else default
+    return normalized
+
+
+def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
+    if run_mode != "grid":
+        return None
+    defaults = _simulation_grid_defaults(model_type)
+    ordered_keys = list(defaults.keys())
+    trial_values = [_normalize_simulation_form_values(form, defaults) for form in run_forms]
+    if not trial_values:
+        return None
+
+    baseline = trial_values[0]
+    changed_keys = []
+    for key in ordered_keys:
+        if any(
+            not _values_equal_for_grid(trial.get(key), baseline.get(key))
+            for trial in trial_values[1:]
+        ):
+            changed_keys.append(key)
+
+    trials = []
+    for trial_idx, trial in enumerate(trial_values):
+        changed = {key: trial.get(key) for key in changed_keys}
+        trials.append({
+            "trial_index": int(trial_idx),
+            "changed": changed,
+        })
+
+    return {
+        "version": 1,
+        "model_type": model_type,
+        "run_mode": run_mode,
+        "trial_count": len(trial_values),
+        "changed_keys": changed_keys,
+        "trials": trials,
+    }
+
+
+def _simulation_grid_metadata_path(output_dir=None):
+    root = output_dir if output_dir else os.path.join(tempfile.gettempdir(), "simulation_data")
+    return os.path.join(root, SIMULATION_GRID_METADATA_FILE)
+
+
+def _clear_simulation_grid_metadata_file(output_dir=None):
+    root = output_dir if output_dir else os.path.join(tempfile.gettempdir(), "simulation_data")
+    targets = {SIMULATION_GRID_METADATA_FILE, *SIMULATION_GRID_METADATA_LEGACY_FILES}
+    for name in targets:
+        path = os.path.join(root, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def _write_simulation_grid_metadata(output_dir, metadata):
+    if not metadata:
+        return None
+    metadata_path = _simulation_grid_metadata_path(output_dir)
+    with open(metadata_path, "wb") as handle:
+        pickle.dump(metadata, handle)
+    return metadata_path
 
 
 def _ensure_sequence(value, name):
@@ -2028,6 +2114,7 @@ def _run_process_with_progress(
     estimate_seconds,
     progress_callback=None,
     line_callback=None,
+    preserve_existing_output=False,
 ):
     output_lines = []
     progress_seen = threading.Event()
@@ -2035,6 +2122,11 @@ def _run_process_with_progress(
 
     if job_id in job_status:
         job_status[job_id].setdefault("output", "")
+        if preserve_existing_output:
+            existing_output = job_status[job_id].get("output", "")
+            if existing_output:
+                for existing_line in existing_output.splitlines(keepends=True):
+                    output_buffer.append(existing_line)
 
     process = subprocess.Popen(
         cmd,
@@ -2048,22 +2140,30 @@ def _run_process_with_progress(
     start = time.time()
 
     def _maybe_update_progress(line):
-        if "PROGRESS:" not in line:
+        value = None
+        if "PROGRESS:" in line:
+            marker_index = line.find("PROGRESS:")
+            if marker_index != -1:
+                value = line[marker_index + len("PROGRESS:"):].strip()
+        else:
+            segment_match = re.search(r"SIM_SEGMENT\s+(\d+)\s*/\s*(\d+)", line)
+            if segment_match:
+                done = int(segment_match.group(1))
+                total = int(segment_match.group(2))
+                if total > 0:
+                    value = str((100.0 * done) / float(total))
+        if value is None:
             return
-        marker_index = line.find("PROGRESS:")
-        if marker_index == -1:
-            return
-        value = line[marker_index + len("PROGRESS:"):].strip()
         try:
             pct = int(float(value))
         except ValueError:
             return
         pct = max(0, min(99, pct))
+        progress_seen.set()
         if progress_callback is not None:
             progress_callback(pct)
         else:
             job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), pct)
-            progress_seen.set()
             if pct >= 5:
                 elapsed = time.time() - start
                 est_total = elapsed / (pct / 100.0)
@@ -2089,6 +2189,15 @@ def _run_process_with_progress(
     while True:
         if process.poll() is not None:
             break
+        if not progress_seen.is_set() and job_id in job_status:
+            elapsed = time.time() - start
+            estimate = max(1.0, float(initial_estimate or estimate_seconds or 60.0))
+            pct = int(min(95, max(0.0, (elapsed / estimate) * 95.0)))
+            if progress_callback is not None:
+                progress_callback(pct)
+            else:
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), pct)
+                job_status[job_id]["estimated_time_remaining"] = start + estimate
         time.sleep(1)
 
     reader_thread.join(timeout=2)
@@ -2347,7 +2456,7 @@ def upload_sim():
     if os.path.isdir(simulation_data_dir):
         simulation_pkl_files = sorted(
             f for f in os.listdir(simulation_data_dir)
-            if f.endswith(".pkl") and os.path.isfile(os.path.join(simulation_data_dir, f))
+            if Path(f).suffix.lower() in PICKLE_EXTENSIONS and os.path.isfile(os.path.join(simulation_data_dir, f))
         )
     else:
         simulation_pkl_files = []
@@ -2364,22 +2473,45 @@ def upload_sim_files():
     os.makedirs(simulation_data_dir, exist_ok=True)
 
     if source_mode == "server-path":
-        folder_path = (request.form.get("simulation_server_folder_path") or "").strip()
-        try:
-            source_files = _collect_pickle_files_from_folder(folder_path, recursive=True)
-        except Exception as exc:
-            flash(f"Invalid simulation server folder path: {exc}", "error")
-            return redirect(request.referrer or url_for('upload_sim'))
+        server_file_paths = _extract_server_file_paths(request.form, "simulation_server_file_path")
+        legacy_folder_path = (request.form.get("simulation_server_folder_path") or "").strip()
+        if server_file_paths:
+            copied = 0
+            for file_path in server_file_paths:
+                try:
+                    source_path = _validate_existing_pickle_file_path(file_path, "Simulation server file")
+                except Exception as exc:
+                    flash(str(exc), "error")
+                    return redirect(request.referrer or url_for('upload_sim'))
 
-        copied = 0
-        for source_path in source_files:
-            filename = secure_filename(os.path.basename(source_path))
-            if not filename:
-                continue
-            shutil.copy2(source_path, os.path.join(simulation_data_dir, filename))
-            copied += 1
-        if copied == 0:
-            flash("No valid simulation files were copied from server folder.", "error")
+                filename = secure_filename(os.path.basename(source_path))
+                if not filename:
+                    continue
+                shutil.copy2(source_path, os.path.join(simulation_data_dir, filename))
+                copied += 1
+            if copied == 0:
+                flash("No valid simulation server files selected.", "error")
+                return redirect(request.referrer or url_for('upload_sim'))
+        elif legacy_folder_path:
+            # Backward compatibility with older clients sending a folder path.
+            try:
+                source_files = _collect_pickle_files_from_folder(legacy_folder_path, recursive=True)
+            except Exception as exc:
+                flash(f"Invalid simulation server folder path: {exc}", "error")
+                return redirect(request.referrer or url_for('upload_sim'))
+
+            copied = 0
+            for source_path in source_files:
+                filename = secure_filename(os.path.basename(source_path))
+                if not filename:
+                    continue
+                shutil.copy2(source_path, os.path.join(simulation_data_dir, filename))
+                copied += 1
+            if copied == 0:
+                flash("No valid simulation files were copied from server folder.", "error")
+                return redirect(request.referrer or url_for('upload_sim'))
+        else:
+            flash("No simulation server file selected.", "error")
             return redirect(request.referrer or url_for('upload_sim'))
     else:
         files = request.files.getlist("simulation_files")
@@ -2394,6 +2526,19 @@ def upload_sim_files():
             file.save(os.path.join(simulation_data_dir, filename))
 
     return redirect(url_for('upload_sim'))
+
+
+@app.route("/simulation/remove_file", methods=["POST"])
+def remove_simulation_file():
+    filename = (request.form.get("filename") or "").strip()
+    simulation_root = os.path.join(tempfile.gettempdir(), "simulation_data")
+    try:
+        target_path = _validate_relative_pickle_path(filename, simulation_root, "Simulation file")
+        os.remove(target_path)
+        flash(f"Removed simulation file: {os.path.basename(target_path)}", "success")
+    except Exception as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("upload_sim"))
 
 @app.route("/clear_simulation_data", methods=["POST"])
 def clear_simulation_data():
@@ -2434,7 +2579,12 @@ def _clear_simulation_data_files():
         return
     for name in os.listdir(simulation_data_dir):
         lower = name.lower()
-        if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+        if not (
+            lower.endswith(".pkl")
+            or lower.endswith(".pickle")
+            or name == SIMULATION_GRID_METADATA_FILE
+            or name in SIMULATION_GRID_METADATA_LEGACY_FILES
+        ):
             continue
         path = os.path.join(simulation_data_dir, name)
         if os.path.isfile(path):
@@ -2442,6 +2592,21 @@ def _clear_simulation_data_files():
                 os.remove(path)
             except OSError:
                 pass
+
+
+def _clear_simulation_output_folder_all_files():
+    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    if not os.path.isdir(simulation_data_dir):
+        return
+    for name in os.listdir(simulation_data_dir):
+        path = os.path.join(simulation_data_dir, name)
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+            elif os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            pass
 
 
 def _clear_field_potential_data_files():
@@ -2589,6 +2754,7 @@ def _simulation_computation(job_id, job_status, params):
 
         output_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
         os.makedirs(output_dir, exist_ok=True)
+        _clear_simulation_grid_metadata_file(output_dir)
         for name in os.listdir(output_dir):
             if name.endswith(".pkl"):
                 path = os.path.join(output_dir, name)
@@ -2600,6 +2766,7 @@ def _simulation_computation(job_id, job_status, params):
 
         total_runs = len(run_forms)
         is_grid = run_mode == "grid"
+        grid_metadata = _build_simulation_grid_metadata(model_type, run_mode, run_forms)
         if is_grid:
             _append_job_output(job_status, job_id, f"Parameter grid mode enabled with {total_runs} simulation(s).")
         else:
@@ -2645,6 +2812,9 @@ def _simulation_computation(job_id, job_status, params):
 
             example_script_path = os.path.join(run_root, "example_model_simulation.py")
             example_script = "\n".join([
+                "import os",
+                "import sys",
+                f"sys.path.insert(0, {repr(repo_root)})",
                 "import ncpi",
                 "",
                 "if __name__ == \"__main__\":",
@@ -2678,6 +2848,7 @@ def _simulation_computation(job_id, job_status, params):
                 job_id,
                 per_run_estimate,
                 progress_callback=_grid_progress if total_runs > 1 else None,
+                preserve_existing_output=total_runs > 1,
             )
 
             if returncode != 0:
@@ -2732,6 +2903,13 @@ def _simulation_computation(job_id, job_status, params):
                 job_id,
                 f"Stored grid outputs in {output_dir} ({total_runs} entries per file).",
             )
+        if grid_metadata:
+            try:
+                metadata_path = _write_simulation_grid_metadata(output_dir, grid_metadata)
+                if metadata_path:
+                    _append_job_output(job_status, job_id, f"Stored grid metadata in {metadata_path}.")
+            except Exception as meta_exc:
+                _append_job_output(job_status, job_id, f"Warning: failed to store grid metadata: {meta_exc}")
 
         job_status[job_id].update({
             "status": "finished",
@@ -2741,6 +2919,7 @@ def _simulation_computation(job_id, job_status, params):
         })
 
     except Exception as exc:
+        _clear_simulation_output_folder_all_files()
         job_status[job_id].update({
             "status": "failed",
             "error": str(exc),
@@ -2770,9 +2949,14 @@ def _simulation_computation_custom(job_id, job_status, params):
 
         output_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
         os.makedirs(output_dir, exist_ok=True)
+        _clear_simulation_grid_metadata_file(output_dir)
 
         example_script_path = os.path.join(temp_run_dir, "example_model_simulation.py")
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
         example_script = "\n".join([
+            "import os",
+            "import sys",
+            f"sys.path.insert(0, {repr(repo_root)})",
             "import ncpi",
             "",
             "if __name__ == \"__main__\":",
@@ -2808,6 +2992,7 @@ def _simulation_computation_custom(job_id, job_status, params):
         })
 
     except Exception as exc:
+        _clear_simulation_output_folder_all_files()
         job_status[job_id].update({
             "status": "failed",
             "error": str(exc),
@@ -2963,46 +3148,44 @@ def field_potential():
 @app.route("/field_potential/load")
 def field_potential_load():
     field_potential_entries = _list_field_potential_detected_files()
-    field_potential_files = [
-        f"{entry.get('label', 'Field Potential')}: {entry.get('name', '')}"
-        for entry in field_potential_entries
-    ]
     return render_template(
         "2.3.field_potential_load.html",
-        field_potential_files=field_potential_files,
-        has_field_potential_data=bool(field_potential_files),
+        field_potential_entries=field_potential_entries,
+        has_field_potential_data=bool(field_potential_entries),
     )
+
+
+@app.route("/field_potential/remove_file", methods=["POST"])
+def remove_field_potential_file():
+    file_key = (request.form.get("file_key") or "").strip()
+    entries = _list_field_potential_detected_files()
+    target = next((entry for entry in entries if entry.get("key") == file_key), None)
+    if not target:
+        flash("Field potential file not found.", "error")
+        return redirect(url_for("field_potential_load"))
+
+    target_path = os.path.realpath(target.get("path") or "")
+    if not target_path or not os.path.isfile(target_path):
+        flash("Field potential file does not exist.", "error")
+        return redirect(url_for("field_potential_load"))
+    allowed_roots = [os.path.realpath(root) for root in _field_potential_dirs()]
+    if not any(_is_path_within_root(target_path, root) for root in allowed_roots):
+        flash("Field potential file is outside allowed directories.", "error")
+        return redirect(url_for("field_potential_load"))
+    try:
+        os.remove(target_path)
+        flash(f"Removed field potential file: {os.path.basename(target_path)}", "success")
+    except OSError as exc:
+        flash(f"Failed to remove field potential file: {exc}", "error")
+    return redirect(url_for("field_potential_load"))
 
 
 @app.route("/field_potential/load_precomputed", methods=["POST"])
 def field_potential_load_precomputed():
     source_mode = (request.form.get("precomputed_fp_source_mode") or "upload").strip().lower()
-    upload = request.files.get("precomputed_fp_file")
-    server_file_path = (request.form.get("precomputed_fp_server_file_path") or "").strip()
+    uploads = [file for file in request.files.getlist("precomputed_fp_file") if file and file.filename]
+    server_file_paths = _extract_server_file_paths(request.form, "precomputed_fp_server_file_path")
     fp_type = (request.form.get("precomputed_fp_type") or "").strip().lower()
-
-    if source_mode == "server-path":
-        try:
-            source_path = _validate_existing_pickle_file_path(server_file_path, "Field potential server file")
-            safe_name = secure_filename(os.path.basename(source_path))
-        except Exception as exc:
-            flash(str(exc), "error")
-            return redirect(request.referrer or url_for("field_potential_load"))
-    else:
-        if upload is None or not upload.filename:
-            flash("Upload a precomputed field potential file (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("field_potential_load"))
-        safe_name = secure_filename(upload.filename)
-        if not safe_name:
-            flash("Invalid uploaded file name.", "error")
-            return redirect(request.referrer or url_for("field_potential_load"))
-        ext = Path(safe_name).suffix.lower()
-        if ext not in PICKLE_EXTENSIONS:
-            flash("Precomputed field potential must be a pickle file (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("field_potential_load"))
-
-    if not fp_type:
-        fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
 
     destination_roots = {
         "proxy": os.path.join(tempfile.gettempdir(), "field_potential_proxy"),
@@ -3012,18 +3195,55 @@ def field_potential_load_precomputed():
         "meg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
         "meeg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
     }
-    if fp_type not in destination_roots:
-        fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
 
-    output_root = destination_roots[fp_type]
-    output_name = _field_potential_output_name(fp_type, safe_name)
-    run_dir = os.path.join(output_root, f"loaded_{uuid.uuid4().hex[:12]}")
-    os.makedirs(run_dir, exist_ok=True)
-    output_path = os.path.join(run_dir, output_name)
+    inputs = []
     if source_mode == "server-path":
-        shutil.copy2(source_path, output_path)
+        if not server_file_paths:
+            flash("Select at least one server field potential file (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+        for server_path in server_file_paths:
+            try:
+                source_path = _validate_existing_pickle_file_path(server_path, "Field potential server file")
+                safe_name = secure_filename(os.path.basename(source_path))
+            except Exception as exc:
+                flash(str(exc), "error")
+                return redirect(request.referrer or url_for("field_potential_load"))
+            if not safe_name:
+                continue
+            inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
     else:
-        upload.save(output_path)
+        if len(uploads) == 0:
+            flash("Upload at least one precomputed field potential file (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+        for upload in uploads:
+            safe_name = secure_filename(upload.filename)
+            if not safe_name:
+                continue
+            ext = Path(safe_name).suffix.lower()
+            if ext not in PICKLE_EXTENSIONS:
+                flash("Precomputed field potential must be a pickle file (.pkl/.pickle).", "error")
+                return redirect(request.referrer or url_for("field_potential_load"))
+            inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
+
+    if not inputs:
+        flash("No valid precomputed field potential files were provided.", "error")
+        return redirect(request.referrer or url_for("field_potential_load"))
+
+    for item in inputs:
+        safe_name = item["safe_name"]
+        file_fp_type = fp_type or (_infer_field_potential_type_from_filename(safe_name) or "proxy")
+        if file_fp_type not in destination_roots:
+            file_fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
+
+        output_root = destination_roots[file_fp_type]
+        output_name = _field_potential_output_name(file_fp_type, safe_name)
+        run_dir = os.path.join(output_root, f"loaded_{uuid.uuid4().hex[:12]}")
+        os.makedirs(run_dir, exist_ok=True)
+        output_path = os.path.join(run_dir, output_name)
+        if source_mode == "server-path":
+            shutil.copy2(item["source_path"], output_path)
+        else:
+            item["upload"].save(output_path)
 
     return redirect(url_for("field_potential"))
 
@@ -3185,6 +3405,31 @@ def _validate_existing_file_path(path_value, label, allowed_extensions=None):
     return resolved
 
 
+def _is_path_within_root(path_value, root_path):
+    path_real = os.path.realpath(path_value)
+    root_real = os.path.realpath(root_path)
+    try:
+        return os.path.commonpath([path_real, root_real]) == root_real
+    except ValueError:
+        return False
+
+
+def _validate_relative_pickle_path(path_value, root_path, label):
+    rel = str(path_value or "").strip()
+    if not rel:
+        raise ValueError(f"{label} is required.")
+    root_real = os.path.realpath(root_path)
+    candidate = os.path.realpath(os.path.join(root_real, rel))
+    if not _is_path_within_root(candidate, root_real):
+        raise ValueError(f"{label} is outside the allowed directory.")
+    if not os.path.isfile(candidate):
+        raise ValueError(f"{label} does not exist: {candidate}")
+    ext = Path(candidate).suffix.lower()
+    if ext not in PICKLE_EXTENSIONS:
+        raise ValueError(f"{label} must be a .pkl/.pickle file: {candidate}")
+    return candidate
+
+
 def _validate_existing_pickle_file_path(path_value, label):
     return _validate_existing_file_path(path_value, label, allowed_extensions=PICKLE_EXTENSIONS)
 
@@ -3220,6 +3465,30 @@ def _collect_pickle_files_from_folder(folder_path, recursive=True):
     if not found:
         raise ValueError(f"No .pkl/.pickle files found in server folder: {root}")
     return found
+
+
+def _extract_server_file_paths(form, field_name):
+    raw_values = []
+    try:
+        raw_values.extend(form.getlist(field_name))
+    except Exception:
+        pass
+    if not raw_values:
+        fallback = form.get(field_name)
+        if fallback is not None:
+            raw_values.append(fallback)
+
+    paths = []
+    seen = set()
+    for raw in raw_values:
+        text = str(raw or "").replace("\r", "\n")
+        for chunk in text.split("\n"):
+            candidate = chunk.strip()
+            if not candidate or candidate in seen:
+                continue
+            seen.add(candidate)
+            paths.append(candidate)
+    return paths
 
 
 def _collect_inference_assets_folder_files(folder_path):
@@ -3468,59 +3737,97 @@ def features_parser_inspect():
 @app.route("/features/load_precomputed", methods=["POST"])
 def features_load_precomputed():
     source_mode = (request.form.get("precomputed_features_source_mode") or "upload").strip().lower()
-    upload = request.files.get("precomputed_features_file")
-    server_file_path = (request.form.get("precomputed_features_server_file_path") or "").strip()
+    uploads = [file for file in request.files.getlist("precomputed_features_file") if file and file.filename]
+    server_file_paths = _extract_server_file_paths(request.form, "precomputed_features_server_file_path")
 
+    inputs = []
     if source_mode == "server-path":
-        try:
-            source_path = _validate_existing_pickle_file_path(server_file_path, "Features server file")
-            safe_name = secure_filename(os.path.basename(source_path))
-        except Exception as exc:
-            flash(str(exc), "error")
+        if not server_file_paths:
+            flash("Select at least one server features file (.pkl/.pickle).", "error")
             return redirect(request.referrer or url_for("features"))
-    else:
-        if upload is None or not upload.filename:
-            flash("Upload a precomputed features dataframe (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("features"))
-        safe_name = secure_filename(upload.filename)
-        if not safe_name:
-            flash("Invalid uploaded file name.", "error")
-            return redirect(request.referrer or url_for("features"))
-        ext = Path(safe_name).suffix.lower()
-        if ext not in PICKLE_EXTENSIONS:
-            flash("Precomputed features must be a pickle file (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("features"))
-
-    features_dir = _features_data_dir(create=True)
-    temp_path = os.path.join(features_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
-    if source_mode == "server-path":
-        shutil.copy2(source_path, temp_path)
-    else:
-        upload.save(temp_path)
-    try:
-        df = compute_utils.read_df_file(temp_path)
-        if not isinstance(df, pd.DataFrame):
-            raise ValueError("Uploaded object is not a pandas dataframe.")
-        if "Features" not in df.columns:
-            raise ValueError("Uploaded dataframe does not contain a 'Features' column.")
-        output_name = f"features_loaded_{uuid.uuid4().hex[:8]}_{safe_name}"
-        output_path = os.path.join(features_dir, output_name)
-        df.to_pickle(output_path)
-    except Exception as exc:
-        if os.path.exists(temp_path):
+        for server_path in server_file_paths:
             try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-        flash(f"Failed to load precomputed features: {exc}", "error")
+                source_path = _validate_existing_pickle_file_path(server_path, "Features server file")
+                safe_name = secure_filename(os.path.basename(source_path))
+            except Exception as exc:
+                flash(str(exc), "error")
+                return redirect(request.referrer or url_for("features"))
+            if not safe_name:
+                continue
+            inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
+    else:
+        if len(uploads) == 0:
+            flash("Upload at least one precomputed features dataframe (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("features"))
+        for upload in uploads:
+            safe_name = secure_filename(upload.filename)
+            if not safe_name:
+                continue
+            ext = Path(safe_name).suffix.lower()
+            if ext not in PICKLE_EXTENSIONS:
+                flash("Precomputed features must be a pickle file (.pkl/.pickle).", "error")
+                return redirect(request.referrer or url_for("features"))
+            inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
+
+    if not inputs:
+        flash("No valid precomputed features files were provided.", "error")
         return redirect(request.referrer or url_for("features"))
 
-    if os.path.exists(temp_path):
+    features_dir = _features_data_dir(create=True)
+    loaded_count = 0
+    errors = []
+    for item in inputs:
+        safe_name = item["safe_name"]
+        temp_path = os.path.join(features_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
         try:
-            os.remove(temp_path)
-        except OSError:
-            pass
+            if source_mode == "server-path":
+                shutil.copy2(item["source_path"], temp_path)
+            else:
+                item["upload"].save(temp_path)
+            df = compute_utils.read_df_file(temp_path)
+            if not isinstance(df, pd.DataFrame):
+                raise ValueError("Uploaded object is not a pandas dataframe.")
+            if "Features" not in df.columns:
+                raise ValueError("Uploaded dataframe does not contain a 'Features' column.")
+            output_name = f"features_loaded_{uuid.uuid4().hex[:8]}_{safe_name}"
+            output_path = os.path.join(features_dir, output_name)
+            df.to_pickle(output_path)
+            loaded_count += 1
+        except Exception as exc:
+            errors.append(f"{safe_name}: {exc}")
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
+    if loaded_count == 0:
+        detail = errors[0] if errors else "Unknown error."
+        flash(f"Failed to load precomputed features: {detail}", "error")
+        return redirect(request.referrer or url_for("features"))
+
+    if errors:
+        shown = "; ".join(errors[:3])
+        if len(errors) > 3:
+            shown += f"; ... ({len(errors) - 3} more)"
+        flash(f"Loaded {loaded_count} features file(s), but some failed: {shown}", "error")
+    elif loaded_count > 1:
+        flash(f"Loaded {loaded_count} precomputed features files.", "success")
+
+    return redirect(url_for("features"))
+
+
+@app.route("/features/remove_file", methods=["POST"])
+def remove_features_file():
+    filename = (request.form.get("filename") or "").strip()
+    features_root = _features_data_dir(create=False)
+    try:
+        target_path = _validate_relative_pickle_path(filename, features_root, "Features file")
+        os.remove(target_path)
+        flash(f"Removed features file: {os.path.basename(target_path)}", "success")
+    except Exception as exc:
+        flash(str(exc), "error")
     return redirect(url_for("features"))
 
 # Inference configuration page
@@ -3542,60 +3849,103 @@ def inference_load_data():
 @app.route("/inference/load_precomputed", methods=["POST"])
 def inference_load_precomputed():
     source_mode = (request.form.get("precomputed_predictions_source_mode") or "upload").strip().lower()
-    upload = request.files.get("precomputed_predictions_file")
-    server_file_path = (request.form.get("precomputed_predictions_server_file_path") or "").strip()
+    uploads = [file for file in request.files.getlist("precomputed_predictions_file") if file and file.filename]
+    server_file_paths = _extract_server_file_paths(request.form, "precomputed_predictions_server_file_path")
 
+    inputs = []
     if source_mode == "server-path":
-        try:
-            source_path = _validate_existing_pickle_file_path(server_file_path, "Predictions server file")
-            safe_name = secure_filename(os.path.basename(source_path))
-        except Exception as exc:
-            flash(str(exc), "error")
+        if not server_file_paths:
+            flash("Select at least one server predictions file (.pkl/.pickle).", "error")
             return redirect(request.referrer or url_for("inference_load_data"))
-    else:
-        if upload is None or not upload.filename:
-            flash("Upload a precomputed predictions dataframe (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("inference_load_data"))
-        safe_name = secure_filename(upload.filename)
-        if not safe_name:
-            flash("Invalid uploaded file name.", "error")
-            return redirect(request.referrer or url_for("inference_load_data"))
-        ext = Path(safe_name).suffix.lower()
-        if ext not in PICKLE_EXTENSIONS:
-            flash("Precomputed predictions must be a pickle file (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("inference_load_data"))
-
-    predictions_dir = _predictions_data_dir(create=True)
-    temp_path = os.path.join(predictions_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
-    if source_mode == "server-path":
-        shutil.copy2(source_path, temp_path)
-    else:
-        upload.save(temp_path)
-    try:
-        df = compute_utils.read_df_file(temp_path)
-        if not isinstance(df, pd.DataFrame):
-            raise ValueError("Uploaded object is not a pandas dataframe.")
-        if "Predictions" not in df.columns:
-            raise ValueError("Uploaded dataframe does not contain a 'Predictions' column.")
-        output_name = "predictions.pkl"
-        output_path = os.path.join(predictions_dir, output_name)
-        df.to_pickle(output_path)
-    except Exception as exc:
-        if os.path.exists(temp_path):
+        for server_path in server_file_paths:
             try:
-                os.remove(temp_path)
-            except OSError:
-                pass
-        flash(f"Failed to load precomputed predictions: {exc}", "error")
+                source_path = _validate_existing_pickle_file_path(server_path, "Predictions server file")
+                safe_name = secure_filename(os.path.basename(source_path))
+            except Exception as exc:
+                flash(str(exc), "error")
+                return redirect(request.referrer or url_for("inference_load_data"))
+            if not safe_name:
+                continue
+            inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
+    else:
+        if len(uploads) == 0:
+            flash("Upload at least one precomputed predictions dataframe (.pkl/.pickle).", "error")
+            return redirect(request.referrer or url_for("inference_load_data"))
+        for upload in uploads:
+            safe_name = secure_filename(upload.filename)
+            if not safe_name:
+                continue
+            ext = Path(safe_name).suffix.lower()
+            if ext not in PICKLE_EXTENSIONS:
+                flash("Precomputed predictions must be a pickle file (.pkl/.pickle).", "error")
+                return redirect(request.referrer or url_for("inference_load_data"))
+            inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
+
+    if not inputs:
+        flash("No valid precomputed predictions files were provided.", "error")
         return redirect(request.referrer or url_for("inference_load_data"))
 
-    if os.path.exists(temp_path):
+    predictions_dir = _predictions_data_dir(create=True)
+    loaded_count = 0
+    errors = []
+    single_file_upload = len(inputs) == 1
+    for item in inputs:
+        safe_name = item["safe_name"]
+        temp_path = os.path.join(predictions_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
         try:
-            os.remove(temp_path)
-        except OSError:
-            pass
+            if source_mode == "server-path":
+                shutil.copy2(item["source_path"], temp_path)
+            else:
+                item["upload"].save(temp_path)
+            df = compute_utils.read_df_file(temp_path)
+            if not isinstance(df, pd.DataFrame):
+                raise ValueError("Uploaded object is not a pandas dataframe.")
+            if "Predictions" not in df.columns:
+                raise ValueError("Uploaded dataframe does not contain a 'Predictions' column.")
+            if single_file_upload:
+                output_name = "predictions.pkl"
+            else:
+                output_name = f"predictions_loaded_{uuid.uuid4().hex[:8]}_{safe_name}"
+            output_path = os.path.join(predictions_dir, output_name)
+            df.to_pickle(output_path)
+            loaded_count += 1
+        except Exception as exc:
+            errors.append(f"{safe_name}: {exc}")
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
 
-    flash(f"Predictions file loaded: {output_name}", "success")
+    if loaded_count == 0:
+        detail = errors[0] if errors else "Unknown error."
+        flash(f"Failed to load precomputed predictions: {detail}", "error")
+        return redirect(request.referrer or url_for("inference_load_data"))
+
+    if errors:
+        shown = "; ".join(errors[:3])
+        if len(errors) > 3:
+            shown += f"; ... ({len(errors) - 3} more)"
+        flash(f"Loaded {loaded_count} predictions file(s), but some failed: {shown}", "error")
+    else:
+        if single_file_upload:
+            flash("Predictions file loaded: predictions.pkl", "success")
+        else:
+            flash(f"Loaded {loaded_count} predictions files.", "success")
+    return redirect(url_for("inference_load_data"))
+
+
+@app.route("/inference/remove_file", methods=["POST"])
+def remove_inference_file():
+    filename = (request.form.get("filename") or "").strip()
+    predictions_root = _predictions_data_dir(create=False)
+    try:
+        target_path = _validate_relative_pickle_path(filename, predictions_root, "Predictions file")
+        os.remove(target_path)
+        flash(f"Removed predictions file: {os.path.basename(target_path)}", "success")
+    except Exception as exc:
+        flash(str(exc), "error")
     return redirect(url_for("inference_load_data"))
 
 # New training for inference configuration page
@@ -3828,15 +4178,18 @@ def analysis():
     simulation_available = False
     simulation_trials = 0
     simulation_model = ""
+    simulation_welch_defaults = None
     try:
         sim_data = _load_simulation_outputs()
         simulation_available = True
         simulation_trials = _simulation_trial_count(sim_data)
         simulation_model = _simulation_model_type(sim_data)
+        simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
     except Exception:
         simulation_available = False
         simulation_trials = 0
         simulation_model = ""
+        simulation_welch_defaults = None
     return render_template(
         "5.analysis.html",
         analysis_data_files=analysis_data_files,
@@ -3851,6 +4204,7 @@ def analysis():
         simulation_available=simulation_available,
         simulation_trials=simulation_trials,
         simulation_model=simulation_model,
+        simulation_welch_defaults=simulation_welch_defaults,
     )
 
 
@@ -3895,12 +4249,42 @@ def _load_simulation_outputs():
         with open(path, "rb") as f:
             payload[name] = pickle.load(f)
 
+    metadata = None
+    metadata_path = _simulation_grid_metadata_path(_simulation_output_root())
+    if metadata_path and os.path.isfile(metadata_path):
+        try:
+            with open(metadata_path, "rb") as handle:
+                maybe_meta = pickle.load(handle)
+            if isinstance(maybe_meta, dict):
+                metadata = maybe_meta
+        except Exception:
+            metadata = None
+    if metadata is None:
+        legacy_candidates = ["simulation_grid_metadata.pkl", "simulation_grid_metadata.json"]
+        for legacy_name in legacy_candidates:
+            legacy_path = os.path.join(_simulation_output_root(), legacy_name)
+            if not os.path.isfile(legacy_path):
+                continue
+            try:
+                if legacy_name.endswith(".json"):
+                    with open(legacy_path, "r", encoding="utf-8") as handle:
+                        maybe_meta = json.load(handle)
+                else:
+                    with open(legacy_path, "rb") as handle:
+                        maybe_meta = pickle.load(handle)
+                if isinstance(maybe_meta, dict):
+                    metadata = maybe_meta
+                    break
+            except Exception:
+                continue
+
     return {
         "times": payload["times.pkl"],
         "gids": payload["gids.pkl"],
         "dt": payload["dt.pkl"],
         "tstop": payload["tstop.pkl"],
         "network": payload["network.pkl"],
+        "grid_metadata": metadata,
     }
 
 
@@ -3911,6 +4295,8 @@ def _simulation_trial_count(sim_data):
 
 def _simulation_model_type(sim_data):
     net = sim_data.get("network", {}) or {}
+    if isinstance(net, list):
+        net = net[0] if net else {}
     if isinstance(net, dict) and "areas" in net:
         return "four_area"
     return "hagen"
@@ -3935,8 +4321,107 @@ def _simulation_trial_data(sim_data, trial_idx):
         "gids": _pick(gids_all),
         "dt": float(_pick(dt_all)),
         "tstop": float(_pick(tstop_all)),
-        "network": sim_data["network"],
+        "network": _pick(sim_data["network"]),
     }
+
+
+def _next_power_of_two(value):
+    value = int(max(1, value))
+    return 1 << (value - 1).bit_length()
+
+
+def _resolve_default_welch_params(signal_len, fs_hz):
+    signal_len = int(max(1, signal_len))
+    fs_hz = float(max(1.0, fs_hz))
+    nperseg = max(256, int(round(2.0 * fs_hz)))
+    nperseg = max(1, min(signal_len, nperseg))
+    noverlap = max(0, min(nperseg - 1, nperseg // 2))
+    nfft = max(nperseg, _next_power_of_two(nperseg))
+    return {
+        "nperseg": int(nperseg),
+        "noverlap": int(noverlap),
+        "nfft": int(nfft),
+    }
+
+
+def _simulation_default_welch_preview(sim_data):
+    try:
+        trial = _simulation_trial_data(sim_data, 0)
+        dt = float(trial.get("dt", 0.0))
+        tstop = float(trial.get("tstop", 0.0))
+    except Exception:
+        return None
+    if not np.isfinite(dt) or not np.isfinite(tstop) or dt <= 0.0 or tstop <= 0.0:
+        return None
+    fs_hz = 1000.0 / dt
+    signal_len = int(max(1, round(tstop / dt)))
+    params = _resolve_default_welch_params(signal_len, fs_hz)
+    params["fs_hz"] = float(fs_hz)
+    params["signal_len"] = int(signal_len)
+    params["dt_ms"] = float(dt)
+    return params
+
+
+def _format_trial_param_value(value, max_len=32):
+    if isinstance(value, float):
+        text = f"{value:.6g}"
+    elif isinstance(value, (int, bool)):
+        text = str(value)
+    elif isinstance(value, str):
+        text = value
+    else:
+        try:
+            text = json.dumps(value, separators=(",", ":"), ensure_ascii=True)
+        except Exception:
+            text = repr(value)
+    text = str(text)
+    if len(text) > max_len:
+        return text[: max_len - 3] + "..."
+    return text
+
+
+def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
+    meta = sim_data.get("grid_metadata")
+    if not isinstance(meta, dict):
+        return ""
+    changed_keys = meta.get("changed_keys")
+    trials = meta.get("trials")
+    if not isinstance(changed_keys, list) or not changed_keys:
+        return ""
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return ""
+    trial_entry = trials[trial_idx]
+    if not isinstance(trial_entry, dict):
+        return ""
+    changed = trial_entry.get("changed")
+    if not isinstance(changed, dict):
+        return ""
+    parts = []
+    for key in changed_keys:
+        if key not in changed:
+            continue
+        parts.append(f"{key}={_format_trial_param_value(changed[key])}")
+    if not parts:
+        return ""
+    if len(parts) > max_params:
+        remaining = len(parts) - max_params
+        parts = parts[:max_params] + [f"+{remaining} more"]
+    return ", ".join(parts)
+
+
+def _simulation_trial_plot_title(sim_data, trial_idx, suffix):
+    base = f"Trial {trial_idx} {suffix}".strip()
+    changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
+    if changed:
+        return f"{base}\n{changed}"
+    return base
+
+
+def _simulation_trial_legend_label(sim_data, trial_idx):
+    changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
+    if changed:
+        return f"trial {trial_idx} | {changed}"
+    return f"trial {trial_idx}"
 
 
 def _population_color(name, idx):
@@ -4259,6 +4744,122 @@ def analysis_sync_selected_simulation_files():
         _clear_analysis_selected_simulation_keys()
 
     return jsonify({"ok": True, "copied_files": copied_files})
+
+
+@app.route("/analysis/upload_simulation_files", methods=["POST"])
+def analysis_upload_simulation_files():
+    uploads = [f for f in request.files.getlist("simulation_files") if f and f.filename]
+    if not uploads:
+        return jsonify({"error": "No simulation files were uploaded."}), 400
+
+    simulation_root = _simulation_output_root()
+    os.makedirs(simulation_root, exist_ok=True)
+
+    # Replace previous simulation pickle outputs to avoid mixing datasets.
+    for name in os.listdir(simulation_root):
+        lower = name.lower()
+        if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+            continue
+        path = os.path.join(simulation_root, name)
+        if not os.path.isfile(path):
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    required_name_by_stem = {
+        "times": "times.pkl",
+        "gids": "gids.pkl",
+        "dt": "dt.pkl",
+        "tstop": "tstop.pkl",
+        "network": "network.pkl",
+        "grid_metadata": SIMULATION_GRID_METADATA_FILE,
+    }
+    copied_files = []
+    used_names = set()
+    for upload in uploads:
+        raw_name = os.path.basename(upload.filename or "")
+        safe_name = secure_filename(raw_name)
+        if not safe_name:
+            continue
+        ext = Path(safe_name).suffix.lower()
+        if ext not in PICKLE_EXTENSIONS:
+            continue
+
+        stem = Path(safe_name).stem.lower()
+        preferred_name = required_name_by_stem.get(stem, safe_name)
+        preferred_name = secure_filename(preferred_name)
+        if not preferred_name:
+            continue
+        preferred_stem, preferred_ext = os.path.splitext(preferred_name)
+        preferred_ext = preferred_ext or ".pkl"
+        candidate = preferred_name
+        suffix = 1
+        while candidate in used_names:
+            candidate = f"{preferred_stem}_{suffix}{preferred_ext}"
+            suffix += 1
+        dst_path = os.path.join(simulation_root, candidate)
+        try:
+            upload.save(dst_path)
+        except OSError:
+            continue
+        if not os.path.isfile(dst_path) or os.path.getsize(dst_path) <= 0:
+            try:
+                if os.path.exists(dst_path):
+                    os.remove(dst_path)
+            except OSError:
+                pass
+            continue
+        used_names.add(candidate)
+        copied_files.append(candidate)
+
+    if not copied_files:
+        return jsonify({"error": "No supported simulation .pkl/.pickle files were uploaded."}), 400
+
+    priority = {
+        "times.pkl": 0,
+        "gids.pkl": 1,
+        "dt.pkl": 2,
+        "tstop.pkl": 3,
+        "network.pkl": 4,
+        SIMULATION_GRID_METADATA_FILE: 5,
+    }
+    copied_files = sorted(copied_files, key=lambda name: (priority.get(name, 1000), name))
+    selected_keys = [f"simulation::{name}" for name in copied_files]
+    _set_analysis_selection_mode("simulation")
+    _set_analysis_selected_simulation_keys(selected_keys)
+    _clear_analysis_data_files()
+
+    required = {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"}
+    missing_required = sorted(name for name in required if name not in set(copied_files))
+
+    simulation_available = False
+    simulation_trials = 0
+    simulation_model = ""
+    simulation_welch_defaults = None
+    try:
+        sim_data = _load_simulation_outputs()
+        simulation_available = True
+        simulation_trials = _simulation_trial_count(sim_data)
+        simulation_model = _simulation_model_type(sim_data)
+        simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
+    except Exception:
+        simulation_available = False
+        simulation_trials = 0
+        simulation_model = ""
+        simulation_welch_defaults = None
+
+    return jsonify({
+        "ok": True,
+        "copied_files": copied_files,
+        "selected_keys": selected_keys,
+        "missing_required": missing_required,
+        "simulation_available": simulation_available,
+        "simulation_trials": simulation_trials,
+        "simulation_model": simulation_model,
+        "simulation_welch_defaults": simulation_welch_defaults,
+    })
 
 
 def _analysis_plot_error(message, status=400, log_output=""):
@@ -5349,13 +5950,39 @@ def analysis_plot_simulation():
     if welch_nperseg is not None and welch_nfft is not None and welch_nfft < welch_nperseg:
         return _analysis_plot_error("Welch nfft must be >= nperseg.", status=400)
 
-    welch_kwargs = {}
-    if welch_nperseg is not None:
-        welch_kwargs["nperseg"] = welch_nperseg
-    if welch_noverlap is not None:
-        welch_kwargs["noverlap"] = welch_noverlap
-    if welch_nfft is not None:
-        welch_kwargs["nfft"] = welch_nfft
+    def _next_power_of_two(value):
+        value = int(max(1, value))
+        return 1 << (value - 1).bit_length()
+
+    def _resolve_welch_kwargs(signal_len, fs_hz):
+        signal_len = int(max(1, signal_len))
+        fs_hz = float(max(1.0, fs_hz))
+        default_nperseg = max(256, int(round(2.0 * fs_hz)))
+        nperseg = int(welch_nperseg) if welch_nperseg is not None else default_nperseg
+        nperseg = max(1, min(signal_len, nperseg))
+
+        noverlap = int(welch_noverlap) if welch_noverlap is not None else (nperseg // 2)
+        noverlap = max(0, min(noverlap, nperseg - 1))
+
+        nfft = int(welch_nfft) if welch_nfft is not None else _next_power_of_two(nperseg)
+        nfft = max(nperseg, nfft)
+        return {
+            "nperseg": nperseg,
+            "noverlap": noverlap,
+            "nfft": nfft,
+        }
+
+    def _fallback_welch_text():
+        if not trial_indices:
+            return None
+        try:
+            trial = _simulation_trial_data(sim_data, trial_indices[0])
+            dt_local = float(trial["dt"])
+            fs = 1000.0 / max(dt_local, 1e-9)
+            signal_len = int(max(1, round(float(trial["tstop"]) / max(dt_local, 1e-9))))
+            return _resolve_welch_kwargs(signal_len, fs)
+        except Exception:
+            return None
 
     allowed_types = {"raster", "firing_rates", "cdm", "cdm_psd"}
     if plot_type not in allowed_types:
@@ -5426,6 +6053,7 @@ def analysis_plot_simulation():
     import math
 
     if plot_type == "cdm_psd":
+        welch_used = None
         areas = sim_data.get("network", {}).get("areas", []) if model == "four_area" else []
         if model == "four_area":
             cols = min(2, max(1, len(areas)))
@@ -5450,12 +6078,20 @@ def analysis_plot_simulation():
                         continue
                     dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
                     fs = 1000.0 / max(dt_local, 1e-9)
-                    freqs, psd = ss.welch(cdm, fs=fs, **welch_kwargs)
+                    effective_welch = _resolve_welch_kwargs(cdm.size, fs)
+                    if welch_used is None:
+                        welch_used = dict(effective_welch)
+                    freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
                     if psd.size == 0:
                         continue
                     psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
                     mask = (freqs >= freq_min) & (freqs <= freq_max)
-                    ax.semilogy(freqs[mask], psd_norm[mask], linewidth=1.0, label=f"trial {trial_idx}")
+                    ax.semilogy(
+                        freqs[mask],
+                        psd_norm[mask],
+                        linewidth=1.0,
+                        label=_simulation_trial_legend_label(sim_data, trial_idx),
+                    )
                     plotted += 1
                 ax.set_title(f"{area_name} PSD")
                 ax.set_xlabel("f (Hz)")
@@ -5466,12 +6102,17 @@ def analysis_plot_simulation():
             for extra_idx in range(len(areas), len(flat_ax)):
                 flat_ax[extra_idx].axis("off")
             fig.tight_layout()
+            welch_text = welch_used or _fallback_welch_text() or {
+                "nperseg": "auto",
+                "noverlap": "auto",
+                "nfft": "auto",
+            }
             subtitle = (
                 f"Field-potential power spectra by area. Model: {model}. Trials {range_start} to {range_end} "
                 f"({freq_min:g}-{freq_max:g} Hz). Source: {cdm_payload_name}. "
-                f"Welch: nperseg={welch_kwargs.get('nperseg', 'default')}, "
-                f"noverlap={welch_kwargs.get('noverlap', 'default')}, "
-                f"nfft={welch_kwargs.get('nfft', 'default')}."
+                f"Welch: nperseg={welch_text.get('nperseg')}, "
+                f"noverlap={welch_text.get('noverlap')}, "
+                f"nfft={welch_text.get('nfft')}."
             )
         else:
             fig, ax = plt.subplots(1, 1, figsize=(8, 5), dpi=160)
@@ -5488,12 +6129,20 @@ def analysis_plot_simulation():
                     continue
                 dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
                 fs = 1000.0 / max(dt_local, 1e-9)
-                freqs, psd = ss.welch(cdm, fs=fs, **welch_kwargs)
+                effective_welch = _resolve_welch_kwargs(cdm.size, fs)
+                if welch_used is None:
+                    welch_used = dict(effective_welch)
+                freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
                 if psd.size == 0:
                     continue
                 psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
                 mask = (freqs >= freq_min) & (freqs <= freq_max)
-                ax.semilogy(freqs[mask], psd_norm[mask], linewidth=1.2, label=f"trial {trial_idx}")
+                ax.semilogy(
+                    freqs[mask],
+                    psd_norm[mask],
+                    linewidth=1.2,
+                    label=_simulation_trial_legend_label(sim_data, trial_idx),
+                )
             ax.set_xlabel("f (Hz)")
             ax.set_ylabel("PSD (a.u./Hz)")
             ax.set_title("Field-potential power spectra (overlaid trials)")
@@ -5501,12 +6150,17 @@ def analysis_plot_simulation():
             if len(trial_indices) <= 20:
                 ax.legend(fontsize=8, loc="best")
             fig.tight_layout()
+            welch_text = welch_used or _fallback_welch_text() or {
+                "nperseg": "auto",
+                "noverlap": "auto",
+                "nfft": "auto",
+            }
             subtitle = (
                 f"Model: {model}. Trials {range_start} to {range_end} (overlaid spectra, {freq_min:g}-{freq_max:g} Hz). "
                 f"Source: {cdm_payload_name}. "
-                f"Welch: nperseg={welch_kwargs.get('nperseg', 'default')}, "
-                f"noverlap={welch_kwargs.get('noverlap', 'default')}, "
-                f"nfft={welch_kwargs.get('nfft', 'default')}."
+                f"Welch: nperseg={welch_text.get('nperseg')}, "
+                f"noverlap={welch_text.get('noverlap')}, "
+                f"nfft={welch_text.get('nfft')}."
             )
     else:
         if model == "four_area":
@@ -5564,7 +6218,7 @@ def analysis_plot_simulation():
                         ax.set_ylabel("gid")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(f"Trial {trial_idx} | {area_name} raster")
+                        ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, f"| {area_name} raster"))
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
@@ -5583,7 +6237,7 @@ def analysis_plot_simulation():
                         ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(f"Trial {trial_idx} | {area_name} rates")
+                        ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, f"| {area_name} rates"))
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
@@ -5596,7 +6250,7 @@ def analysis_plot_simulation():
                         ax.set_ylabel("Field potential (a.u.)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(f"Trial {trial_idx} | {area_name} field potential")
+                        ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, f"| {area_name} field potential"))
                 # Hide unused cells in this trial's area grid block.
                 for extra_idx in range(len(areas), area_rows * area_cols):
                     grid_row = trial_pos * area_rows + (extra_idx // area_cols)
@@ -5624,7 +6278,7 @@ def analysis_plot_simulation():
                         ax.plot(t[mask_t], g[mask_t], ".", ms=1.0, color=_population_color(pop_name, pop_i), alpha=0.7, label=str(pop_name))
                     ax.set_ylabel("gid")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(f"Trial {trial_idx} raster")
+                    ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, "raster"))
                     if pos == 0:
                         ax.legend(fontsize=7, loc="best")
                     ax.set_xlim(time_start, time_end)
@@ -5636,7 +6290,7 @@ def analysis_plot_simulation():
                         ax.plot(tb[mask_t], rate[mask_t], linewidth=1.0, color=_population_color(pop_name, pop_i), label=str(pop_name))
                     ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(f"Trial {trial_idx} firing rates")
+                    ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, "firing rates"))
                     if pos == 0:
                         ax.legend(fontsize=7, loc="best")
                     ax.set_xlim(time_start, time_end)
@@ -5657,7 +6311,7 @@ def analysis_plot_simulation():
                     ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                     ax.set_ylabel("Field potential (a.u.)")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(f"Trial {trial_idx} field potential")
+                    ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, "field potential"))
                     ax.set_xlim(time_start, time_end)
 
             for pos in range(len(trial_indices), len(flat_ax)):

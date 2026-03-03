@@ -1,4 +1,6 @@
 import os
+import subprocess
+import sys
 
 
 def run_script(script_path, param_path, output_folder):
@@ -26,8 +28,14 @@ def run_script(script_path, param_path, output_folder):
     if not param_path.endswith('.py'):
         raise ValueError(f"Parameter file '{param_path}' is not a python script.")
 
-    # Run the script
-    os.system(f"python {script_path} {param_path} {output_folder}")
+    # Run the script and propagate failures to callers.
+    # This ensures orchestrators (e.g. WebUI) can mark jobs as failed.
+    cmd = [sys.executable, script_path, param_path, output_folder]
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Script '{os.path.basename(script_path)}' failed with exit code {result.returncode}."
+        )
 
 
 class Simulation:

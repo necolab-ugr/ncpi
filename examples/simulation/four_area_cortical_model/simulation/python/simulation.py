@@ -56,11 +56,7 @@ class LIF_network(object):
                     tau_syn_ex=tau_syn_ex,
                     tau_syn_in=tau_syn_in,
                 )
-                print(
-                    '\n[CREATE] %s_%s | N=%d | tau_syn_ex=%s ms | tau_syn_in=%s ms | J_ext=%s nA'
-                    % (area, X, N, tau_syn_ex, tau_syn_in, self.LIF_params['J_ext']),
-                    flush=True,
-                )
+                print('Creating population %s\n' % f"{area}_{X}", end=' ', flush=True)
                 self.neurons[area][X] = nest.Create(
                     self.LIF_params['model'],
                     N,
@@ -90,9 +86,7 @@ class LIF_network(object):
                         rule='pairwise_bernoulli',
                         p=self.LIF_params['C_YX'][i][j],
                     )
-                    print('\nConnecting %s_%s with %s_%s with weight %s\n' % (
-                        area, X, area, Y, self.LIF_params['J_YX'][i][j]
-                    ), end=' ', flush=True)
+                    print('Connecting %s with %s \n' % (f"{area}_{X}", f"{area}_{Y}"), end=' ', flush=True)
                     syn_spec = dict(
                         synapse_model='static_synapse',
                         weight=nest.math.redraw(
@@ -154,9 +148,11 @@ class LIF_network(object):
                                 rule='pairwise_bernoulli',
                                 p=C_inter[i][j],
                             )
-                            print('\nConnecting %s_%s with %s_%s (inter-area) weight %s\n' % (
-                                pre_area, pre, post_area, post, J_inter[i][j]
-                            ), end=' ', flush=True)
+                            print(
+                                'Connecting %s with %s \n' % (f"{pre_area}_{pre}", f"{post_area}_{post}"),
+                                end=' ',
+                                flush=True,
+                            )
                             syn_spec = dict(
                                 synapse_model='static_synapse',
                                 weight=nest.math.redraw(
@@ -194,6 +190,9 @@ def _simulate_with_progress(tstop, dt):
     # Use 1-second chunks (aligned to dt) to reduce simulation-loop overhead.
     step = max(dt, 1000.0)
     step = max(dt, round(step / dt) * dt)
+    total_segments = int(np.ceil(tstop / step))
+    total_segments = max(1, total_segments)
+    segment_idx = 0
     sim_time = 0.0
     while sim_time < tstop:
         remaining = tstop - sim_time
@@ -202,8 +201,8 @@ def _simulate_with_progress(tstop, dt):
             break
         nest.Simulate(this_step)
         sim_time += this_step
-        pct = int(min(100, round((sim_time / tstop) * 100)))
-        print(f"PROGRESS:{pct}", flush=True)
+        segment_idx += 1
+        print(f"SIM_SEGMENT {segment_idx}/{total_segments}", flush=True)
 
 
 if __name__ == "__main__":
@@ -238,7 +237,7 @@ if __name__ == "__main__":
     network.create_LIF_network(local_num_threads, dt)
 
     # Simulation
-    print('\nSimulating...\n', end=' ', flush=True)
+    print('Simulating...\n', end=' ', flush=True)
     tac = time.time()
     _simulate_with_progress(tstop, dt)
     toc = time.time()

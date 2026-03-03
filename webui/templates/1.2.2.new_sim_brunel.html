@@ -22,6 +22,17 @@
         },
     }
 </script>
+<style>
+    .param-input[type=number]::-webkit-outer-spin-button,
+    .param-input[type=number]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .param-input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+</style>
 {% endblock %}
 
 
@@ -38,21 +49,20 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation time
-                        tstop (ms)</span>
+                        <i>t</i><sub>stop</sub> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" step="any" data-param="tstop" />
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Time step
-                        dt (ms)</span>
+                        <i>d</i><i>t</i> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" step="any" data-param="dt"/>
                 </label>
                 <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Threads
-                        local_num_threads</span>
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Number of threads</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" min="1" step="1" data-param="local_num_threads" />
@@ -66,35 +76,35 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Populations
-                        X</span>
+                        <i>X</i></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Population
-                        sizes N_X</span>
+                        sizes <i>N</i><sub><i>X</i></sub></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="N_X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane
-                        capacitance C_m_X</span>
+                        capacitance <i>C</i><sub><i>m</i><sub><i>X</i></sub></sub> (pF)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="C_m_X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane
-                        time constant tau_m_X (ms)</span>
+                        time constant <i>&tau;</i><sub><i>m</i><sub><i>X</i></sub></sub> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="tau_m_X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Resting
-                        potential E_L_X (mV)</span>
+                        potential <i>E</i><sub><i>L</i><sub><i>X</i></sub></sub> (mV)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="E_L_X"/>
@@ -104,7 +114,7 @@
                         model</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                        type="text" data-param="model"/>
+                        type="text" data-param="model" readonly />
                 </label>
             </div>
         </section>
@@ -115,49 +125,49 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Connection
-                        probability matrix C_YX</span>
+                        probability matrix <i>C</i><sub><i>Y</i><i>X</i></sub></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="C_YX"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic
-                        weight matrix J_YX (pA)</span>
+                        weight matrix <i>J</i><sub><i>Y</i><i>X</i></sub> (nA)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="J_YX"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic
-                        delay matrix delay_YX (ms)</span>
+                        delay matrix <i>&delta;</i><sub><i>Y</i><i>X</i></sub> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="delay_YX"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic
-                        time constants tau_syn_YX (ms)</span>
+                        time constants <i>&tau;</i><sub>syn,<i>Y</i><i>X</i></sub> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="tau_syn_YX"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">External
-                        indegree n_ext</span>
+                        indegree <i>n</i><sub>ext</sub></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="n_ext"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">External
-                        rate nu_ext (Hz)</span>
+                        rate <i>&nu;</i><sub>ext</sub> (Hz)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" step="any" data-param="nu_ext"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">External
-                        weight J_ext (pA)</span>
+                        weight <i>J</i><sub>ext</sub> (nA)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" step="any" data-param="J_ext"/>
@@ -216,6 +226,6 @@
     {{ super() }} <!-- import base.html scripts -->
 
     <!-- Simulation-specific JavaScript -->
-    <script src="{{ url_for('static', filename='js/simulation.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulation.js', v='20260303') }}"></script>
 
 {% endblock %} > 

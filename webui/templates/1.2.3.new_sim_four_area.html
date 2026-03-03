@@ -22,6 +22,17 @@
         },
     }
 </script>
+<style>
+    .param-input[type=number]::-webkit-outer-spin-button,
+    .param-input[type=number]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .param-input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+</style>
 {% endblock %}
 
 
@@ -45,21 +56,20 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation time
-                        tstop (ms)</span>
+                        <i>t</i><sub>stop</sub> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" step="any" data-param="tstop" />
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Time step
-                        dt (ms)</span>
+                        <i>d</i><i>t</i> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" step="any" data-param="dt"/>
                 </label>
                 <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Threads
-                        local_num_threads</span>
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Number of threads</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="number" min="1" step="1" data-param="local_num_threads" />
@@ -73,42 +83,42 @@
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Areas
-                        areas</span>
+                        <i>areas</i></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="areas"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Populations
-                        X</span>
+                        <i>X</i></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Population
-                        sizes N_X</span>
+                        sizes <i>N</i><sub><i>X</i></sub></span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="N_X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane
-                        capacitance C_m_X</span>
+                        capacitance <i>C</i><sub><i>m</i><sub><i>X</i></sub></sub> (pF)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="C_m_X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane
-                        time constant tau_m_X (ms)</span>
+                        time constant <i>&tau;</i><sub><i>m</i><sub><i>X</i></sub></sub> (ms)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="tau_m_X"/>
                 </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Resting
-                        potential E_L_X (mV)</span>
+                        potential <i>E</i><sub><i>L</i><sub><i>X</i></sub></sub> (mV)</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                         type="text" data-param="E_L_X"/>
@@ -118,7 +128,7 @@
                         model</span>
                     <input
                         class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                        type="text" data-param="model"/>
+                        type="text" data-param="model" readonly />
                 </label>
             </div>
         </section>
@@ -134,77 +144,77 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            J_EE (pA)</span>
+                            <i>J</i><sub><i>E</i><sub><i>E</i></sub></sub> (pA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="J_EE"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            J_IE (pA)</span>
+                            <i>J</i><sub><i>I</i><sub><i>E</i></sub></sub> (pA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="J_IE"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            J_EI (pA)</span>
+                            <i>J</i><sub><i>E</i><sub><i>I</i></sub></sub> (pA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="J_EI"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            J_II (pA)</span>
+                            <i>J</i><sub><i>I</i><sub><i>I</i></sub></sub> (pA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="J_II"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local connection
-                            probability matrix C_YX</span>
+                            probability matrix <i>C</i><sub><i>Y</i><i>X</i></sub></span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="C_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            matrix J_YX (pA)</span>
+                            matrix <i>J</i><sub><i>Y</i><i>X</i></sub> (nA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="J_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local delay
-                            matrix delay_YX (ms)</span>
+                            matrix <i>&delta;</i><sub><i>Y</i><i>X</i></sub> (ms)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="delay_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Local synaptic
-                            time constants tau_syn_YX (ms)</span>
+                            time constants <i>&tau;</i><sub>syn,<i>Y</i><i>X</i></sub> (ms)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="tau_syn_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">External
-                            indegree n_ext</span>
+                            indegree <i>n</i><sub>ext</sub></span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="n_ext"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">External
-                            rate nu_ext (Hz)</span>
+                            rate <i>&nu;</i><sub>ext</sub> (Hz)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="nu_ext"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">External
-                            weight J_ext (pA)</span>
+                            weight <i>J</i><sub>ext</sub> (nA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="J_ext"/>
@@ -217,42 +227,42 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
-                            scale inter_area_scale</span>
+                            scale inter<sub>area<sub>scale</sub></sub></span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="inter_area_scale"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
-                            probability inter_area_p</span>
+                            probability inter<sub>area<sub>p</sub></sub></span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="inter_area_p"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
-                            delay inter_area_delay (ms)</span>
+                            delay inter<sub>area<sub>delay</sub></sub> (ms)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="number" step="any" data-param="inter_area_delay"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
-                            C_YX</span>
+                            <i>C</i><sub><i>Y</i><i>X</i></sub></span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="inter_area.C_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
-                            J_YX (pA)</span>
+                            <i>J</i><sub><i>Y</i><i>X</i></sub> (nA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="inter_area.J_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
-                            delay_YX (ms)</span>
+                            <i>&delta;</i><sub><i>Y</i><i>X</i></sub> (ms)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="inter_area.delay_YX"/>
@@ -312,6 +322,6 @@
     {{ super() }} <!-- import base.html scripts -->
 
     <!-- Simulation-specific JavaScript -->
-    <script src="{{ url_for('static', filename='js/simulation_four_area.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulation_four_area.js', v='20260303') }}"></script>
 
 {% endblock %} > 

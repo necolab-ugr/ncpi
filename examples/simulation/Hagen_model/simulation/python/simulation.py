@@ -47,9 +47,7 @@ class LIF_network(object):
                 tau_syn_ex=tau_syn_ex,
                 tau_syn_in=tau_syn_in
             )
-            print('Creating population %s, tau_syn_ex = %s, tau_syn_in = %s\n' % (
-                                                        X,tau_syn_ex,tau_syn_in),
-                                                        end=' ', flush=True)
+            print('Creating population %s\n' % X, end=' ', flush=True)
             self.neurons[X] = nest.Create(self.LIF_params['model'],
                                           N, net_params)
 
@@ -73,9 +71,7 @@ class LIF_network(object):
                     rule='pairwise_bernoulli',
                     p=self.LIF_params['C_YX'][i][j],
                 )
-                print('Connecting %s with %s with weight %s\n' % (X,Y,
-                                                self.LIF_params['J_YX'][i][j]),
-                                                end=' ', flush=True)
+                print('Connecting %s with %s \n' % (X, Y), end=' ', flush=True)
                 syn_spec = dict(
                     synapse_model='static_synapse',
                     weight=nest.math.redraw(
@@ -125,6 +121,9 @@ def _simulate_with_progress(tstop, dt):
     # Use 1-second chunks (aligned to dt) to reduce simulation-loop overhead.
     step = max(dt, 1000.0)
     step = max(dt, round(step / dt) * dt)
+    total_segments = int(np.ceil(tstop / step))
+    total_segments = max(1, total_segments)
+    segment_idx = 0
     sim_time = 0.0
     while sim_time < tstop:
         remaining = tstop - sim_time
@@ -133,8 +132,8 @@ def _simulate_with_progress(tstop, dt):
             break
         nest.Simulate(this_step)
         sim_time += this_step
-        pct = int(min(100, round((sim_time / tstop) * 100)))
-        print(f"PROGRESS:{pct}", flush=True)
+        segment_idx += 1
+        print(f"SIM_SEGMENT {segment_idx}/{total_segments}", flush=True)
 
 
 if __name__ == "__main__":

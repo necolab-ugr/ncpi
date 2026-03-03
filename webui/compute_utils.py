@@ -836,6 +836,40 @@ def _safe_float(value):
         return None
 
 
+def _is_trial_sequence(value):
+    if not isinstance(value, (list, tuple)):
+        return False
+    if len(value) == 0:
+        return False
+    first = value[0]
+    if isinstance(first, (dict, pd.DataFrame, np.ndarray)):
+        return True
+    if isinstance(first, (list, tuple)):
+        if len(first) == 0:
+            return False
+        nested_first = first[0]
+        return isinstance(nested_first, (dict, pd.DataFrame, np.ndarray, list, tuple))
+    return False
+
+
+def _pick_trial_item(value, trial_idx):
+    if _is_trial_sequence(value):
+        if len(value) == 0:
+            return None
+        if 0 <= trial_idx < len(value):
+            return value[trial_idx]
+        return value[-1]
+    return value
+
+
+def _infer_trial_count_from_values(*values):
+    count = 1
+    for value in values:
+        if _is_trial_sequence(value):
+            count = max(count, len(value))
+    return max(1, count)
+
+
 def _coerce_dt_ms(value):
     if isinstance(value, pd.DataFrame):
         dt_ms = _first_numeric_from_column(value, "dt_ms")
@@ -2529,6 +2563,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         file_paths = params.get('file_paths', {})
         sim_data = {}
+        fr_times = None
+        fr_gids = None
 
         dt_from_stage, dt_path = _load_simulation_dt_ms(file_paths)
         proxy_sim_step = None
@@ -2538,9 +2574,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             _append_job_output(job_status, job_id, "Loading spike times and gids...")
             times_path = _resolve_sim_file(file_paths, 'times_file', 'times.pkl', required=True)
             gids_path = _resolve_sim_file(file_paths, 'gids_file', 'gids.pkl', required=True)
-            times = read_file(times_path)
-            gids = read_file(gids_path)
-            sim_data['FR'] = _compute_mean_firing_rate(times, gids, bin_size)
+            fr_times = read_file(times_path)
+            fr_gids = read_file(gids_path)
             proxy_sim_step = float(bin_size)
             dt_source = "bin_size_ms"
 
@@ -2601,9 +2636,56 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         _append_job_output(job_status, job_id, f"Effective proxy sampling step: {proxy_sim_step:g} ms ({dt_source}).")
 
+        trial_count = _infer_trial_count_from_values(
+            fr_times,
+            fr_gids,
+            *(sim_data.values()),
+        )
+        if trial_count > 1:
+            _append_job_output(job_status, job_id, f"Detected {trial_count} trial(s); computing proxy for each trial.")
+
         _append_job_output(job_status, job_id, "Computing proxy with ncpi.FieldPotential.compute_proxy...")
         potential = ncpi.FieldPotential()
-        proxy = potential.compute_proxy(method, sim_data, proxy_sim_step, excitatory_only=excitatory_only)
+        trial_sim_payloads = []
+        trial_proxy_payloads = []
+        for trial_idx in range(trial_count):
+            if method == "FR":
+                trial_times = _pick_trial_item(fr_times, trial_idx)
+                trial_gids = _pick_trial_item(fr_gids, trial_idx)
+                trial_sim_data = {"FR": _compute_mean_firing_rate(trial_times, trial_gids, bin_size)}
+            else:
+                trial_sim_data = {
+                    key: _pick_trial_item(value, trial_idx)
+                    for key, value in sim_data.items()
+                }
+
+            proxy = potential.compute_proxy(method, trial_sim_data, proxy_sim_step, excitatory_only=excitatory_only)
+            dt_ms = _safe_float(proxy_sim_step)
+            row = {
+                "data": proxy,
+                "proxy_method": method,
+                "dt_ms": dt_ms,
+                "decimation_factor": 1,
+                "fs_hz": None,
+                "metadata": {"dt_ms": dt_ms, "decimation_factor": 1, "fs_hz": None, "dt_source": dt_source},
+            }
+            dt_val = row.get("dt_ms")
+            if dt_val is not None and dt_val > 0:
+                fs_hz = 1000.0 / float(dt_val)
+                row["fs_hz"] = fs_hz
+                row["metadata"] = {
+                    "dt_ms": float(dt_val),
+                    "decimation_factor": 1,
+                    "fs_hz": fs_hz,
+                    "dt_source": dt_source,
+                }
+            if trial_count > 1:
+                row["trial_index"] = int(trial_idx)
+
+            trial_sim_payloads.append(trial_sim_data)
+            trial_proxy_payloads.append(pd.DataFrame([row]))
+            if trial_count > 1:
+                _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
 
         output_root = '/tmp/field_potential_proxy'
         os.makedirs(output_root, exist_ok=True)
@@ -2620,28 +2702,15 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         proxy_path = os.path.join(output_root, 'proxy.pkl')
 
         with open(sim_data_path, 'wb') as f:
-            pickle.dump(sim_data, f)
-        # Save proxy outputs in a dataframe so downstream parsing can use "data" as locator.
-        dt_ms = _safe_float(proxy_sim_step)
-        proxy_df = pd.DataFrame([{
-            "data": proxy,
-            "proxy_method": method,
-            "dt_ms": dt_ms,
-            "decimation_factor": 1,
-            "fs_hz": None,
-            "metadata": {"dt_ms": dt_ms, "decimation_factor": 1, "fs_hz": None, "dt_source": dt_source},
-        }])
-        dt_val = proxy_df["dt_ms"].iloc[0]
-        if dt_val is not None and dt_val > 0:
-            fs_hz = 1000.0 / float(dt_val)
-            proxy_df["fs_hz"] = fs_hz
-            proxy_df.at[proxy_df.index[0], "metadata"] = {
-                "dt_ms": float(dt_val),
-                "decimation_factor": 1,
-                "fs_hz": fs_hz,
-                "dt_source": dt_source,
-            }
-        proxy_df.to_pickle(proxy_path)
+            pickle.dump(
+                trial_sim_payloads if trial_count > 1 else trial_sim_payloads[0],
+                f,
+            )
+        with open(proxy_path, "wb") as f:
+            pickle.dump(
+                trial_proxy_payloads if trial_count > 1 else trial_proxy_payloads[0],
+                f,
+            )
 
         _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {output_root}")
         job_status[job_id].update({
@@ -2865,125 +2934,32 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             file_paths, "kernel_spike_times_file", "times.pkl", required=True
         )
         spike_times_raw = read_file(spike_times_path)
-        spike_times_input, area_names, area_populations, spike_layout_mode = _extract_area_population_layout_from_spike_times(
-            spike_times_raw
-        )
-
-        if spike_layout_mode == "trial_list_first":
-            _append_job_output(
-                job_status,
-                job_id,
-                "Detected multiple spike-time trials; using the first trial for kernel convolution.",
-            )
-
-        kernels_for_convolution = kernels
-        if area_names and area_populations:
-            _append_job_output(
-                job_status,
-                job_id,
-                f"Detected area-wise spike times ({', '.join(area_names)}); expanding kernels per area/population pair.",
-            )
-            network_path = _resolve_sim_file(
-                file_paths, "kernel_network_file", "network.pkl", required=False
-            )
-            if not network_path:
-                candidate_network = os.path.join(os.path.dirname(spike_times_path), "network.pkl")
-                if os.path.exists(candidate_network):
-                    network_path = candidate_network
-
-            inter_area_scales = {}
-            if network_path and os.path.exists(network_path):
-                try:
-                    network_obj = read_file(network_path)
-                    inter_area_scales = _compute_inter_area_kernel_scales(network_obj, area_populations)
-                    if inter_area_scales:
-                        _append_job_output(
-                            job_status,
-                            job_id,
-                            "Applied inter-area kernel scaling from network connectivity (network.pkl).",
-                        )
-                except Exception as exc:
-                    _append_job_output(
-                        job_status,
-                        job_id,
-                        f"Warning: failed to load inter-area scaling from network file ({exc}). Using unscaled area kernels.",
-                    )
-
-            kernels_for_convolution, kernel_mode = _expand_kernels_for_area_combinations(
-                kernels,
-                area_names,
-                inter_area_scales=inter_area_scales,
-            )
-            if kernel_mode == "area_expanded":
-                _append_job_output(
-                    job_status,
-                    job_id,
-                    f"Expanded kernel dictionary from {len(kernels)} to {len(kernels_for_convolution)} entries.",
-                )
-                spike_times_input = _flatten_area_spike_times_for_kernels(
-                    spike_times_input,
-                    area_names,
-                    area_populations,
-                )
-
-        required_populations = _extract_kernel_presynaptic_populations(kernels_for_convolution)
-        if (
-            area_names
-            and area_populations
-            and isinstance(spike_times_input, dict)
-            and any(_parse_population_area_label(pop)[1] is not None for pop in required_populations)
-            and not all(pop in spike_times_input for pop in required_populations)
-        ):
-            spike_times_input = _flatten_area_spike_times_for_kernels(
-                spike_times_input,
-                area_names,
-                area_populations,
-            )
-        spike_times, spike_times_mode = _prepare_spike_times_for_kernel_convolution(
-            spike_times_input,
-            required_populations,
-        )
-        if spike_times_mode == "area_aggregated":
-            _append_job_output(
-                job_status,
-                job_id,
-                "Detected area-wise spike times; aggregated spikes across areas by population for kernel convolution.",
-            )
-
-        population_sizes = None
-        pop_path = _resolve_sim_file(
+        pop_sizes_path = _resolve_sim_file(
             file_paths, "kernel_population_sizes_file", "population_sizes.pkl", required=False
         )
-        if pop_path:
-            population_sizes = read_file(pop_path)
-            if area_names and area_populations:
-                population_sizes, pop_sizes_layout = _flatten_area_population_sizes_for_kernels(
-                    population_sizes,
-                    area_names,
-                    area_populations,
-                )
-                if pop_sizes_layout == "area_flattened":
-                    _append_job_output(
-                        job_status,
-                        job_id,
-                        "Detected area-wise population sizes; mapped them to area/population kernel keys.",
-                    )
-            population_sizes, pop_sizes_mode = _prepare_population_sizes_for_kernel_convolution(
-                population_sizes,
-                required_populations,
-            )
-            if pop_sizes_mode == "area_aggregated":
+        population_sizes_raw = read_file(pop_sizes_path) if pop_sizes_path else None
+
+        network_path = _resolve_sim_file(
+            file_paths, "kernel_network_file", "network.pkl", required=False
+        )
+        if not network_path:
+            candidate_network = os.path.join(os.path.dirname(spike_times_path), "network.pkl")
+            if os.path.exists(candidate_network):
+                network_path = candidate_network
+        network_obj = None
+        if network_path and os.path.exists(network_path):
+            try:
+                network_obj = read_file(network_path)
+            except Exception as exc:
                 _append_job_output(
                     job_status,
                     job_id,
-                    "Detected area-wise population sizes; aggregated sizes across areas by population.",
+                    f"Warning: failed to load network file for inter-area scaling ({exc}).",
                 )
 
-        kernels_path = os.path.join(output_root, "kernels.pkl")
-        with open(kernels_path, "wb") as f:
-            pickle.dump(kernels_for_convolution, f)
-
-        _append_job_output(job_status, job_id, f"Saved kernels to {kernels_path}")
+        trial_count = _infer_trial_count_from_values(spike_times_raw, population_sizes_raw)
+        if trial_count > 1:
+            _append_job_output(job_status, job_id, f"Detected {trial_count} trial(s); computing CDM/LFP for each trial.")
 
         cdm_dt = params.get("cdm_dt")
         cdm_dt = float(cdm_dt) if cdm_dt not in (None, "") else dt
@@ -3018,61 +2994,187 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             "GaussCylinderPotential": "gauss_cylinder_potential.pkl",
         }
 
-        probe_outputs = {}
+        kernels_for_save = None
+        probe_trial_payloads = {probe_name: [] for probe_name in probe_names}
+        multi_probe_trial_payloads = []
+        logged_area_detected = False
+        logged_scaling_applied = False
+        logged_scaling_warning = False
+        logged_area_aggregated = False
+        logged_population_flattened = False
+        logged_population_aggregated = False
+
         output_paths = {}
         fs_hz = (1000.0 / float(cdm_dt)) if float(cdm_dt) > 0 else None
-        for probe_name in probe_names:
-            cdm_signals = potential.compute_cdm_lfp_from_kernels(
-                kernels_for_convolution,
-                spike_times,
-                cdm_dt,
-                cdm_tstop,
-                population_sizes=population_sizes,
-                transient=transient,
-                probe=probe_name,
-                component=component,
-                mode=mode,
-                scale=scale,
-                aggregate=aggregate,
+        for trial_idx in range(trial_count):
+            spike_times_trial_raw = _pick_trial_item(spike_times_raw, trial_idx)
+            spike_times_input, area_names, area_populations, _ = _extract_area_population_layout_from_spike_times(
+                spike_times_trial_raw
             )
-            probe_outputs[probe_name] = cdm_signals
 
-            output_name = probe_output_map.get(probe_name)
-            if not output_name:
-                safe_probe = "".join(ch.lower() if ch.isalnum() else "_" for ch in probe_name).strip("_")
-                output_name = f"{safe_probe or 'probe_output'}.pkl"
-            output_path = os.path.join(output_root, output_name)
-            combined_signal = _sum_signal_dict(cdm_signals)
-            payload_df = pd.DataFrame([{
-                "data": combined_signal,
-                "raw_signals": cdm_signals,
-                "probe": probe_name,
-                "dt_ms": float(cdm_dt),
-                "decimation_factor": 1,
-                "fs_hz": fs_hz,
-                "metadata": {"dt_ms": float(cdm_dt), "decimation_factor": 1, "fs_hz": fs_hz},
-            }])
-            payload_df.to_pickle(output_path)
-            output_paths[probe_name] = output_path
-            _append_job_output(job_status, job_id, f"Saved probe output to {output_path}")
+            kernels_for_convolution = kernels
+            if area_names and area_populations:
+                if not logged_area_detected:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Detected area-wise spike times ({', '.join(area_names)}); expanding kernels per area/population pair.",
+                    )
+                    logged_area_detected = True
+                inter_area_scales = {}
+                if network_obj is not None:
+                    try:
+                        inter_area_scales = _compute_inter_area_kernel_scales(network_obj, area_populations)
+                        if inter_area_scales and not logged_scaling_applied:
+                            _append_job_output(
+                                job_status,
+                                job_id,
+                                "Applied inter-area kernel scaling from network connectivity (network.pkl).",
+                            )
+                            logged_scaling_applied = True
+                    except Exception as exc:
+                        if not logged_scaling_warning:
+                            _append_job_output(
+                                job_status,
+                                job_id,
+                                f"Warning: failed to compute inter-area scaling ({exc}). Using unscaled area kernels.",
+                            )
+                            logged_scaling_warning = True
 
-        results_path = None
-        if len(probe_outputs) == 1:
-            results_path = next(iter(output_paths.values()))
-        else:
-            combined_path = os.path.join(output_root, "probe_outputs.pkl")
-            rows = []
-            for probe_name, probe_dict in probe_outputs.items():
-                rows.append({
-                    "data": _sum_signal_dict(probe_dict),
-                    "raw_signals": probe_dict,
+                kernels_for_convolution, kernel_mode = _expand_kernels_for_area_combinations(
+                    kernels,
+                    area_names,
+                    inter_area_scales=inter_area_scales,
+                )
+                if kernel_mode == "area_expanded" and kernels_for_save is None:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Expanded kernel dictionary from {len(kernels)} to {len(kernels_for_convolution)} entries.",
+                    )
+                if kernel_mode == "area_expanded":
+                    spike_times_input = _flatten_area_spike_times_for_kernels(
+                        spike_times_input,
+                        area_names,
+                        area_populations,
+                    )
+
+            required_populations = _extract_kernel_presynaptic_populations(kernels_for_convolution)
+            if (
+                area_names
+                and area_populations
+                and isinstance(spike_times_input, dict)
+                and any(_parse_population_area_label(pop)[1] is not None for pop in required_populations)
+                and not all(pop in spike_times_input for pop in required_populations)
+            ):
+                spike_times_input = _flatten_area_spike_times_for_kernels(
+                    spike_times_input,
+                    area_names,
+                    area_populations,
+                )
+            spike_times, spike_times_mode = _prepare_spike_times_for_kernel_convolution(
+                spike_times_input,
+                required_populations,
+            )
+            if spike_times_mode == "area_aggregated" and not logged_area_aggregated:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Detected area-wise spike times; aggregated spikes across areas by population for kernel convolution.",
+                )
+                logged_area_aggregated = True
+
+            population_sizes = _pick_trial_item(population_sizes_raw, trial_idx)
+            if population_sizes is not None:
+                if area_names and area_populations:
+                    population_sizes, pop_sizes_layout = _flatten_area_population_sizes_for_kernels(
+                        population_sizes,
+                        area_names,
+                        area_populations,
+                    )
+                    if pop_sizes_layout == "area_flattened" and not logged_population_flattened:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "Detected area-wise population sizes; mapped them to area/population kernel keys.",
+                        )
+                        logged_population_flattened = True
+                population_sizes, pop_sizes_mode = _prepare_population_sizes_for_kernel_convolution(
+                    population_sizes,
+                    required_populations,
+                )
+                if pop_sizes_mode == "area_aggregated" and not logged_population_aggregated:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Detected area-wise population sizes; aggregated sizes across areas by population.",
+                    )
+                    logged_population_aggregated = True
+
+            if kernels_for_save is None:
+                kernels_for_save = kernels_for_convolution
+
+            trial_rows = []
+            for probe_name in probe_names:
+                cdm_signals = potential.compute_cdm_lfp_from_kernels(
+                    kernels_for_convolution,
+                    spike_times,
+                    cdm_dt,
+                    cdm_tstop,
+                    population_sizes=population_sizes,
+                    transient=transient,
+                    probe=probe_name,
+                    component=component,
+                    mode=mode,
+                    scale=scale,
+                    aggregate=aggregate,
+                )
+                row = {
+                    "data": _sum_signal_dict(cdm_signals),
+                    "raw_signals": cdm_signals,
                     "probe": probe_name,
                     "dt_ms": float(cdm_dt),
                     "decimation_factor": 1,
                     "fs_hz": fs_hz,
                     "metadata": {"dt_ms": float(cdm_dt), "decimation_factor": 1, "fs_hz": fs_hz},
-                })
-            pd.DataFrame(rows).to_pickle(combined_path)
+                }
+                if trial_count > 1:
+                    row["trial_index"] = int(trial_idx)
+                payload_df = pd.DataFrame([row])
+                probe_trial_payloads[probe_name].append(payload_df)
+                trial_rows.append(row)
+            if len(probe_names) > 1:
+                multi_probe_trial_payloads.append(pd.DataFrame(trial_rows))
+            if trial_count > 1:
+                _append_job_output(job_status, job_id, f"Computed kernel convolution trial {trial_idx + 1}/{trial_count}.")
+
+        kernels_path = os.path.join(output_root, "kernels.pkl")
+        with open(kernels_path, "wb") as f:
+            pickle.dump(kernels_for_save if kernels_for_save is not None else kernels, f)
+        _append_job_output(job_status, job_id, f"Saved kernels to {kernels_path}")
+
+        for probe_name in probe_names:
+            output_name = probe_output_map.get(probe_name)
+            if not output_name:
+                safe_probe = "".join(ch.lower() if ch.isalnum() else "_" for ch in probe_name).strip("_")
+                output_name = f"{safe_probe or 'probe_output'}.pkl"
+            output_path = os.path.join(output_root, output_name)
+            payload = probe_trial_payloads[probe_name]
+            with open(output_path, "wb") as f:
+                pickle.dump(payload if trial_count > 1 else payload[0], f)
+            output_paths[probe_name] = output_path
+            _append_job_output(job_status, job_id, f"Saved probe output to {output_path}")
+
+        results_path = None
+        if len(probe_names) == 1:
+            results_path = next(iter(output_paths.values()))
+        else:
+            combined_path = os.path.join(output_root, "probe_outputs.pkl")
+            with open(combined_path, "wb") as f:
+                pickle.dump(
+                    multi_probe_trial_payloads if trial_count > 1 else multi_probe_trial_payloads[0],
+                    f,
+                )
             results_path = combined_path
             _append_job_output(job_status, job_id, f"Saved combined probe outputs to {combined_path}")
 
@@ -3119,43 +3221,11 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         if not cdm_path or not os.path.exists(cdm_path):
             raise FileNotFoundError("CDM input is required (upload .pkl or compute kernels first).")
         CDM_obj = read_file(cdm_path)
-        CDM, cdm_meta = _extract_signal_and_meta_from_source(CDM_obj)
+        cdm_trials_raw = list(CDM_obj) if _is_trial_sequence(CDM_obj) else [CDM_obj]
+        trial_count = max(1, len(cdm_trials_raw))
+        if trial_count > 1:
+            _append_job_output(job_status, job_id, f"Detected {trial_count} CDM trial(s); computing M/EEG for each trial.")
         job_status[job_id]["progress"] = 20
-        if isinstance(CDM, dict):
-            if "sum" in CDM:
-                _append_job_output(job_status, job_id, "CDM input is a dict; using 'sum' entry.")
-                CDM = CDM["sum"]
-            elif len(CDM) == 1:
-                key = next(iter(CDM.keys()))
-                _append_job_output(job_status, job_id, f"CDM input is a dict; using '{key}' entry.")
-                CDM = CDM[key]
-            else:
-                _append_job_output(job_status, job_id, "CDM input has multiple entries; summing all keys for M/EEG.")
-                total = None
-                for value in CDM.values():
-                    arr = np.asarray(value)
-                    if total is None:
-                        total = np.array(arr, copy=True)
-                    else:
-                        total = total + arr
-                CDM = total
-        CDM = np.asarray(CDM)
-        if CDM.ndim == 2 and CDM.shape[0] != 3 and CDM.shape[1] == 3:
-            CDM = CDM.T
-        if CDM.ndim == 3 and CDM.shape[1] != 3 and CDM.shape[2] == 3:
-            CDM = np.transpose(CDM, (0, 2, 1))
-        if CDM.ndim == 1:
-            _append_job_output(job_status, job_id, "CDM is 1D; assuming z-axis dipole (x=y=0).")
-            CDM = np.vstack([np.zeros_like(CDM), np.zeros_like(CDM), CDM])
-        elif CDM.ndim == 2 and CDM.shape[0] != 3:
-            _append_job_output(job_status, job_id, "CDM has 1 component per dipole; assuming z-axis dipoles (x=y=0).")
-            zeros = np.zeros_like(CDM)
-            CDM = np.stack([zeros, zeros, CDM], axis=1)
-        if not ((CDM.ndim == 2 and CDM.shape[0] == 3) or (CDM.ndim == 3 and CDM.shape[1] == 3)):
-            raise ValueError(
-                "CDM must have 3 components. Ensure you computed a dipole-moment probe (e.g., "
-                "KernelApproxCurrentDipoleMoment or CurrentDipoleMoment), not a scalar potential."
-            )
 
         dipole_locations = None
         dipole_path = file_paths.get("meeg_dipole_file")
@@ -3181,132 +3251,190 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         _append_job_output(job_status, job_id, f"Model: {model}")
         job_status[job_id]["progress"] = 45
         potential = ncpi.FieldPotential()
-        if auto_1020 and model == "NYHeadModel":
-            dipole_locations, _ = potential._get_eeg_1020_locations()
-            dipole_locations = np.asarray(dipole_locations, dtype=float)
-            n_dip = 1 if CDM.ndim == 2 else int(CDM.shape[0])
-            if n_dip == 1:
-                dipole_locations = dipole_locations[0]
-                _append_job_output(job_status, job_id, "Using first EEG 10–20 dipole location for NYHeadModel.")
+        model_kwargs = model_kwargs or {}
+        is_meg = model in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}
+        trial_payloads = []
+        warned_cdm_1d = False
+        warned_cdm_2d = False
+
+        for trial_idx, cdm_trial_raw in enumerate(cdm_trials_raw):
+            CDM, cdm_meta = _extract_signal_and_meta_from_source(cdm_trial_raw)
+            if isinstance(CDM, dict):
+                if "sum" in CDM:
+                    _append_job_output(job_status, job_id, "CDM input is a dict; using 'sum' entry.")
+                    CDM = CDM["sum"]
+                elif len(CDM) == 1:
+                    key = next(iter(CDM.keys()))
+                    _append_job_output(job_status, job_id, f"CDM input is a dict; using '{key}' entry.")
+                    CDM = CDM[key]
+                else:
+                    _append_job_output(job_status, job_id, "CDM input has multiple entries; summing all keys for M/EEG.")
+                    total = None
+                    for value in CDM.values():
+                        arr = np.asarray(value)
+                        if total is None:
+                            total = np.array(arr, copy=True)
+                        else:
+                            total = total + arr
+                    CDM = total
+            CDM = np.asarray(CDM)
+            if CDM.ndim == 2 and CDM.shape[0] != 3 and CDM.shape[1] == 3:
+                CDM = CDM.T
+            if CDM.ndim == 3 and CDM.shape[1] != 3 and CDM.shape[2] == 3:
+                CDM = np.transpose(CDM, (0, 2, 1))
+            if CDM.ndim == 1:
+                if not warned_cdm_1d:
+                    _append_job_output(job_status, job_id, "CDM is 1D; assuming z-axis dipole (x=y=0).")
+                    warned_cdm_1d = True
+                CDM = np.vstack([np.zeros_like(CDM), np.zeros_like(CDM), CDM])
+            elif CDM.ndim == 2 and CDM.shape[0] != 3:
+                if not warned_cdm_2d:
+                    _append_job_output(job_status, job_id, "CDM has 1 component per dipole; assuming z-axis dipoles (x=y=0).")
+                    warned_cdm_2d = True
+                zeros = np.zeros_like(CDM)
+                CDM = np.stack([zeros, zeros, CDM], axis=1)
+            if not ((CDM.ndim == 2 and CDM.shape[0] == 3) or (CDM.ndim == 3 and CDM.shape[1] == 3)):
+                raise ValueError(
+                    "CDM must have 3 components. Ensure you computed a dipole-moment probe (e.g., "
+                    "KernelApproxCurrentDipoleMoment or CurrentDipoleMoment), not a scalar potential."
+                )
+
+            trial_dipole_locations = dipole_locations
+            trial_sensor_locations = sensor_locations
+            if auto_1020 and model == "NYHeadModel":
+                trial_dipole_locations, _ = potential._get_eeg_1020_locations()
+                trial_dipole_locations = np.asarray(trial_dipole_locations, dtype=float)
+                n_dip = 1 if CDM.ndim == 2 else int(CDM.shape[0])
+                if n_dip == 1:
+                    trial_dipole_locations = trial_dipole_locations[0]
+                else:
+                    if trial_dipole_locations.shape[0] < n_dip:
+                        needed = n_dip - trial_dipole_locations.shape[0]
+                        tail = np.repeat(trial_dipole_locations[-1:], needed, axis=0)
+                        trial_dipole_locations = np.vstack([trial_dipole_locations, tail])
+                    trial_dipole_locations = trial_dipole_locations[:n_dip]
+                trial_sensor_locations = None
+            elif model == "NYHeadModel":
+                trial_sensor_locations = None
             else:
-                if dipole_locations.shape[0] < n_dip:
-                    needed = n_dip - dipole_locations.shape[0]
-                    tail = np.repeat(dipole_locations[-1:], needed, axis=0)
-                    dipole_locations = np.vstack([dipole_locations, tail])
+                if trial_sensor_locations is None:
+                    if model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
+                        trial_sensor_locations = np.array([[0.0, 0.0, 90000.0]])
+                    elif model == "InfiniteHomogeneousVolCondMEG":
+                        trial_sensor_locations = np.array([[10000.0, 0.0, 0.0]])
+                    elif model == "SphericallySymmetricVolCondMEG":
+                        trial_sensor_locations = np.array([[0.0, 0.0, 92000.0]])
+
+            if trial_dipole_locations is None:
+                if model == "FourSphereVolumeConductor":
+                    trial_dipole_locations = np.array([0.0, 0.0, 78000.0])
+                elif model == "SphericallySymmetricVolCondMEG":
+                    trial_dipole_locations = np.array([0.0, 0.0, 90000.0])
+                else:
+                    trial_dipole_locations = np.zeros(3)
+
+            p_list, loc_list = potential._normalize_cdm_and_locations(CDM, trial_dipole_locations)
+
+            matrices = []
+            p_use_list = []
+            n_sensors = 0
+            if model == "NYHeadModel":
+                if potential.nyhead is None:
+                    nyhead_model = potential._load_eegmegcalc_model("NYHeadModel")
+                    potential.nyhead = nyhead_model(**model_kwargs) if model_kwargs else nyhead_model()
+                for p_i, loc_i in zip(p_list, loc_list):
+                    potential.nyhead.set_dipole_pos(loc_i)
+                    M = potential.nyhead.get_transformation_matrix()
+                    p_use = potential.nyhead.rotate_dipole_to_surface_normal(p_i) if align_to_surface else p_i
+                    matrices.append(M)
+                    p_use_list.append(p_use)
+                if matrices:
+                    n_sensors = matrices[0].shape[0]
+            else:
+                if trial_sensor_locations is None:
+                    raise ValueError("sensor_locations must be provided for this model.")
+                trial_sensor_locations = np.asarray(trial_sensor_locations, dtype=float)
+                if trial_sensor_locations.ndim != 2 or trial_sensor_locations.shape[1] != 3:
+                    raise ValueError("sensor_locations must have shape (n_sensors, 3).")
+                if model == "FourSphereVolumeConductor":
+                    FourSphere = potential._load_eegmegcalc_model("FourSphereVolumeConductor")
+                    model_obj = FourSphere(trial_sensor_locations, **model_kwargs)
+                    def get_M(loc):
+                        return model_obj.get_transformation_matrix(loc)
+                elif model == "InfiniteVolumeConductor":
+                    InfiniteVol = potential._load_eegmegcalc_model("InfiniteVolumeConductor")
+                    model_obj = InfiniteVol(**model_kwargs)
+                    def get_M(loc):
+                        r = trial_sensor_locations - loc
+                        return model_obj.get_transformation_matrix(r)
+                elif model == "InfiniteHomogeneousVolCondMEG":
+                    IHVCMEG = potential._load_eegmegcalc_model("InfiniteHomogeneousVolCondMEG")
+                    model_obj = IHVCMEG(trial_sensor_locations, **model_kwargs)
+                    def get_M(loc):
+                        return model_obj.get_transformation_matrix(loc)
+                elif model == "SphericallySymmetricVolCondMEG":
+                    SSVMEG = potential._load_eegmegcalc_model("SphericallySymmetricVolCondMEG")
+                    model_obj = SSVMEG(trial_sensor_locations, **model_kwargs)
+                    def get_M(loc):
+                        return model_obj.get_transformation_matrix(loc)
+                else:
+                    raise ValueError(f"Unknown model '{model}'.")
+
+                for p_i, loc_i in zip(p_list, loc_list):
+                    matrices.append(get_M(loc_i))
+                    p_use_list.append(p_i)
+                if matrices:
+                    n_sensors = matrices[0].shape[0]
+
+            if not matrices or n_sensors <= 0:
+                raise ValueError("Unable to determine number of sensors/electrodes.")
+
+            n_times = p_use_list[0].shape[1]
+            if is_meg:
+                meeg = np.zeros((n_sensors, 3, n_times))
+            else:
+                meeg = np.zeros((n_sensors, n_times))
+
+            log_every = max(1, n_sensors // 50)
+            trial_progress_start = 50 + int((trial_idx / trial_count) * 40)
+            trial_progress_end = 50 + int(((trial_idx + 1) / trial_count) * 40)
+            for idx in range(n_sensors):
+                if is_meg:
+                    acc = np.zeros((3, n_times))
+                    for M, p_i in zip(matrices, p_use_list):
+                        acc = acc + (M[idx] @ p_i)
+                    meeg[idx] = acc
+                else:
+                    acc = np.zeros((n_times,))
+                    for M, p_i in zip(matrices, p_use_list):
+                        acc = acc + (M[idx] @ p_i)
+                    meeg[idx] = acc
+
+                if (idx + 1) % log_every == 0 or (idx + 1) == n_sensors:
                     _append_job_output(
                         job_status,
                         job_id,
-                        "EEG 10–20 locations fewer than dipoles; repeating last location to match count.",
+                        f"Computed electrodes: {idx + 1}/{n_sensors} (trial {trial_idx + 1}/{trial_count})",
                     )
-                dipole_locations = dipole_locations[:n_dip]
-                _append_job_output(job_status, job_id, "Using EEG 10–20 dipole locations for NYHeadModel.")
-            sensor_locations = None
-        elif model == "NYHeadModel":
-            sensor_locations = None
-        else:
-            if sensor_locations is None:
-                if model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
-                    sensor_locations = np.array([[0.0, 0.0, 90000.0]])
-                elif model == "InfiniteHomogeneousVolCondMEG":
-                    sensor_locations = np.array([[10000.0, 0.0, 0.0]])
-                elif model == "SphericallySymmetricVolCondMEG":
-                    sensor_locations = np.array([[0.0, 0.0, 92000.0]])
+                progress = trial_progress_start + int((idx + 1) / n_sensors * max(1, (trial_progress_end - trial_progress_start)))
+                job_status[job_id]["progress"] = progress
 
-        if dipole_locations is None:
-            if model == "FourSphereVolumeConductor":
-                dipole_locations = np.array([0.0, 0.0, 78000.0])
-            elif model == "SphericallySymmetricVolCondMEG":
-                dipole_locations = np.array([0.0, 0.0, 90000.0])
-            else:
-                dipole_locations = np.zeros(3)
-
-        p_list, loc_list = potential._normalize_cdm_and_locations(CDM, dipole_locations)
-        model_kwargs = model_kwargs or {}
-        is_meg = model in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}
-
-        matrices = []
-        p_use_list = []
-        n_sensors = 0
-        if model == "NYHeadModel":
-            if potential.nyhead is None:
-                nyhead_model = potential._load_eegmegcalc_model("NYHeadModel")
-                potential.nyhead = nyhead_model(**model_kwargs) if model_kwargs else nyhead_model()
-            for p_i, loc_i in zip(p_list, loc_list):
-                potential.nyhead.set_dipole_pos(loc_i)
-                M = potential.nyhead.get_transformation_matrix()
-                p_use = potential.nyhead.rotate_dipole_to_surface_normal(p_i) if align_to_surface else p_i
-                matrices.append(M)
-                p_use_list.append(p_use)
-            if matrices:
-                n_sensors = matrices[0].shape[0]
-        else:
-            if sensor_locations is None:
-                raise ValueError("sensor_locations must be provided for this model.")
-            sensor_locations = np.asarray(sensor_locations, dtype=float)
-            if sensor_locations.ndim != 2 or sensor_locations.shape[1] != 3:
-                raise ValueError("sensor_locations must have shape (n_sensors, 3).")
-            if model == "FourSphereVolumeConductor":
-                FourSphere = potential._load_eegmegcalc_model("FourSphereVolumeConductor")
-                model_obj = FourSphere(sensor_locations, **model_kwargs)
-                def get_M(loc):
-                    return model_obj.get_transformation_matrix(loc)
-            elif model == "InfiniteVolumeConductor":
-                InfiniteVol = potential._load_eegmegcalc_model("InfiniteVolumeConductor")
-                model_obj = InfiniteVol(**model_kwargs)
-                def get_M(loc):
-                    r = sensor_locations - loc
-                    return model_obj.get_transformation_matrix(r)
-            elif model == "InfiniteHomogeneousVolCondMEG":
-                IHVCMEG = potential._load_eegmegcalc_model("InfiniteHomogeneousVolCondMEG")
-                model_obj = IHVCMEG(sensor_locations, **model_kwargs)
-                def get_M(loc):
-                    return model_obj.get_transformation_matrix(loc)
-            elif model == "SphericallySymmetricVolCondMEG":
-                SSVMEG = potential._load_eegmegcalc_model("SphericallySymmetricVolCondMEG")
-                model_obj = SSVMEG(sensor_locations, **model_kwargs)
-                def get_M(loc):
-                    return model_obj.get_transformation_matrix(loc)
-            else:
-                raise ValueError(f"Unknown model '{model}'.")
-
-            for p_i, loc_i in zip(p_list, loc_list):
-                matrices.append(get_M(loc_i))
-                p_use_list.append(p_i)
-            if matrices:
-                n_sensors = matrices[0].shape[0]
-
-        if not matrices or n_sensors <= 0:
-            raise ValueError("Unable to determine number of sensors/electrodes.")
-
-        n_times = p_use_list[0].shape[1]
-        if is_meg:
-            meeg = np.zeros((n_sensors, 3, n_times))
-        else:
-            meeg = np.zeros((n_sensors, n_times))
-
-        log_every = max(1, n_sensors // 50)
-        progress_start = 50
-        progress_end = 90
-        for idx in range(n_sensors):
-            if is_meg:
-                acc = np.zeros((3, n_times))
-                for M, p_i in zip(matrices, p_use_list):
-                    acc = acc + (M[idx] @ p_i)
-                meeg[idx] = acc
-            else:
-                acc = np.zeros((n_times,))
-                for M, p_i in zip(matrices, p_use_list):
-                    acc = acc + (M[idx] @ p_i)
-                meeg[idx] = acc
-
-            if (idx + 1) % log_every == 0 or (idx + 1) == n_sensors:
-                _append_job_output(
-                    job_status,
-                    job_id,
-                    f"Computed electrodes: {idx + 1}/{n_sensors}",
-                )
-            progress = progress_start + int((idx + 1) / n_sensors * (progress_end - progress_start))
-            job_status[job_id]["progress"] = progress
+            meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
+            meeg_decimation = int(cdm_meta.get("decimation_factor", 1))
+            meeg_fs = _safe_float(cdm_meta.get("fs_hz"))
+            row = {
+                "data": meeg,
+                "dt_ms": meeg_dt_ms,
+                "decimation_factor": meeg_decimation,
+                "fs_hz": meeg_fs,
+                "metadata": {"dt_ms": meeg_dt_ms, "decimation_factor": meeg_decimation, "fs_hz": meeg_fs},
+                "source_cdm_file": os.path.basename(cdm_path),
+            }
+            if trial_count > 1:
+                row["trial_index"] = int(trial_idx)
+            trial_payloads.append(pd.DataFrame([row]))
+            if trial_count > 1:
+                _append_job_output(job_status, job_id, f"Computed M/EEG trial {trial_idx + 1}/{trial_count}.")
 
         output_root = "/tmp/field_potential_meeg"
         os.makedirs(output_root, exist_ok=True)
@@ -3321,17 +3449,8 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 except OSError:
                     pass
         meeg_path = os.path.join(output_root, "meeg.pkl")
-        meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
-        meeg_decimation = int(cdm_meta.get("decimation_factor", 1))
-        meeg_fs = _safe_float(cdm_meta.get("fs_hz"))
-        pd.DataFrame([{
-            "data": meeg,
-            "dt_ms": meeg_dt_ms,
-            "decimation_factor": meeg_decimation,
-            "fs_hz": meeg_fs,
-            "metadata": {"dt_ms": meeg_dt_ms, "decimation_factor": meeg_decimation, "fs_hz": meeg_fs},
-            "source_cdm_file": os.path.basename(cdm_path),
-        }]).to_pickle(meeg_path)
+        with open(meeg_path, "wb") as f:
+            pickle.dump(trial_payloads if trial_count > 1 else trial_payloads[0], f)
 
         _append_job_output(job_status, job_id, f"Saved M/EEG to {meeg_path}")
         job_status[job_id].update({
