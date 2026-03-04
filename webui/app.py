@@ -3497,6 +3497,21 @@ def _extract_server_file_paths(form, field_name):
     return paths
 
 
+def _infer_inference_asset_role(file_name):
+    base_name = os.path.basename(str(file_name or "")).strip().lower()
+    if not base_name:
+        return None
+    stem = Path(base_name).stem.lower()
+    normalized_stem = stem.replace("-", "_")
+    if normalized_stem.startswith("model") or normalized_stem.startswith("posterior"):
+        return "model_file"
+    if normalized_stem.startswith("scaler"):
+        return "scaler_file"
+    if "density_estimator" in normalized_stem or normalized_stem.startswith("density"):
+        return "density_estimator_file"
+    return None
+
+
 def _collect_inference_assets_folder_files(folder_path):
     root = os.path.realpath(os.path.expanduser((folder_path or "").strip()))
     if not root:
@@ -3508,17 +3523,7 @@ def _collect_inference_assets_folder_files(folder_path):
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames.sort()
         for filename in sorted(filenames):
-            lower = filename.lower()
-            ext = Path(filename).suffix.lower()
-            if ext not in PICKLE_EXTENSIONS:
-                continue
-            key = None
-            if lower.startswith("model") or lower == "model.pkl":
-                key = "model_file"
-            elif lower.startswith("scaler") or lower == "scaler.pkl":
-                key = "scaler_file"
-            elif "density_estimator" in lower or lower.startswith("density"):
-                key = "density_estimator_file"
+            key = _infer_inference_asset_role(filename)
             if key and key not in matched:
                 abs_path = os.path.realpath(os.path.join(dirpath, filename))
                 if os.path.isfile(abs_path):
@@ -3608,6 +3613,42 @@ def features_browse_dirs():
     if include_files:
         payload["files"] = files[:1000]
     return jsonify(payload)
+
+
+@app.route("/inference/inspect_assets_folder", methods=["POST"])
+def inference_inspect_assets_folder():
+    folder_path = (request.form.get("folder_path") or "").strip()
+    root = os.path.realpath(os.path.expanduser(folder_path))
+    try:
+        matched = _collect_inference_assets_folder_files(folder_path)
+    except Exception as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+
+    files_preview = []
+    files_total = 0
+    preview_limit = 120
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames.sort()
+        for filename in sorted(filenames):
+            abs_path = os.path.realpath(os.path.join(dirpath, filename))
+            if not os.path.isfile(abs_path):
+                continue
+            files_total += 1
+            if len(files_preview) < preview_limit:
+                files_preview.append(os.path.relpath(abs_path, root))
+
+    return jsonify({
+        "ok": True,
+        "folder_path": root,
+        "assets": {
+            "model_file": matched.get("model_file") or "",
+            "scaler_file": matched.get("scaler_file") or "",
+            "density_estimator_file": matched.get("density_estimator_file") or "",
+        },
+        "files_preview": files_preview,
+        "files_total": files_total,
+        "files_more": max(0, files_total - len(files_preview)),
+    })
 
 
 @app.route("/features/select_folder", methods=["POST"])
@@ -4151,10 +4192,6 @@ def inference_detect_model_backend():
     safe_name = secure_filename(upload.filename)
     if not safe_name:
         return jsonify({"ok": False, "error": "Invalid uploaded file name."}), 400
-
-    ext = Path(safe_name).suffix.lower()
-    if ext not in PICKLE_EXTENSIONS:
-        return jsonify({"ok": False, "error": "Model auto-detection supports .pkl/.pickle files."}), 400
 
     os.makedirs(temp_uploaded_files, exist_ok=True)
     temp_path = os.path.join(temp_uploaded_files, f"detect_model_{uuid.uuid4().hex}_{safe_name}")
@@ -6890,13 +6927,13 @@ def start_computation_redirect(computation_type):
                     return redirect(request.referrer or url_for('inference'))
                 if "model_file" not in inference_assets_server_files:
                     flash(
-                        'Server assets folder must contain a model pickle file (e.g. model.pkl).',
+                        'Server assets folder must contain a model/posterior file (e.g. model.* or posterior.*).',
                         'error',
                     )
                     return redirect(request.referrer or url_for('inference'))
             else:
                 try:
-                    inference_assets_server_files["model_file"] = _validate_existing_pickle_file_path(
+                    inference_assets_server_files["model_file"] = _validate_existing_file_path(
                         inference_model_server_file_path,
                         "Inference server model file",
                     )
@@ -6905,7 +6942,7 @@ def start_computation_redirect(computation_type):
                     return redirect(request.referrer or url_for('inference'))
                 if inference_scaler_server_file_path:
                     try:
-                        inference_assets_server_files["scaler_file"] = _validate_existing_pickle_file_path(
+                        inference_assets_server_files["scaler_file"] = _validate_existing_file_path(
                             inference_scaler_server_file_path,
                             "Inference server scaler file",
                         )
@@ -6914,7 +6951,7 @@ def start_computation_redirect(computation_type):
                         return redirect(request.referrer or url_for('inference'))
                 if inference_density_server_file_path:
                     try:
-                        inference_assets_server_files["density_estimator_file"] = _validate_existing_pickle_file_path(
+                        inference_assets_server_files["density_estimator_file"] = _validate_existing_file_path(
                             inference_density_server_file_path,
                             "Inference server density estimator file",
                         )
@@ -6934,12 +6971,11 @@ def start_computation_redirect(computation_type):
 
             folder_has_model = False
             for folder_upload in folder_uploads:
-                base = os.path.basename(folder_upload.filename or "").lower()
-                if base.startswith("model") or base == "model.pkl":
+                if _infer_inference_asset_role(folder_upload.filename or "") == "model_file":
                     folder_has_model = True
                     break
             if not has_uploaded_model and not folder_has_model:
-                flash('Upload a model file, or upload a folder that contains a model file (e.g. model.pkl).', 'error')
+                flash('Upload a model file, or upload a folder that contains a model/posterior file (e.g. model.* or posterior.*).', 'error')
                 return redirect(request.referrer or url_for('inference'))
 
         estimated_time_remaining = time.time() + 130 # 130 seconds of estimated time remaining
@@ -7255,14 +7291,7 @@ def start_computation_redirect(computation_type):
                     file_path = os.path.join(temp_uploaded_files, unique_filename)
                     upload.save(file_path)
 
-                    lower = safe_name.lower()
-                    normalized_key = None
-                    if lower.startswith("model") or lower == "model.pkl":
-                        normalized_key = "model_file"
-                    elif lower.startswith("scaler") or lower == "scaler.pkl":
-                        normalized_key = "scaler_file"
-                    elif "density_estimator" in lower or lower.startswith("density"):
-                        normalized_key = "density_estimator_file"
+                    normalized_key = _infer_inference_asset_role(safe_name)
 
                     # Do not override explicit single-file uploads from dedicated controls.
                     if normalized_key and normalized_key not in file_paths:
