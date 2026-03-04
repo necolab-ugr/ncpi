@@ -1176,15 +1176,6 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="mt-6 flex flex-wrap items-center gap-3">
-                                <button type="submit"
-                                    formaction="{{ url_for('analysis_plot_boxplot') }}"
-                                    data-plot-action="boxplot"
-                                    class="flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
-                                    :disabled="!dfColumns.length || columnsLoading || !boxplotGroupBy || !boxplotValueCol || (boxplotShowCohen && !boxplotControlGroup)">
-                                    Plot boxplot
-                                </button>
-                            </div>
                         </div>
                     </section>
                     <section
@@ -1381,15 +1372,6 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="mt-6 flex flex-wrap items-center gap-3">
-                                <button type="submit"
-                                    formaction="{{ url_for('analysis_plot_topomap') }}"
-                                    data-plot-action="topomap"
-                                    class="flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
-                                    :disabled="!dfColumns.length || columnsLoading || !topomapGroupBy || !topomapValueCol || (topomapMode === 'compare_categories' && !topomapControlGroup)">
-                                    Plot topomap
-                                </button>
-                            </div>
                         </div>
                     </section>
                     <section
@@ -1512,18 +1494,6 @@
                             </div>
                         </div>
 
-                        <div class="mt-6 flex flex-wrap items-center gap-3">
-                            <template x-for="item in selectedSimulationFiles" :key="'hidden-' + item.key">
-                                <input type="hidden" name="sim_selected_file_keys" :value="item.key" />
-                            </template>
-                            <button type="submit"
-                                formaction="{{ url_for('analysis_plot_simulation') }}"
-                                data-plot-action="simulation"
-                                class="flex items-center justify-center gap-2 h-11 px-5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
-                                :disabled="!simulationAvailable">
-                                Plot simulation outputs
-                            </button>
-                        </div>
                     </section>
                     <section
                         x-show="isDataframeSelected()"
@@ -1573,6 +1543,41 @@
                         Next step
                         <span class="material-symbols-outlined">arrow_forward</span>
                     </button>
+                </template>
+
+                <template x-if="activeTab === 'boxplot' && isDataframeSelected() && !isSimulationSelectionActive()">
+                    <button type="submit"
+                        formaction="{{ url_for('analysis_plot_boxplot') }}"
+                        data-plot-action="boxplot"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
+                        :disabled="!dfColumns.length || columnsLoading || !boxplotGroupBy || !boxplotValueCol || (boxplotShowCohen && !boxplotControlGroup)">
+                        Plot boxplot
+                    </button>
+                </template>
+
+                <template x-if="activeTab === 'topomap' && isDataframeSelected() && !isSimulationSelectionActive()">
+                    <button type="submit"
+                        formaction="{{ url_for('analysis_plot_topomap') }}"
+                        data-plot-action="topomap"
+                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
+                        :disabled="!dfColumns.length || columnsLoading || !topomapGroupBy || !topomapValueCol || (topomapMode === 'compare_categories' && !topomapControlGroup)">
+                        Plot topomap
+                    </button>
+                </template>
+
+                <template x-if="activeTab === 'simulation-outputs' && isSimulationSelectionActive() && !isDataframeSelected()">
+                    <div class="contents">
+                        <template x-for="item in selectedSimulationFiles" :key="'hidden-nav-' + item.key">
+                            <input type="hidden" name="sim_selected_file_keys" :value="item.key" />
+                        </template>
+                        <button type="submit"
+                            formaction="{{ url_for('analysis_plot_simulation') }}"
+                            data-plot-action="simulation"
+                            class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
+                            :disabled="!simulationAvailable">
+                            Plot simulation outputs
+                        </button>
+                    </div>
                 </template>
             </div>
         </form>
