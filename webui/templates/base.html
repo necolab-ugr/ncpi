@@ -102,6 +102,16 @@
 						{% endif %}
 						{% endwith %}
 
+						<div id="server-error-banner"
+							class="hidden max-w-4xl mx-auto bg-red-100 border border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300 px-4 py-3 mb-8 rounded relative"
+							role="alert" aria-live="assertive" aria-atomic="true">
+							<strong class="font-bold">Server error:</strong>
+							<span id="server-error-banner-message" class="block sm:inline"></span>
+							<button id="server-error-banner-close" type="button"
+								class="absolute top-0 bottom-0 right-0 px-4 py-3 text-red-500 dark:text-red-300 hover:text-red-700 dark:hover:text-red-100"
+								aria-label="Close server error banner">✕</button>
+						</div>
+
 						<!-- Main content -->
 						{% block content %}
 						{% endblock %}
@@ -151,6 +161,7 @@
 
 					<!-- My main JS files -->
 					<script src="{{ url_for('static', filename='js/darkModeToggle.js') }}"></script>
+					<script src="{{ url_for('static', filename='js/serverErrorBanner.js') }}"></script>
 					<!-- Handling of alert messages -->
 					<script src="{{ url_for('static', filename='js/alertMessages.js') }}"></script>
 					<!-- Block for page-specific JavaScript -->

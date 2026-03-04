@@ -408,7 +408,44 @@
                 if (!key) return '';
                 const labels = this.parserInfo?.virtual_field_labels || {};
                 const label = labels && typeof labels === 'object' ? labels[key] : '';
-                return String(label || key);
+                let rendered = String(label || key);
+                if (key === '__file_id__') {
+                    return this.parserFileIdOptionLabel();
+                }
+                if (key === '__file_extracted_label__' || key.startsWith('__file_extracted_chain_')) {
+                    const sourceHint = 'from source file names';
+                    if (!rendered.toLowerCase().includes(sourceHint)) {
+                        rendered = `${rendered} (${sourceHint})`;
+                    }
+                }
+                return rendered;
+            },
+            parserFileIdOptionLabel() {
+                return 'file_ID (generated from each source file name)';
+            },
+            parserIsVirtualField(field) {
+                const key = String(field || '').trim();
+                if (!key) return false;
+                return key === '__file_id__'
+                    || key === '__file_extracted_label__'
+                    || key.startsWith('__file_extracted_chain_');
+            },
+            parserFieldOptionStyle(field) {
+                return this.parserIsVirtualField(field)
+                    ? this.parserVirtualOptionStyle()
+                    : this.parserDataframeOptionStyle();
+            },
+            parserDataframeOptionStyle() {
+                return 'color: #0f766e;';
+            },
+            parserManualOptionStyle() {
+                return 'color: #1d4ed8; font-weight: 600;';
+            },
+            parserVirtualOptionStyle() {
+                return 'color: #b45309; font-weight: 600;';
+            },
+            parserNeutralOptionStyle() {
+                return 'color: #6b7280;';
             },
             canSubmitFeatures() {
                 if (this.submitInProgress) return false;
@@ -828,9 +865,13 @@
                 this.submitInProgress = true;
                 this.uploadStatusMessage = uploadRequired ? 'Uploading files...' : 'Submitting configuration...';
                 this.uploadProgress = 0;
+                if (window.ncpiServerErrorBanner && typeof window.ncpiServerErrorBanner.hide === 'function') {
+                    window.ncpiServerErrorBanner.hide();
+                }
 
                 const xhr = new XMLHttpRequest();
                 xhr.open('POST', form.action, true);
+                xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
 
                 const startServerIngestPulse = () => {
                     if (!this.submitInProgress) return;
@@ -900,26 +941,61 @@
                         this.stopUploadWaitPulse();
                         this.uploadProgressKnown = true;
                         this.uploadProgress = 100;
-                        this.uploadStatusMessage = 'Upload complete. Starting computation...';
                         const redirectTarget = xhr.responseURL || form.action;
-                        window.location.assign(redirectTarget);
+                        const responseHtml = String(xhr.responseText || '');
+                        const reachedJobStatus = redirectTarget.includes('/job_status/')
+                            || responseHtml.includes("loadingApp('");
+                        if (reachedJobStatus) {
+                            this.uploadStatusMessage = 'Upload complete. Starting computation...';
+                            window.location.assign(redirectTarget);
+                            return;
+                        }
+
+                        this.submitInProgress = false;
+                        this.uploadStatusMessage = '';
+                        const serverMessage = window.ncpiServerErrorBanner
+                            ? window.ncpiServerErrorBanner.showFromResponseText(
+                                xhr.responseText,
+                                'The server rejected the request before computation started.',
+                            )
+                            : '';
+                        this.submitError = serverMessage || 'The server rejected the request before computation started.';
                         return;
                     }
                     this.stopUploadWaitPulse();
                     this.submitInProgress = false;
-                    this.submitError = `Upload failed (HTTP ${xhr.status}).`;
+                    this.uploadStatusMessage = '';
+                    const serverMessage = window.ncpiServerErrorBanner
+                        ? window.ncpiServerErrorBanner.showFromResponseText(
+                            xhr.responseText,
+                            `Upload failed (HTTP ${xhr.status}).`,
+                        )
+                        : '';
+                    this.submitError = serverMessage || `Upload failed (HTTP ${xhr.status}).`;
                 };
 
                 xhr.onerror = () => {
                     this.stopUploadWaitPulse();
                     this.submitInProgress = false;
                     this.submitError = 'Upload failed due to a network error.';
+                    if (window.ncpiServerErrorBanner) {
+                        window.ncpiServerErrorBanner.showFromError(
+                            new Error(this.submitError),
+                            this.submitError,
+                        );
+                    }
                 };
 
                 xhr.onabort = () => {
                     this.stopUploadWaitPulse();
                     this.submitInProgress = false;
                     this.submitError = 'Upload was cancelled.';
+                    if (window.ncpiServerErrorBanner) {
+                        window.ncpiServerErrorBanner.showFromError(
+                            new Error(this.submitError),
+                            this.submitError,
+                        );
+                    }
                 };
 
                 try {
@@ -929,6 +1005,12 @@
                     this.stopUploadWaitPulse();
                     this.submitInProgress = false;
                     this.submitError = 'Unable to start file upload.';
+                    if (window.ncpiServerErrorBanner) {
+                        window.ncpiServerErrorBanner.showFromError(
+                            new Error(this.submitError),
+                            this.submitError,
+                        );
+                    }
                 }
             },
             parserDebugCode() {
@@ -1447,38 +1529,44 @@
                             <span class="material-symbols-outlined text-primary">tune</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Configure EphysDatasetParser</h3>
                         </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-3">
-                            Selected source: <span class="font-semibold" x-text="selectedDataDescription()"></span>
-                        </p>
-
                         <div x-show="parserLoading" class="text-sm text-gray-500 dark:text-gray-400">Inspecting selected data...</div>
                         <div x-show="parserError" class="text-sm text-red-600 dark:text-red-400" x-text="parserError"></div>
 
                         <template x-if="parserInfo">
                             <div class="space-y-4">
                                 <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
+                                <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                    Menu colors:
+                                    <span style="color: #0f766e;">dataframe fields</span>,
+                                    <span style="color: #1d4ed8; font-weight: 600;">manual entries</span>,
+                                    <span style="color: #b45309; font-weight: 600;">virtual fields</span>.
+                                </p>
 
                                 <div x-show="resolvedDataSourceKind() === 'pipeline' || resolvedDataSourceKind() === 'new-simulation'" class="space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
+                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Column/field where the electrophysiological time-series are stored.</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">Select</option>
+                                                <option value="" :style="parserNeutralOptionStyle()">Select</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-data-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
                                         </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__numeric__">Numeric value</option>
+                                                <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-fs-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__none__">None</option>
+                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
@@ -1488,16 +1576,27 @@
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
                                                 placeholder="e.g. 16000 for dt=0.0625 ms">
                                         </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__manual__">Manual list</option>
+                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-ch-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__autocomplete__">Autocomplete</option>
+                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
                                             </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
+                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
+                                                min="0" max="4" step="1" inputmode="numeric"
+                                                :disabled="parserChNamesSource !== '__autocomplete__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="0-4">
                                         </label>
                                     </div>
                                     <input type="hidden" name="parser_fs_locator"
@@ -1511,26 +1610,16 @@
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
                                             placeholder="e.g. ch0, ch1, ch2">
                                     </label>
-                                    <label class="text-sm" x-show="parserChNamesSource === '__autocomplete__'">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
-                                        <select name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                            <option value="0">0</option>
-                                            <option value="1">1</option>
-                                            <option value="2">2</option>
-                                            <option value="3">3</option>
-                                        </select>
-                                    </label>
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__value__">Value</option>
+                                                <option value="__value__" :style="parserManualOptionStyle()">Value</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-rec-type-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__none__">None</option>
+                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
@@ -1551,14 +1640,23 @@
                                         :value="(parserRecordingTypeSource && parserRecordingTypeSource !== '__value__' && parserRecordingTypeSource !== '__none__') ? parserRecordingTypeSource : ''">
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <label class="text-sm">
+                                        <fieldset class="text-sm md:col-span-2">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data origin</span>
-                                            <select name="parser_metadata_mode" x-model="parserMetadataMode"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="empirical">Empirical</option>
-                                                <option value="simulated">Simulated</option>
-                                            </select>
-                                        </label>
+                                            <div class="flex flex-wrap gap-2">
+                                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer"
+                                                    :class="parserMetadataMode === 'empirical' ? 'bg-primary/10 border-primary text-primary dark:text-primary' : ''">
+                                                    <input type="radio" name="parser_metadata_mode" value="empirical" x-model="parserMetadataMode"
+                                                        class="rounded-full border-gray-300 text-primary focus:ring-primary/50">
+                                                    <span>Empirical</span>
+                                                </label>
+                                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer"
+                                                    :class="parserMetadataMode === 'simulated' ? 'bg-primary/10 border-primary text-primary dark:text-primary' : ''">
+                                                    <input type="radio" name="parser_metadata_mode" value="simulated" x-model="parserMetadataMode"
+                                                        class="rounded-full border-gray-300 text-primary focus:ring-primary/50">
+                                                    <span>Simulated</span>
+                                                </label>
+                                            </div>
+                                        </fieldset>
                                     </div>
                                     <p class="text-xs text-gray-500 dark:text-gray-400" x-show="parserMetadataMode === 'simulated'">
                                         Metadata is auto-filled as one synthetic subject.
@@ -1569,11 +1667,11 @@
                                                 <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject ID source</span>
                                                 <select name="parser_metadata_subject_id_source" x-model="parserMetadataSubjectIdSource"
                                                     class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                    <option value="__none__">None</option>
-                                                    <option value="__value__">Custom value</option>
-                                                    <option value="__file_id__">file_ID</option>
+                                                    <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
+                                                    <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
+                                                    <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                     <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-subject-source-'+field">
-                                                        <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                        <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
                                             </label>
@@ -1589,11 +1687,11 @@
                                                 <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Group source</span>
                                                 <select name="parser_metadata_group_source" x-model="parserMetadataGroupSource"
                                                     class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                    <option value="__none__">None</option>
-                                                    <option value="__value__">Custom value</option>
-                                                    <option value="__file_id__">file_ID</option>
+                                                    <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
+                                                    <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
+                                                    <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                     <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-group-source-'+field">
-                                                        <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                        <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
                                             </label>
@@ -1609,11 +1707,11 @@
                                                 <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Species source</span>
                                                 <select name="parser_metadata_species_source" x-model="parserMetadataSpeciesSource"
                                                     class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                    <option value="__none__">None</option>
-                                                    <option value="__value__">Custom value</option>
-                                                    <option value="__file_id__">file_ID</option>
+                                                    <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
+                                                    <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
+                                                    <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                     <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-species-source-'+field">
-                                                        <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                        <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
                                             </label>
@@ -1629,11 +1727,11 @@
                                                 <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Condition source</span>
                                                 <select name="parser_metadata_condition_source" x-model="parserMetadataConditionSource"
                                                     class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                    <option value="__none__">None</option>
-                                                    <option value="__value__">Custom value</option>
-                                                    <option value="__file_id__">file_ID</option>
+                                                    <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
+                                                    <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
+                                                    <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                     <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-condition-source-'+field">
-                                                        <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                        <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
                                             </label>
@@ -1654,26 +1752,30 @@
                                 </div>
 
                                 <div x-show="resolvedDataSourceKind() === 'new-empirical'" class="space-y-4">
-                                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                    <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
+                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Column/field where the electrophysiological time-series are stored.</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">Select</option>
+                                                <option value="" :style="parserNeutralOptionStyle()">Select</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'data-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
                                         </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__numeric__">Numeric value</option>
+                                                <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'fs-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__none__">None</option>
+                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
@@ -1683,16 +1785,27 @@
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
                                                 placeholder="e.g. 16000 for dt=0.0625 ms">
                                         </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__manual__">Manual list</option>
+                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'ch-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__autocomplete__">Autocomplete</option>
+                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
                                             </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
+                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
+                                                min="0" max="4" step="1" inputmode="numeric"
+                                                :disabled="parserChNamesSource !== '__autocomplete__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="0-4">
                                         </label>
                                     </div>
                                     <input type="hidden" name="parser_fs_locator"
@@ -1706,27 +1819,17 @@
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
                                             placeholder="e.g. ch0, ch1, ch2">
                                     </label>
-                                    <label class="text-sm" x-show="parserChNamesSource === '__autocomplete__'">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
-                                        <select name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                            <option value="0">0</option>
-                                            <option value="1">1</option>
-                                            <option value="2">2</option>
-                                            <option value="3">3</option>
-                                        </select>
-                                    </label>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__value__">Value</option>
+                                                <option value="__value__" :style="parserManualOptionStyle()">Value</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'rec-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__none__">None</option>
+                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
@@ -1751,10 +1854,10 @@
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject ID column</span>
                                             <select name="parser_subject_id_locator" x-model="parserSubjectIdLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">None</option>
-                                                <option value="__file_id__">Each file (file_ID)</option>
+                                                <option value="" :style="parserNeutralOptionStyle()">None</option>
+                                                <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'subject-id-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
                                         </label>
@@ -1762,10 +1865,10 @@
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Group column</span>
                                             <select name="parser_group_locator" x-model="parserGroupLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">None</option>
-                                                <option value="__file_id__">Each file (file_ID)</option>
+                                                <option value="" :style="parserNeutralOptionStyle()">None</option>
+                                                <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'group-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
                                         </label>
@@ -1773,10 +1876,10 @@
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Species column</span>
                                             <select name="parser_species_locator" x-model="parserSpeciesLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">None</option>
-                                                <option value="__file_id__">Each file (file_ID)</option>
+                                                <option value="" :style="parserNeutralOptionStyle()">None</option>
+                                                <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'species-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
                                         </label>
@@ -1784,10 +1887,10 @@
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Condition column</span>
                                             <select name="parser_condition_locator" x-model="parserConditionLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="">None</option>
-                                                <option value="__file_id__">Each file (file_ID)</option>
+                                                <option value="" :style="parserNeutralOptionStyle()">None</option>
+                                                <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'condition-source-'+field">
-                                                    <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
                                         </label>
@@ -1822,7 +1925,7 @@
                                         <select multiple x-model="parserAggregateOverSelected"
                                             class="w-full min-h-32 rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                             <template x-for="field in aggregateOverOptions()" :key="'agg-over-'+field">
-                                                <option :value="field" x-text="parserFieldLabel(field)"></option>
+                                                <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                             </template>
                                         </select>
                                         <span class="block text-[11px] text-gray-400 mt-1">Choose one or more fields.</span>

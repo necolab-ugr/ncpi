@@ -11,6 +11,7 @@ import pickle
 import sys
 import inspect
 import re
+import traceback
 from pathlib import Path
 from collections import deque
 from itertools import product
@@ -242,6 +243,29 @@ def _append_job_output(job_status, job_id, message):
     if len(lines) > MAX_OUTPUT_LINES:
         lines = lines[-MAX_OUTPUT_LINES:]
     job_status[job_id]["output"] = "\n".join(lines)
+
+
+def _mark_job_failed(job_id, exc, *, log_traceback=True, prefix="Error"):
+    message = str(exc).strip()
+    if message:
+        error_text = f"{type(exc).__name__}: {message}"
+    else:
+        error_text = type(exc).__name__
+    _append_job_output(job_status, job_id, f"{prefix}: {error_text}")
+
+    if log_traceback:
+        tb_text = traceback.format_exc().strip()
+        if tb_text and tb_text != "NoneType: None":
+            for line in tb_text.splitlines():
+                _append_job_output(job_status, job_id, line)
+
+    status = job_status.get(job_id)
+    if isinstance(status, dict):
+        status.update({
+            "status": "failed",
+            "error": error_text,
+            "progress": status.get("progress", 0),
+        })
 
 
 def _is_numeric_default(value):
@@ -2678,11 +2702,7 @@ def _run_job_with_post_success_cleanup(job_id, module_key, func, *func_args):
         app.logger.exception("[compute %s] unhandled worker exception in %s", job_id, getattr(func, "__name__", "worker"))
         status = job_status.get(job_id)
         if isinstance(status, dict) and status.get("status") not in {"finished", "failed"}:
-            status.update({
-                "status": "failed",
-                "error": str(exc),
-                "progress": status.get("progress", 0),
-            })
+            _mark_job_failed(job_id, exc, prefix="Unhandled worker exception")
         return
 
     status = job_status.get(job_id, {})
@@ -2903,11 +2923,7 @@ def _simulation_computation(job_id, job_status, params):
 
     except Exception as exc:
         _clear_simulation_output_folder_all_files()
-        job_status[job_id].update({
-            "status": "failed",
-            "error": str(exc),
-            "progress": job_status[job_id].get("progress", 0),
-        })
+        _mark_job_failed(job_id, exc)
 
 
 def _simulation_computation_custom(job_id, job_status, params):
@@ -2976,11 +2992,7 @@ def _simulation_computation_custom(job_id, job_status, params):
 
     except Exception as exc:
         _clear_simulation_output_folder_all_files()
-        job_status[job_id].update({
-            "status": "failed",
-            "error": str(exc),
-            "progress": job_status[job_id].get("progress", 0),
-        })
+        _mark_job_failed(job_id, exc)
     finally:
         if temp_run_dir and os.path.isdir(temp_run_dir):
             shutil.rmtree(temp_run_dir, ignore_errors=True)

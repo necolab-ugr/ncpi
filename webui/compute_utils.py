@@ -24,6 +24,7 @@ import contextlib
 import itertools
 import threading
 import time
+import traceback
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
@@ -190,6 +191,28 @@ def _append_job_output(job_status, job_id, message):
     combined = current + message
     lines = combined.splitlines()[-MAX_OUTPUT_LINES:]
     job_status[job_id]["output"] = "\n".join(lines)
+
+
+def _mark_job_failed(job_status, job_id, exc):
+    message = str(exc).strip()
+    if message:
+        error_text = f"{type(exc).__name__}: {message}"
+    else:
+        error_text = type(exc).__name__
+    _append_job_output(job_status, job_id, f"Error: {error_text}")
+
+    tb_text = traceback.format_exc().strip()
+    if tb_text and tb_text != "NoneType: None":
+        for line in tb_text.splitlines():
+            _append_job_output(job_status, job_id, line)
+
+    status = job_status.get(job_id)
+    if isinstance(status, dict):
+        status.update({
+            "status": "failed",
+            "error": error_text,
+            "progress": status.get("progress", 0),
+        })
 
 
 _PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
@@ -1456,12 +1479,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             })
 
     except Exception as e:
-        _append_job_output(job_status, job_id, f"Error: {e}")
-        job_status[job_id].update({
-                "status": "failed",
-                "error": str(e),
-                "progress": job_status[job_id].get("progress", 0)
-            })
+        _mark_job_failed(job_status, job_id, e)
 
     # Remove temporary inputs but keep result file available for download.
     cleanup_temp_files(params['file_paths'], keep_paths=[output_df_path])
@@ -2213,12 +2231,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
         })
 
     except Exception as e:
-        _append_job_output(job_status, job_id, f"Error: {e}")
-        job_status[job_id].update({
-            "status": "failed",
-            "error": str(e),
-            "progress": job_status[job_id].get("progress", 0),
-        })
+        _mark_job_failed(job_status, job_id, e)
     finally:
         cleanup_temp_files(file_paths)
         if os.path.isdir(artifacts_dir):
@@ -2507,12 +2520,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         })
 
     except Exception as e:
-        _append_job_output(job_status, job_id, f"Error: {e}")
-        job_status[job_id].update({
-            "status": "failed",
-            "error": str(e),
-            "progress": job_status[job_id].get("progress", 0),
-        })
+        _mark_job_failed(job_status, job_id, e)
     finally:
         cleanup_temp_files(file_paths)
         if os.path.isdir(artifacts_dir):
@@ -2533,11 +2541,7 @@ def analysis_computation(job_id, job_status, params, temp_uploaded_files):
             })
 
     except Exception as e:
-        job_status[job_id].update({
-                "status": "failed",
-                "error": str(e),
-                "progress": job_status[job_id].get("progress", 0)
-            })
+        _mark_job_failed(job_status, job_id, e)
 
     # Remove the file after using it
     cleanup_temp_files(params['file_paths'])
@@ -2722,12 +2726,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             })
 
     except Exception as e:
-        _append_job_output(job_status, job_id, f"Error: {e}")
-        job_status[job_id].update({
-                "status": "failed",
-                "error": str(e),
-                "progress": job_status[job_id].get("progress", 0)
-            })
+        _mark_job_failed(job_status, job_id, e)
 
     cleanup_temp_files(params.get('file_paths', {}))
 
@@ -3186,12 +3185,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 "error": False
             })
     except Exception as e:
-        _append_job_output(job_status, job_id, f"Error: {e}")
-        job_status[job_id].update({
-                "status": "failed",
-                "error": str(e),
-                "progress": job_status[job_id].get("progress", 0)
-            })
+        _mark_job_failed(job_status, job_id, e)
     cleanup_temp_files(params.get('file_paths', {}))
 
 
@@ -3461,10 +3455,5 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 "error": False
             })
     except Exception as e:
-        _append_job_output(job_status, job_id, f"Error: {e}")
-        job_status[job_id].update({
-                "status": "failed",
-                "error": str(e),
-                "progress": job_status[job_id].get("progress", 0)
-            })
+        _mark_job_failed(job_status, job_id, e)
     cleanup_temp_files(params.get('file_paths', {}))

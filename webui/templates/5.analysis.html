@@ -107,6 +107,20 @@
             selectedDataframeName: '',
             isUploaded(id) { return this.uploads[id]?.uploaded === true; },
             getFileName(id) { return this.uploads[id]?.name || ''; },
+            hideServerErrorBanner() {
+                if (window.ncpiServerErrorBanner && typeof window.ncpiServerErrorBanner.hide === 'function') {
+                    window.ncpiServerErrorBanner.hide();
+                }
+            },
+            showServerErrorBanner(message, fallback = 'An unexpected server error occurred.') {
+                const text = String(message || fallback || '').trim();
+                if (!text) {
+                    return;
+                }
+                if (window.ncpiServerErrorBanner && typeof window.ncpiServerErrorBanner.show === 'function') {
+                    window.ncpiServerErrorBanner.show(text);
+                }
+            },
             setAnalysisSourceMode(mode) {
                 if (mode === 'server-path' && this.isSimulationSelectionActive()) {
                     this.analysisSourceMode = 'upload';
@@ -130,6 +144,7 @@
             async loadAnalysisServerFileBrowser(path) {
                 this.serverFileBrowserLoading = true;
                 this.serverFileBrowserError = '';
+                this.hideServerErrorBanner();
                 try {
                     const params = new URLSearchParams();
                     const targetPath = String(path || '').trim();
@@ -146,7 +161,9 @@
                     this.serverFileBrowserDirs = Array.isArray(payload.dirs) ? payload.dirs : [];
                     this.serverFileBrowserFiles = Array.isArray(payload.files) ? payload.files : [];
                 } catch (err) {
-                    this.serverFileBrowserError = err && err.message ? err.message : 'Failed to list server files.';
+                    const message = err && err.message ? err.message : 'Failed to list server files.';
+                    this.serverFileBrowserError = message;
+                    this.showServerErrorBanner(message);
                 } finally {
                     this.serverFileBrowserLoading = false;
                 }
@@ -228,6 +245,7 @@
                 );
             },
             async syncSelectedSimulationFilesOnServer() {
+                this.hideServerErrorBanner();
                 try {
                     const formData = new FormData();
                     for (const item of this.selectedSimulationFiles) {
@@ -249,9 +267,11 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to sync selected simulation files.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                 }
             },
             async clearAnalysisDataOnServer() {
+                this.hideServerErrorBanner();
                 try {
                     const response = await fetch('{{ url_for("clear_analysis_data") }}', {
                         method: 'POST',
@@ -266,6 +286,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to clear analysis data from temporary storage.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                 }
             },
             async unselectDataframe() {
@@ -495,6 +516,7 @@
                 this[loadingKey] = true;
                 this[errorKey] = '';
                 this[valuesKey] = [];
+                this.hideServerErrorBanner();
                 try {
                     const response = await fetch(`{{ url_for("analysis_column_values") }}?column=${encodeURIComponent(column)}`);
                     const data = await response.json();
@@ -511,6 +533,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load group values.';
                     this[errorKey] = message;
+                    this.showServerErrorBanner(message);
                 } finally {
                     this[loadingKey] = false;
                 }
@@ -542,6 +565,7 @@
                 this.columnsError = '';
                 this.dfColumns = [];
                 this.columnsLoading = true;
+                this.hideServerErrorBanner();
                 try {
                     const response = await fetch('{{ url_for("analysis_columns_current") }}');
                     const data = await response.json();
@@ -552,6 +576,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load columns.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                 } finally {
                     this.columnsLoading = false;
                 }
@@ -568,6 +593,7 @@
                 this.topomapGroupValues = [];
                 this.boxplotControlGroup = '';
                 this.topomapControlGroup = '';
+                this.hideServerErrorBanner();
                 this.uploadInProgress = true;
                 this.uploadProgress = 0;
                 this.uploadTotal = file && file.size ? file.size : 0;
@@ -618,6 +644,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load columns.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                     return false;
                 } finally {
                     this.columnsLoading = false;
@@ -641,6 +668,7 @@
                 this.topomapGroupValues = [];
                 this.boxplotControlGroup = '';
                 this.topomapControlGroup = '';
+                this.hideServerErrorBanner();
                 try {
                     const formData = new FormData();
                     formData.append('dataframe_path', selectedPath);
@@ -666,6 +694,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load columns.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                 } finally {
                     this.columnsLoading = false;
                 }
@@ -689,6 +718,7 @@
                     return;
                 }
                 this.columnsError = '';
+                this.hideServerErrorBanner();
                 this.uploadInProgress = true;
                 this.uploadProgress = 0;
                 this.uploadTotal = selectedFiles.reduce((acc, item) => acc + (item && item.size ? item.size : 0), 0);
@@ -795,6 +825,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to upload simulation files.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                 } finally {
                     this.uploadInProgress = false;
                 }
@@ -835,6 +866,7 @@
                 this.topomapGroupValues = [];
                 this.boxplotControlGroup = '';
                 this.topomapControlGroup = '';
+                this.hideServerErrorBanner();
                 try {
                     const formData = new FormData();
                     formData.append('data_file_key', entry.key);
@@ -858,6 +890,7 @@
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load detected file.';
                     this.columnsError = message;
+                    this.showServerErrorBanner(message);
                 } finally {
                     this.columnsLoading = false;
                 }
@@ -1664,6 +1697,9 @@
                 return;
             }
             event.preventDefault();
+            if (window.ncpiServerErrorBanner && typeof window.ncpiServerErrorBanner.hide === 'function') {
+                window.ncpiServerErrorBanner.hide();
+            }
             overlay.classList.remove('hidden');
             overlay.classList.add('flex');
             submitter.disabled = true;
@@ -1675,6 +1711,18 @@
                     body: formData,
                 });
                 const html = await response.text();
+                if (!response.ok) {
+                    overlay.classList.add('hidden');
+                    overlay.classList.remove('flex');
+                    submitter.disabled = false;
+                    if (window.ncpiServerErrorBanner) {
+                        window.ncpiServerErrorBanner.showFromResponseText(
+                            html,
+                            'Failed to render plot.',
+                        );
+                    }
+                    return;
+                }
                 document.open();
                 document.write(html);
                 document.close();
@@ -1682,7 +1730,12 @@
                 overlay.classList.add('hidden');
                 overlay.classList.remove('flex');
                 submitter.disabled = false;
-                alert('Failed to render plot. Please try again.');
+                if (window.ncpiServerErrorBanner) {
+                    window.ncpiServerErrorBanner.showFromError(
+                        err,
+                        'Failed to render plot. Please try again.',
+                    );
+                }
             }
         });
     })();
