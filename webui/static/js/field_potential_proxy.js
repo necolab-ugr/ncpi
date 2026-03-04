@@ -222,6 +222,7 @@ function setupUploadZones() {
         const uploadedBox = zone.querySelector('[data-uploaded]');
         const uploadedName = zone.querySelector('[data-uploaded-name]');
         const uploadedLabel = zone.querySelector('[data-uploaded-label]');
+        const clearSelectionBtn = zone.querySelector('[data-clear-upload]');
         const defaultName = uploadedBox ? String(uploadedBox.dataset.defaultName || '') : '';
 
         if (!input) {
@@ -234,9 +235,11 @@ function setupUploadZones() {
                 uploadedName.textContent = defaultName;
                 if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
                 uploadedBox.classList.remove('hidden');
+                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
             } else {
                 uploadedName.textContent = '';
                 uploadedBox.classList.add('hidden');
+                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
             }
         };
 
@@ -293,6 +296,7 @@ function setupUploadZones() {
                     uploadedName.textContent = basenameFromPath(selected);
                     if (uploadedLabel) uploadedLabel.textContent = 'Selected';
                     uploadedBox.classList.remove('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
                     syncUploadedBoxToDefault();
                 }
@@ -309,6 +313,7 @@ function setupUploadZones() {
                     uploadedName.textContent = selectedFile.name;
                     if (uploadedLabel) uploadedLabel.textContent = 'Uploaded';
                     uploadedBox.classList.remove('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
                     syncUploadedBoxToDefault();
                 }
@@ -357,6 +362,19 @@ function setupUploadZones() {
                 event.stopPropagation();
                 setMode('server-path');
                 openServerPicker();
+            });
+        }
+        if (clearSelectionBtn) {
+            clearSelectionBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                input.value = '';
+                serverPathInput.value = '';
+                if (isServerPathMode()) {
+                    syncServerSelectionUi();
+                } else {
+                    syncLocalSelectionUi();
+                }
             });
         }
 
@@ -411,6 +429,7 @@ function setupUploadZones() {
     const extUploadedBox = document.getElementById('extBackRateUploaded');
     const extUploadedName = document.getElementById('extBackRateUploadedName');
     const extUploadedLabel = document.getElementById('extBackRateUploadedLabel');
+    const extClearBtn = document.getElementById('extBackRateClear');
     const extDefaultName = extUploadedBox ? extUploadedBox.dataset.defaultName : '';
     if (extInput && extButton) {
         extButton.addEventListener('click', () => extInput.click());
@@ -429,6 +448,9 @@ function setupUploadZones() {
                         extUploadedLabel.textContent = 'Uploaded';
                     }
                     extUploadedBox.classList.remove('hidden');
+                    if (extClearBtn) {
+                        extClearBtn.classList.remove('hidden');
+                    }
                 } else {
                     if (extDefaultName) {
                         extUploadedName.textContent = extDefaultName;
@@ -436,13 +458,30 @@ function setupUploadZones() {
                             extUploadedLabel.textContent = 'Loaded';
                         }
                         extUploadedBox.classList.remove('hidden');
+                        if (extClearBtn) {
+                            extClearBtn.classList.add('hidden');
+                        }
                     } else {
                         extUploadedName.textContent = '';
                         extUploadedBox.classList.add('hidden');
+                        if (extClearBtn) {
+                            extClearBtn.classList.add('hidden');
+                        }
                     }
                 }
             }
         });
+        if (extClearBtn) {
+            extClearBtn.addEventListener('click', () => {
+                extInput.value = '';
+                extInput.dispatchEvent(new Event('change'));
+            });
+            if (extInput.files && extInput.files[0]) {
+                extClearBtn.classList.remove('hidden');
+            } else {
+                extClearBtn.classList.add('hidden');
+            }
+        }
     }
 }
 

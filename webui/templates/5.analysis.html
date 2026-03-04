@@ -108,7 +108,7 @@
             isUploaded(id) { return this.uploads[id]?.uploaded === true; },
             getFileName(id) { return this.uploads[id]?.name || ''; },
             setAnalysisSourceMode(mode) {
-                if (this.analysisUploadKind === 'simulation') {
+                if (mode === 'server-path' && this.isSimulationSelectionActive()) {
                     this.analysisSourceMode = 'upload';
                     return;
                 }
@@ -178,9 +178,23 @@
                 return !this.isDataframeSelected();
             },
             canUseUploadCard() {
-                return this.analysisUploadKind === 'simulation'
-                    ? this.canSelectSimulation()
-                    : this.canSelectDataframe();
+                if (this.analysisSourceMode === 'server-path') {
+                    return this.canSelectDataframe();
+                }
+                return this.canSelectDataframe() || this.canSelectSimulation();
+            },
+            browseAnalysisUpload() {
+                if (!this.canUseUploadCard()) {
+                    return;
+                }
+                if (this.analysisSourceMode === 'server-path') {
+                    this.pickServerDataframe();
+                    return;
+                }
+                const uploadInput = document.getElementById('analysis-upload-auto');
+                if (uploadInput) {
+                    uploadInput.click();
+                }
             },
             isSimulationEntry(entry) {
                 return !!(entry && (entry.source === 'simulation' || entry.source === 'field_potential'));
@@ -382,26 +396,77 @@
                 }
                 this.loadColumns(file);
             },
-            async handleSimulationFileInput(event) {
+            async handleAutoFileInput(event) {
+                const files = event && event.target && event.target.files
+                    ? Array.from(event.target.files).filter(Boolean)
+                    : [];
+                await this.autoDetectAndLoadUploadFiles(files);
+                if (event && event.target) {
+                    event.target.value = '';
+                }
+            },
+            async autoDetectAndLoadUploadFiles(files) {
+                if (!this.canUseUploadCard() || this.analysisSourceMode !== 'upload') {
+                    return;
+                }
+                const selectedFiles = Array.isArray(files) ? files.filter(Boolean) : [];
+                if (!selectedFiles.length) {
+                    return;
+                }
+                const validFiles = selectedFiles.filter((file) => /\.(pkl|pickle)$/i.test(String(file.name || '')));
+                if (!validFiles.length) {
+                    this.columnsError = 'Select one or more .pkl/.pickle files.';
+                    return;
+                }
+
+                if (validFiles.length > 1) {
+                    if (!this.canSelectSimulation()) {
+                        this.columnsError = 'Unselect the dataframe before selecting simulation outputs.';
+                        return;
+                    }
+                    this.setAnalysisUploadKind('simulation');
+                    if (!this.uploads) {
+                        this.uploads = {};
+                    }
+                    this.uploads['simulation-upload'] = {
+                        name: `${validFiles.length} file(s)`,
+                        uploaded: false,
+                    };
+                    await this.loadSimulationFiles(validFiles);
+                    return;
+                }
+
+                const singleFile = validFiles[0];
+                if (this.canSelectDataframe()) {
+                    this.setAnalysisUploadKind('dataframe');
+                    if (!this.uploads) {
+                        this.uploads = {};
+                    }
+                    this.uploads['dataframe-upload'] = { name: singleFile.name, uploaded: false };
+                    const dataframeLoaded = await this.loadColumns(singleFile);
+                    if (dataframeLoaded) {
+                        return;
+                    }
+                }
+
                 if (!this.canSelectSimulation()) {
                     this.columnsError = 'Unselect the dataframe before selecting simulation outputs.';
                     return;
                 }
-                const files = event && event.target && event.target.files
-                    ? Array.from(event.target.files).filter(Boolean)
-                    : [];
-                if (!files.length) {
-                    return;
-                }
+
+                this.columnsError = '';
                 this.setAnalysisUploadKind('simulation');
                 if (!this.uploads) {
                     this.uploads = {};
                 }
                 this.uploads['simulation-upload'] = {
-                    name: `${files.length} file(s)`,
+                    name: '1 file(s)',
                     uploaded: false,
                 };
-                await this.loadSimulationFiles(files);
+                await this.loadSimulationFiles([singleFile]);
+            },
+            async handleSimulationFileInput(event) {
+                await this.handleAutoFileInput(event);
             },
             async fetchGroupValues(column, target) {
                 if (!column || !this.hasExistingData) {
@@ -450,39 +515,11 @@
                     this[loadingKey] = false;
                 }
             },
-            handleFileDrop(event) {
-                if (!this.canUseUploadCard() || this.analysisSourceMode !== 'upload') {
-                    return;
-                }
-                if (this.analysisUploadKind === 'simulation') {
-                    const files = event.dataTransfer && event.dataTransfer.files
-                        ? Array.from(event.dataTransfer.files).filter(Boolean)
-                        : [];
-                    if (!files.length) {
-                        return;
-                    }
-                    if (!this.uploads) {
-                        this.uploads = {};
-                    }
-                    this.uploads['simulation-upload'] = {
-                        name: `${files.length} file(s)`,
-                        uploaded: false,
-                    };
-                    this.loadSimulationFiles(files);
-                } else {
-                    const file = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files[0] : null;
-                    if (!file) {
-                        return;
-                    }
-                    const inputId = 'dataframe-upload';
-                    if (!this.uploads) {
-                        this.uploads = {};
-                    }
-                    this.uploads[inputId] = { name: file.name, uploaded: false };
-                    if (typeof this.onFileSelected === 'function') {
-                        this.onFileSelected(file, inputId);
-                    }
-                }
+            async handleFileDrop(event) {
+                const files = event.dataTransfer && event.dataTransfer.files
+                    ? Array.from(event.dataTransfer.files).filter(Boolean)
+                    : [];
+                await this.autoDetectAndLoadUploadFiles(files);
                 if (this.$nextTick) {
                     this.$nextTick();
                 }
@@ -520,13 +557,9 @@
                 }
             },
             async loadColumns(file) {
-                if (this.analysisUploadKind !== 'dataframe') {
-                    this.columnsError = 'Switch data type to Dataframe to load columns.';
-                    return;
-                }
                 if (!this.canSelectDataframe()) {
                     this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
-                    return;
+                    return false;
                 }
                 this.columnsError = '';
                 this.dfColumns = [];
@@ -575,24 +608,23 @@
                     this.existingDataFiles = [file.name];
                     this.hasExistingData = true;
                     this.selectedDataframeName = file.name;
+                    this.setAnalysisUploadKind('dataframe');
                     if (!this.uploads['dataframe-upload']) {
                         this.uploads['dataframe-upload'] = { name: file.name, uploaded: true };
                     } else {
                         this.uploads['dataframe-upload'].uploaded = true;
                     }
+                    return true;
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to load columns.';
                     this.columnsError = message;
+                    return false;
                 } finally {
                     this.columnsLoading = false;
                     this.uploadInProgress = false;
                 }
             },
             async loadColumnsFromServerPath(filePath) {
-                if (this.analysisUploadKind !== 'dataframe') {
-                    this.columnsError = 'Switch data type to Dataframe to load columns.';
-                    return;
-                }
                 if (!this.canSelectDataframe()) {
                     this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
                     return;
@@ -625,6 +657,7 @@
                     this.existingDataFiles = [selectedName];
                     this.hasExistingData = true;
                     this.selectedDataframeName = selectedName;
+                    this.setAnalysisUploadKind('dataframe');
                     this.uploads['dataframe-upload'] = { name: selectedName, uploaded: true, persisted: true };
                     const uploadInput = document.getElementById('dataframe-upload');
                     if (uploadInput) {
@@ -638,10 +671,6 @@
                 }
             },
             async pickServerDataframe() {
-                if (this.analysisUploadKind !== 'dataframe') {
-                    this.columnsError = 'Server path mode is only available for dataframes.';
-                    return;
-                }
                 if (!this.canSelectDataframe()) {
                     this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
                     return;
@@ -923,84 +952,44 @@
                         <section
                             class="lg:col-span-2 bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
                             <h3 class="text-lg font-semibold text-slate-900 dark:text-white">Upload data (.pkl)</h3>
-                            <div class="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                <button type="button" @click="setAnalysisUploadKind('dataframe')"
-                                    class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                    :class="analysisUploadKind === 'dataframe' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                    Dataframe
-                                </button>
-                                <button type="button" @click="setAnalysisUploadKind('simulation')"
-                                    class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                    :class="analysisUploadKind === 'simulation' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                    Simulation files
-                                </button>
-                            </div>
                             <div
-                                :class="canUseUploadCard() ? 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 py-10' : 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 px-6 py-10 opacity-60'"
+                                :class="canUseUploadCard() ? 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 py-10 cursor-pointer' : 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 px-6 py-10 opacity-60 cursor-not-allowed'"
+                                @click="browseAnalysisUpload()"
                                 @dragenter.prevent
                                 @dragover.prevent
                                 @drop.prevent="handleFileDrop($event)">
                                 <div class="text-center">
-                                    <div class="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2" x-show="analysisUploadKind === 'dataframe'" x-cloak>
-                                        <button type="button" @click="setAnalysisSourceMode('upload')"
+                                    <div class="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2" x-show="!isSimulationSelectionActive()" x-cloak>
+                                        <button type="button" @click.stop="setAnalysisSourceMode('upload')"
                                             class="px-3 py-2 text-xs rounded-lg border transition-colors"
                                             :class="analysisSourceMode === 'upload' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
                                             Local file (browser upload)
                                         </button>
-                                        <button type="button" @click="setAnalysisSourceMode('server-path')"
+                                        <button type="button" @click.stop="setAnalysisSourceMode('server-path')"
                                             class="px-3 py-2 text-xs rounded-lg border transition-colors"
                                             :class="analysisSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
                                             Server file path
                                         </button>
                                     </div>
                                     <span class="material-icons text-4xl text-slate-400 mx-auto">upload_file</span>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500"
-                                        x-show="analysisUploadKind === 'dataframe' && analysisSourceMode === 'upload'">
-                                        Pick a local `.pkl`/`.pickle` file from your browser and upload it.
-                                    </p>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500"
-                                        x-show="analysisUploadKind === 'dataframe' && analysisSourceMode === 'server-path'">
+                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500">
                                         Browse and select an existing `.pkl`/`.pickle` file on the server.
                                     </p>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500" x-show="analysisUploadKind === 'simulation'">
-                                        Upload one or more simulation `.pkl`/`.pickle` files (e.g. `times.pkl`, `gids.pkl`, `dt.pkl`, `tstop.pkl`, `network.pkl`).
-                                    </p>
-                                    <div class="mt-4 flex text-sm leading-6 text-slate-600 dark:text-slate-400">
-                                        <label
-                                            :class="canUseUploadCard() && (analysisUploadKind === 'simulation' || analysisSourceMode === 'upload')
-                                                ? 'relative cursor-pointer rounded-md bg-white dark:bg-transparent font-semibold text-primary focus-within:outline-none focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 dark:focus-within:ring-offset-slate-900 hover:text-indigo-500 dark:text-primary-dark'
-                                                : 'relative cursor-not-allowed rounded-md bg-white dark:bg-transparent font-semibold text-slate-400 dark:text-slate-500'"
-                                            :for="analysisUploadKind === 'simulation' ? 'simulation-upload' : 'dataframe-upload'">
-                                            <span x-show="analysisUploadKind === 'dataframe'">Drag &amp; drop your .pkl file here (local mode)</span>
-                                            <span x-show="analysisUploadKind === 'simulation'">Drag &amp; drop your simulation .pkl files here</span>
-                                            <input class="sr-only" id="dataframe-upload" name="dataframe" type="file"
-                                                accept=".pkl,.pickle" @change="handleFileUpload($event)"
-                                                :disabled="analysisUploadKind !== 'dataframe' || !canUseUploadCard() || analysisSourceMode !== 'upload'" />
-                                            <input class="sr-only" id="simulation-upload" name="simulation_files" type="file" multiple
-                                                accept=".pkl,.pickle" @change="handleSimulationFileInput($event)"
-                                                :disabled="analysisUploadKind !== 'simulation' || !canUseUploadCard() || analysisSourceMode !== 'upload'" />
-                                        </label>
-                                    </div>
-                                    <p class="text-xs leading-5 text-slate-500 dark:text-slate-500" x-show="analysisUploadKind === 'dataframe'">or</p>
+                                    <input class="sr-only" id="analysis-upload-auto" type="file" multiple
+                                        accept=".pkl,.pickle" @change="handleAutoFileInput($event)"
+                                        :disabled="!canUseUploadCard() || analysisSourceMode !== 'upload'" />
                                     <button
-                                        @click="analysisUploadKind === 'simulation'
-                                            ? document.getElementById('simulation-upload').click()
-                                            : (analysisSourceMode === 'upload' ? document.getElementById('dataframe-upload').click() : pickServerDataframe())"
+                                        @click.stop="browseAnalysisUpload()"
                                         :disabled="!canUseUploadCard()"
                                         :class="canUseUploadCard()
                                             ? 'mt-2 rounded-md bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'
                                             : 'mt-2 rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-sm font-semibold text-slate-400 dark:text-slate-500 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 cursor-not-allowed'"
                                         type="button"
-                                        x-text="analysisUploadKind === 'simulation'
-                                            ? 'Browse simulation files'
-                                            : (analysisSourceMode === 'upload' ? 'Browse local file' : 'Browse server files')"></button>
+                                        x-text="analysisSourceMode === 'upload' ? 'Browse local files' : 'Browse server files'"></button>
                                 </div>
                             </div>
-                            <p x-show="analysisUploadKind === 'dataframe' && !canUseUploadCard()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                                Unselect simulation outputs first to enable dataframe selection.
-                            </p>
-                            <p x-show="analysisUploadKind === 'simulation' && !canUseUploadCard()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                                Unselect the dataframe first to enable simulation upload.
+                            <p x-show="analysisSourceMode === 'server-path' && isSimulationSelectionActive()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                                Server file path mode supports dataframe uploads only. Unselect simulation outputs or switch to local upload.
                             </p>
                             <div x-show="uploadInProgress" class="mt-4">
                                 <div class="flex items-center justify-between text-xs text-slate-600 dark:text-slate-400">
@@ -1017,7 +1006,6 @@
                                     <span x-text="formatBytes(uploadTotal)"></span>
                                 </div>
                             </div>
-                            <p class="mt-2 text-xs text-slate-500 dark:text-slate-500">Supported format: .pkl/.pickle only.</p>
                             <!-- Upload status indicator -->
                             <div x-show="isUploaded('dataframe-upload') && isDataframeSelected()" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
                                 <span class="material-symbols-outlined">check_circle</span>

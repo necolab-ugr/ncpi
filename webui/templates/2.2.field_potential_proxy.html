@@ -87,11 +87,15 @@
                         <input type="hidden" name="times_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
-                        <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.times }}</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.times %}hidden{% endif %}"
                             data-uploaded data-default-name="{{ 'times.pkl' if default_sim.times else '' }}">
-                            <span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div id="gidsUploadContainer"
@@ -104,11 +108,15 @@
                         <input type="hidden" name="gids_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike gids (gids.pkl)</span>
-                        <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.gids }}</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.gids %}hidden{% endif %}"
                             data-uploaded data-default-name="{{ 'gids.pkl' if default_sim.gids else '' }}">
-                            <span data-uploaded-label>{% if default_sim.gids %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.gids %}gids.pkl{% endif %}</span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>{% if default_sim.gids %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.gids %}gids.pkl{% endif %}</span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div id="vmUploadContainer"
@@ -121,11 +129,15 @@
                         <input type="hidden" name="vm_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Membrane Potential (Vm)</span>
-                        <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.vm }}</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.vm %}hidden{% endif %}"
                             data-uploaded data-default-name="{{ 'vm.pkl' if default_sim.vm else '' }}">
-                            <span data-uploaded-label>{% if default_sim.vm %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.vm %}vm.pkl{% endif %}</span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>{% if default_sim.vm %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.vm %}vm.pkl{% endif %}</span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div id="ampaUploadContainer" 
@@ -138,11 +150,15 @@
                         <input type="hidden" name="ampa_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">AMPA Currents Data</span>
-                        <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.ampa }}</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.ampa %}hidden{% endif %}"
                             data-uploaded data-default-name="{{ 'ampa.pkl' if default_sim.ampa else '' }}">
-                            <span data-uploaded-label>{% if default_sim.ampa %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.ampa %}ampa.pkl{% endif %}</span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>{% if default_sim.ampa %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.ampa %}ampa.pkl{% endif %}</span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div id="gabaUploadContainer" 
@@ -155,11 +171,15 @@
                         <input type="hidden" name="gaba_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">GABA Currents Data</span>
-                        <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.gaba }}</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.gaba %}hidden{% endif %}"
                             data-uploaded data-default-name="{{ 'gaba.pkl' if default_sim.gaba else '' }}">
-                            <span data-uploaded-label>{% if default_sim.gaba %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.gaba %}gaba.pkl{% endif %}</span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>{% if default_sim.gaba %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.gaba %}gaba.pkl{% endif %}</span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -184,11 +204,15 @@
                             <span class="material-symbols-outlined text-xl">upload</span>
                             <span class="font-bold text-sm">Upload nu_ext (.pkl)</span>
                         </button>
-                        <p class="mt-2 text-[10px] text-slate-400">Default: {{ default_sim_paths.nu_ext }}</p>
-                        <p class="text-[10px] text-slate-500" id="extBackRateFilename">Not selected</p>
+                        <p class="mt-2 text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.nu_ext %}hidden{% endif %}"
                             id="extBackRateUploaded" data-default-name="{{ 'nu_ext.pkl' if default_sim.nu_ext else '' }}">
-                            <span id="extBackRateUploadedLabel">{% if default_sim.nu_ext %}Loaded{% else %}Uploaded{% endif %}</span>: <span id="extBackRateUploadedName">{% if default_sim.nu_ext %}nu_ext.pkl{% endif %}</span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span id="extBackRateUploadedLabel">{% if default_sim.nu_ext %}Loaded{% else %}Uploaded{% endif %}</span>: <span id="extBackRateUploadedName">{% if default_sim.nu_ext %}nu_ext.pkl{% endif %}</span></span>
+                                <button type="button" id="extBackRateClear" class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

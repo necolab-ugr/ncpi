@@ -85,7 +85,8 @@
                         Features Data <span class="text-red-500">*</span>
                     </label>
                     <div
-                        @click="if (featuresSourceMode === 'upload') { $refs.trainingFeaturesInput.click(); }"
+                        id="training-features-drop-zone"
+                        @click="if (featuresSourceMode === 'upload') { $refs.trainingFeaturesInput.click(); } else { const btn = document.getElementById('training-features-server-browse-btn'); if (btn) { btn.click(); } }"
                         class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
                         <div class="space-y-2 text-center">
                             <div class="flex flex-wrap justify-center gap-2">
@@ -110,7 +111,7 @@
                                 </button>
                             </div>
                             <div class="flex justify-center" x-show="featuresSourceMode === 'server-path' && !featuresServerFilePath" x-cloak>
-                                <button type="button" id="training-features-server-browse-btn"
+                                <button type="button" id="training-features-server-browse-btn" @click.stop
                                     class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
                                     Browse server files
                                 </button>
@@ -140,7 +141,8 @@
                         Parameters Data <span class="text-red-500">*</span>
                     </label>
                     <div
-                        @click="if (parametersSourceMode === 'upload') { $refs.trainingParametersInput.click(); }"
+                        id="training-parameters-drop-zone"
+                        @click="if (parametersSourceMode === 'upload') { $refs.trainingParametersInput.click(); } else { const btn = document.getElementById('training-parameters-server-browse-btn'); if (btn) { btn.click(); } }"
                         class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
                         <div class="space-y-2 text-center">
                             <div class="flex flex-wrap justify-center gap-2">
@@ -165,7 +167,7 @@
                                 </button>
                             </div>
                             <div class="flex justify-center" x-show="parametersSourceMode === 'server-path' && !parametersServerFilePath" x-cloak>
-                                <button type="button" id="training-parameters-server-browse-btn"
+                                <button type="button" id="training-parameters-server-browse-btn" @click.stop
                                     class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
                                     Browse server files
                                 </button>
@@ -505,6 +507,7 @@
         const form = document.querySelector("form[action*='inference_training']");
 
         const featuresInput = byId("training-features-file");
+        const featuresDropZone = byId("training-features-drop-zone");
         const featuresModeInput = byId("training-features-source-mode");
         const featuresServerPathInput = byId("training-features-server-file-path");
         const featuresUploadBtn = byId("training-features-source-upload-btn");
@@ -512,6 +515,7 @@
         const featuresBrowseBtn = byId("training-features-server-browse-btn");
 
         const parametersInput = byId("training-parameters-file");
+        const parametersDropZone = byId("training-parameters-drop-zone");
         const parametersModeInput = byId("training-parameters-source-mode");
         const parametersServerPathInput = byId("training-parameters-server-file-path");
         const parametersUploadBtn = byId("training-parameters-source-upload-btn");
@@ -530,8 +534,8 @@
 
         if (
             !form ||
-            !featuresInput || !featuresModeInput || !featuresServerPathInput || !featuresUploadBtn || !featuresServerBtn || !featuresBrowseBtn ||
-            !parametersInput || !parametersModeInput || !parametersServerPathInput || !parametersUploadBtn || !parametersServerBtn || !parametersBrowseBtn ||
+            !featuresInput || !featuresDropZone || !featuresModeInput || !featuresServerPathInput || !featuresUploadBtn || !featuresServerBtn || !featuresBrowseBtn ||
+            !parametersInput || !parametersDropZone || !parametersModeInput || !parametersServerPathInput || !parametersUploadBtn || !parametersServerBtn || !parametersBrowseBtn ||
             !modal || !modalPathEl || !modalEntriesEl || !modalErrorEl || !modalLoadingEl || !modalUpBtn || !modalRefreshBtn || !modalSelectBtn || !modalCloseBtn
         ) {
             return;
@@ -553,6 +557,12 @@
             if (state && typeof state.clearUpload === "function") {
                 state.clearUpload(uploadKey);
             }
+        };
+
+        const setInputFiles = (input, files) => {
+            const transfer = new DataTransfer();
+            Array.from(files || []).forEach((file) => transfer.items.add(file));
+            input.files = transfer.files;
         };
 
         const syncStateFromRuntime = () => {
@@ -701,6 +711,41 @@
             selectedFilePath = current;
             openModal();
             await loadServerFiles(startPath);
+        });
+
+        ["dragenter", "dragover", "dragleave", "drop"].forEach((eventName) => {
+            featuresDropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+            });
+            parametersDropZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+            });
+        });
+
+        featuresDropZone.addEventListener("drop", (event) => {
+            if (String(featuresModeInput.value || "").trim().toLowerCase() !== "upload") {
+                return;
+            }
+            const files = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files : null;
+            if (!files || files.length === 0) {
+                return;
+            }
+            setInputFiles(featuresInput, files);
+            featuresServerPathInput.value = "";
+            featuresInput.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        parametersDropZone.addEventListener("drop", (event) => {
+            if (String(parametersModeInput.value || "").trim().toLowerCase() !== "upload") {
+                return;
+            }
+            const files = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files : null;
+            if (!files || files.length === 0) {
+                return;
+            }
+            setInputFiles(parametersInput, files);
+            parametersServerPathInput.value = "";
+            parametersInput.dispatchEvent(new Event("change", { bubbles: true }));
         });
 
         modalUpBtn.addEventListener("click", () => {

@@ -556,25 +556,7 @@ def _infer_field_potential_type_from_filename(filename):
 
 
 def _field_potential_output_name(fp_type, safe_name):
-    lower_name = (safe_name or "").lower()
-
-    if fp_type == "proxy":
-        return safe_name if lower_name.startswith("proxy") else "proxy_loaded.pkl"
-    if fp_type == "cdm":
-        if lower_name in {"kernel_approx_cdm.pkl", "current_dipole_moment.pkl"}:
-            return safe_name
-        return "kernel_approx_cdm.pkl"
-    if fp_type == "lfp":
-        if lower_name in {"gauss_cylinder_potential.pkl", "probe_outputs.pkl", "lfp.pkl"}:
-            return safe_name
-        return "gauss_cylinder_potential.pkl"
-    if fp_type == "eeg":
-        return "eeg.pkl"
-    if fp_type == "meg":
-        return "meg.pkl"
-    if fp_type == "meeg":
-        return "meeg.pkl"
-
+    # Preserve user-provided names for precomputed load-data uploads.
     return safe_name
 
 
@@ -774,9 +756,11 @@ def _list_field_potential_detected_files():
                     continue
                 seen_paths.add(abs_path)
                 rel_name = os.path.relpath(abs_path, root)
+                display_name = os.path.basename(abs_path)
                 entries.append({
                     "key": f"field_potential::{abs_path}",
-                    "name": rel_name,
+                    "name": display_name,
+                    "relative_name": rel_name,
                     "source": "field_potential",
                     "label": mode_label,
                     "path": abs_path,
@@ -2525,7 +2509,7 @@ def upload_sim_files():
                 continue
             file.save(os.path.join(simulation_data_dir, filename))
 
-    return redirect(url_for('upload_sim'))
+    return redirect(request.referrer or url_for('upload_sim'))
 
 
 @app.route("/simulation/remove_file", methods=["POST"])
@@ -2535,7 +2519,6 @@ def remove_simulation_file():
     try:
         target_path = _validate_relative_pickle_path(filename, simulation_root, "Simulation file")
         os.remove(target_path)
-        flash(f"Removed simulation file: {os.path.basename(target_path)}", "success")
     except Exception as exc:
         flash(str(exc), "error")
     return redirect(url_for("upload_sim"))
@@ -3174,7 +3157,6 @@ def remove_field_potential_file():
         return redirect(url_for("field_potential_load"))
     try:
         os.remove(target_path)
-        flash(f"Removed field potential file: {os.path.basename(target_path)}", "success")
     except OSError as exc:
         flash(f"Failed to remove field potential file: {exc}", "error")
     return redirect(url_for("field_potential_load"))
@@ -3245,7 +3227,7 @@ def field_potential_load_precomputed():
         else:
             item["upload"].save(output_path)
 
-    return redirect(url_for("field_potential"))
+    return redirect(request.referrer or url_for("field_potential_load"))
 
 
 @app.route("/field_potential/kernel")
@@ -3623,6 +3605,7 @@ def features_select_folder():
     mode = (request.form.get("mode") or "folder").strip().lower()
     allow_multiple = (request.form.get("allow_multiple") or "").strip().lower() in {"1", "true", "yes", "on"}
     requested_exts = (request.form.get("extensions") or "").strip()
+    requested_start_path = (request.form.get("start_path") or "").strip()
     allowed_exts = set()
     if requested_exts:
         for raw in requested_exts.split(","):
@@ -3632,9 +3615,52 @@ def features_select_folder():
             if not ext.startswith("."):
                 ext = f".{ext}"
             allowed_exts.add(ext)
+
+    start_path = ""
+    if requested_start_path:
+        candidate = os.path.realpath(os.path.expanduser(requested_start_path))
+        if os.path.isdir(candidate):
+            start_path = candidate
+
+    def _normalize_and_validate_paths(picked_items):
+        if not picked_items:
+            return None, jsonify({"error": "No path selected."}), 400
+        if mode == "folder":
+            picked = os.path.realpath(os.path.expanduser(str(picked_items[0]).strip()))
+            if not os.path.isdir(picked):
+                return None, jsonify({"error": f"Selected path is not a directory: {picked}"}), 400
+            return {"path": picked}, None, None
+
+        normalized_paths = []
+        seen = set()
+        for raw_path in picked_items:
+            picked = os.path.realpath(os.path.expanduser(str(raw_path).strip()))
+            if not picked or picked in seen:
+                continue
+            seen.add(picked)
+            if not os.path.isfile(picked):
+                return None, jsonify({"error": f"Selected path is not a file: {picked}"}), 400
+            ext = Path(picked).suffix.lower()
+            if allowed_exts:
+                if ext not in allowed_exts:
+                    return None, jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
+            elif ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                return None, jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
+            normalized_paths.append(picked)
+        if not normalized_paths:
+            return None, jsonify({"error": "No valid files selected."}), 400
+        return {"path": normalized_paths[0], "paths": normalized_paths}, None, None
+
+    picker_errors = []
+
     if shutil.which("zenity"):
         try:
             cmd = ["zenity", "--file-selection"]
+            if start_path:
+                zenity_start = start_path
+                if not zenity_start.endswith(os.sep):
+                    zenity_start = f"{zenity_start}{os.sep}"
+                cmd.append(f"--filename={zenity_start}")
             if mode == "folder":
                 cmd.extend(["--directory", "--title=Select data folder"])
             else:
@@ -3648,43 +3674,126 @@ def features_select_folder():
                 timeout=300,
                 env=os.environ.copy(),
             )
-            if proc.returncode != 0:
+            if proc.returncode == 0:
+                raw_output = (proc.stdout or "").replace("\r", "\n")
+                picked_items = [chunk.strip() for chunk in raw_output.split("\n") if chunk.strip()]
+                payload, error_response, error_code = _normalize_and_validate_paths(picked_items)
+                if error_response is not None:
+                    return error_response, error_code
+                return jsonify(payload)
+            stderr_text = (proc.stderr or "").strip()
+            if proc.returncode == 1 and not stderr_text:
                 return jsonify({"error": "Path selection cancelled."}), 400
-            raw_output = (proc.stdout or "").replace("\r", "\n")
-            picked_items = [chunk.strip() for chunk in raw_output.split("\n") if chunk.strip()]
-            if not picked_items:
-                return jsonify({"error": "No path selected."}), 400
-            if mode == "folder":
-                picked = os.path.realpath(os.path.expanduser(picked_items[0]))
-                if not os.path.isdir(picked):
-                    return jsonify({"error": f"Selected path is not a directory: {picked}"}), 400
-                return jsonify({"path": picked})
-            else:
-                normalized_paths = []
-                seen = set()
-                for raw_path in picked_items:
-                    picked = os.path.realpath(os.path.expanduser(raw_path))
-                    if picked in seen:
-                        continue
-                    seen.add(picked)
-                    if not os.path.isfile(picked):
-                        return jsonify({"error": f"Selected path is not a file: {picked}"}), 400
-                    ext = Path(picked).suffix.lower()
-                    if allowed_exts:
-                        if ext not in allowed_exts:
-                            return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
-                    elif ext not in FEATURES_PARSER_FILE_EXTENSIONS:
-                        return jsonify({"error": f"Unsupported selected file type: {ext}"}), 400
-                    normalized_paths.append(picked)
-                if not normalized_paths:
-                    return jsonify({"error": "No valid files selected."}), 400
-                return jsonify({"path": normalized_paths[0], "paths": normalized_paths})
+            picker_errors.append(f"zenity failed (code {proc.returncode}): {stderr_text or 'no error details'}")
         except subprocess.TimeoutExpired:
-            return jsonify({"error": "Folder selector timed out."}), 408
+            picker_errors.append("zenity timed out while waiting for a selection.")
         except Exception as exc:
-            return jsonify({"error": f"Failed to open native folder selector: {exc}"}), 500
+            picker_errors.append(f"zenity error: {exc}")
+    else:
+        picker_errors.append("zenity not found")
 
-    return jsonify({"error": "Native folder picker is unavailable (zenity not found). Set the folder path manually."}), 400
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = None
+        try:
+            root = tk.Tk()
+            root.withdraw()
+            root.update()
+
+            dialog_kwargs = {}
+            if start_path:
+                dialog_kwargs["initialdir"] = start_path
+
+            if mode == "folder":
+                selected = filedialog.askdirectory(title="Select data folder", **dialog_kwargs)
+                picked_items = [selected] if selected else []
+            else:
+                filetypes = []
+                if allowed_exts:
+                    patterns = " ".join(f"*{ext}" for ext in sorted(allowed_exts))
+                    filetypes.append(("Allowed files", patterns))
+                else:
+                    patterns = " ".join(f"*{ext}" for ext in sorted(FEATURES_PARSER_FILE_EXTENSIONS))
+                    filetypes.append(("Supported files", patterns))
+                filetypes.append(("All files", "*.*"))
+                if allow_multiple:
+                    selected = filedialog.askopenfilenames(title="Select data file(s)", filetypes=filetypes, **dialog_kwargs)
+                    picked_items = list(selected) if selected else []
+                else:
+                    selected = filedialog.askopenfilename(title="Select data file", filetypes=filetypes, **dialog_kwargs)
+                    picked_items = [selected] if selected else []
+        finally:
+            if root is not None:
+                root.destroy()
+
+        if not picked_items:
+            return jsonify({"error": "Path selection cancelled."}), 400
+        payload, error_response, error_code = _normalize_and_validate_paths(picked_items)
+        if error_response is not None:
+            return error_response, error_code
+        return jsonify(payload)
+    except Exception as exc:
+        picker_errors.append(f"tkinter failed: {exc}")
+
+    details = "; ".join(picker_errors)
+    error_message = "Native file/folder picker is unavailable in this runtime. Use Server folders or type the path manually."
+    if details:
+        error_message = f"{error_message} Details: {details}"
+    return jsonify({"error": error_message, "details": details}), 400
+
+
+@app.route("/field_potential/kernel/stage_local_folder", methods=["POST"])
+def stage_kernel_local_folder():
+    uploads = [item for item in request.files.getlist("folder_files") if item and item.filename]
+    if not uploads:
+        return jsonify({"error": "No local folder files were uploaded."}), 400
+
+    target_field = (request.form.get("target_field") or "").strip().lower()
+    if target_field not in {"mc_folder", "output_sim_path"}:
+        target_field = "folder"
+
+    base_root = os.path.join(tempfile.gettempdir(), "field_potential_kernel", "local_folder_uploads")
+    session_id = uuid.uuid4().hex
+    staging_root = os.path.realpath(os.path.join(base_root, f"{target_field}_{session_id}"))
+    os.makedirs(staging_root, exist_ok=True)
+
+    top_level_name = ""
+    saved_count = 0
+
+    for upload in uploads:
+        raw_name = str(upload.filename or "").strip().replace("\\", "/")
+        parts = [part for part in raw_name.split("/") if part not in {"", "."}]
+        if not parts:
+            continue
+        if any(part == ".." for part in parts):
+            return jsonify({"error": f"Invalid relative path in upload: {raw_name}"}), 400
+
+        if not top_level_name and parts:
+            top_level_name = parts[0]
+
+        relative_path = os.path.join(*parts)
+        destination = os.path.realpath(os.path.join(staging_root, relative_path))
+        if not _is_path_within_root(destination, staging_root):
+            return jsonify({"error": f"Invalid destination path for upload: {raw_name}"}), 400
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        upload.save(destination)
+        saved_count += 1
+
+    if saved_count == 0:
+        return jsonify({"error": "No valid files were uploaded from the selected folder."}), 400
+
+    staged_path = staging_root
+    if top_level_name:
+        candidate = os.path.realpath(os.path.join(staging_root, top_level_name))
+        if _is_path_within_root(candidate, staging_root) and os.path.isdir(candidate):
+            staged_path = candidate
+
+    return jsonify({
+        "path": staged_path,
+        "files_saved": saved_count,
+    })
 
 
 @app.route("/features/parser/inspect", methods=["POST"])
@@ -3816,7 +3925,7 @@ def features_load_precomputed():
                 raise ValueError("Uploaded object is not a pandas dataframe.")
             if "Features" not in df.columns:
                 raise ValueError("Uploaded dataframe does not contain a 'Features' column.")
-            output_name = f"features_loaded_{uuid.uuid4().hex[:8]}_{safe_name}"
+            output_name = safe_name
             output_path = os.path.join(features_dir, output_name)
             df.to_pickle(output_path)
             loaded_count += 1
@@ -3842,7 +3951,7 @@ def features_load_precomputed():
     elif loaded_count > 1:
         flash(f"Loaded {loaded_count} precomputed features files.", "success")
 
-    return redirect(url_for("features"))
+    return redirect(request.referrer or url_for("features"))
 
 
 @app.route("/features/remove_file", methods=["POST"])
@@ -3852,7 +3961,6 @@ def remove_features_file():
     try:
         target_path = _validate_relative_pickle_path(filename, features_root, "Features file")
         os.remove(target_path)
-        flash(f"Removed features file: {os.path.basename(target_path)}", "success")
     except Exception as exc:
         flash(str(exc), "error")
     return redirect(url_for("features"))
@@ -3915,7 +4023,6 @@ def inference_load_precomputed():
     predictions_dir = _predictions_data_dir(create=True)
     loaded_count = 0
     errors = []
-    single_file_upload = len(inputs) == 1
     for item in inputs:
         safe_name = item["safe_name"]
         temp_path = os.path.join(predictions_dir, f"tmp_{uuid.uuid4().hex}_{safe_name}")
@@ -3929,10 +4036,7 @@ def inference_load_precomputed():
                 raise ValueError("Uploaded object is not a pandas dataframe.")
             if "Predictions" not in df.columns:
                 raise ValueError("Uploaded dataframe does not contain a 'Predictions' column.")
-            if single_file_upload:
-                output_name = "predictions.pkl"
-            else:
-                output_name = f"predictions_loaded_{uuid.uuid4().hex[:8]}_{safe_name}"
+            output_name = safe_name
             output_path = os.path.join(predictions_dir, output_name)
             df.to_pickle(output_path)
             loaded_count += 1
@@ -3955,12 +4059,11 @@ def inference_load_precomputed():
         if len(errors) > 3:
             shown += f"; ... ({len(errors) - 3} more)"
         flash(f"Loaded {loaded_count} predictions file(s), but some failed: {shown}", "error")
+    elif loaded_count == 1:
+        flash(f"Predictions file loaded: {inputs[0]['safe_name']}", "success")
     else:
-        if single_file_upload:
-            flash("Predictions file loaded: predictions.pkl", "success")
-        else:
-            flash(f"Loaded {loaded_count} predictions files.", "success")
-    return redirect(url_for("inference_load_data"))
+        flash(f"Loaded {loaded_count} predictions files.", "success")
+    return redirect(request.referrer or url_for("inference_load_data"))
 
 
 @app.route("/inference/remove_file", methods=["POST"])
@@ -3970,7 +4073,6 @@ def remove_inference_file():
     try:
         target_path = _validate_relative_pickle_path(filename, predictions_root, "Predictions file")
         os.remove(target_path)
-        flash(f"Removed predictions file: {os.path.basename(target_path)}", "success")
     except Exception as exc:
         flash(str(exc), "error")
     return redirect(url_for("inference_load_data"))

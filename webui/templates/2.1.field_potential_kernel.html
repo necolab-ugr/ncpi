@@ -58,7 +58,7 @@
 {% block content %}
 <div class="bg-container-light dark:bg-[#111422] rounded-xl border border-border-light dark:border-[#323b67]/50 p-6"
     x-data="{ activeTab: '{{ initial_tab }}', browseSourceMode: ((window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path') }">
-    <input id="kernel-browse-source-mode" type="hidden" :value="browseSourceMode" />
+    <input id="kernel-browse-source-mode" type="hidden" x-model="browseSourceMode" />
 
     <!-- Menu tabs -->
     <div class="mb-6 border-b border-border-light dark:border-[#323b67]/50">
@@ -104,32 +104,36 @@
                             <div class="mb-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
                                 <p class="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Browse source</p>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <button type="button" @click="browseSourceMode = 'local-picker'"
+                                    <button id="kernel-browse-mode-local" type="button" @click="browseSourceMode = 'local-picker'"
                                         class="px-3 py-2 text-xs rounded-lg border transition-colors"
+                                        :data-active="browseSourceMode === 'local-picker' ? '1' : '0'"
                                         :class="browseSourceMode === 'local-picker' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                        Local picker
+                                        Local paths
                                     </button>
-                                    <button type="button" @click="browseSourceMode = 'server-path'"
+                                    <button id="kernel-browse-mode-server" type="button" @click="browseSourceMode = 'server-path'"
                                         class="px-3 py-2 text-xs rounded-lg border transition-colors"
+                                        :data-active="browseSourceMode === 'server-path' ? '1' : '0'"
                                         :class="browseSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                        Server folders
+                                        Server paths
                                     </button>
                                 </div>
-                                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-show="browseSourceMode === 'local-picker'">
-                                    Uses native picker on the host where the web app is running.
-                                </p>
-                                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400" x-show="browseSourceMode === 'server-path'">
-                                    Browse directories directly on the server filesystem.
-                                </p>
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Multicompartment neuron model folder</label>
-                                <p class="input-subtext">Path to the folder containing the multicompartment neuron model
+                                <p class="input-subtext">Folder containing the multicompartment neuron model
                                     descriptions (cell parameters and morphologies).</p>
-                                <div class="relative" data-folder-input>
-                                    <input class="input-field pr-10" placeholder="/path/to/mc_folder/" type="text" name="mc_folder" value="{{ mc_models_default }}" />
-                                    <span
-                                        class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer hover:text-primary folder-picker">folder</span>
+                                <div class="flex items-center gap-2" data-folder-input>
+                                    <input id="mcFolderDisplayInput" class="input-field flex-1" placeholder="/path/to/mc_folder/" type="text" value="{{ mc_models_default }}" data-folder-display />
+                                    <input id="mcFolderHiddenInput" type="hidden" name="mc_folder" value="{{ mc_models_default }}" data-folder-hidden />
+                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="server-path" data-folder-source />
+                                    <input id="kernelMcFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple data-folder-local />
+                                    <button
+                                        type="button"
+                                        class="folder-picker inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-primary hover:border-primary/40 bg-white dark:bg-slate-900/40"
+                                        title="Browse folder"
+                                        aria-label="Browse folder">
+                                        <span class="material-symbols-outlined text-base leading-none">folder_open</span>
+                                    </button>
                                 </div>
                             </div>
                             <div class="input-group">
@@ -137,10 +141,18 @@
                                 <p class="input-subtext">Folder containing MC network simulation outputs. If not specified,
                                     both mean firing rates (mean_nu_X) and resting membrane potential (Vrest) must be
                                     provided.</p>
-                                <div class="relative" data-folder-input>
-                                    <input class="input-field pr-10" placeholder="/path/to/mc_network/simulation_outputs/" type="text" name="output_sim_path" value="{{ mc_outputs_default }}" />
-                                    <span
-                                        class="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm cursor-pointer hover:text-primary folder-picker">folder</span>
+                                <div class="flex items-center gap-2" data-folder-input>
+                                    <input id="outputSimDisplayInput" class="input-field flex-1" placeholder="/path/to/mc_network/simulation_outputs/" type="text" value="{{ mc_outputs_default }}" data-folder-display />
+                                    <input id="outputSimHiddenInput" type="hidden" name="output_sim_path" value="{{ mc_outputs_default }}" data-folder-hidden />
+                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="server-path" data-folder-source />
+                                    <input id="kernelOutputFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple data-folder-local />
+                                    <button
+                                        type="button"
+                                        class="folder-picker inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-primary hover:border-primary/40 bg-white dark:bg-slate-900/40"
+                                        title="Browse folder"
+                                        aria-label="Browse folder">
+                                        <span class="material-symbols-outlined text-base leading-none">folder_open</span>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -179,7 +191,7 @@
                 <section class="form-card">
                     <div class="flex items-center gap-3 mb-6">
                         <div class="p-2 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg">
-                            <span class="material-symbols-outlined">psychology</span>
+                            <span class="material-symbols-outlined">settings</span>
                         </div>
                         <h3 class="text-lg font-bold">3. Kernel Inputs</h3>
                     </div>
@@ -204,7 +216,7 @@
                             <div class="flex flex-wrap items-center gap-2 mb-2">
                                 <button type="button" id="kernel-params-browse-local"
                                     class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                    Browse local file
+                                    Browse local files
                                 </button>
                                 <button type="button" id="kernel-params-browse-server"
                                     class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
@@ -302,11 +314,15 @@
                                 <input type="hidden" name="kernel_spike_times_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
-                                <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.times }}</p>
-                                <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
+                                <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                                 <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.times %}hidden{% endif %}"
                                     data-uploaded data-default-name="{{ 'times.pkl' if default_sim.times else '' }}">
-                                    <span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span>
+                                    <div class="flex items-start justify-between gap-2">
+                                        <span><span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span></span>
+                                        <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -322,11 +338,15 @@
                                 <input type="hidden" name="kernel_population_sizes_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Population sizes (population_sizes.pkl)</span>
-                                <p class="text-[10px] text-slate-400">Default: {{ default_sim_paths.population_sizes }}</p>
-                                <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
+                                <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                                 <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.population_sizes %}hidden{% endif %}"
                                     data-uploaded data-default-name="{{ 'population_sizes.pkl' if default_sim.population_sizes else '' }}">
-                                    <span data-uploaded-label>{% if default_sim.population_sizes %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.population_sizes %}population_sizes.pkl{% endif %}</span>
+                                    <div class="flex items-start justify-between gap-2">
+                                        <span><span data-uploaded-label>{% if default_sim.population_sizes %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.population_sizes %}population_sizes.pkl{% endif %}</span></span>
+                                        <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -342,10 +362,15 @@
                                 <input type="hidden" name="electrode_parameters_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Electrode parameters (.pkl)</span>
-                                <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
+                                <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                                 <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 hidden"
                                     data-uploaded data-default-name="">
-                                    <span data-uploaded-label>Uploaded</span>: <span data-uploaded-name></span>
+                                    <div class="flex items-start justify-between gap-2">
+                                        <span><span data-uploaded-label>Uploaded</span>: <span data-uploaded-name></span></span>
+                                        <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -491,14 +516,17 @@
                             <input type="hidden" name="meeg_cdm_file_server_path" value="" />
                             <span class="material-symbols-outlined text-slate-400">upload_file</span>
                             <span class="text-xs font-bold lowercase tracking-wider text-slate-500">CDM (.pkl)</span>
-                            <p class="text-[10px] text-slate-400">Current dipole moment time series</p>
-                            <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
+                            <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                             <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_meeg.cdm_exists %}hidden{% endif %}"
                                 data-uploaded data-default-name="{{ default_meeg.cdm_name }}">
-                                <span data-uploaded-label>{% if default_meeg.cdm_exists %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_meeg.cdm_exists %}{{ default_meeg.cdm_name }}{% endif %}</span>
+                                <div class="flex items-start justify-between gap-2">
+                                    <span><span data-uploaded-label>{% if default_meeg.cdm_exists %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_meeg.cdm_exists %}{{ default_meeg.cdm_name }}{% endif %}</span></span>
+                                    <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
-                        <p class="text-[10px] text-slate-400">Default: {{ default_meeg.cdm if default_meeg.cdm_exists else 'Not found' }}</p>
                     </div>
                 <div class="space-y-2">
                     <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1">Dipole locations</label>
@@ -515,11 +543,15 @@
                         <input type="hidden" name="meeg_dipole_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Dipole locations (.pkl)</span>
-                        <p class="text-[10px] text-slate-400">Locations matching CDM</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                             data-uploaded>
-                            Uploaded: <span data-uploaded-name></span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>Uploaded</span>: <span data-uploaded-name></span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -564,11 +596,15 @@
                         <input type="hidden" name="meeg_sensor_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Sensor locations (.pkl)</span>
-                        <p class="text-[10px] text-slate-400">Sensor/electrode locations</p>
-                        <p class="text-[10px] text-slate-500" data-filename>Local file not selected</p>
+                        <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                             data-uploaded>
-                            Uploaded: <span data-uploaded-name></span>
+                            <div class="flex items-start justify-between gap-2">
+                                <span><span data-uploaded-label>Uploaded</span>: <span data-uploaded-name></span></span>
+                                <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -666,6 +702,42 @@
         </div>
     </div>
 
+    <div id="kernel-local-folder-browser" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse local folders</h3>
+                <button id="kernel-local-folder-close" type="button" class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                    Current folder:
+                    <span id="kernel-local-folder-current" class="font-mono">/</span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button id="kernel-local-folder-root" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Choose root folder
+                    </button>
+                    <button id="kernel-local-folder-up" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300 disabled:opacity-50">
+                        Up
+                    </button>
+                    <button id="kernel-local-folder-refresh" type="button"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Refresh
+                    </button>
+                    <button id="kernel-local-folder-select" type="button"
+                        class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                        Select this folder
+                    </button>
+                </div>
+                <div id="kernel-local-folder-error" class="text-xs text-red-600 dark:text-red-400 hidden"></div>
+                <div id="kernel-local-folder-loading" class="text-xs text-slate-500 dark:text-slate-400 hidden">Loading directories...</div>
+                <div id="kernel-local-folder-list" class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+            </div>
+        </div>
+    </div>
+
     <div id="kernel-server-file-browser" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
@@ -703,13 +775,8 @@
 
 {% block scripts %}
 <script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<script defer="" src="{{ url_for('static', filename='js/field_potential_proxy.js') }}"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    if (window.setupUploadZones) {
-        window.setupUploadZones();
-    }
-
     const matrixSizeInput = document.getElementById('weightMatrixSize');
     const matrixGrid = document.getElementById('weightMatrixGrid');
     const weightsField = document.getElementById('weightsField');
@@ -841,11 +908,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const pickNativePath = async (mode, extensions = '') => {
+    const pickNativePath = async (mode, extensions = '', startPath = '') => {
         const formData = new FormData();
         formData.append('mode', mode);
         if (extensions) {
             formData.append('extensions', extensions);
+        }
+        if (startPath) {
+            formData.append('start_path', startPath);
         }
         const response = await fetch('{{ url_for("features_select_folder") }}', {
             method: 'POST',
@@ -862,6 +932,35 @@ document.addEventListener('DOMContentLoaded', () => {
         return selectedPath;
     };
 
+    const stageKernelLocalFolder = async (targetFieldName, files) => {
+        const entries = Array.isArray(files) ? files : Array.from(files || []);
+        if (!entries.length) {
+            throw new Error('No local folder files selected.');
+        }
+        const formData = new FormData();
+        formData.append('target_field', String(targetFieldName || '').trim());
+        entries.forEach((entry) => {
+            const file = entry && entry.file ? entry.file : entry;
+            const relative = String(
+                (entry && entry.relativePath) || file.webkitRelativePath || file.name || '',
+            ).replace(/\\/g, '/');
+            formData.append('folder_files', file, relative || file.name);
+        });
+        const response = await fetch('{{ url_for("stage_kernel_local_folder") }}', {
+            method: 'POST',
+            body: formData,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(payload.error || 'Failed to stage local folder.');
+        }
+        const stagedPath = String(payload.path || '').trim();
+        if (!stagedPath) {
+            throw new Error('No staged folder path returned.');
+        }
+        return stagedPath;
+    };
+
     const serverFolderModal = document.getElementById('kernel-server-folder-browser');
     const serverFolderClose = document.getElementById('kernel-server-folder-close');
     const serverFolderUp = document.getElementById('kernel-server-folder-up');
@@ -871,6 +970,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const serverFolderError = document.getElementById('kernel-server-folder-error');
     const serverFolderLoading = document.getElementById('kernel-server-folder-loading');
     const serverFolderList = document.getElementById('kernel-server-folder-list');
+    const kernelBrowseSourceModeInput = document.getElementById('kernel-browse-source-mode');
+    const kernelBrowseModeLocalBtn = document.getElementById('kernel-browse-mode-local');
+    const kernelBrowseModeServerBtn = document.getElementById('kernel-browse-mode-server');
+    const kernelMcFolderInput = document.getElementById('mcFolderHiddenInput');
+    const kernelMcFolderDisplayInput = document.getElementById('mcFolderDisplayInput');
+    const kernelMcFolderSourceInput = document.getElementById('mcFolderSourceInput');
+    const kernelOutputSimPathInput = document.getElementById('outputSimHiddenInput');
+    const kernelOutputSimDisplayInput = document.getElementById('outputSimDisplayInput');
+    const kernelOutputSimSourceInput = document.getElementById('outputSimSourceInput');
+    const localFolderModal = document.getElementById('kernel-local-folder-browser');
+    const localFolderClose = document.getElementById('kernel-local-folder-close');
+    const localFolderRoot = document.getElementById('kernel-local-folder-root');
+    const localFolderUp = document.getElementById('kernel-local-folder-up');
+    const localFolderRefresh = document.getElementById('kernel-local-folder-refresh');
+    const localFolderSelect = document.getElementById('kernel-local-folder-select');
+    const localFolderCurrent = document.getElementById('kernel-local-folder-current');
+    const localFolderError = document.getElementById('kernel-local-folder-error');
+    const localFolderLoading = document.getElementById('kernel-local-folder-loading');
+    const localFolderList = document.getElementById('kernel-local-folder-list');
     const serverFileModal = document.getElementById('kernel-server-file-browser');
     const serverFileClose = document.getElementById('kernel-server-file-close');
     const serverFileUp = document.getElementById('kernel-server-file-up');
@@ -884,11 +1002,188 @@ document.addEventListener('DOMContentLoaded', () => {
     let serverFolderPath = '';
     let serverFolderParent = '';
     let pendingFolderInput = null;
+    let pendingFolderDisplayInput = null;
+    let pendingFolderSourceInput = null;
+    let pendingLocalFolderInput = null;
+    let localFolderStack = [];
     let serverFilePath = '';
     let serverFileParent = '';
     let serverFileSelectedPath = '';
     let pendingFileInput = null;
     let pendingFileExtensions = '.pkl';
+
+    const normalizeKernelBrowseSourceMode = (value) => (
+        String(value || '').trim().toLowerCase() === 'local-picker' ? 'local-picker' : 'server-path'
+    );
+
+    const basenameFromFolderPath = (rawValue) => {
+        const value = String(rawValue || '').trim().replace(/\\/g, '/');
+        if (!value) return '';
+        const parts = value.split('/').filter(Boolean);
+        return parts.length ? parts[parts.length - 1] : value;
+    };
+
+    let kernelBrowseSourceModeState = normalizeKernelBrowseSourceMode(
+        kernelBrowseSourceModeInput
+            ? (kernelBrowseSourceModeInput.value || kernelBrowseSourceModeInput.getAttribute('value') || '')
+            : ((window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path')
+    );
+
+    const folderSelectionStateByName = {
+        mc_folder: {
+            serverPath: String(kernelMcFolderInput?.value || '').trim(),
+            localStagedPath: '',
+            localLabel: '',
+        },
+        output_sim_path: {
+            serverPath: String(kernelOutputSimPathInput?.value || '').trim(),
+            localStagedPath: '',
+            localLabel: '',
+        },
+    };
+
+    const getFolderSelectionState = (hiddenInput) => {
+        const key = String(hiddenInput?.name || '').trim();
+        if (!key) return null;
+        return folderSelectionStateByName[key] || null;
+    };
+
+    const applyFolderSelectionForMode = (mode, hiddenInput, displayInput, sourceInput) => {
+        if (!hiddenInput || !displayInput || !sourceInput) return;
+        const state = getFolderSelectionState(hiddenInput);
+        if (!state) return;
+        if (mode === 'local-picker') {
+            sourceInput.value = 'local-upload';
+            hiddenInput.value = state.localStagedPath || '';
+            displayInput.value = state.localLabel || 'home';
+            displayInput.readOnly = true;
+            return;
+        }
+        sourceInput.value = 'server-path';
+        hiddenInput.value = state.serverPath || '';
+        displayInput.value = basenameFromFolderPath(state.serverPath || '');
+        displayInput.readOnly = true;
+    };
+
+    const setKernelBrowseSourceModeState = (mode) => {
+        kernelBrowseSourceModeState = normalizeKernelBrowseSourceMode(mode);
+        if (kernelBrowseSourceModeInput) {
+            kernelBrowseSourceModeInput.value = kernelBrowseSourceModeState;
+        }
+        if (kernelBrowseModeLocalBtn) {
+            kernelBrowseModeLocalBtn.dataset.active = kernelBrowseSourceModeState === 'local-picker' ? '1' : '0';
+        }
+        if (kernelBrowseModeServerBtn) {
+            kernelBrowseModeServerBtn.dataset.active = kernelBrowseSourceModeState === 'server-path' ? '1' : '0';
+        }
+        applyFolderSelectionForMode(kernelBrowseSourceModeState, kernelMcFolderInput, kernelMcFolderDisplayInput, kernelMcFolderSourceInput);
+        applyFolderSelectionForMode(kernelBrowseSourceModeState, kernelOutputSimPathInput, kernelOutputSimDisplayInput, kernelOutputSimSourceInput);
+    };
+
+    if (kernelBrowseModeLocalBtn) {
+        kernelBrowseModeLocalBtn.addEventListener('click', () => setKernelBrowseSourceModeState('local-picker'));
+    }
+    if (kernelBrowseModeServerBtn) {
+        kernelBrowseModeServerBtn.addEventListener('click', () => setKernelBrowseSourceModeState('server-path'));
+    }
+    if (kernelBrowseSourceModeInput) {
+        kernelBrowseSourceModeInput.addEventListener('input', () => {
+            setKernelBrowseSourceModeState(kernelBrowseSourceModeInput.value);
+        });
+        kernelBrowseSourceModeInput.addEventListener('change', () => {
+            setKernelBrowseSourceModeState(kernelBrowseSourceModeInput.value);
+        });
+    }
+    setKernelBrowseSourceModeState(kernelBrowseSourceModeState);
+
+    const getKernelBrowseSourceMode = () => {
+        if (kernelBrowseModeLocalBtn && kernelBrowseModeLocalBtn.dataset.active === '1') {
+            return 'local-picker';
+        }
+        if (kernelBrowseModeServerBtn && kernelBrowseModeServerBtn.dataset.active === '1') {
+            return 'server-path';
+        }
+        return kernelBrowseSourceModeState;
+    };
+
+    const setDisplayValue = (displayInput, value) => {
+        if (!displayInput) return;
+        displayInput.value = value;
+        displayInput.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const setHiddenValue = (hiddenInput, value) => {
+        if (!hiddenInput) return;
+        hiddenInput.value = value;
+        hiddenInput.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const setSourceModeValue = (sourceInput, value) => {
+        if (!sourceInput) return;
+        sourceInput.value = value;
+        sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const deriveLocalFolderLabelFromFiles = (files) => {
+        if (!files || files.length === 0) return 'local-folder';
+        const first = files[0];
+        const rel = String(first.webkitRelativePath || first.name || '').replace(/\\/g, '/');
+        if (!rel) return 'local-folder';
+        return rel.split('/')[0] || 'local-folder';
+    };
+
+    const pickLocalFolderFromBrowser = async (targetFieldName, displayInput, hiddenInput, sourceInput, localInput) => {
+        const state = getFolderSelectionState(hiddenInput);
+        if (localFolderApiSupported()) {
+            const rootHandle = await window.showDirectoryPicker();
+            const folderLabel = String(rootHandle.name || 'local-folder');
+            const files = [];
+            await collectLocalFolderFiles(rootHandle, folderLabel, files);
+            if (!files.length) {
+                throw new Error('Selected folder does not contain files.');
+            }
+            const stagedPath = await stageKernelLocalFolder(targetFieldName, files);
+            if (state) {
+                state.localLabel = folderLabel;
+                state.localStagedPath = stagedPath;
+            }
+            setDisplayValue(displayInput, folderLabel);
+            setSourceModeValue(sourceInput, 'local-upload');
+            setHiddenValue(hiddenInput, stagedPath);
+            return;
+        }
+        if (!localInput) {
+            throw new Error('Local folder picking is not supported by this browser.');
+        }
+        await new Promise((resolve, reject) => {
+            localInput.value = '';
+            localInput.onchange = async () => {
+                try {
+                    const files = localInput.files ? Array.from(localInput.files) : [];
+                    if (!files.length) {
+                        resolve();
+                        return;
+                    }
+                    const folderLabel = deriveLocalFolderLabelFromFiles(files);
+                    const stagedPath = await stageKernelLocalFolder(targetFieldName, files);
+                    if (state) {
+                        state.localLabel = folderLabel;
+                        state.localStagedPath = stagedPath;
+                    }
+                    setDisplayValue(displayInput, folderLabel);
+                    setSourceModeValue(sourceInput, 'local-upload');
+                    setHiddenValue(hiddenInput, stagedPath);
+                    resolve();
+                } catch (err) {
+                    reject(err);
+                } finally {
+                    localInput.value = '';
+                    localInput.onchange = null;
+                }
+            };
+            localInput.click();
+        });
+    };
 
     const setServerFolderError = (message) => {
         if (!serverFolderError) return;
@@ -963,13 +1258,147 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const openServerFolderModal = async (targetInput) => {
-        pendingFolderInput = targetInput;
+    const openServerFolderModal = async (displayInput, hiddenInput, sourceInput) => {
+        pendingFolderInput = hiddenInput || displayInput;
+        pendingFolderDisplayInput = displayInput;
+        pendingFolderSourceInput = sourceInput;
         if (!serverFolderModal) return;
         serverFolderModal.classList.remove('hidden');
         serverFolderModal.classList.add('flex');
-        const startPath = String(targetInput?.value || '').trim() || String((window.__webuiRuntime || {}).server_home_dir || '').trim();
+        const state = getFolderSelectionState(hiddenInput);
+        const startPath = String(state?.serverPath || hiddenInput?.value || displayInput?.value || '').trim()
+            || String((window.__webuiRuntime || {}).server_home_dir || '').trim();
         await loadServerFolder(startPath);
+    };
+
+    const localFolderApiSupported = () => typeof window.showDirectoryPicker === 'function';
+
+    const setLocalFolderError = (message) => {
+        if (!localFolderError) return;
+        if (!message) {
+            localFolderError.textContent = '';
+            localFolderError.classList.add('hidden');
+            return;
+        }
+        localFolderError.textContent = message;
+        localFolderError.classList.remove('hidden');
+    };
+
+    const toggleLocalFolderLoading = (loading) => {
+        if (!localFolderLoading) return;
+        localFolderLoading.classList.toggle('hidden', !loading);
+    };
+
+    const closeLocalFolderModal = () => {
+        if (!localFolderModal) return;
+        localFolderModal.classList.add('hidden');
+        localFolderModal.classList.remove('flex');
+        setLocalFolderError('');
+    };
+
+    const currentLocalFolderPath = () => {
+        if (!localFolderStack.length) return '/';
+        return `/${localFolderStack.map((item) => item.name).join('/')}`;
+    };
+
+    const collectLocalFolderFiles = async (dirHandle, prefix, bucket) => {
+        for await (const [name, entry] of dirHandle.entries()) {
+            if (entry.kind === 'directory') {
+                await collectLocalFolderFiles(entry, `${prefix}/${name}`, bucket);
+            } else if (entry.kind === 'file') {
+                const file = await entry.getFile();
+                bucket.push({ file, relativePath: `${prefix}/${name}` });
+            }
+        }
+    };
+
+    const stageSelectedLocalFolder = async () => {
+        if (!pendingLocalFolderInput || !localFolderStack.length) {
+            throw new Error('No target input selected.');
+        }
+        const selectedItem = localFolderStack[localFolderStack.length - 1];
+        const selectedName = String(selectedItem?.name || 'folder').trim() || 'folder';
+        const files = [];
+        await collectLocalFolderFiles(selectedItem.handle, selectedName, files);
+        if (!files.length) {
+            throw new Error('Selected folder does not contain files.');
+        }
+        const stagedPath = await stageKernelLocalFolder(pendingLocalFolderInput.name || '', files);
+        pendingLocalFolderInput.value = stagedPath;
+        pendingLocalFolderInput.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const renderLocalFolderEntries = async () => {
+        if (!localFolderList) return;
+        localFolderList.innerHTML = '';
+        if (!localFolderStack.length) {
+            const empty = document.createElement('p');
+            empty.className = 'px-3 py-2 text-xs text-slate-500 dark:text-slate-400';
+            empty.textContent = 'Choose a local root folder to browse.';
+            localFolderList.appendChild(empty);
+            if (localFolderCurrent) localFolderCurrent.textContent = '/';
+            if (localFolderUp) localFolderUp.disabled = true;
+            return;
+        }
+
+        const current = localFolderStack[localFolderStack.length - 1];
+        if (localFolderCurrent) localFolderCurrent.textContent = currentLocalFolderPath();
+        if (localFolderUp) localFolderUp.disabled = localFolderStack.length <= 1;
+
+        const dirs = [];
+        for await (const [name, entry] of current.handle.entries()) {
+            if (entry.kind === 'directory') {
+                dirs.push({ name, handle: entry });
+            }
+        }
+        dirs.sort((a, b) => a.name.localeCompare(b.name));
+
+        if (!dirs.length) {
+            const empty = document.createElement('p');
+            empty.className = 'px-3 py-2 text-xs text-slate-500 dark:text-slate-400';
+            empty.textContent = 'No subdirectories found.';
+            localFolderList.appendChild(empty);
+            return;
+        }
+
+        dirs.forEach((entry) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60';
+            button.innerHTML = `<span class="font-mono">${entry.name}</span><span class="ml-2 text-xs text-slate-500">/</span>`;
+            button.addEventListener('click', async () => {
+                localFolderStack.push({ name: entry.name, handle: entry.handle });
+                await renderLocalFolderEntries();
+            });
+            localFolderList.appendChild(button);
+        });
+    };
+
+    const chooseLocalFolderRoot = async () => {
+        if (!localFolderApiSupported()) {
+            throw new Error('Local folder browsing is not supported by this browser.');
+        }
+        const rootHandle = await window.showDirectoryPicker();
+        localFolderStack = [{ name: String(rootHandle.name || 'root'), handle: rootHandle }];
+        await renderLocalFolderEntries();
+    };
+
+    const openLocalFolderModal = async (targetInput) => {
+        pendingLocalFolderInput = targetInput;
+        if (!localFolderModal) return;
+        localFolderModal.classList.remove('hidden');
+        localFolderModal.classList.add('flex');
+        setLocalFolderError('');
+        toggleLocalFolderLoading(true);
+        try {
+            if (!localFolderStack.length) {
+                await chooseLocalFolderRoot();
+            } else {
+                await renderLocalFolderEntries();
+            }
+        } finally {
+            toggleLocalFolderLoading(false);
+        }
     };
 
     const setServerFileError = (message) => {
@@ -1104,8 +1533,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 setServerFolderError('No target input selected.');
                 return;
             }
-            pendingFolderInput.value = serverFolderPath;
-            pendingFolderInput.dispatchEvent(new Event('input', { bubbles: true }));
+            const state = getFolderSelectionState(pendingFolderInput);
+            if (state) {
+                state.serverPath = serverFolderPath;
+            }
+            applyFolderSelectionForMode('server-path', pendingFolderInput, pendingFolderDisplayInput, pendingFolderSourceInput);
             closeServerFolderModal();
         });
     }
@@ -1113,6 +1545,71 @@ document.addEventListener('DOMContentLoaded', () => {
         serverFolderModal.addEventListener('click', (event) => {
             if (event.target === serverFolderModal) {
                 closeServerFolderModal();
+            }
+        });
+    }
+    if (localFolderClose) {
+        localFolderClose.addEventListener('click', () => closeLocalFolderModal());
+    }
+    if (localFolderRoot) {
+        localFolderRoot.addEventListener('click', async () => {
+            toggleLocalFolderLoading(true);
+            setLocalFolderError('');
+            try {
+                await chooseLocalFolderRoot();
+            } catch (error) {
+                setLocalFolderError(error && error.message ? error.message : 'Failed to choose local folder.');
+            } finally {
+                toggleLocalFolderLoading(false);
+            }
+        });
+    }
+    if (localFolderRefresh) {
+        localFolderRefresh.addEventListener('click', async () => {
+            toggleLocalFolderLoading(true);
+            setLocalFolderError('');
+            try {
+                await renderLocalFolderEntries();
+            } catch (error) {
+                setLocalFolderError(error && error.message ? error.message : 'Failed to refresh local folders.');
+            } finally {
+                toggleLocalFolderLoading(false);
+            }
+        });
+    }
+    if (localFolderUp) {
+        localFolderUp.addEventListener('click', async () => {
+            if (localFolderStack.length <= 1) return;
+            localFolderStack.pop();
+            toggleLocalFolderLoading(true);
+            setLocalFolderError('');
+            try {
+                await renderLocalFolderEntries();
+            } catch (error) {
+                setLocalFolderError(error && error.message ? error.message : 'Failed to navigate local folders.');
+            } finally {
+                toggleLocalFolderLoading(false);
+            }
+        });
+    }
+    if (localFolderSelect) {
+        localFolderSelect.addEventListener('click', async () => {
+            toggleLocalFolderLoading(true);
+            setLocalFolderError('');
+            try {
+                await stageSelectedLocalFolder();
+                closeLocalFolderModal();
+            } catch (error) {
+                setLocalFolderError(error && error.message ? error.message : 'Failed to select local folder.');
+            } finally {
+                toggleLocalFolderLoading(false);
+            }
+        });
+    }
+    if (localFolderModal) {
+        localFolderModal.addEventListener('click', (event) => {
+            if (event.target === localFolderModal) {
+                closeLocalFolderModal();
             }
         });
     }
@@ -1149,20 +1646,20 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.folder-picker').forEach((icon) => {
         icon.addEventListener('click', async () => {
             const container = icon.closest('[data-folder-input]') || icon.parentElement;
-            const textInput = container ? container.querySelector('input[type="text"]') : null;
-            if (!textInput) {
+            const displayInput = container ? container.querySelector('input[data-folder-display]') : null;
+            const hiddenInput = container ? container.querySelector('input[data-folder-hidden]') : null;
+            const sourceInput = container ? container.querySelector('input[data-folder-source]') : null;
+            const localInput = container ? container.querySelector('input[data-folder-local]') : null;
+            if (!displayInput) {
                 return;
             }
             try {
-                const sourceInput = document.getElementById('kernel-browse-source-mode');
-                const sourceMode = sourceInput ? String(sourceInput.value || '').trim() : 'server-path';
+                const sourceMode = getKernelBrowseSourceMode();
                 if (sourceMode === 'local-picker') {
-                    const selectedPath = await pickNativePath('folder');
-                    textInput.value = selectedPath;
-                    textInput.dispatchEvent(new Event('input', { bubbles: true }));
-                } else {
-                    await openServerFolderModal(textInput);
+                    await pickLocalFolderFromBrowser(hiddenInput ? hiddenInput.name : '', displayInput, hiddenInput, sourceInput, localInput);
+                    return;
                 }
+                await openServerFolderModal(displayInput, hiddenInput, sourceInput);
             } catch (err) {
                 const msg = (err && err.message) ? err.message : 'Failed to select folder.';
                 alert(msg);
@@ -1180,13 +1677,12 @@ document.addEventListener('DOMContentLoaded', () => {
             const extensions = String(icon.dataset.fileExtensions || '.pkl').trim() || '.pkl';
             try {
                 const explicitModeInputId = String(icon.dataset.browseModeInput || '').trim();
-                const sourceInput = document.getElementById('kernel-browse-source-mode');
                 const explicitModeInput = explicitModeInputId ? document.getElementById(explicitModeInputId) : null;
                 const sourceMode = explicitModeInput
                     ? String(explicitModeInput.value || '').trim()
-                    : (sourceInput ? String(sourceInput.value || '').trim() : 'server-path');
+                    : getKernelBrowseSourceMode();
                 if (sourceMode === 'local-picker') {
-                    const selectedPath = await pickNativePath('file', extensions);
+                    const selectedPath = await pickNativePath('file', extensions, '/home');
                     textInput.value = selectedPath;
                     textInput.dispatchEvent(new Event('input', { bubbles: true }));
                 } else {
@@ -1365,6 +1861,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const uploadedBox = zone.querySelector('[data-uploaded]');
         const uploadedName = zone.querySelector('[data-uploaded-name]');
         const uploadedLabel = zone.querySelector('[data-uploaded-label]');
+        const clearSelectionBtn = zone.querySelector('[data-clear-upload]');
         const defaultName = uploadedBox ? String(uploadedBox.dataset.defaultName || '') : '';
 
         const applyModeVisuals = (mode) => {
@@ -1389,9 +1886,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 uploadedName.textContent = defaultName;
                 if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
                 uploadedBox.classList.remove('hidden');
+                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
             } else {
                 uploadedName.textContent = '';
                 uploadedBox.classList.add('hidden');
+                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
             }
         };
 
@@ -1405,6 +1904,24 @@ document.addEventListener('DOMContentLoaded', () => {
                     uploadedName.textContent = basenameFromPath(selected);
                     if (uploadedLabel) uploadedLabel.textContent = 'Selected';
                     uploadedBox.classList.remove('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
+                } else {
+                    syncUploadedBoxToDefault();
+                }
+            }
+        };
+
+        const syncLocalSelectionUi = () => {
+            const selectedFile = (fileInput.files && fileInput.files[0]) ? fileInput.files[0] : null;
+            if (filenameEl) {
+                filenameEl.textContent = selectedFile ? selectedFile.name : 'Local file not selected';
+            }
+            if (uploadedBox && uploadedName) {
+                if (selectedFile) {
+                    uploadedName.textContent = selectedFile.name;
+                    if (uploadedLabel) uploadedLabel.textContent = 'Uploaded';
+                    uploadedBox.classList.remove('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
                     syncUploadedBoxToDefault();
                 }
@@ -1417,12 +1934,7 @@ document.addEventListener('DOMContentLoaded', () => {
             applyModeVisuals(nextMode);
             if (nextMode === 'upload') {
                 serverPathInput.value = '';
-                if (filenameEl && (!fileInput.files || !fileInput.files[0])) {
-                    filenameEl.textContent = 'Local file not selected';
-                }
-                if (!fileInput.files || !fileInput.files[0]) {
-                    syncUploadedBoxToDefault();
-                }
+                syncLocalSelectionUi();
             } else {
                 fileInput.value = '';
                 syncServerSelectionUi();
@@ -1437,6 +1949,19 @@ document.addEventListener('DOMContentLoaded', () => {
             event.stopPropagation();
             setMode('server-path');
         });
+        if (clearSelectionBtn) {
+            clearSelectionBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                fileInput.value = '';
+                serverPathInput.value = '';
+                if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
+                    syncServerSelectionUi();
+                } else {
+                    syncLocalSelectionUi();
+                }
+            });
+        }
 
         zone.addEventListener('click', async (event) => {
             if (event.target && event.target.closest('[data-upload-action]')) {
@@ -1445,6 +1970,33 @@ document.addEventListener('DOMContentLoaded', () => {
             if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
                 await openServerFileModal(serverPathInput, cfg.extensions);
                 syncServerSelectionUi();
+                return;
+            }
+            fileInput.click();
+        });
+
+        zone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
+                return;
+            }
+            zone.classList.add('border-primary', 'bg-primary/5');
+        });
+
+        zone.addEventListener('dragleave', () => {
+            zone.classList.remove('border-primary', 'bg-primary/5');
+        });
+
+        zone.addEventListener('drop', (event) => {
+            event.preventDefault();
+            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
+                return;
+            }
+            zone.classList.remove('border-primary', 'bg-primary/5');
+            if (event.dataTransfer.files && event.dataTransfer.files[0]) {
+                fileInput.files = event.dataTransfer.files;
+                serverPathInput.value = '';
+                syncLocalSelectionUi();
             }
         });
 
@@ -1459,6 +2011,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             serverPathInput.value = '';
+            syncLocalSelectionUi();
         });
 
         const runtimeDefault = String((window.__webuiRuntime || {}).default_simulation_source_mode || '').trim().toLowerCase();
