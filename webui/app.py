@@ -425,7 +425,7 @@ def _to_form_value(value):
 def _expand_simulation_forms(model_type, form):
     run_mode = (_get_form_value(form, "sim_run_mode") or "single").lower()
     if run_mode not in {"single", "grid"}:
-        raise ValueError("Invalid simulation mode. Use single trial or parameter grid.")
+        raise ValueError("Invalid simulation mode. Use single trial or parameter grid sweep.")
 
     if run_mode == "single":
         return run_mode, [dict(form)]
@@ -454,7 +454,7 @@ def _expand_simulation_forms(model_type, form):
         expanded_forms.append(trial_form)
 
     if not expanded_forms:
-        raise ValueError("No simulations generated from the selected parameter grid.")
+        raise ValueError("No simulations generated from the selected parameter grid sweep.")
     return run_mode, expanded_forms
 
 
@@ -1446,11 +1446,35 @@ def _load_parser_source(path):
     return source_obj
 
 
+def _coerce_trial_dataframe_sequence(source_obj):
+    """
+    Field-potential pipeline files with multiple trials are commonly stored as
+    a list/tuple of per-trial DataFrames. Flatten them into one DataFrame so
+    parser inspection can expose dataframe fields in the UI.
+    """
+    if not isinstance(source_obj, (list, tuple)):
+        return source_obj
+    if len(source_obj) == 0:
+        return source_obj
+    if not all(isinstance(item, pd.DataFrame) for item in source_obj):
+        return source_obj
+
+    frames = []
+    for idx, frame in enumerate(source_obj):
+        frame_use = frame.copy()
+        if "trial_index" not in frame_use.columns:
+            frame_use["trial_index"] = int(idx)
+        frames.append(frame_use)
+    return pd.concat(frames, ignore_index=True)
+
+
 def _load_features_source(path):
     ext = os.path.splitext(str(path))[1].lower()
     if ext in {".xlsx", ".xls", ".feather"}:
-        return compute_utils.read_df_file(path)
-    return _load_parser_source(path)
+        loaded = compute_utils.read_df_file(path)
+    else:
+        loaded = _load_parser_source(path)
+    return _coerce_trial_dataframe_sequence(loaded)
 
 
 def _load_uploaded_source_in_memory(upload):
@@ -2771,7 +2795,7 @@ def _simulation_computation(job_id, job_status, params):
         is_grid = run_mode == "grid"
         grid_metadata = _build_simulation_grid_metadata(model_type, run_mode, run_forms)
         if is_grid:
-            _append_job_output(job_status, job_id, f"Parameter grid mode enabled with {total_runs} simulation(s).")
+            _append_job_output(job_status, job_id, f"Parameter grid sweep mode enabled with {total_runs} simulation(s).")
         else:
             _append_job_output(job_status, job_id, "Single trial mode enabled.")
 
@@ -5054,6 +5078,15 @@ def _analysis_plot_error(message, status=400, log_output=""):
     )
 
 
+def _analysis_default_plot_filename(title):
+    base_name = secure_filename(str(title or "").strip())
+    if not base_name:
+        base_name = "analysis_plot"
+    if not base_name.lower().endswith(".png"):
+        base_name = f"{base_name}.png"
+    return base_name
+
+
 def _render_analysis_plot(title, subtitle, image_bytes, log_output=""):
     encoded = base64.b64encode(image_bytes).decode("ascii")
     return render_template(
@@ -5063,6 +5096,7 @@ def _render_analysis_plot(title, subtitle, image_bytes, log_output=""):
         error=None,
         image_data=encoded,
         log_output=log_output,
+        default_filename=_analysis_default_plot_filename(title),
     )
 
 

@@ -571,7 +571,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const isGrid = selected && selected.value === 'grid';
         if (elements.buttonLabel) {
             elements.buttonLabel.textContent = isGrid
-                ? 'Run parameter grid simulation'
+                ? 'Run parameter grid sweep simulation'
                 : 'Run trial simulation';
         }
         if (elements.gridHelp) {

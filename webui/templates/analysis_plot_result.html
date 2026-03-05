@@ -25,6 +25,16 @@
     </div>
     {% else %}
     <div class="mt-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+        <div class="mb-4 flex flex-wrap items-center gap-3">
+            <a
+                id="download-plot-local"
+                href="data:image/png;base64,{{ image_data }}"
+                download="{{ default_filename or 'analysis_plot.png' }}"
+                class="inline-flex items-center justify-center gap-2 h-10 px-4 rounded-lg border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-sm font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
+                Save figure
+            </a>
+        </div>
+
         <div id="plot-wait" class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 p-10 text-slate-600 dark:text-slate-300">
             <div class="h-10 w-10 rounded-full border-4 border-slate-300 border-t-slate-600 dark:border-slate-600 dark:border-t-slate-300 animate-spin"></div>
             <div class="text-sm font-semibold">Rendering plot...</div>
@@ -43,10 +53,12 @@
         const img = document.getElementById("plot-image");
         const wait = document.getElementById("plot-wait");
         if (!img || !wait) return;
+
         const showImage = () => {
             wait.classList.add("hidden");
             img.classList.remove("hidden");
         };
+
         if (img.complete && img.naturalWidth > 0) {
             showImage();
         } else {
