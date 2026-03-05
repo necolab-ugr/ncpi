@@ -16,18 +16,19 @@
 {% set completion_title = 'Features Computed' if computation_type == 'features' else ('Training Complete' if computation_type == 'inference_training' else ('Predictions Computed' if computation_type == 'inference' else 'Computation Complete!')) %}
 {% set is_pending = pending if pending is not none else false %}
 
-<div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}', {{ is_pending | tojson }})">
+<div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}', {{ is_pending | tojson }}, '{{ computation_type }}')">
     <div class="flex items-center gap-6">
         <div x-show="status === 'in_progress' && progress < 100 && !pending" class="flex flex-col items-center gap-6 text-center">
             <div class="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-primary dark:border-primary"></div>
         </div>
         <div x-show="status === 'finished' && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
+        <div x-show="status === 'cancelled' && !pending" class="text-amber-500 dark:text-amber-400 text-4xl">■</div>
         <div x-show="status === 'failed' || error" class="flex flex-col items-center gap-6 text-center">
             <div class="text-red-500 dark:text-red-400 text-4xl">❌</div>
         </div>
         <div class="flex flex-col gap-2">
-            <p x-text="status === 'failed' ? 'Computation Failed' : (pending ? 'Preparing {{ computation_label }}' : (status === 'finished' ? '{{ completion_title }}' : 'Computing {{ computation_label }}'))" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
-            <p x-text="status === 'failed' ? 'An error occurred during computation.' : (pending ? 'Waiting for upload to complete...' : (status === 'finished' ? 'Your results are ready.' : 'Please wait while the computation is in progress...'))" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
+            <p x-text="status === 'failed' ? 'Computation Failed' : (status === 'cancelled' ? 'Computation Cancelled' : (pending ? 'Preparing {{ computation_label }}' : (status === 'finished' ? '{{ completion_title }}' : 'Computing {{ computation_label }}')))" class="text-text-light-primary dark:text-white text-2xl font-bold tracking-tight"></p>
+            <p x-text="status === 'failed' ? 'An error occurred during computation.' : (status === 'cancelled' ? 'The computation was cancelled.' : (pending ? 'Waiting for upload to complete...' : (status === 'finished' ? 'Your results are ready.' : (cancelRequested ? 'Cancellation requested. Stopping computation...' : 'Please wait while the computation is in progress...'))))" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
         </div>
     </div>
     <div class="w-64 mt-4">
@@ -70,6 +71,24 @@
     </div>
     {% endif %}
     <div class="flex justify-end gap-4 mt-10 pt-6">
+        <button x-show="!pending && status === 'in_progress'"
+            :disabled="cancelling || cancelRequested"
+            @click="cancelComputation()"
+            :class="cancelling || cancelRequested
+                ? 'px-5 py-2.5 text-sm font-semibold text-slate-500 bg-slate-200 rounded-lg cursor-not-allowed opacity-70'
+                : 'px-5 py-2.5 text-sm font-semibold text-white bg-amber-600 rounded-lg shadow-md hover:bg-amber-700 transition-colors'">
+            <span x-text="cancelRequested ? 'Cancelling...' : 'Cancel computation'"></span>
+        </button>
+
+        <button x-show="!pending && status === 'finished'"
+                :disabled="hasBeenClicked"
+                @click="downloadResults()"
+                :class="hasBeenClicked
+                ? 'px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/50 bg-gray-200 dark:bg-[#2d3358] rounded-lg cursor-not-allowed opacity-50'
+                : 'px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg shadow-md hover:bg-primary-dark transition-colors'">
+            Save results
+        </button>
+
         {% if computation_type == 'simulation' %}
         <a x-show="!pending && status === 'finished'" href="{{url_for('field_potential')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
@@ -105,21 +124,11 @@
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Analysis
         </a>
-        {% else %}
-        <button :disabled="pending || status !== 'finished' || hasBeenClicked"
-                @click="hasBeenClicked = true; window.location.href = `{{url_for('download_results', job_id=job_id, computation_type=computation_type )}}`"
-                :class="pending || status !== 'finished' || hasBeenClicked
-                ? 'px-5 py-2.5 text-sm font-semibold text-text-light-secondary dark:text-white/50 bg-gray-200 dark:bg-[#2d3358] rounded-lg cursor-not-allowed opacity-50'
-                : 'px-5 py-2.5 text-sm font-semibold text-white bg-primary rounded-lg shadow-md hover:bg-primary-dark transition-colors'">
-            Save results
-        </button>
         {% endif %}
     </div>
-    {% if computation_type not in ['simulation'] %}
     <p x-show="hasBeenClicked" class="text-sm text-text-light-secondary dark:text-[#929bc9]">
         ✅ Results have already been downloaded
     </p>
-    {% endif %}
 </div>
 
 
@@ -136,8 +145,9 @@ function formatTime(seconds) {
 
 // Alpine.js component for the loading page
 document.addEventListener('alpine:init', () => {
-    Alpine.data('loadingApp', (initialJobId, pending) => ({
+    Alpine.data('loadingApp', (initialJobId, pending, computationType) => ({
         jobId: initialJobId,
+        computationType,
         pending,
         progress: 0,
         elapsedTime: '00:00',
@@ -145,6 +155,8 @@ document.addEventListener('alpine:init', () => {
         status: 'in_progress',
         error: null, 
         output: "",
+        cancelRequested: false,
+        cancelling: false,
         uploadProgress: 0,
         uploadMessage: "",
         simulationTotal: 0,
@@ -197,6 +209,7 @@ document.addEventListener('alpine:init', () => {
                     this.status = data.status || 'in_progress';
                     this.progress = data.progress;
                     this.output = data.output || "";
+                    this.cancelRequested = !!data.cancel_requested || this.status === 'cancelled';
                     this.simulationTotal = Number(data.simulation_total || 0);
                     this.simulationCompleted = Number(data.simulation_completed || 0);
                     this.$nextTick(() => {
@@ -207,10 +220,14 @@ document.addEventListener('alpine:init', () => {
                     
                     if (data.status === 'finished') {
                         this.error = null;
+                        this.cancelling = false;
                         this.progress = 100; // Finalize display
                         console.log('Computation finished. Save results button active.');
                         // Polling stops automatically here as it doesn't set a new timeout
 
+                    } else if (data.status === 'cancelled') {
+                        this.error = null;
+                        this.cancelling = false;
                     } else if (data.status === 'in_progress') {
                         this.error = null;
                         // Poll again after 1 second (simplest polling interval)
@@ -218,6 +235,7 @@ document.addEventListener('alpine:init', () => {
 
                     } else { // Failed
                         this.error = data.error || 'Unknown error';  // Set error message
+                        this.cancelling = false;
                         this.progress = data.progress || 0;
                         // Polling stops on failure
                     }
@@ -231,6 +249,43 @@ document.addEventListener('alpine:init', () => {
         schedulePendingPoll() {
             if (!this.pending) return;
             setTimeout(() => this.pollStatus(), 1500);
+        },
+        downloadResults() {
+            if (this.pending || this.status !== 'finished' || this.hasBeenClicked) return;
+            this.hasBeenClicked = true;
+            const encodedJobId = encodeURIComponent(this.jobId || '');
+            const encodedType = encodeURIComponent(this.computationType || '');
+            window.location.href = `/download_results/${encodedJobId}?computation_type=${encodedType}`;
+        },
+        async cancelComputation() {
+            if (this.pending || !this.jobId || this.status !== 'in_progress' || this.cancelling || this.cancelRequested) {
+                return;
+            }
+            this.cancelling = true;
+            try {
+                const response = await fetch(`/cancel_job/${encodeURIComponent(this.jobId)}`, {
+                    method: 'POST',
+                    headers: {
+                        'X-Requested-With': 'XMLHttpRequest',
+                    },
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok || payload.ok === false) {
+                    throw new Error(payload.error || 'Failed to cancel computation.');
+                }
+                this.cancelRequested = true;
+                this.status = payload.status || this.status;
+                if (this.status === 'cancelled') {
+                    this.progress = Math.min(this.progress, 99);
+                } else {
+                    this.pollStatus();
+                }
+            } catch (err) {
+                console.error('Cancellation failed:', err);
+                this.error = err && err.message ? err.message : 'Failed to cancel computation.';
+            } finally {
+                this.cancelling = false;
+            }
         },
     }));
 });

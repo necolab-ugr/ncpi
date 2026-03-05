@@ -2,6 +2,7 @@ import tempfile
 import os
 import shutil
 import subprocess
+import signal
 import ast
 import json
 import threading
@@ -67,6 +68,7 @@ executor = ThreadPoolExecutor(max_workers=5)
 # Dictionary to store job progress/results (job_id: status_dict)
 # NOTE: This dictionary is volatile and will reset if the server restarts.
 job_status = {}
+job_futures = {}
 MAX_OUTPUT_LINES = 200
 FEATURES_PARSER_FILE_EXTENSIONS = {
     ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather"
@@ -245,7 +247,160 @@ def _append_job_output(job_status, job_id, message):
     job_status[job_id]["output"] = "\n".join(lines)
 
 
+class JobCancelledError(RuntimeError):
+    """Raised when a running job is cancelled by user request."""
+
+
+def _is_job_cancel_requested(job_id):
+    status = job_status.get(job_id)
+    return bool(isinstance(status, dict) and status.get("cancel_requested"))
+
+
+def _pid_exists(pid):
+    try:
+        os.kill(int(pid), 0)
+    except (ProcessLookupError, ValueError, TypeError):
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _pkill_python_children(parent_pid, sig_name="TERM"):
+    pkill_path = shutil.which("pkill")
+    if not pkill_path:
+        return "pkill unavailable; skipped child-process kill."
+
+    cmd = [pkill_path, f"-{sig_name}", "-P", str(int(parent_pid)), "-f", "python"]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    except Exception as exc:
+        return f"pkill {sig_name} failed: {exc}"
+
+    stderr_text = (proc.stderr or "").strip()
+    if proc.returncode == 0:
+        return f"pkill {sig_name}: sent to python child process(es)."
+    if proc.returncode == 1:
+        return f"pkill {sig_name}: no matching python child processes."
+    return f"pkill {sig_name} returned code {proc.returncode}: {stderr_text or 'no details'}"
+
+
+def _terminate_tracked_worker_process(job_id):
+    status = job_status.get(job_id)
+    if not isinstance(status, dict):
+        return None
+
+    worker_pid = status.get("worker_pid")
+    if worker_pid is None:
+        return "No tracked worker process for this job."
+
+    try:
+        worker_pid = int(worker_pid)
+    except (TypeError, ValueError):
+        status.pop("worker_pid", None)
+        status.pop("worker_isolated_pgrp", None)
+        return "Tracked worker pid is invalid."
+
+    if worker_pid <= 0:
+        status.pop("worker_pid", None)
+        status.pop("worker_isolated_pgrp", None)
+        return "Tracked worker pid is invalid."
+
+    if not _pid_exists(worker_pid):
+        status.pop("worker_pid", None)
+        status.pop("worker_isolated_pgrp", None)
+        return f"Tracked worker process {worker_pid} already exited."
+
+    isolated_group = bool(status.get("worker_isolated_pgrp"))
+    try:
+        if isolated_group:
+            os.killpg(worker_pid, signal.SIGTERM)
+        else:
+            os.kill(worker_pid, signal.SIGTERM)
+    except ProcessLookupError:
+        status.pop("worker_pid", None)
+        status.pop("worker_isolated_pgrp", None)
+        return f"Tracked worker process {worker_pid} already exited."
+    except Exception as exc:
+        return f"Failed to send SIGTERM to worker process {worker_pid}: {exc}"
+
+    deadline = time.time() + 3.0
+    while time.time() < deadline:
+        if not _pid_exists(worker_pid):
+            status.pop("worker_pid", None)
+            status.pop("worker_isolated_pgrp", None)
+            return f"Worker process {worker_pid} terminated."
+        time.sleep(0.1)
+
+    try:
+        if isolated_group:
+            os.killpg(worker_pid, signal.SIGKILL)
+        else:
+            os.kill(worker_pid, signal.SIGKILL)
+    except ProcessLookupError:
+        status.pop("worker_pid", None)
+        status.pop("worker_isolated_pgrp", None)
+        return f"Worker process {worker_pid} terminated."
+    except Exception as exc:
+        return f"Failed to send SIGKILL to worker process {worker_pid}: {exc}"
+
+    status.pop("worker_pid", None)
+    status.pop("worker_isolated_pgrp", None)
+    return f"Worker process {worker_pid} force-killed."
+
+
+def _cancel_job_python_processes(job_id):
+    status = job_status.get(job_id)
+    if not isinstance(status, dict):
+        return []
+
+    messages = []
+    tracked_msg = _terminate_tracked_worker_process(job_id)
+    if tracked_msg:
+        messages.append(tracked_msg)
+
+    computation_type = str(status.get("computation_type") or "").strip().lower()
+    should_pkill_children = computation_type in {
+        "features",
+        "inference",
+        "inference_training",
+        "field_potential_proxy",
+        "field_potential_kernel",
+        "field_potential_meeg",
+    }
+    if should_pkill_children:
+        parent_pid = os.getpid()
+        messages.append(_pkill_python_children(parent_pid, "TERM"))
+        time.sleep(0.2)
+        messages.append(_pkill_python_children(parent_pid, "KILL"))
+
+    return messages
+
+
+def _mark_job_cancelled(job_id, reason="Computation cancelled by user."):
+    status = job_status.get(job_id)
+    if not isinstance(status, dict):
+        return
+    already_cancelled = status.get("status") == "cancelled"
+    status.update({
+        "status": "cancelled",
+        "error": False,
+        "cancel_requested": True,
+        "cancelled_at": time.time(),
+        "cancel_message": reason,
+        "estimated_time_remaining": time.time(),
+        "progress": status.get("progress", 0),
+    })
+    if not already_cancelled:
+        _append_job_output(job_status, job_id, reason)
+
+
 def _mark_job_failed(job_id, exc, *, log_traceback=True, prefix="Error"):
+    status = job_status.get(job_id)
+    if isinstance(status, dict) and (status.get("status") == "cancelled" or status.get("cancel_requested")):
+        _mark_job_cancelled(job_id, status.get("cancel_message") or "Computation cancelled by user.")
+        return
+
     message = str(exc).strip()
     if message:
         error_text = f"{type(exc).__name__}: {message}"
@@ -259,7 +414,6 @@ def _mark_job_failed(job_id, exc, *, log_traceback=True, prefix="Error"):
             for line in tb_text.splitlines():
                 _append_job_output(job_status, job_id, line)
 
-    status = job_status.get(job_id)
     if isinstance(status, dict):
         status.update({
             "status": "failed",
@@ -2151,6 +2305,7 @@ def _run_process_with_progress(
     output_lines = []
     progress_seen = threading.Event()
     output_buffer = deque(maxlen=MAX_OUTPUT_LINES)
+    cancelled = False
 
     if job_id in job_status:
         job_status[job_id].setdefault("output", "")
@@ -2167,7 +2322,11 @@ def _run_process_with_progress(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
+    if job_id in job_status:
+        job_status[job_id]["worker_pid"] = process.pid
+        job_status[job_id]["worker_isolated_pgrp"] = True
 
     start = time.time()
 
@@ -2219,6 +2378,17 @@ def _run_process_with_progress(
 
     initial_estimate = estimate_seconds
     while True:
+        if _is_job_cancel_requested(job_id):
+            cancelled = True
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=5)
+            except Exception:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except Exception:
+                    pass
+            break
         if process.poll() is not None:
             break
         if not progress_seen.is_set() and job_id in job_status:
@@ -2233,6 +2403,11 @@ def _run_process_with_progress(
         time.sleep(1)
 
     reader_thread.join(timeout=2)
+    if job_id in job_status:
+        job_status[job_id].pop("worker_pid", None)
+        job_status[job_id].pop("worker_isolated_pgrp", None)
+    if cancelled:
+        raise JobCancelledError("Computation cancelled by user.")
     output_text = "".join(output_lines).strip()
     return process.returncode, output_text
 
@@ -2721,15 +2896,26 @@ def _clear_downstream_data_for_module(module_key):
 def _run_job_with_post_success_cleanup(job_id, module_key, func, *func_args):
     """Run a background job and clear downstream data only on successful completion."""
     try:
+        if _is_job_cancel_requested(job_id):
+            _mark_job_cancelled(job_id, "Computation cancelled by user.")
+            return
         func(job_id, job_status, *func_args)
     except Exception as exc:
         app.logger.exception("[compute %s] unhandled worker exception in %s", job_id, getattr(func, "__name__", "worker"))
         status = job_status.get(job_id)
-        if isinstance(status, dict) and status.get("status") not in {"finished", "failed"}:
-            _mark_job_failed(job_id, exc, prefix="Unhandled worker exception")
+        if isinstance(status, dict):
+            if status.get("cancel_requested") or status.get("status") == "cancelled":
+                _mark_job_cancelled(job_id, status.get("cancel_message") or "Computation cancelled by user.")
+            elif status.get("status") not in {"finished", "failed"}:
+                _mark_job_failed(job_id, exc, prefix="Unhandled worker exception")
         return
+    finally:
+        job_futures.pop(job_id, None)
 
     status = job_status.get(job_id, {})
+    if status.get("cancel_requested") or status.get("status") == "cancelled":
+        _mark_job_cancelled(job_id, status.get("cancel_message") or "Computation cancelled by user.")
+        return
     if status.get("status") != "finished" or bool(status.get("error")):
         return
 
@@ -2807,6 +2993,8 @@ def _simulation_computation(job_id, job_status, params):
         generated_files = None
 
         for run_idx, form in enumerate(run_forms, start=1):
+            if _is_job_cancel_requested(job_id):
+                raise JobCancelledError("Computation cancelled by user.")
             if model_type == "hagen":
                 network_params_content = _build_hagen_network_params(form)
             else:
@@ -2947,7 +3135,10 @@ def _simulation_computation(job_id, job_status, params):
 
     except Exception as exc:
         _clear_simulation_output_folder_all_files()
-        _mark_job_failed(job_id, exc)
+        if isinstance(exc, JobCancelledError):
+            _mark_job_cancelled(job_id, str(exc))
+        else:
+            _mark_job_failed(job_id, exc)
 
 
 def _simulation_computation_custom(job_id, job_status, params):
@@ -3016,7 +3207,10 @@ def _simulation_computation_custom(job_id, job_status, params):
 
     except Exception as exc:
         _clear_simulation_output_folder_all_files()
-        _mark_job_failed(job_id, exc)
+        if isinstance(exc, JobCancelledError):
+            _mark_job_cancelled(job_id, str(exc))
+        else:
+            _mark_job_failed(job_id, exc)
     finally:
         if temp_run_dir and os.path.isdir(temp_run_dir):
             shutil.rmtree(temp_run_dir, ignore_errors=True)
@@ -3063,6 +3257,8 @@ def run_trial_simulation(model_type):
         "estimated_time_remaining": None,
         "results": None,
         "error": False,
+        "cancel_requested": False,
+        "computation_type": "simulation",
         "progress_mode": "manual",
         "output": "",
         "simulation_total": len(run_forms),
@@ -3070,7 +3266,7 @@ def run_trial_simulation(model_type):
         "simulation_mode": run_mode,
     }
 
-    executor.submit(
+    future = executor.submit(
         _run_job_with_post_success_cleanup,
         job_id,
         "simulation",
@@ -3083,6 +3279,7 @@ def run_trial_simulation(model_type):
             "estimate_seconds": estimated_duration,
         },
     )
+    job_futures[job_id] = future
 
     return redirect(url_for("job_status_page", job_id=job_id, computation_type="simulation"))
 
@@ -3144,17 +3341,20 @@ def run_trial_simulation_custom():
         "estimated_time_remaining": None,
         "results": None,
         "error": False,
+        "cancel_requested": False,
+        "computation_type": "simulation",
         "progress_mode": "manual",
         "output": "",
     }
 
-    executor.submit(
+    future = executor.submit(
         _run_job_with_post_success_cleanup,
         job_id,
         "simulation",
         _simulation_computation_custom,
         {"input_paths": input_paths, "upload_root": upload_root, "estimate_seconds": estimated_duration},
     )
+    job_futures[job_id] = future
 
     return redirect(url_for("job_status_page", job_id=job_id, computation_type="simulation"))
 
@@ -7395,6 +7595,8 @@ def start_computation_redirect(computation_type):
         "estimated_time_remaining": estimated_time_remaining,
         "results": None,
         "error": False,
+        "cancel_requested": False,
+        "computation_type": computation_type,
         "output": "",
         "progress_mode": "manual" if computation_type in {"features", "inference", "inference_training"} else "time",
     }
@@ -7415,19 +7617,26 @@ def start_computation_redirect(computation_type):
             job_id,
             time.perf_counter() - route_started,
         )
-        threading.Timer(
-            0.05,
-            lambda: executor.submit(
+        def _submit_deferred_features_job():
+            status = job_status.get(job_id)
+            if not isinstance(status, dict):
+                return
+            if status.get("cancel_requested") or status.get("status") == "cancelled":
+                _mark_job_cancelled(job_id, "Computation cancelled by user.")
+                return
+            future = executor.submit(
                 _run_job_with_post_success_cleanup,
                 job_id,
                 upstream_module,
                 func,
                 data,
                 temp_uploaded_files,
-            ),
-        ).start()
+            )
+            job_futures[job_id] = future
+
+        threading.Timer(0.05, _submit_deferred_features_job).start()
     else:
-        executor.submit(
+        future = executor.submit(
             _run_job_with_post_success_cleanup,
             job_id,
             upstream_module,
@@ -7435,6 +7644,7 @@ def start_computation_redirect(computation_type):
             data,
             temp_uploaded_files,
         )
+        job_futures[job_id] = future
 
     # Redirect immediately to the loading page (PRG pattern)
     app.logger.warning(
@@ -7457,6 +7667,39 @@ def job_status_pending():
     """Renders the loading page before a job id is assigned (used for uploads)."""
     computation_type = request.args.get('computation_type')
     return render_template("loading_page.html", job_id="", computation_type=computation_type, pending=True)
+
+
+@app.route("/cancel_job/<job_id>", methods=["POST"])
+def cancel_job(job_id):
+    status = job_status.get(job_id)
+    if not isinstance(status, dict):
+        return jsonify({"ok": False, "error": "Job not found."}), 404
+
+    if status.get("status") in {"finished", "failed", "cancelled"}:
+        return jsonify({
+            "ok": False,
+            "error": f'Job is already in terminal state: {status.get("status")}.',
+            "status": status.get("status"),
+        }), 400
+
+    status["cancel_requested"] = True
+    _append_job_output(job_status, job_id, "Cancellation requested by user.")
+
+    future = job_futures.get(job_id)
+    cancelled_before_start = bool(future and future.cancel())
+    if cancelled_before_start:
+        job_futures.pop(job_id, None)
+        _mark_job_cancelled(job_id, "Computation cancelled before execution.")
+    else:
+        for cancel_msg in _cancel_job_python_processes(job_id):
+            _append_job_output(job_status, job_id, cancel_msg)
+        _mark_job_cancelled(job_id, "Computation cancelled by user.")
+
+    return jsonify({
+        "ok": True,
+        "status": job_status.get(job_id, {}).get("status", "cancelled"),
+        "cancel_requested": True,
+    })
 
 @app.route("/status/<job_id>")
 def get_status(job_id):
@@ -7498,10 +7741,12 @@ def get_status(job_id):
         "elapsed_time": int(time.time() - status["start_time"]),
         "estimated_time_remaining": status["estimated_time_remaining"],
         "error": status.get("error", False),
+        "cancel_requested": bool(status.get("cancel_requested")),
         "output": status.get("output", ""),
         "simulation_total": status.get("simulation_total"),
         "simulation_completed": status.get("simulation_completed"),
         "simulation_mode": status.get("simulation_mode"),
+        "can_download": bool(status.get("status") == "finished" and status.get("results")),
     })
 
 
@@ -7519,8 +7764,8 @@ def download_results(job_id):
     # Retrieve the stored DataFrame
     output_df_path = status["results"] 
 
-    # Remove file after downloading it (keep proxy outputs in /tmp)
-    if computation_type != 'field_potential_proxy':
+    # Remove file after downloading it, except canonical pipeline outputs in /tmp.
+    if computation_type not in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'simulation'}:
         @after_this_request
         def cleanup(response):
             try:
@@ -7537,6 +7782,29 @@ def download_results(job_id):
             mimetype='image/png',
             as_attachment=True,
             download_name='LFP_predictions.png'
+        )
+    if computation_type == 'simulation':
+        if not os.path.isdir(output_df_path):
+            return "Simulation outputs directory is not available.", 404
+
+        os.makedirs(temp_uploaded_files, exist_ok=True)
+        archive_base = os.path.join(temp_uploaded_files, f"simulation_results_{job_id}")
+        archive_path = shutil.make_archive(archive_base, "zip", root_dir=output_df_path)
+
+        @after_this_request
+        def cleanup_sim_zip(response):
+            try:
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
+            except Exception as exc:
+                app.logger.error(f"Error removing simulation archive {archive_path}: {exc}")
+            return response
+
+        return send_file(
+            archive_path,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name=f'simulation_results_{job_id}.zip'
         )
     if computation_type == 'field_potential_proxy':
         return send_file(
