@@ -85,6 +85,9 @@
                             <p id="simulationDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
                                 Drag and drop pkl files or click to browse
                             </p>
+                            <p id="simulationUploadValidationError" class="mt-2 hidden whitespace-pre-line break-words text-sm font-semibold text-red-600 dark:text-red-400 text-center">
+                                Only .pkl or .pickle files are supported.
+                            </p>
                             <div id="selectedFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
                                 <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local files</span>
                                 <div id="selectedFilesList" class="mt-2"></div>
@@ -171,7 +174,7 @@
             <div class="space-y-6">
                 <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400">Formatting Tips</h4>
                 <div class="space-y-4">
-                    <div class="flex gap-4">
+                    <div id="simulationSupportedFormatsTip" class="flex gap-4 rounded-lg transition-all">
                         <span class="material-symbols-outlined text-primary shrink-0">info</span>
                         <div>
                             <h5 class="text-sm font-bold mb-1">Supported Formats</h5>
@@ -244,6 +247,8 @@
     const simulationModeUploadBtn = document.getElementById('simulationModeUploadBtn');
     const simulationModeServerBtn = document.getElementById('simulationModeServerBtn');
     const simulationDropZoneHint = document.getElementById('simulationDropZoneHint');
+    const simulationUploadValidationError = document.getElementById('simulationUploadValidationError');
+    const simulationSupportedFormatsTip = document.getElementById('simulationSupportedFormatsTip');
     const selectedFiles = document.getElementById('selectedFiles');
     const selectedSimulationServerFile = document.getElementById('selectedSimulationServerFile');
     const selectedSimulationServerFilePath = document.getElementById('selectedSimulationServerFilePath');
@@ -262,6 +267,8 @@
     let simulationServerBrowserCurrentPath = '';
     let simulationServerBrowserParentPath = '';
     let simulationServerBrowserSelectedFilePaths = [];
+    let simulationFormatFlashTimeout = null;
+    let simulationAutoSubmitTimeout = null;
     const allowServerSource = runtime.is_server_runtime !== false;
 
     if (!allowServerSource) {
@@ -308,11 +315,13 @@
             selectedSimulationServerFile.classList.add('hidden');
             simulationServerFilePathInput.value = '';
             simulationServerBrowserSelectedFilePaths = [];
+            clearSimulationUploadError();
         } else {
             simulationModeServerBtn.classList.add(...uploadActiveClasses);
             simulationModeServerBtn.classList.remove(...inactiveClasses);
             simulationDropZoneHint.textContent = 'Drag and drop pkl files or click to browse';
             selectedFiles.classList.add('hidden');
+            clearSimulationUploadError();
         }
     };
 
@@ -349,6 +358,76 @@
         const dataTransfer = new DataTransfer();
         Array.from(files).forEach((file) => dataTransfer.items.add(file));
         spikeFileInput.files = dataTransfer.files;
+    };
+
+    // Checks file format is pickle
+    const isSimulationFileExtensionValid = (fileName) => /\.(pkl|pickle)$/i.test(String(fileName || '').trim());
+
+    // Highlights format info message on the lateral menu
+    const flashSimulationFormatTip = () => {
+        if (!simulationSupportedFormatsTip) return;
+        simulationSupportedFormatsTip.classList.add('ring-2', 'ring-red-300', 'dark:ring-red-700', 'bg-red-50/70', 'dark:bg-red-900/20');
+        if (simulationFormatFlashTimeout) {
+            clearTimeout(simulationFormatFlashTimeout);
+        }
+        simulationFormatFlashTimeout = window.setTimeout(() => {
+            simulationSupportedFormatsTip.classList.remove('ring-2', 'ring-red-300', 'dark:ring-red-700', 'bg-red-50/70', 'dark:bg-red-900/20');
+            simulationFormatFlashTimeout = null;
+        }, 3200);
+    };
+
+    // Highlights simulation supported format's tip on the lateral menu and makes an error message appear in the dropzone, highlighted
+    const showSimulationUploadError = (message) => {
+        simulationUploadValidationError.textContent = String(message || '').trim() || 'Only .pkl or .pickle files are supported.';
+        simulationUploadValidationError.classList.remove('hidden');
+        simulationDropZoneHint.classList.add('text-red-600', 'dark:text-red-400');
+        simulationDropZoneHint.classList.remove('text-slate-600', 'dark:text-slate-400');
+        spikeDropZone.classList.add('border-red-400', 'bg-red-50/40', 'dark:bg-red-900/10');
+        flashSimulationFormatTip();
+    };
+
+    // Hide format error message in dropzone
+    const clearSimulationUploadError = () => {
+        simulationUploadValidationError.classList.add('hidden');
+        simulationDropZoneHint.classList.remove('text-red-600', 'dark:text-red-400');
+        simulationDropZoneHint.classList.add('text-slate-600', 'dark:text-slate-400');
+        spikeDropZone.classList.remove('border-red-400', 'bg-red-50/40', 'dark:bg-red-900/10');
+    };
+
+    const handleSelectedLocalFiles = (candidateFiles) => {
+        clearSimulationUploadError();
+        const allFiles = Array.from(candidateFiles || []);
+        if (!allFiles.length) {
+            selectedFiles.classList.add('hidden');
+            return;
+        }
+        const validFiles = allFiles.filter((file) => isSimulationFileExtensionValid(file && file.name));
+        const invalidFiles = allFiles.filter((file) => !isSimulationFileExtensionValid(file && file.name));
+        if (invalidFiles.length > 0) {
+            const rejectedNames = invalidFiles.map((file) => `- ${file.name}`).join('\n');
+            showSimulationUploadError(`Unsupported format:\n\n${rejectedNames}\n\nUse .pkl or .pickle.`);
+        }
+        if (!validFiles.length) {
+            setInputFiles([]);
+            selectedFiles.classList.add('hidden');
+            return;
+        }
+        setInputFiles(validFiles);
+        renderSelectedFiles(validFiles);
+        setSelectedServerFiles([]);
+        if (simulationAutoSubmitTimeout) {
+            clearTimeout(simulationAutoSubmitTimeout);
+            simulationAutoSubmitTimeout = null;
+        }
+        // In case there are invalid as well as valid files, show error message of the invalid ones before uploading the valid file(s)
+        if (invalidFiles.length > 0) {
+            simulationAutoSubmitTimeout = window.setTimeout(() => {
+                submitIfReady();
+                simulationAutoSubmitTimeout = null;
+            }, 3200);
+            return;
+        }
+        submitIfReady();
     };
 
     const showSimulationServerBrowserError = (message) => {
@@ -495,13 +574,12 @@
     };
 
     spikeFileInput.addEventListener('change', () => {
-        renderSelectedFiles(spikeFileInput.files);
-        setSelectedServerFiles([]);
-        submitIfReady();
+        handleSelectedLocalFiles(spikeFileInput.files);
     });
 
     spikeDropZone.addEventListener('click', () => {
         if (simulationSourceMode === 'upload') {
+            spikeFileInput.value = '';
             spikeFileInput.click();
         } else {
             openSimulationServerFilePicker();
@@ -542,10 +620,7 @@
         if (!files || files.length === 0) {
             return;
         }
-        setInputFiles(files);
-        renderSelectedFiles(files);
-        setSelectedServerFiles([]);
-        submitIfReady();
+        handleSelectedLocalFiles(files);
     });
 
     simulationServerBrowserUp.addEventListener('click', () => {
