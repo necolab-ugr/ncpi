@@ -24,6 +24,35 @@
         {{ error }}
     </div>
     {% else %}
+    {% if simulation_repeat_controls %}
+    <div class="mt-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+        <form method="POST" action="{{ simulation_repeat_controls.action_url }}" class="flex flex-wrap items-end gap-3">
+            {% for field_name, field_value in simulation_repeat_controls.hidden_fields %}
+            <input type="hidden" name="{{ field_name }}" value="{{ field_value }}">
+            {% endfor %}
+            {% for key in simulation_repeat_controls.selected_file_keys %}
+            <input type="hidden" name="sim_selected_file_keys" value="{{ key }}">
+            {% endfor %}
+            <label class="flex flex-col gap-1">
+                <span class="text-sm font-medium text-slate-700 dark:text-slate-300">Repetition</span>
+                <select name="sim_repeat_index"
+                    class="h-10 min-w-[220px] rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 text-sm text-slate-800 dark:text-slate-100">
+                    {% for opt in simulation_repeat_controls.options %}
+                    <option value="{{ opt.value }}" {% if simulation_repeat_controls.selected_value == opt.value %}selected{% endif %}>
+                        {{ opt.label }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </label>
+            <button type="submit"
+                class="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors">
+                Apply
+            </button>
+        </form>
+        <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">{{ simulation_repeat_controls.hint }}</p>
+    </div>
+    {% endif %}
+
     <div class="mt-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
         <div class="mb-4 flex flex-wrap items-center gap-3">
             <a

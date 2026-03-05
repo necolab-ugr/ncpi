@@ -211,10 +211,25 @@
                 Back to simulation options
             </a>
         </div>
-        <button type="submit"
-            class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
-            <span id="run-simulation-button-label" class="truncate">Run trial simulation</span>
-        </button>
+        <div class="flex items-end gap-3">
+            <label for="sim-repetitions" class="flex flex-col gap-1">
+                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Repetitions/config</span>
+                <input
+                    id="sim-repetitions"
+                    name="sim_repetitions"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="1"
+                    disabled
+                    class="form-input h-12 w-28 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                />
+            </label>
+            <button type="submit"
+                class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+                <span id="run-simulation-button-label" class="truncate">Run trial simulation</span>
+            </button>
+        </div>
     </div>
 </form>
 </div>
@@ -226,6 +241,6 @@
     {{ super() }} <!-- import base.html scripts -->
 
     <!-- Simulation-specific JavaScript -->
-    <script src="{{ url_for('static', filename='js/simulation.js', v='20260303') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulation.js', v='20260305') }}"></script>
 
 {% endblock %} > 

@@ -1513,16 +1513,16 @@
                             <div class="sm:col-span-6" x-show="simPlotType === 'cdm_psd'" x-cloak>
                                 <p class="text-xs text-slate-500 dark:text-slate-400" x-show="simulationWelchDefaults">
                                     Default Welch values (if fields are left empty): nperseg=<span class="font-semibold" x-text="simulationWelchDefaults.nperseg"></span>,
-                                    noverlap=<span class="font-semibold" x-text="simulationWelchDefaults.noverlap"></span>,
-                                    nfft=<span class="font-semibold" x-text="simulationWelchDefaults.nfft"></span>,
+                                    noverlap=<span class="font-semibold" x-text="simulationWelchDefaults.noverlap ?? 'None'"></span>,
+                                    nfft=<span class="font-semibold" x-text="simulationWelchDefaults.nfft ?? 'None'"></span>,
                                     computed from dt=<span class="font-semibold" x-text="Number(simulationWelchDefaults.dt_ms || 0).toFixed(6)"></span> ms
                                     (fs=<span class="font-semibold" x-text="Number(simulationWelchDefaults.fs_hz || 0).toFixed(3)"></span> Hz,
                                     signal length=<span class="font-semibold" x-text="simulationWelchDefaults.signal_len"></span> samples).
                                 </p>
                                 <p class="text-xs text-slate-500 dark:text-slate-400" x-show="!simulationWelchDefaults">
-                                    If Welch parameters are left empty: nperseg uses an approximately 2-second window
-                                    (minimum 256, capped by signal length), noverlap defaults to 50% of nperseg,
-                                    and nfft defaults to the next power of two.
+                                    If Welch parameters are left empty: nperseg defaults to a 1-second window when the
+                                    signal is longer than 1 second; otherwise it defaults to half of the signal length.
+                                    noverlap and nfft default to None.
                                 </p>
                             </div>
                         </div>

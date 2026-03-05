@@ -582,30 +582,43 @@ def _expand_simulation_forms(model_type, form):
         raise ValueError("Invalid simulation mode. Use single trial or parameter grid sweep.")
 
     if run_mode == "single":
-        return run_mode, [dict(form)]
+        single_form = dict(form)
+        single_form["sim_repetitions"] = "1"
+        return run_mode, [single_form]
+
+    repetitions = _parse_int(form, "sim_repetitions", 1)
+    if repetitions < 1:
+        raise ValueError("Repetitions per parameter configuration must be >= 1.")
 
     grid_defaults = _simulation_grid_defaults(model_type)
     ordered_keys = list(grid_defaults.keys())
 
     candidate_lists = {}
-    total = 1
+    combinations = 1
     for key in ordered_keys:
         candidates, _ = _parse_grid_candidates(form, key, grid_defaults[key])
         candidate_lists[key] = candidates
-        total *= len(candidates)
+        combinations *= len(candidates)
+
+    total = combinations * repetitions
 
     if total > MAX_SIMULATION_GRID_COMBINATIONS:
         raise ValueError(
-            f"Grid expands to {total} simulations; maximum allowed is {MAX_SIMULATION_GRID_COMBINATIONS}."
+            f"Grid expands to {combinations} configurations x {repetitions} repetition(s) = {total} simulations; "
+            f"maximum allowed is {MAX_SIMULATION_GRID_COMBINATIONS}."
         )
 
     expanded_forms = []
-    for combo in product(*(candidate_lists[key] for key in ordered_keys)):
-        trial_form = dict(form)
-        trial_form["sim_run_mode"] = "grid"
-        for key, value in zip(ordered_keys, combo):
-            trial_form[key] = _to_form_value(value)
-        expanded_forms.append(trial_form)
+    for combo_index, combo in enumerate(product(*(candidate_lists[key] for key in ordered_keys))):
+        for repeat_index in range(repetitions):
+            trial_form = dict(form)
+            trial_form["sim_run_mode"] = "grid"
+            trial_form["sim_repetitions"] = str(repetitions)
+            trial_form["sim_combo_index"] = str(combo_index)
+            trial_form["sim_repeat_index"] = str(repeat_index)
+            for key, value in zip(ordered_keys, combo):
+                trial_form[key] = _to_form_value(value)
+            expanded_forms.append(trial_form)
 
     if not expanded_forms:
         raise ValueError("No simulations generated from the selected parameter grid sweep.")
@@ -652,11 +665,29 @@ def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
         ):
             changed_keys.append(key)
 
+    repetitions = 1
+    if run_forms:
+        try:
+            repetitions = max(1, _parse_int(run_forms[0], "sim_repetitions", 1))
+        except Exception:
+            repetitions = 1
+    configuration_count = max(1, (len(trial_values) + repetitions - 1) // repetitions)
+
     trials = []
     for trial_idx, trial in enumerate(trial_values):
+        try:
+            combo_index = max(0, _parse_int(run_forms[trial_idx], "sim_combo_index", trial_idx // repetitions))
+        except Exception:
+            combo_index = trial_idx // repetitions
+        try:
+            repeat_index = max(0, _parse_int(run_forms[trial_idx], "sim_repeat_index", trial_idx % repetitions))
+        except Exception:
+            repeat_index = trial_idx % repetitions
         changed = {key: trial.get(key) for key in changed_keys}
         trials.append({
             "trial_index": int(trial_idx),
+            "configuration_index": int(combo_index),
+            "repeat_index": int(repeat_index),
             "changed": changed,
         })
 
@@ -665,6 +696,8 @@ def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
         "model_type": model_type,
         "run_mode": run_mode,
         "trial_count": len(trial_values),
+        "configuration_count": configuration_count,
+        "repetitions_per_configuration": int(repetitions),
         "changed_keys": changed_keys,
         "trials": trials,
     }
@@ -2981,7 +3014,14 @@ def _simulation_computation(job_id, job_status, params):
         is_grid = run_mode == "grid"
         grid_metadata = _build_simulation_grid_metadata(model_type, run_mode, run_forms)
         if is_grid:
-            _append_job_output(job_status, job_id, f"Parameter grid sweep mode enabled with {total_runs} simulation(s).")
+            repetitions = int((grid_metadata or {}).get("repetitions_per_configuration", 1))
+            configuration_count = int((grid_metadata or {}).get("configuration_count", total_runs))
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Parameter grid sweep mode enabled with {configuration_count} configuration(s), "
+                f"{repetitions} repetition(s) each ({total_runs} simulation(s) total).",
+            )
         else:
             _append_job_output(job_status, job_id, "Single trial mode enabled.")
 
@@ -4704,6 +4744,31 @@ def _simulation_model_type(sim_data):
     return "hagen"
 
 
+def _simulation_area_names(sim_data, trial_idx=0):
+    try:
+        trial = _simulation_trial_data(sim_data, trial_idx)
+        trial_network = trial.get("network", {})
+        if isinstance(trial_network, dict):
+            areas = trial_network.get("areas")
+            if isinstance(areas, (list, tuple)):
+                return list(areas)
+    except Exception:
+        pass
+
+    net = sim_data.get("network", {}) or {}
+    if isinstance(net, dict):
+        areas = net.get("areas")
+        if isinstance(areas, (list, tuple)):
+            return list(areas)
+    if isinstance(net, list) and net:
+        first = net[0]
+        if isinstance(first, dict):
+            areas = first.get("areas")
+            if isinstance(areas, (list, tuple)):
+                return list(areas)
+    return []
+
+
 def _simulation_trial_data(sim_data, trial_idx):
     times_all = sim_data["times"]
     gids_all = sim_data["gids"]
@@ -4727,22 +4792,18 @@ def _simulation_trial_data(sim_data, trial_idx):
     }
 
 
-def _next_power_of_two(value):
-    value = int(max(1, value))
-    return 1 << (value - 1).bit_length()
-
-
 def _resolve_default_welch_params(signal_len, fs_hz):
     signal_len = int(max(1, signal_len))
     fs_hz = float(max(1.0, fs_hz))
-    nperseg = max(256, int(round(2.0 * fs_hz)))
-    nperseg = max(1, min(signal_len, nperseg))
-    noverlap = max(0, min(nperseg - 1, nperseg // 2))
-    nfft = max(nperseg, _next_power_of_two(nperseg))
+    one_second_samples = int(max(1, round(fs_hz)))
+    if signal_len > one_second_samples:
+        nperseg = one_second_samples
+    else:
+        nperseg = max(1, signal_len // 2)
     return {
         "nperseg": int(nperseg),
-        "noverlap": int(noverlap),
-        "nfft": int(nfft),
+        "noverlap": None,
+        "nfft": None,
     }
 
 
@@ -4824,6 +4885,88 @@ def _simulation_trial_legend_label(sim_data, trial_idx):
     if changed:
         return f"trial {trial_idx} | {changed}"
     return f"trial {trial_idx}"
+
+
+def _simulation_trial_grid_entry(sim_data, trial_idx):
+    meta = sim_data.get("grid_metadata")
+    if not isinstance(meta, dict):
+        return None
+    trials = meta.get("trials")
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return None
+    entry = trials[trial_idx]
+    return entry if isinstance(entry, dict) else None
+
+
+def _simulation_trial_repeat_index(sim_data, trial_idx):
+    entry = _simulation_trial_grid_entry(sim_data, trial_idx)
+    if isinstance(entry, dict):
+        try:
+            value = int(entry.get("repeat_index"))
+            if value >= 0:
+                return value
+        except (TypeError, ValueError):
+            pass
+
+    meta = sim_data.get("grid_metadata")
+    if not isinstance(meta, dict):
+        return None
+    try:
+        repetitions = int(meta.get("repetitions_per_configuration"))
+    except (TypeError, ValueError):
+        repetitions = 0
+    if repetitions > 1:
+        return int(trial_idx % repetitions)
+    return None
+
+
+def _simulation_trial_configuration_index(sim_data, trial_idx):
+    entry = _simulation_trial_grid_entry(sim_data, trial_idx)
+    if isinstance(entry, dict):
+        try:
+            return int(entry.get("configuration_index"))
+        except (TypeError, ValueError):
+            pass
+
+    meta = sim_data.get("grid_metadata")
+    if isinstance(meta, dict):
+        try:
+            repetitions = int(meta.get("repetitions_per_configuration"))
+        except (TypeError, ValueError):
+            repetitions = 0
+        if repetitions > 0:
+            return int(trial_idx // repetitions)
+    return int(trial_idx)
+
+
+def _simulation_available_repetition_indices(sim_data, trial_indices):
+    repeats = []
+    for trial_idx in trial_indices:
+        rep_idx = _simulation_trial_repeat_index(sim_data, trial_idx)
+        if rep_idx is None:
+            continue
+        repeats.append(int(rep_idx))
+    return sorted(set(repeats))
+
+
+def _simulation_group_trials_by_configuration(sim_data, trial_indices):
+    grouped = {}
+    for trial_idx in trial_indices:
+        cfg_idx = _simulation_trial_configuration_index(sim_data, trial_idx)
+        grouped.setdefault(int(cfg_idx), []).append(int(trial_idx))
+    return grouped
+
+
+def _simulation_configuration_legend_label(sim_data, configuration_index, trial_indices):
+    changed = ""
+    for trial_idx in trial_indices:
+        changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
+        if changed:
+            break
+    base = f"config {configuration_index}"
+    if changed:
+        return f"{base} | {changed}"
+    return base
 
 
 def _population_color(name, idx):
@@ -5287,17 +5430,19 @@ def _analysis_default_plot_filename(title):
     return base_name
 
 
-def _render_analysis_plot(title, subtitle, image_bytes, log_output=""):
+def _render_analysis_plot(title, subtitle, image_bytes, log_output="", **extra_context):
     encoded = base64.b64encode(image_bytes).decode("ascii")
-    return render_template(
-        "analysis_plot_result.html",
-        title=title,
-        subtitle=subtitle,
-        error=None,
-        image_data=encoded,
-        log_output=log_output,
-        default_filename=_analysis_default_plot_filename(title),
-    )
+    context = {
+        "title": title,
+        "subtitle": subtitle,
+        "error": None,
+        "image_data": encoded,
+        "log_output": log_output,
+        "default_filename": _analysis_default_plot_filename(title),
+    }
+    if extra_context:
+        context.update(extra_context)
+    return render_template("analysis_plot_result.html", **context)
 
 
 def _find_column(df, candidates):
@@ -6310,11 +6455,43 @@ def analysis_plot_simulation():
     if range_start > range_end:
         return _analysis_plot_error("Trial range is invalid: start must be <= end.", status=400)
 
-    trial_indices = list(range(range_start, range_end + 1))
-    if not trial_indices:
+    trial_indices_full_range = list(range(range_start, range_end + 1))
+    if not trial_indices_full_range:
         return _analysis_plot_error("No trials selected to plot.", status=400)
+    trial_indices = list(trial_indices_full_range)
 
     plot_type = (request.form.get("sim_plot_type") or "raster").strip().lower()
+    available_repeat_indices = _simulation_available_repetition_indices(sim_data, trial_indices_full_range)
+    sim_repeat_raw = (request.form.get("sim_repeat_index") or "").strip().lower()
+    selected_repeat_index = None
+    if sim_repeat_raw and sim_repeat_raw not in {"all", "*"}:
+        try:
+            selected_repeat_index = int(sim_repeat_raw)
+        except ValueError:
+            return _analysis_plot_error("Repetition selection must be an integer or 'all'.", status=400)
+        if selected_repeat_index < 0:
+            return _analysis_plot_error("Repetition selection must be >= 0.", status=400)
+
+    if selected_repeat_index is not None:
+        if not available_repeat_indices:
+            return _analysis_plot_error("Repetition selection is not available for these simulation outputs.", status=400)
+        if selected_repeat_index not in set(available_repeat_indices):
+            return _analysis_plot_error(
+                f"Selected repetition {selected_repeat_index + 1} is outside the available range.",
+                status=400,
+            )
+
+    if plot_type in {"raster", "firing_rates", "cdm"} and selected_repeat_index is not None:
+        trial_indices = [
+            idx for idx in trial_indices_full_range
+            if _simulation_trial_repeat_index(sim_data, idx) == selected_repeat_index
+        ]
+        if not trial_indices:
+            return _analysis_plot_error(
+                f"No trials found for repetition {selected_repeat_index + 1} in the selected trial range.",
+                status=400,
+            )
+
     selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
     selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
     def _parse_float(value, default):
@@ -6362,22 +6539,24 @@ def analysis_plot_simulation():
     if welch_nperseg is not None and welch_nfft is not None and welch_nfft < welch_nperseg:
         return _analysis_plot_error("Welch nfft must be >= nperseg.", status=400)
 
-    def _next_power_of_two(value):
-        value = int(max(1, value))
-        return 1 << (value - 1).bit_length()
-
     def _resolve_welch_kwargs(signal_len, fs_hz):
         signal_len = int(max(1, signal_len))
         fs_hz = float(max(1.0, fs_hz))
-        default_nperseg = max(256, int(round(2.0 * fs_hz)))
+        one_second_samples = int(max(1, round(fs_hz)))
+        if signal_len > one_second_samples:
+            default_nperseg = one_second_samples
+        else:
+            default_nperseg = max(1, signal_len // 2)
         nperseg = int(welch_nperseg) if welch_nperseg is not None else default_nperseg
         nperseg = max(1, min(signal_len, nperseg))
 
-        noverlap = int(welch_noverlap) if welch_noverlap is not None else (nperseg // 2)
-        noverlap = max(0, min(noverlap, nperseg - 1))
+        noverlap = int(welch_noverlap) if welch_noverlap is not None else None
+        if noverlap is not None:
+            noverlap = max(0, min(noverlap, nperseg - 1))
 
-        nfft = int(welch_nfft) if welch_nfft is not None else _next_power_of_two(nperseg)
-        nfft = max(nperseg, nfft)
+        nfft = int(welch_nfft) if welch_nfft is not None else None
+        if nfft is not None:
+            nfft = max(nperseg, nfft)
         return {
             "nperseg": nperseg,
             "noverlap": noverlap,
@@ -6463,10 +6642,68 @@ def analysis_plot_simulation():
         return _analysis_plot_error(f"Plot dependencies are unavailable: {exc}", status=500)
 
     import math
+    simulation_repeat_controls = None
+    repeat_display_note = ""
+    if plot_type in {"raster", "firing_rates", "cdm"} and available_repeat_indices:
+        repeat_display_note = (
+            f" Repetition shown: {selected_repeat_index + 1}."
+            if selected_repeat_index is not None
+            else " Repetitions shown: all."
+        )
+        preserve_fields = [
+            "sim_plot_type",
+            "sim_trial_start",
+            "sim_trial_end",
+            "sim_time_start",
+            "sim_time_end",
+            "sim_freq_min",
+            "sim_freq_max",
+            "sim_welch_nperseg",
+            "sim_welch_noverlap",
+            "sim_welch_nfft",
+        ]
+        hidden_fields = []
+        for field_name in preserve_fields:
+            value = request.form.get(field_name)
+            if value is None:
+                continue
+            value_text = str(value).strip()
+            if value_text == "":
+                continue
+            hidden_fields.append((field_name, value_text))
+        if not any(name == "sim_plot_type" for name, _ in hidden_fields):
+            hidden_fields.append(("sim_plot_type", plot_type))
+        simulation_repeat_controls = {
+            "action_url": url_for("analysis_plot_simulation"),
+            "hidden_fields": hidden_fields,
+            "selected_file_keys": selected_keys,
+            "selected_value": str(selected_repeat_index) if selected_repeat_index is not None else "all",
+            "options": [
+                {"value": "all", "label": "All repetitions"}
+            ] + [
+                {"value": str(rep), "label": f"Repetition {rep + 1}"}
+                for rep in available_repeat_indices
+            ],
+            "hint": "Select which repetition to display for this plot type.",
+        }
+
+    def _align_psd_to_reference(reference_freqs, freqs, psd_values):
+        ref = np.asarray(reference_freqs, dtype=float).ravel()
+        x = np.asarray(freqs, dtype=float).ravel()
+        y = np.asarray(psd_values, dtype=float).ravel()
+        if ref.size == 0 or x.size == 0 or y.size == 0:
+            return None
+        if x.size != y.size:
+            return None
+        if ref.size == x.size and np.allclose(ref, x, rtol=1e-6, atol=1e-9):
+            return y
+        return np.interp(ref, x, y, left=np.nan, right=np.nan)
 
     if plot_type == "cdm_psd":
         welch_used = None
-        areas = sim_data.get("network", {}).get("areas", []) if model == "four_area" else []
+        config_groups = _simulation_group_trials_by_configuration(sim_data, trial_indices)
+        config_count = len(config_groups)
+        areas = _simulation_area_names(sim_data, trial_indices[0]) if model == "four_area" else []
         if model == "four_area":
             cols = min(2, max(1, len(areas)))
             rows = int(math.ceil(len(areas) / cols))
@@ -6475,17 +6712,91 @@ def analysis_plot_simulation():
             for area_idx, area_name in enumerate(areas):
                 ax = flat_ax[area_idx]
                 plotted = 0
-                for trial_idx in trial_indices:
+                for config_idx, config_trials in config_groups.items():
+                    ref_freqs = None
+                    spectra = []
+                    for trial_idx in config_trials:
+                        trial = _simulation_trial_data(sim_data, trial_idx)
+                        series_by_area, dt_fp = _field_potential_payload_to_area_series(
+                            cdm_payload,
+                            model,
+                            areas,
+                            trial_idx,
+                        )
+                        if area_name not in series_by_area:
+                            continue
+                        cdm = np.asarray(series_by_area[area_name], dtype=float)
+                        if cdm.size < 8:
+                            continue
+                        dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
+                        fs = 1000.0 / max(dt_local, 1e-9)
+                        effective_welch = _resolve_welch_kwargs(cdm.size, fs)
+                        if welch_used is None:
+                            welch_used = dict(effective_welch)
+                        freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
+                        if psd.size == 0:
+                            continue
+                        psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
+                        if ref_freqs is None:
+                            ref_freqs = np.asarray(freqs, dtype=float)
+                            aligned = np.asarray(psd_norm, dtype=float)
+                        else:
+                            aligned = _align_psd_to_reference(ref_freqs, freqs, psd_norm)
+                            if aligned is None:
+                                continue
+                        spectra.append(aligned)
+                    if ref_freqs is None or not spectra:
+                        continue
+                    spectra_matrix = np.vstack(spectra)
+                    if not np.isfinite(spectra_matrix).any():
+                        continue
+                    mean_psd = np.nanmean(spectra_matrix, axis=0)
+                    mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
+                    if not np.any(mask):
+                        continue
+                    ax.semilogy(
+                        ref_freqs[mask],
+                        mean_psd[mask],
+                        linewidth=1.0,
+                        label=_simulation_configuration_legend_label(sim_data, config_idx, config_trials),
+                    )
+                    plotted += 1
+                ax.set_title(f"{area_name} PSD")
+                ax.set_xlabel("f (Hz)")
+                ax.set_ylabel("PSD (a.u./Hz)")
+                ax.grid(alpha=0.2)
+                if plotted and config_count <= 20:
+                    ax.legend(fontsize=7, loc="best")
+            for extra_idx in range(len(areas), len(flat_ax)):
+                flat_ax[extra_idx].axis("off")
+            fig.tight_layout()
+            welch_text = welch_used or _fallback_welch_text() or {
+                "nperseg": "auto",
+                "noverlap": "auto",
+                "nfft": "auto",
+            }
+            subtitle = (
+                f"Field-potential power spectra by area (repetition-averaged per configuration). "
+                f"Model: {model}. Trials {range_start} to {range_end} | configurations={config_count} "
+                f"({freq_min:g}-{freq_max:g} Hz). Source: {cdm_payload_name}. "
+                f"Welch: nperseg={welch_text.get('nperseg')}, "
+                f"noverlap={welch_text.get('noverlap')}, "
+                f"nfft={welch_text.get('nfft')}."
+            )
+        else:
+            fig, ax = plt.subplots(1, 1, figsize=(8, 5), dpi=160)
+            for config_idx, config_trials in config_groups.items():
+                ref_freqs = None
+                spectra = []
+                for trial_idx in config_trials:
                     trial = _simulation_trial_data(sim_data, trial_idx)
                     series_by_area, dt_fp = _field_potential_payload_to_area_series(
                         cdm_payload,
                         model,
-                        areas,
+                        [],
                         trial_idx,
                     )
-                    if area_name not in series_by_area:
-                        continue
-                    cdm = np.asarray(series_by_area[area_name], dtype=float)
+                    cdm = np.asarray(series_by_area.get("global", []), dtype=float)
                     if cdm.size < 8:
                         continue
                     dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
@@ -6497,69 +6808,34 @@ def analysis_plot_simulation():
                     if psd.size == 0:
                         continue
                     psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
-                    mask = (freqs >= freq_min) & (freqs <= freq_max)
-                    ax.semilogy(
-                        freqs[mask],
-                        psd_norm[mask],
-                        linewidth=1.0,
-                        label=_simulation_trial_legend_label(sim_data, trial_idx),
-                    )
-                    plotted += 1
-                ax.set_title(f"{area_name} PSD")
-                ax.set_xlabel("f (Hz)")
-                ax.set_ylabel("PSD (a.u./Hz)")
-                ax.grid(alpha=0.2)
-                if plotted and len(trial_indices) <= 20:
-                    ax.legend(fontsize=7, loc="best")
-            for extra_idx in range(len(areas), len(flat_ax)):
-                flat_ax[extra_idx].axis("off")
-            fig.tight_layout()
-            welch_text = welch_used or _fallback_welch_text() or {
-                "nperseg": "auto",
-                "noverlap": "auto",
-                "nfft": "auto",
-            }
-            subtitle = (
-                f"Field-potential power spectra by area. Model: {model}. Trials {range_start} to {range_end} "
-                f"({freq_min:g}-{freq_max:g} Hz). Source: {cdm_payload_name}. "
-                f"Welch: nperseg={welch_text.get('nperseg')}, "
-                f"noverlap={welch_text.get('noverlap')}, "
-                f"nfft={welch_text.get('nfft')}."
-            )
-        else:
-            fig, ax = plt.subplots(1, 1, figsize=(8, 5), dpi=160)
-            for trial_idx in trial_indices:
-                trial = _simulation_trial_data(sim_data, trial_idx)
-                series_by_area, dt_fp = _field_potential_payload_to_area_series(
-                    cdm_payload,
-                    model,
-                    [],
-                    trial_idx,
-                )
-                cdm = np.asarray(series_by_area.get("global", []), dtype=float)
-                if cdm.size < 8:
+                    if ref_freqs is None:
+                        ref_freqs = np.asarray(freqs, dtype=float)
+                        aligned = np.asarray(psd_norm, dtype=float)
+                    else:
+                        aligned = _align_psd_to_reference(ref_freqs, freqs, psd_norm)
+                        if aligned is None:
+                            continue
+                    spectra.append(aligned)
+                if ref_freqs is None or not spectra:
                     continue
-                dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
-                fs = 1000.0 / max(dt_local, 1e-9)
-                effective_welch = _resolve_welch_kwargs(cdm.size, fs)
-                if welch_used is None:
-                    welch_used = dict(effective_welch)
-                freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
-                if psd.size == 0:
+                spectra_matrix = np.vstack(spectra)
+                if not np.isfinite(spectra_matrix).any():
                     continue
-                psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
-                mask = (freqs >= freq_min) & (freqs <= freq_max)
+                mean_psd = np.nanmean(spectra_matrix, axis=0)
+                mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
+                if not np.any(mask):
+                    continue
                 ax.semilogy(
-                    freqs[mask],
-                    psd_norm[mask],
+                    ref_freqs[mask],
+                    mean_psd[mask],
                     linewidth=1.2,
-                    label=_simulation_trial_legend_label(sim_data, trial_idx),
+                    label=_simulation_configuration_legend_label(sim_data, config_idx, config_trials),
                 )
             ax.set_xlabel("f (Hz)")
             ax.set_ylabel("PSD (a.u./Hz)")
-            ax.set_title("Field-potential power spectra (overlaid trials)")
+            ax.set_title("Field-potential power spectra (repetition-averaged by configuration)")
             ax.grid(alpha=0.2)
-            if len(trial_indices) <= 20:
+            if config_count <= 20:
                 ax.legend(fontsize=8, loc="best")
             fig.tight_layout()
             welch_text = welch_used or _fallback_welch_text() or {
@@ -6568,7 +6844,8 @@ def analysis_plot_simulation():
                 "nfft": "auto",
             }
             subtitle = (
-                f"Model: {model}. Trials {range_start} to {range_end} (overlaid spectra, {freq_min:g}-{freq_max:g} Hz). "
+                f"Model: {model}. Trials {range_start} to {range_end} "
+                f"(repetition-averaged spectra, configurations={config_count}, {freq_min:g}-{freq_max:g} Hz). "
                 f"Source: {cdm_payload_name}. "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
                 f"noverlap={welch_text.get('noverlap')}, "
@@ -6576,7 +6853,7 @@ def analysis_plot_simulation():
             )
     else:
         if model == "four_area":
-            areas = sim_data.get("network", {}).get("areas", [])
+            areas = _simulation_area_names(sim_data, trial_indices[0])
             if not areas:
                 return _analysis_plot_error("Four-area model detected but no areas were found in network parameters.", status=400)
             area_cols = min(2, max(1, len(areas)))
@@ -6739,7 +7016,7 @@ def analysis_plot_simulation():
         source_info = f" Source: {cdm_payload_name}." if plot_type == "cdm" and cdm_payload_name else ""
         subtitle = (
             f"{pretty_name}. Model: {model}. Trials {range_start} to {range_end} "
-            f"({time_start:g}-{time_end:g} ms).{selected_info}{source_info}"
+            f"({time_start:g}-{time_end:g} ms).{repeat_display_note}{selected_info}{source_info}"
         )
 
     output = io.BytesIO()
@@ -6751,6 +7028,7 @@ def analysis_plot_simulation():
         subtitle=subtitle,
         image_bytes=output.getvalue(),
         log_output="",
+        simulation_repeat_controls=simulation_repeat_controls,
     )
 
 

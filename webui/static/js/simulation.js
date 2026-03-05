@@ -33,7 +33,8 @@ document.addEventListener('DOMContentLoaded', function() {
         form: document.getElementById('run-simulation-form'),
         runModeInputs: document.querySelectorAll('input[name="sim_run_mode"]'),
         buttonLabel: document.getElementById('run-simulation-button-label'),
-        gridHelp: document.getElementById('grid-mode-help')
+        gridHelp: document.getElementById('grid-mode-help'),
+        repetitionsInput: document.getElementById('sim-repetitions')
     };
 
     function ensureInputCanCarryValue(input, value) {
@@ -538,6 +539,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (elements.gridHelp) {
             elements.gridHelp.classList.toggle('hidden', !isGrid);
         }
+        if (elements.repetitionsInput) {
+            elements.repetitionsInput.disabled = !isGrid;
+        }
         document.querySelectorAll('.param-input').forEach(input => {
             const paramName = input.dataset.param || input.name;
             const keepSingle = simulationOnlyParams.has(paramName);
@@ -575,6 +579,15 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.form.addEventListener('submit', (event) => {
             const selected = document.querySelector('input[name="sim_run_mode"]:checked');
             const isGrid = selected && selected.value === 'grid';
+
+            if (isGrid && elements.repetitionsInput) {
+                const repetitions = Number(String(elements.repetitionsInput.value ?? '').trim());
+                if (!Number.isInteger(repetitions) || repetitions < 1) {
+                    event.preventDefault();
+                    window.alert('Repetitions/config must be a positive integer.');
+                    return;
+                }
+            }
 
             const params = Array.from(elements.form.querySelectorAll('.param-input'));
             for (const input of params) {
