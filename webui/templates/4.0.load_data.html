@@ -80,16 +80,31 @@
                             <p id="inferenceDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
                                 Drag and drop pkl files or click to browse
                             </p>
-                            <div id="selectedInferenceFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
-                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local files</span>
+                            <div id="selectedInferenceFiles"
+                                class="mt-4 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="block font-semibold text-green-800 dark:text-green-200">Selected local files</span>
                                 <div id="selectedInferenceFilesList" class="mt-2"></div>
                             </div>
-                            <div id="selectedInferenceServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
-                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server files</span>
+                            <div id="selectedInferenceServerFile"
+                                class="mt-4 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="block font-semibold text-green-800 dark:text-green-200">Selected server files</span>
                                 <div id="selectedInferenceServerFilePath" class="mt-2 font-mono break-all"></div>
                             </div>
                         </div>
                     </form>
+                    {% if has_predictions_data %}
+                    <div class="mt-4 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-4 py-3 text-green-800 dark:text-green-200 text-sm">
+                        <div class="flex items-center gap-2 font-semibold">
+                            <span class="material-symbols-outlined text-base">check_circle</span>
+                            <span>Files uploaded successfully</span>
+                        </div>
+                        <div class="mt-2 text-xs space-y-1">
+                            {% for filename in predictions_data_files %}
+                            <div class="font-mono break-all">{{ filename }}</div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
                 </div>
 
                 <div class="mt-8 flex justify-end">

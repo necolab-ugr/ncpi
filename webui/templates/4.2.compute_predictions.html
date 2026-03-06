@@ -116,8 +116,8 @@
             <div class="grid grid-cols-1 gap-6">
                 <div>
                     <input id="existing-features-file" type="hidden" name="existing_features_file" value="{{ default_feature_file | default('') }}">
-                    <input id="features-source-mode" type="hidden" name="features_source_mode" :value="featuresSourceMode">
-                    <input id="features-server-file-path" type="hidden" name="features_server_file_path" :value="featuresServerFilePath">
+                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="upload">
+                    <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="">
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                         Features Data <span class="text-red-500">*</span>
                     </label>
@@ -174,11 +174,14 @@
                     </div>
                     <div
                         id="features-uploaded-status"
-                        class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
+                        class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
                         style="display:none;"
                     >
-                        Uploaded:
-                        <span id="features-uploaded-name"></span>
+                        <span class="inline-flex items-center gap-2">
+                            <span class="material-symbols-outlined text-base">check_circle</span>
+                            <span>File selected:</span>
+                            <span id="features-uploaded-name"></span>
+                        </span>
                     </div>
                     <div
                         id="features-not-loaded-status"
@@ -198,12 +201,12 @@
                 Load Prediction Assets
             </h2>
             <div class="grid grid-cols-1 gap-6">
-                <input id="model-assets-source" type="hidden" name="model_assets_source" :value="assetsSourceMode">
-                <input type="hidden" name="assets_upload_mode" :value="assetsUploadMode">
-                <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" :value="assetsServerFolderPath">
-                <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" :value="assetsModelServerFilePath">
-                <input id="inference-scaler-server-file-path" type="hidden" name="inference_scaler_server_file_path" :value="assetsScalerServerFilePath">
-                <input id="inference-density-server-file-path" type="hidden" name="inference_density_server_file_path" :value="assetsDensityServerFilePath">
+                <input id="model-assets-source" type="hidden" name="model_assets_source" value="upload">
+                <input type="hidden" id="assets-upload-mode-hidden" name="assets_upload_mode" value="individual">
+                <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" value="">
+                <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" value="">
+                <input id="inference-scaler-server-file-path" type="hidden" name="inference_scaler_server_file_path" value="">
+                <input id="inference-density-server-file-path" type="hidden" name="inference_density_server_file_path" value="">
 
                 <div class="rounded-md border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/30">
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Assets Source</label>
@@ -374,9 +377,13 @@
                             </div>
                         </div>
                         <div id="asset-model-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
+                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
                             style="display:none;">
-                            Uploaded: <span id="asset-model-name"></span>
+                            <span class="inline-flex items-center gap-2">
+                                <span class="material-symbols-outlined text-base">check_circle</span>
+                                <span>File selected:</span>
+                                <span id="asset-model-name"></span>
+                            </span>
                         </div>
                     </div>
                     <div>
@@ -400,9 +407,13 @@
                             </div>
                         </div>
                         <div id="asset-scaler-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
+                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
                             style="display:none;">
-                            Uploaded: <span id="asset-scaler-name"></span>
+                            <span class="inline-flex items-center gap-2">
+                                <span class="material-symbols-outlined text-base">check_circle</span>
+                                <span>File selected:</span>
+                                <span id="asset-scaler-name"></span>
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -429,9 +440,13 @@
                             </div>
                         </div>
                         <div id="asset-density-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
+                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
                             style="display:none;">
-                            Uploaded: <span id="asset-density-name"></span>
+                            <span class="inline-flex items-center gap-2">
+                                <span class="material-symbols-outlined text-base">check_circle</span>
+                                <span>File selected:</span>
+                                <span id="asset-density-name"></span>
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -1738,6 +1753,7 @@
         if (pageInitialized) return;
         pageInitialized = true;
         const state = getInferenceState();
+        const form = document.querySelector("form[action*='start_computation_redirect/inference']");
         const input = byId("file-upload-features");
         const featuresDropZone = byId("features-drop-zone");
         const existingInput = byId("existing-features-file");
@@ -1794,27 +1810,30 @@
         const syncAssetsMode = bindAssetsModeExclusivity();
         bindInferenceServerBrowsers(syncAssetsMode);
         if (featuresSourceUploadBtn && featuresSourceModeInput && featuresServerFilePathInput) {
-            featuresSourceUploadBtn.addEventListener("click", () => {
-                if (state) {
-                    state.featuresSourceMode = "upload";
-                    state.featuresServerFilePath = "";
-                }
-                featuresSourceModeInput.value = "upload";
-                featuresServerFilePathInput.value = "";
-                refreshFeaturesLoadStatus();
-            });
-        }
-        if (featuresSourceServerBtn && featuresSourceModeInput && input) {
-            featuresSourceServerBtn.addEventListener("click", () => {
+                featuresSourceUploadBtn.addEventListener("click", () => {
+                    if (state) {
+                        state.featuresSourceMode = "upload";
+                        state.featuresServerFilePath = "";
+                    }
+                    featuresSourceModeInput.value = "upload";
+                    featuresServerFilePathInput.value = "";
+                    syncInputValue(featuresSourceModeInput);
+                    syncInputValue(featuresServerFilePathInput);
+                    refreshFeaturesLoadStatus();
+                });
+            }
+            if (featuresSourceServerBtn && featuresSourceModeInput && input) {
+                featuresSourceServerBtn.addEventListener("click", () => {
                 if (state) {
                     state.featuresSourceMode = "server-path";
-                }
-                featuresSourceModeInput.value = "server-path";
-                input.value = "";
-                if (existingInput) existingInput.value = "";
-                refreshFeaturesLoadStatus();
-            });
-        }
+                    }
+                    featuresSourceModeInput.value = "server-path";
+                    syncInputValue(featuresSourceModeInput);
+                    input.value = "";
+                    if (existingInput) existingInput.value = "";
+                    refreshFeaturesLoadStatus();
+                });
+            }
         const applyAssetsSourceMode = (mode) => {
             if (!modelAssetsSourceInput) return;
             const normalizedMode = String(mode || "upload").trim().toLowerCase() === "server-path" ? "server-path" : "upload";
@@ -1835,11 +1854,16 @@
                 }
             }
             modelAssetsSourceInput.value = normalizedMode;
+            syncInputValue(modelAssetsSourceInput);
             if (normalizedMode === "upload" && assetsServerFolderInput) {
                 assetsServerFolderInput.value = "";
                 if (assetsModelServerFilePathInput) assetsModelServerFilePathInput.value = "";
                 if (assetsScalerServerFilePathInput) assetsScalerServerFilePathInput.value = "";
                 if (assetsDensityServerFilePathInput) assetsDensityServerFilePathInput.value = "";
+                syncInputValue(assetsServerFolderInput);
+                if (assetsModelServerFilePathInput) syncInputValue(assetsModelServerFilePathInput);
+                if (assetsScalerServerFilePathInput) syncInputValue(assetsScalerServerFilePathInput);
+                if (assetsDensityServerFilePathInput) syncInputValue(assetsDensityServerFilePathInput);
             }
             if (typeof syncAssetsMode === "function") syncAssetsMode();
         };
@@ -1862,6 +1886,8 @@
             }
             featuresSourceModeInput.value = "upload";
             if (featuresServerFilePathInput) featuresServerFilePathInput.value = "";
+            syncInputValue(featuresSourceModeInput);
+            if (featuresServerFilePathInput) syncInputValue(featuresServerFilePathInput);
             if (existingInput) existingInput.value = "";
             input.dispatchEvent(new Event("change", { bubbles: true }));
         });
@@ -1899,6 +1925,153 @@
             if (typeof syncAssetsMode === "function") syncAssetsMode();
             assetsFolderInput.dispatchEvent(new Event("change", { bubbles: true }));
         });
+
+        if (form && featuresSourceModeInput && modelAssetsSourceInput) {
+            form.addEventListener("submit", (event) => {
+                const liveState = getInferenceState();
+                const assetsUploadModeHidden = byId("assets-upload-mode-hidden");
+
+                let featuresMode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
+                const hasLocalFeatures = Boolean(input && input.files && input.files.length);
+                const hasExistingFeatures = Boolean(existingInput && String(existingInput.value || "").trim());
+                const hasServerFeatures = Boolean(featuresServerFilePathInput && String(featuresServerFilePathInput.value || "").trim());
+                if (hasServerFeatures && !hasLocalFeatures && !hasExistingFeatures) {
+                    featuresMode = "server-path";
+                } else if (!hasServerFeatures && (hasLocalFeatures || hasExistingFeatures)) {
+                    featuresMode = "upload";
+                }
+                featuresSourceModeInput.value = featuresMode;
+                syncInputValue(featuresSourceModeInput);
+                if (liveState) {
+                    liveState.featuresSourceMode = featuresMode;
+                }
+
+                if (featuresMode === "server-path") {
+                    if (input) input.value = "";
+                    if (existingInput) existingInput.value = "";
+                    if (!hasServerFeatures) {
+                        event.preventDefault();
+                        window.alert("Select a server features file or switch to local upload.");
+                        return;
+                    }
+                } else {
+                    if (featuresServerFilePathInput) {
+                        featuresServerFilePathInput.value = "";
+                        syncInputValue(featuresServerFilePathInput);
+                    }
+                    if (liveState) {
+                        liveState.featuresServerFilePath = "";
+                    }
+                    if (!hasLocalFeatures && !hasExistingFeatures) {
+                        event.preventDefault();
+                        window.alert("Upload features data, or select a detected features dataframe.");
+                        return;
+                    }
+                }
+
+                const hasLocalModel = Boolean(modelInput && modelInput.files && modelInput.files.length);
+                const hasLocalScaler = Boolean(scalerInput && scalerInput.files && scalerInput.files.length);
+                const hasLocalDensity = Boolean(densityInput && densityInput.files && densityInput.files.length);
+                const hasLocalFolder = Boolean(assetsFolderInput && assetsFolderInput.files && assetsFolderInput.files.length);
+                const hasLocalIndividual = hasLocalModel || hasLocalScaler || hasLocalDensity;
+
+                const hasServerFolder = Boolean(assetsServerFolderInput && String(assetsServerFolderInput.value || "").trim());
+                const hasServerModel = Boolean(assetsModelServerFilePathInput && String(assetsModelServerFilePathInput.value || "").trim());
+                const hasServerScaler = Boolean(assetsScalerServerFilePathInput && String(assetsScalerServerFilePathInput.value || "").trim());
+                const hasServerDensity = Boolean(assetsDensityServerFilePathInput && String(assetsDensityServerFilePathInput.value || "").trim());
+                const hasServerIndividual = hasServerModel || hasServerScaler || hasServerDensity;
+                const hasServerAny = hasServerFolder || hasServerIndividual;
+
+                let assetsSource = String(modelAssetsSourceInput.value || "upload").trim().toLowerCase();
+                if (assetsSource !== "upload" && assetsSource !== "server-path") {
+                    assetsSource = hasServerAny ? "server-path" : "upload";
+                }
+                if (hasServerAny && !hasLocalFolder && !hasLocalIndividual) {
+                    assetsSource = "server-path";
+                } else if (!hasServerAny && (hasLocalFolder || hasLocalIndividual)) {
+                    assetsSource = "upload";
+                }
+                modelAssetsSourceInput.value = assetsSource;
+                syncInputValue(modelAssetsSourceInput);
+                if (liveState) {
+                    liveState.assetsSourceMode = assetsSource;
+                }
+
+                let assetsMode = (assetsModeFolder && assetsModeFolder.checked) ? "folder" : "individual";
+                if (assetsSource === "server-path") {
+                    if (hasServerFolder && !hasServerIndividual) {
+                        assetsMode = "folder";
+                    } else if (hasServerIndividual) {
+                        assetsMode = "individual";
+                    }
+                }
+                if (assetsUploadModeHidden) {
+                    assetsUploadModeHidden.value = assetsMode;
+                    syncInputValue(assetsUploadModeHidden);
+                }
+                if (liveState) {
+                    liveState.assetsUploadMode = assetsMode;
+                }
+
+                if (assetsSource === "server-path") {
+                    if (modelInput) modelInput.value = "";
+                    if (scalerInput) scalerInput.value = "";
+                    if (densityInput) densityInput.value = "";
+                    if (assetsFolderInput) assetsFolderInput.value = "";
+                    if (assetsMode === "folder" && !hasServerFolder) {
+                        event.preventDefault();
+                        window.alert("Select a server assets folder or switch to individual server files.");
+                        return;
+                    }
+                    if (assetsMode === "individual" && !hasServerModel) {
+                        event.preventDefault();
+                        window.alert("Select a server model/posterior file.");
+                        return;
+                    }
+                } else {
+                    if (assetsServerFolderInput) {
+                        assetsServerFolderInput.value = "";
+                        syncInputValue(assetsServerFolderInput);
+                    }
+                    if (assetsModelServerFilePathInput) {
+                        assetsModelServerFilePathInput.value = "";
+                        syncInputValue(assetsModelServerFilePathInput);
+                    }
+                    if (assetsScalerServerFilePathInput) {
+                        assetsScalerServerFilePathInput.value = "";
+                        syncInputValue(assetsScalerServerFilePathInput);
+                    }
+                    if (assetsDensityServerFilePathInput) {
+                        assetsDensityServerFilePathInput.value = "";
+                        syncInputValue(assetsDensityServerFilePathInput);
+                    }
+                    if (liveState) {
+                        liveState.assetsServerFolderPath = "";
+                        liveState.assetsModelServerFilePath = "";
+                        liveState.assetsScalerServerFilePath = "";
+                        liveState.assetsDensityServerFilePath = "";
+                    }
+                    if (hasLocalFolder && hasLocalIndividual) {
+                        event.preventDefault();
+                        window.alert("Use one local assets mode: either individual files or one folder.");
+                        return;
+                    }
+                    if (assetsMode === "folder" && !hasLocalFolder) {
+                        event.preventDefault();
+                        window.alert("Upload one local assets folder or switch to individual files.");
+                        return;
+                    }
+                    if (assetsMode === "individual" && !hasLocalModel) {
+                        event.preventDefault();
+                        window.alert("Upload a local model/posterior file.");
+                        return;
+                    }
+                }
+
+                if (typeof syncAssetsMode === "function") syncAssetsMode();
+                refreshFeaturesLoadStatus();
+            });
+        }
 
         bindAutoModelDetection();
         if (typeof syncAssetsMode === "function") syncAssetsMode();

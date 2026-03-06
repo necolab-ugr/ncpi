@@ -5562,8 +5562,33 @@ def analysis_sync_selected_simulation_files():
 @app.route("/analysis/upload_simulation_files", methods=["POST"])
 def analysis_upload_simulation_files():
     uploads = [f for f in request.files.getlist("simulation_files") if f and f.filename]
-    if not uploads:
-        return jsonify({"error": "No simulation files were uploaded."}), 400
+    server_file_paths = _extract_server_file_paths(request.form, "simulation_server_file_path")
+    if not uploads and not server_file_paths:
+        return jsonify({"error": "No simulation files were provided."}), 400
+
+    inputs = []
+    for server_path in server_file_paths:
+        try:
+            source_path = _validate_existing_pickle_file_path(server_path, "Simulation server file")
+            safe_name = secure_filename(os.path.basename(source_path))
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not safe_name:
+            continue
+        inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
+
+    for upload in uploads:
+        raw_name = os.path.basename(upload.filename or "")
+        safe_name = secure_filename(raw_name)
+        if not safe_name:
+            continue
+        ext = Path(safe_name).suffix.lower()
+        if ext not in PICKLE_EXTENSIONS:
+            continue
+        inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
+
+    if not inputs:
+        return jsonify({"error": "No supported simulation .pkl/.pickle files were provided."}), 400
 
     simulation_root = _simulation_output_root()
     os.makedirs(simulation_root, exist_ok=True)
@@ -5591,14 +5616,8 @@ def analysis_upload_simulation_files():
     }
     copied_files = []
     used_names = set()
-    for upload in uploads:
-        raw_name = os.path.basename(upload.filename or "")
-        safe_name = secure_filename(raw_name)
-        if not safe_name:
-            continue
-        ext = Path(safe_name).suffix.lower()
-        if ext not in PICKLE_EXTENSIONS:
-            continue
+    for item in inputs:
+        safe_name = item["safe_name"]
 
         stem = Path(safe_name).stem.lower()
         preferred_name = required_name_by_stem.get(stem, safe_name)
@@ -5614,7 +5633,10 @@ def analysis_upload_simulation_files():
             suffix += 1
         dst_path = os.path.join(simulation_root, candidate)
         try:
-            upload.save(dst_path)
+            if item["source_path"]:
+                shutil.copy2(item["source_path"], dst_path)
+            else:
+                item["upload"].save(dst_path)
         except OSError:
             continue
         if not os.path.isfile(dst_path) or os.path.getsize(dst_path) <= 0:
@@ -5773,6 +5795,11 @@ def analysis_columns():
 
     try:
         df = compute_utils.read_df_file(temp_path)
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError(
+                "Uploaded file does not contain a pandas dataframe. "
+                "Select 'Simulation files' mode for simulation outputs."
+            )
         columns = [str(col) for col in df.columns]
         _set_analysis_selection_mode("dataframe")
         _clear_analysis_selected_simulation_keys()
@@ -5793,6 +5820,11 @@ def analysis_columns_current():
         return jsonify({"error": "No analysis dataframe found."}), 404
     try:
         df = compute_utils.read_df_file(data_path)
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError(
+                "Current analysis file is not a pandas dataframe. "
+                "Select 'Simulation files' mode for simulation outputs."
+            )
         columns = [str(col) for col in df.columns]
         return jsonify({"columns": columns})
     except Exception as exc:
@@ -5811,6 +5843,13 @@ def analysis_column_values():
         df = compute_utils.read_df_file(data_path)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
+    if not isinstance(df, pd.DataFrame):
+        return jsonify({
+            "error": (
+                "Current analysis file is not a pandas dataframe. "
+                "Select 'Simulation files' mode for simulation outputs."
+            )
+        }), 400
     if column not in df.columns:
         return jsonify({"error": f'Column "{column}" not found in the dataframe.'}), 400
 
@@ -7596,18 +7635,28 @@ def start_computation_redirect(computation_type):
         training_features_server_file_path = (request.form.get("training_features_server_file_path") or "").strip()
         training_parameters_server_file_path = (request.form.get("training_parameters_server_file_path") or "").strip()
 
-        if inference_training_features_source_mode not in {"upload", "server-path"}:
-            inference_training_features_source_mode = "upload"
-        if inference_training_parameters_source_mode not in {"upload", "server-path"}:
-            inference_training_parameters_source_mode = "upload"
-
         has_features = _has_upload("training_features_file", "file-upload-x", "features_train_file")
         has_parameters = _has_upload("training_parameters_file", "file-upload-y", "parameters_train_file")
+        has_training_features_server_path = bool(training_features_server_file_path)
+        has_training_parameters_server_path = bool(training_parameters_server_file_path)
+
+        if inference_training_features_source_mode not in {"upload", "server-path"}:
+            inference_training_features_source_mode = "server-path" if has_training_features_server_path else "upload"
+        if inference_training_parameters_source_mode not in {"upload", "server-path"}:
+            inference_training_parameters_source_mode = "server-path" if has_training_parameters_server_path else "upload"
+
+        # Fallback: infer source mode from provided fields when UI mode sync fails.
+        if inference_training_features_source_mode == "upload" and not has_features and has_training_features_server_path:
+            inference_training_features_source_mode = "server-path"
+        if inference_training_features_source_mode == "server-path" and not has_training_features_server_path and has_features:
+            inference_training_features_source_mode = "upload"
+
+        if inference_training_parameters_source_mode == "upload" and not has_parameters and has_training_parameters_server_path:
+            inference_training_parameters_source_mode = "server-path"
+        if inference_training_parameters_source_mode == "server-path" and not has_training_parameters_server_path and has_parameters:
+            inference_training_parameters_source_mode = "upload"
 
         if inference_training_features_source_mode == "server-path":
-            if has_features:
-                flash('Use either a local features upload or a server features file path for training, not both.', 'error')
-                return redirect(request.referrer or url_for('new_training'))
             try:
                 inference_training_features_server_path = _validate_existing_file_path(
                     training_features_server_file_path,
@@ -7621,9 +7670,6 @@ def start_computation_redirect(computation_type):
             return redirect(request.referrer or url_for('new_training'))
 
         if inference_training_parameters_source_mode == "server-path":
-            if has_parameters:
-                flash('Use either a local parameters upload or a server parameters file path for training, not both.', 'error')
-                return redirect(request.referrer or url_for('new_training'))
             try:
                 inference_training_parameters_server_path = _validate_existing_file_path(
                     training_parameters_server_file_path,
@@ -7667,10 +7713,16 @@ def start_computation_redirect(computation_type):
         inference_density_server_file_path = (request.form.get("inference_density_server_file_path") or "").strip()
 
         has_uploaded_features = _has_upload("features_predict_file", "features_predict", "file-upload-features")
+        has_server_features_path = bool(features_server_file_path)
+        if inference_features_source_mode not in {"upload", "server-path"}:
+            inference_features_source_mode = "server-path" if has_server_features_path else "upload"
+        # Fallback: infer source mode from provided fields when UI mode sync fails.
+        if inference_features_source_mode == "upload" and not has_uploaded_features and has_server_features_path:
+            inference_features_source_mode = "server-path"
+        if inference_features_source_mode == "server-path" and not has_server_features_path and has_uploaded_features:
+            inference_features_source_mode = "upload"
+
         if inference_features_source_mode == "server-path":
-            if has_uploaded_features:
-                flash('Use either a local features upload or a server features file path, not both.', 'error')
-                return redirect(request.referrer or url_for('inference'))
             try:
                 inference_features_server_path = _validate_existing_pickle_file_path(
                     features_server_file_path,
@@ -7690,15 +7742,41 @@ def start_computation_redirect(computation_type):
         folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
         has_folder_uploads = bool(folder_uploads)
         has_individual_assets = has_uploaded_model or has_uploaded_scaler or has_uploaded_density
+        has_server_assets_folder_path = bool(inference_assets_server_folder_path)
+        has_server_asset_file_paths = bool(
+            inference_model_server_file_path
+            or inference_scaler_server_file_path
+            or inference_density_server_file_path
+        )
         assets_upload_mode = (request.form.get("assets_upload_mode") or "").strip().lower()
         if assets_upload_mode not in {"individual", "folder"}:
             assets_upload_mode = "individual"
         inference_assets_server_files = {}
 
+        if inference_model_assets_source not in {"upload", "server-path"}:
+            inference_model_assets_source = "server-path" if (has_server_assets_folder_path or has_server_asset_file_paths) else "upload"
+        if (
+            inference_model_assets_source == "upload"
+            and not has_folder_uploads
+            and not has_individual_assets
+            and (has_server_assets_folder_path or has_server_asset_file_paths)
+        ):
+            inference_model_assets_source = "server-path"
+        if (
+            inference_model_assets_source == "server-path"
+            and not has_server_assets_folder_path
+            and not has_server_asset_file_paths
+            and (has_folder_uploads or has_individual_assets)
+        ):
+            inference_model_assets_source = "upload"
+
         if inference_model_assets_source == "server-path":
-            if has_folder_uploads or has_individual_assets:
-                flash('Use either server assets folder mode or browser upload mode, not both.', 'error')
-                return redirect(request.referrer or url_for('inference'))
+            if assets_upload_mode == "individual" and has_server_assets_folder_path and not has_server_asset_file_paths:
+                assets_upload_mode = "folder"
+            if assets_upload_mode == "folder" and not has_server_assets_folder_path and has_server_asset_file_paths:
+                assets_upload_mode = "individual"
+
+        if inference_model_assets_source == "server-path":
             if assets_upload_mode == "folder":
                 try:
                     inference_assets_server_files = _collect_inference_assets_folder_files(
@@ -8124,6 +8202,26 @@ def start_computation_redirect(computation_type):
                 file_paths["training_parameters_file"] = copied_path
 
     data = request.form.to_dict() # Get parameters from form POST
+    if computation_type == "inference":
+        data["features_source_mode"] = inference_features_source_mode
+        data["model_assets_source"] = inference_model_assets_source
+        data["features_server_file_path"] = (
+            inference_features_server_path or (request.form.get("features_server_file_path") or "").strip()
+        )
+        data["inference_assets_server_folder_path"] = inference_assets_server_folder_path
+        data["inference_model_server_file_path"] = inference_model_server_file_path
+        data["inference_scaler_server_file_path"] = inference_scaler_server_file_path
+        data["inference_density_server_file_path"] = inference_density_server_file_path
+        data["assets_upload_mode"] = assets_upload_mode
+    if computation_type == "inference_training":
+        data["training_features_source_mode"] = inference_training_features_source_mode
+        data["training_parameters_source_mode"] = inference_training_parameters_source_mode
+        data["training_features_server_file_path"] = (
+            inference_training_features_server_path or (request.form.get("training_features_server_file_path") or "").strip()
+        )
+        data["training_parameters_server_file_path"] = (
+            inference_training_parameters_server_path or (request.form.get("training_parameters_server_file_path") or "").strip()
+        )
     if kernel_params_module_override is not None:
         data["kernel_params_module"] = kernel_params_module_override
     # Add file information to the data dictionary
