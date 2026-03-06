@@ -224,6 +224,7 @@
 {% block scripts %}
 <script>
     const runtime = window.__webuiRuntime || {};
+    const SERVER_BROWSER_HISTORY_KEY = 'field_potential_load:file_browser';
     const fieldPotentialUploadForm = document.getElementById('fieldPotentialUploadForm');
     const fieldPotentialFileInput = document.getElementById('fieldPotentialFileInput');
     const fieldPotentialDropZone = document.getElementById('fieldPotentialDropZone');
@@ -411,6 +412,7 @@
             if (targetPath) {
                 params.set('path', targetPath);
             }
+            params.set('history_key', SERVER_BROWSER_HISTORY_KEY);
             params.set('include_files', '1');
             params.set('extensions', '.pkl,.pickle');
             const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
@@ -435,6 +437,7 @@
         formData.append('mode', 'file');
         formData.append('extensions', '.pkl,.pickle');
         formData.append('allow_multiple', '1');
+        formData.append('history_key', SERVER_BROWSER_HISTORY_KEY);
         const response = await fetch('{{ url_for("features_select_folder") }}', {
             method: 'POST',
             body: formData,
@@ -458,7 +461,7 @@
         fieldPotentialServerFileModal.classList.add('flex');
         fieldPotentialServerBrowserSelectedPaths = parseSelectedFieldPotentialServerFiles();
         const current = fieldPotentialServerBrowserSelectedPaths.length > 0 ? fieldPotentialServerBrowserSelectedPaths[0] : '';
-        const startPath = current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : (runtime.server_home_dir || '').trim();
+        const startPath = current.includes('/') ? current.slice(0, current.lastIndexOf('/')) : '';
         await loadFieldPotentialServerFiles(startPath);
     };
 
@@ -469,6 +472,12 @@
             submitFieldPotentialIfReady();
             return;
         } catch (error) {
+            const errorMessage = String(error?.message || '').toLowerCase();
+            const shouldFallbackToBrowser = errorMessage.includes('native file/folder picker is unavailable');
+            if (!shouldFallbackToBrowser) {
+                console.debug('Native server picker dismissed; not opening in-app browser fallback.', error);
+                return;
+            }
             console.debug('Native server picker unavailable, opening in-app browser.', error);
         }
         await openFieldPotentialServerFileModal();

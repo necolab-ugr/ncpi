@@ -149,6 +149,7 @@
                     const params = new URLSearchParams();
                     const targetPath = String(path || '').trim();
                     if (targetPath) params.set('path', targetPath);
+                    params.set('history_key', 'analysis:file_browser');
                     params.set('include_files', '1');
                     params.set('extensions', '.pkl,.pickle');
                     const response = await fetch(`{{ url_for("features_browse_dirs") }}?${params.toString()}`, { method: 'GET' });
@@ -170,8 +171,33 @@
             },
             async openAnalysisServerFileBrowser() {
                 this.serverFileBrowserOpen = true;
-                const startPath = String((this.runtime || {}).server_home_dir || '').trim();
+                const selected = String(this.serverFileBrowserSelectedPath || '').trim();
+                const selectedParent = selected.includes('/') ? selected.slice(0, selected.lastIndexOf('/')) : '';
+                const startPath = String(this.serverFileBrowserPath || '').trim() || selectedParent || '';
                 await this.loadAnalysisServerFileBrowser(startPath);
+            },
+            async pickNativeAnalysisServerFile(startPath) {
+                const formData = new FormData();
+                formData.append('mode', 'file');
+                formData.append('extensions', '.pkl,.pickle');
+                formData.append('history_key', 'analysis:file_browser');
+                const cleanStartPath = String(startPath || '').trim();
+                if (cleanStartPath) {
+                    formData.append('start_path', cleanStartPath);
+                }
+                const response = await fetch('{{ url_for("features_select_folder") }}', {
+                    method: 'POST',
+                    body: formData,
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.error || 'Path selection cancelled.');
+                }
+                const selectedPath = String(payload.path || '').trim();
+                if (!selectedPath) {
+                    throw new Error('No file selected.');
+                }
+                return selectedPath;
             },
             async chooseAnalysisServerFile() {
                 const selectedPath = String(this.serverFileBrowserSelectedPath || '').trim();
@@ -705,6 +731,22 @@
                     return;
                 }
                 this.columnsError = '';
+                const selected = String(this.serverFileBrowserSelectedPath || '').trim();
+                const selectedParent = selected.includes('/') ? selected.slice(0, selected.lastIndexOf('/')) : '';
+                const startPath = String(this.serverFileBrowserPath || '').trim() || selectedParent || '';
+                try {
+                    const selectedPath = await this.pickNativeAnalysisServerFile(startPath);
+                    await this.loadColumnsFromServerPath(selectedPath);
+                    return;
+                } catch (error) {
+                    const errorMessage = String(error && error.message ? error.message : '').toLowerCase();
+                    const shouldFallbackToBrowser = errorMessage.includes('native file/folder picker is unavailable');
+                    if (!shouldFallbackToBrowser) {
+                        console.debug('Native server picker dismissed; not opening in-app browser fallback.', error);
+                        return;
+                    }
+                    console.debug('Native server picker unavailable, opening in-app browser.', error);
+                }
                 await this.openAnalysisServerFileBrowser();
             },
             async loadSimulationFiles(files) {
@@ -1040,9 +1082,9 @@
                                 </div>
                             </div>
                             <!-- Upload status indicator -->
-                            <div x-show="isUploaded('dataframe-upload') && isDataframeSelected()" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
+                            <div x-show="isDataframeSelected()" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">
                                 <span class="material-symbols-outlined">check_circle</span>
-                                <span>Data uploaded successfully</span>
+                                <span x-text="analysisSourceMode === 'server-path' ? 'Data loaded successfully' : 'Data uploaded successfully'"></span>
                                 <span x-show="getFileName('dataframe-upload')" class="font-semibold">(<span x-text="getFileName('dataframe-upload')"></span>)</span>
                             </div>
                             <div x-show="isUploaded('simulation-upload') && isSimulationSelectionActive()" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg flex items-center gap-2">

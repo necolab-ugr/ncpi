@@ -56,6 +56,7 @@
 
     function featuresPage() {
         const runtime = window.__featuresRuntime || {};
+        const SERVER_DIRECTORY_HISTORY_KEY = 'features:directory_browser';
         const defaultEmpiricalSourceMode = runtime.default_empirical_source_mode || 'server-path';
         const defaultSimulationSourceMode = runtime.default_simulation_source_mode || 'server-path';
         const supportedParserFileExtensions = new Set([
@@ -323,6 +324,7 @@
                     const params = new URLSearchParams();
                     const targetPath = String(path || '').trim();
                     if (targetPath) params.set('path', targetPath);
+                    params.set('history_key', SERVER_DIRECTORY_HISTORY_KEY);
                     const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
                     const payload = await response.json().catch(() => ({}));
                     if (!response.ok) throw new Error(payload.error || 'Failed to list server directories.');
@@ -338,7 +340,7 @@
             async openServerDirectoryBrowser() {
                 this.serverDirBrowserTarget = 'empirical';
                 this.serverDirBrowserOpen = true;
-                const startPath = String(this.empiricalFolderPath || '').trim() || String(this.runtime?.server_home_dir || '').trim();
+                const startPath = String(this.empiricalFolderPath || '').trim() || '';
                 await this.loadServerDirectory(startPath);
             },
             async openServerDirectoryBrowserFor(target) {
@@ -347,7 +349,7 @@
                 const preferredPath = this.serverDirBrowserTarget === 'simulation'
                     ? String(this.simulationFolderPath || '').trim()
                     : String(this.empiricalFolderPath || '').trim();
-                const startPath = preferredPath || String(this.runtime?.server_home_dir || '').trim();
+                const startPath = preferredPath || '';
                 await this.loadServerDirectory(startPath);
             },
             async chooseServerDirectory() {
@@ -2584,6 +2586,7 @@
 <script>
     (() => {
         const runtime = window.__featuresRuntime || {};
+        const PRECOMPUTED_SERVER_FILE_HISTORY_KEY = 'features:precomputed_file_browser';
         const featuresUploadForm = document.getElementById('featuresUploadForm');
         const featuresFileInput = document.getElementById('featuresFileInput');
         const featuresDropZone = document.getElementById('featuresDropZone');
@@ -2790,6 +2793,7 @@
                 if (targetPath) {
                     params.set('path', targetPath);
                 }
+                params.set('history_key', PRECOMPUTED_SERVER_FILE_HISTORY_KEY);
                 params.set('include_files', '1');
                 params.set('extensions', '.pkl,.pickle');
                 const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
@@ -2814,6 +2818,7 @@
             formData.append('mode', 'file');
             formData.append('extensions', '.pkl,.pickle');
             formData.append('allow_multiple', '1');
+            formData.append('history_key', PRECOMPUTED_SERVER_FILE_HISTORY_KEY);
             const response = await fetch('{{ url_for("features_select_folder") }}', {
                 method: 'POST',
                 body: formData,
@@ -2841,7 +2846,7 @@
                 : '';
             const startPath = current && current.includes('/')
                 ? current.slice(0, current.lastIndexOf('/'))
-                : String(runtime.server_home_dir || '').trim();
+                : '';
             await loadPrecomputedFeaturesServerFiles(startPath);
         };
 
@@ -2852,6 +2857,12 @@
                 submitFeaturesIfReady();
                 return;
             } catch (error) {
+                const errorMessage = String(error?.message || '').toLowerCase();
+                const shouldFallbackToBrowser = errorMessage.includes('native file/folder picker is unavailable');
+                if (!shouldFallbackToBrowser) {
+                    console.debug('Native server picker dismissed; not opening in-app browser fallback.', error);
+                    return;
+                }
                 console.debug('Native server picker unavailable, opening in-app browser.', error);
             }
             await openPrecomputedFeaturesServerFileModal();

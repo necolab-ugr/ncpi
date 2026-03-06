@@ -44,7 +44,7 @@ _repo_root = os.path.dirname(_webui_dir)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
 
-from flask import Flask, render_template, request, jsonify, url_for, redirect, send_file, after_this_request, flash
+from flask import Flask, render_template, request, jsonify, url_for, redirect, send_file, after_this_request, flash, session
 from werkzeug.utils import secure_filename
 from concurrent.futures import ThreadPoolExecutor
 import uuid
@@ -82,6 +82,10 @@ MAX_SIMULATION_GRID_COMBINATIONS = 256
 GRID_PREFIX = "grid="
 SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
 SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
+PATH_HISTORY_CLIENT_ID_SESSION_KEY = "webui_path_history_client_id"
+PATH_HISTORY_STORAGE_DIR = os.path.join(_tempdir, "ncpi_webui_path_history")
+PATH_HISTORY_MAX_FIELDS = 256
+PATH_HISTORY_MAX_VALUE_LEN = 4096
 
 
 HAGEN_DEFAULTS = {
@@ -185,6 +189,212 @@ def _get_form_value(form, key):
         return None
     value = value.strip()
     return value if value != "" else None
+
+
+def _normalize_path_history_candidate(raw_value):
+    text = str(raw_value or "").strip()
+    if not text:
+        return ""
+    if len(text) > PATH_HISTORY_MAX_VALUE_LEN:
+        return ""
+    lowered = text.lower()
+    if lowered in {"upload", "server-path", "local-picker", "none", "null"}:
+        return ""
+    if not (
+        "/" in text
+        or "\\" in text
+        or text.startswith(("~", ".", "$"))
+        or re.match(r"^[A-Za-z]:[\\/]", text)
+    ):
+        return ""
+    expanded = os.path.expandvars(os.path.expanduser(text))
+    return os.path.realpath(expanded)
+
+
+def _get_path_history_store():
+    store = {}
+    history_path = _path_history_storage_path()
+    if history_path and os.path.isfile(history_path):
+        try:
+            with open(history_path, "r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+            if isinstance(loaded, dict):
+                store = loaded
+        except Exception:
+            store = {}
+    by_field = store.get("by_field")
+    if not isinstance(by_field, dict):
+        by_field = {}
+    latest_path = store.get("latest_path")
+    if not isinstance(latest_path, str):
+        latest_path = ""
+    return {
+        "by_field": by_field,
+        "latest_path": latest_path.strip(),
+    }
+
+
+def _set_path_history_store(store):
+    by_field = store.get("by_field") if isinstance(store, dict) else {}
+    latest_path = store.get("latest_path") if isinstance(store, dict) else ""
+    if not isinstance(by_field, dict):
+        by_field = {}
+    if len(by_field) > PATH_HISTORY_MAX_FIELDS:
+        trimmed_items = list(by_field.items())[-PATH_HISTORY_MAX_FIELDS:]
+        by_field = {key: value for key, value in trimmed_items}
+    if not isinstance(latest_path, str):
+        latest_path = ""
+    payload = {
+        "by_field": by_field,
+        "latest_path": latest_path.strip(),
+    }
+    history_path = _path_history_storage_path()
+    if not history_path:
+        return
+    try:
+        parent = os.path.dirname(history_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp_path = f"{history_path}.tmp"
+        with open(tmp_path, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=True, separators=(",", ":"))
+        os.replace(tmp_path, history_path)
+    except Exception:
+        return
+
+
+def _path_history_client_id():
+    existing = session.get(PATH_HISTORY_CLIENT_ID_SESSION_KEY)
+    if isinstance(existing, str) and existing.strip():
+        return existing.strip()
+    new_id = uuid.uuid4().hex
+    session[PATH_HISTORY_CLIENT_ID_SESSION_KEY] = new_id
+    session.modified = True
+    return new_id
+
+
+def _path_history_storage_path():
+    try:
+        client_id = _path_history_client_id()
+    except Exception:
+        return ""
+    if not client_id:
+        return ""
+    safe_client_id = re.sub(r"[^a-zA-Z0-9_-]", "", client_id)[:64]
+    if not safe_client_id:
+        return ""
+    return os.path.join(PATH_HISTORY_STORAGE_DIR, f"{safe_client_id}.json")
+
+
+def _remember_path_history(field_key, value):
+    normalized = _normalize_path_history_candidate(value)
+    if not normalized:
+        return ""
+    key = str(field_key or "").strip() or "path"
+    store = _get_path_history_store()
+    store["by_field"][key] = normalized
+    store["latest_path"] = normalized
+    _set_path_history_store(store)
+    return normalized
+
+
+def _remember_path_history_from_form(form, route_key):
+    if form is None:
+        return
+    try:
+        keys = list(form.keys())
+    except Exception:
+        return
+    for key in keys:
+        key_text = str(key or "").strip()
+        if not key_text:
+            continue
+        try:
+            values = form.getlist(key_text)
+        except Exception:
+            values = [form.get(key_text)]
+        for idx, raw_value in enumerate(values):
+            value_text = str(raw_value or "")
+            chunks = value_text.replace("\r", "\n").split("\n")
+            for chunk in chunks:
+                label = f"{route_key}:{key_text}"
+                if len(values) > 1:
+                    label = f"{label}[{idx}]"
+                _remember_path_history(label, chunk)
+
+
+def _path_history_namespace_key(history_key):
+    raw = str(history_key or "").strip()
+    if not raw:
+        return ""
+    safe = re.sub(r"[^a-zA-Z0-9_.:-]", "", raw)[:120]
+    if not safe:
+        return ""
+    return f"browser:{safe}"
+
+
+def _path_history_value_for_key(history_key):
+    namespace_key = _path_history_namespace_key(history_key)
+    if not namespace_key:
+        return ""
+    store = _get_path_history_store()
+    by_field = store.get("by_field")
+    if not isinstance(by_field, dict):
+        return ""
+    value = by_field.get(namespace_key)
+    return str(value).strip() if isinstance(value, str) else ""
+
+
+def _remember_path_history_for_key(history_key, value):
+    namespace_key = _path_history_namespace_key(history_key)
+    if not namespace_key:
+        return ""
+    return _remember_path_history(namespace_key, value)
+
+
+def _existing_directory_from_candidate(path_value):
+    candidate = str(path_value or "").strip()
+    if not candidate:
+        return ""
+    if os.path.isdir(candidate):
+        return candidate
+    parent = os.path.dirname(candidate)
+    if parent and os.path.isdir(parent):
+        return parent
+    return ""
+
+
+def _path_history_latest(default_value=""):
+    latest = _get_path_history_store().get("latest_path") or ""
+    return latest if latest else default_value
+
+
+def _path_history_start_directory(default_value, history_key=None):
+    namespace_key = _path_history_namespace_key(history_key)
+    if namespace_key:
+        keyed_value = _path_history_value_for_key(history_key)
+        keyed_dir = _existing_directory_from_candidate(keyed_value)
+        if keyed_dir:
+            return keyed_dir
+        return default_value
+    latest = _path_history_latest(default_value="")
+    latest_dir = _existing_directory_from_candidate(latest)
+    if latest_dir:
+        return latest_dir
+    return default_value
+
+
+def _path_history_snapshot():
+    store = _get_path_history_store()
+    by_field = {
+        str(key): str(value)
+        for key, value in store.get("by_field", {}).items()
+        if isinstance(key, str) and isinstance(value, str)
+    }
+    return {
+        "latest_path": store.get("latest_path", ""),
+        "by_field": by_field,
+    }
 
 
 def _parse_literal(form, key, default):
@@ -2708,6 +2918,7 @@ def upload_sim():
 
 @app.route("/upload_sim_files", methods=["POST"])
 def upload_sim_files():
+    _remember_path_history_from_form(request.form, "upload_sim_files")
     source_mode = (request.form.get("simulation_source_mode") or "upload").strip().lower()
     simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
     os.makedirs(simulation_data_dir, exist_ok=True)
@@ -3326,6 +3537,7 @@ def run_trial_simulation(model_type):
 
 @app.route("/run_trial_simulation_custom", methods=["POST"])
 def run_trial_simulation_custom():
+    _remember_path_history_from_form(request.form, "run_trial_simulation_custom")
     required_fields = {
         "network_params_file": "network_params",
         "network_py_file": "network_py",
@@ -3440,6 +3652,7 @@ def remove_field_potential_file():
 
 @app.route("/field_potential/load_precomputed", methods=["POST"])
 def field_potential_load_precomputed():
+    _remember_path_history_from_form(request.form, "field_potential_load_precomputed")
     source_mode = (request.form.get("precomputed_fp_source_mode") or "upload").strip().lower()
     uploads = [file for file in request.files.getlist("precomputed_fp_file") if file and file.filename]
     server_file_paths = _extract_server_file_paths(request.form, "precomputed_fp_server_file_path")
@@ -3524,6 +3737,19 @@ def field_potential_kernel():
         "params",
         "analysis_params.py",
     )
+
+    remembered_mc_folder = _path_history_value_for_key("field_potential_kernel:mc_folder_browser")
+    if remembered_mc_folder:
+        mc_models_default = remembered_mc_folder
+
+    remembered_output_sim = _path_history_value_for_key("field_potential_kernel:output_sim_path_browser")
+    if remembered_output_sim:
+        mc_outputs_default = remembered_output_sim
+
+    remembered_kernel_params = _path_history_value_for_key("field_potential_kernel:kernel_params_module_browser")
+    if remembered_kernel_params:
+        kernel_params_default = remembered_kernel_params
+
     default_dir = "/tmp/simulation_data"
     default_paths = {
         "times": os.path.join(default_dir, "times.pkl"),
@@ -3641,6 +3867,9 @@ def _detect_webui_runtime_context(req):
         else:
             is_server_runtime = True
 
+    path_history = _path_history_snapshot()
+    server_real_home_dir = os.path.realpath(os.path.expanduser("~"))
+    server_default_browse_dir = _path_history_start_directory(default_value=server_real_home_dir)
     return {
         "is_server_runtime": is_server_runtime,
         "native_picker_available": bool(shutil.which("zenity") and os.environ.get("DISPLAY")),
@@ -3648,7 +3877,10 @@ def _detect_webui_runtime_context(req):
         "default_simulation_source_mode": "server-path" if is_server_runtime else "upload",
         "default_analysis_source_mode": "server-path" if is_server_runtime else "upload",
         "default_path_picker_source_mode": "server-path" if is_server_runtime else "local-picker",
-        "server_home_dir": os.path.realpath(os.path.expanduser("~")),
+        "server_home_dir": server_default_browse_dir,
+        "server_real_home_dir": server_real_home_dir,
+        "path_history_latest": path_history.get("latest_path", ""),
+        "path_history_by_field": path_history.get("by_field", {}),
     }
 
 
@@ -3819,10 +4051,14 @@ def features():
 @app.route("/features/browse_dirs", methods=["GET"])
 def features_browse_dirs():
     requested = (request.args.get("path") or "").strip()
+    requested_history_key = (request.args.get("history_key") or "").strip()
     if requested:
         current = os.path.realpath(os.path.expanduser(requested))
     else:
-        current = os.path.realpath(os.path.expanduser("~"))
+        current = _path_history_start_directory(
+            default_value=os.path.realpath(os.path.expanduser("~")),
+            history_key=requested_history_key,
+        )
 
     if not os.path.isdir(current):
         return jsonify({"error": f"Not a directory: {current}"}), 400
@@ -3876,11 +4112,15 @@ def features_browse_dirs():
     }
     if include_files:
         payload["files"] = files[:1000]
+    if requested_history_key:
+        _remember_path_history_for_key(requested_history_key, current)
+    _remember_path_history("features_browse_dirs:path", current)
     return jsonify(payload)
 
 
 @app.route("/inference/inspect_assets_folder", methods=["POST"])
 def inference_inspect_assets_folder():
+    _remember_path_history_from_form(request.form, "inference_inspect_assets_folder")
     folder_path = (request.form.get("folder_path") or "").strip()
     root = os.path.realpath(os.path.expanduser(folder_path))
     try:
@@ -3917,12 +4157,14 @@ def inference_inspect_assets_folder():
 
 @app.route("/features/select_folder", methods=["POST"])
 def features_select_folder():
+    _remember_path_history_from_form(request.form, "features_select_folder")
     # Opens a native path picker on the machine running the Flask server.
     # This is intended for local desktop usage.
     mode = (request.form.get("mode") or "folder").strip().lower()
     allow_multiple = (request.form.get("allow_multiple") or "").strip().lower() in {"1", "true", "yes", "on"}
     requested_exts = (request.form.get("extensions") or "").strip()
     requested_start_path = (request.form.get("start_path") or "").strip()
+    requested_history_key = (request.form.get("history_key") or "").strip()
     allowed_exts = set()
     if requested_exts:
         for raw in requested_exts.split(","):
@@ -3938,6 +4180,8 @@ def features_select_folder():
         candidate = os.path.realpath(os.path.expanduser(requested_start_path))
         if os.path.isdir(candidate):
             start_path = candidate
+    if not start_path:
+        start_path = _path_history_start_directory(default_value="", history_key=requested_history_key)
 
     def _normalize_and_validate_paths(picked_items):
         if not picked_items:
@@ -3946,6 +4190,9 @@ def features_select_folder():
             picked = os.path.realpath(os.path.expanduser(str(picked_items[0]).strip()))
             if not os.path.isdir(picked):
                 return None, jsonify({"error": f"Selected path is not a directory: {picked}"}), 400
+            if requested_history_key:
+                _remember_path_history_for_key(requested_history_key, picked)
+            _remember_path_history("features_select_folder:selected_folder", picked)
             return {"path": picked}, None, None
 
         normalized_paths = []
@@ -3966,6 +4213,10 @@ def features_select_folder():
             normalized_paths.append(picked)
         if not normalized_paths:
             return None, jsonify({"error": "No valid files selected."}), 400
+        for idx, normalized_path in enumerate(normalized_paths):
+            if requested_history_key:
+                _remember_path_history_for_key(requested_history_key, normalized_path)
+            _remember_path_history(f"features_select_folder:selected_file[{idx}]", normalized_path)
         return {"path": normalized_paths[0], "paths": normalized_paths}, None, None
 
     picker_errors = []
@@ -4061,6 +4312,20 @@ def features_select_folder():
     return jsonify({"error": error_message, "details": details}), 400
 
 
+@app.route("/path_history/remember", methods=["POST"])
+def path_history_remember():
+    history_key = (request.form.get("history_key") or "").strip()
+    path_value = (request.form.get("path") or "").strip()
+    if not history_key:
+        return jsonify({"ok": False, "error": "Missing history key."}), 400
+    if not path_value:
+        return jsonify({"ok": False, "error": "Missing path value."}), 400
+    remembered = _remember_path_history_for_key(history_key, path_value)
+    if not remembered:
+        return jsonify({"ok": False, "error": "Invalid path value for history."}), 400
+    return jsonify({"ok": True, "path": remembered})
+
+
 @app.route("/field_potential/kernel/stage_local_folder", methods=["POST"])
 def stage_kernel_local_folder():
     uploads = [item for item in request.files.getlist("folder_files") if item and item.filename]
@@ -4115,6 +4380,7 @@ def stage_kernel_local_folder():
 
 @app.route("/features/parser/inspect", methods=["POST"])
 def features_parser_inspect():
+    _remember_path_history_from_form(request.form, "features_parser_inspect")
     existing_data_path = (request.form.get("existing_data_path") or "").strip()
     empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
     simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
@@ -4189,6 +4455,7 @@ def features_parser_inspect():
 
 @app.route("/features/load_precomputed", methods=["POST"])
 def features_load_precomputed():
+    _remember_path_history_from_form(request.form, "features_load_precomputed")
     source_mode = (request.form.get("precomputed_features_source_mode") or "upload").strip().lower()
     uploads = [file for file in request.files.getlist("precomputed_features_file") if file and file.filename]
     server_file_paths = _extract_server_file_paths(request.form, "precomputed_features_server_file_path")
@@ -4300,6 +4567,7 @@ def inference_load_data():
 
 @app.route("/inference/load_precomputed", methods=["POST"])
 def inference_load_precomputed():
+    _remember_path_history_from_form(request.form, "inference_load_precomputed")
     source_mode = (request.form.get("precomputed_predictions_source_mode") or "upload").strip().lower()
     uploads = [file for file in request.files.getlist("precomputed_predictions_file") if file and file.filename]
     server_file_paths = _extract_server_file_paths(request.form, "precomputed_predictions_server_file_path")
@@ -5469,6 +5737,7 @@ def _pick_value_column(df, exclude):
 
 @app.route("/analysis/columns", methods=["POST"])
 def analysis_columns():
+    _remember_path_history_from_form(request.form, "analysis_columns")
     dataframe_path = (request.form.get("dataframe_path") or "").strip()
     upload = request.files.get("dataframe")
     
@@ -7060,6 +7329,7 @@ def start_computation_redirect(computation_type):
 
     if computation_type not in allowed_functions:
         return f"Type of computation is not valid", 400
+    _remember_path_history_from_form(request.form, f"start_computation_redirect:{computation_type}")
 
     # Allocate job id early so we can correlate upload/validation logs even before redirect.
     job_id = str(uuid.uuid4())

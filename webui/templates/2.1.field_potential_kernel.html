@@ -908,7 +908,18 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    const pickNativePath = async (mode, extensions = '', startPath = '') => {
+    const KERNEL_SERVER_FOLDER_HISTORY_KEY = 'field_potential_kernel:folder_browser';
+    const KERNEL_SERVER_FILE_HISTORY_KEY = 'field_potential_kernel:file_browser';
+    const KERNEL_SERVER_FOLDER_HISTORY_KEY_BY_FIELD = {
+        mc_folder: 'field_potential_kernel:mc_folder_browser',
+        output_sim_path: 'field_potential_kernel:output_sim_path_browser',
+    };
+    const KERNEL_SERVER_FILE_HISTORY_KEY_BY_INPUT = {
+        kernel_params_module: 'field_potential_kernel:kernel_params_module_browser',
+    };
+    const KERNEL_NATIVE_FILE_HISTORY_KEY = 'field_potential_kernel:native_file_picker';
+
+    const pickNativePath = async (mode, extensions = '', startPath = '', historyKey = '') => {
         const formData = new FormData();
         formData.append('mode', mode);
         if (extensions) {
@@ -916,6 +927,9 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (startPath) {
             formData.append('start_path', startPath);
+        }
+        if (historyKey) {
+            formData.append('history_key', historyKey);
         }
         const response = await fetch('{{ url_for("features_select_folder") }}', {
             method: 'POST',
@@ -1011,6 +1025,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let serverFileSelectedPath = '';
     let pendingFileInput = null;
     let pendingFileExtensions = '.pkl';
+    let pendingFolderHistoryKey = KERNEL_SERVER_FOLDER_HISTORY_KEY;
+    let pendingFileHistoryKey = KERNEL_SERVER_FILE_HISTORY_KEY;
 
     const normalizeKernelBrowseSourceMode = (value) => (
         String(value || '').trim().toLowerCase() === 'local-picker' ? 'local-picker' : 'server-path'
@@ -1124,6 +1140,23 @@ document.addEventListener('DOMContentLoaded', () => {
         sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
     };
 
+    const rememberPathHistory = async (historyKey, pathValue) => {
+        const key = String(historyKey || '').trim();
+        const path = String(pathValue || '').trim();
+        if (!key || !path) return;
+        const formData = new FormData();
+        formData.append('history_key', key);
+        formData.append('path', path);
+        try {
+            await fetch('{{ url_for("path_history_remember") }}', {
+                method: 'POST',
+                body: formData,
+            });
+        } catch (error) {
+            console.debug('Failed to persist path history.', error);
+        }
+    };
+
     const deriveLocalFolderLabelFromFiles = (files) => {
         if (!files || files.length === 0) return 'local-folder';
         const first = files[0];
@@ -1230,13 +1263,14 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    const loadServerFolder = async (path) => {
+    const loadServerFolder = async (path, historyKey = pendingFolderHistoryKey) => {
         toggleServerFolderLoading(true);
         setServerFolderError('');
         try {
             const params = new URLSearchParams();
             const target = String(path || '').trim();
             if (target) params.set('path', target);
+            params.set('history_key', String(historyKey || KERNEL_SERVER_FOLDER_HISTORY_KEY));
             const response = await fetch(`{{ url_for("features_browse_dirs") }}?${params.toString()}`, { method: 'GET' });
             const payload = await response.json().catch(() => ({}));
             if (!response.ok) {
@@ -1258,17 +1292,18 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const openServerFolderModal = async (displayInput, hiddenInput, sourceInput) => {
+    const openServerFolderModal = async (displayInput, hiddenInput, sourceInput, historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY) => {
         pendingFolderInput = hiddenInput || displayInput;
         pendingFolderDisplayInput = displayInput;
         pendingFolderSourceInput = sourceInput;
+        pendingFolderHistoryKey = String(historyKey || KERNEL_SERVER_FOLDER_HISTORY_KEY);
         if (!serverFolderModal) return;
         serverFolderModal.classList.remove('hidden');
         serverFolderModal.classList.add('flex');
         const state = getFolderSelectionState(hiddenInput);
         const startPath = String(state?.serverPath || hiddenInput?.value || displayInput?.value || '').trim()
-            || String((window.__webuiRuntime || {}).server_home_dir || '').trim();
-        await loadServerFolder(startPath);
+            || '';
+        await loadServerFolder(startPath, pendingFolderHistoryKey);
     };
 
     const localFolderApiSupported = () => typeof window.showDirectoryPicker === 'function';
@@ -1436,7 +1471,7 @@ document.addEventListener('DOMContentLoaded', () => {
             button.className = 'w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60';
             button.innerHTML = `<span class="font-mono">${entry.name}</span><span class="ml-2 text-xs text-slate-500">/</span>`;
             button.addEventListener('click', () => {
-                loadServerFile(entry.path, pendingFileExtensions);
+                loadServerFile(entry.path, pendingFileExtensions, pendingFileHistoryKey);
             });
             serverFileList.appendChild(button);
         });
@@ -1469,13 +1504,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const loadServerFile = async (path, extensions = '.pkl') => {
+    const loadServerFile = async (path, extensions = '.pkl', historyKey = pendingFileHistoryKey) => {
         toggleServerFileLoading(true);
         setServerFileError('');
         try {
             const params = new URLSearchParams();
             const target = String(path || '').trim();
             if (target) params.set('path', target);
+            params.set('history_key', String(historyKey || KERNEL_SERVER_FILE_HISTORY_KEY));
             params.set('include_files', '1');
             params.set('extensions', extensions);
             const response = await fetch(`{{ url_for("features_browse_dirs") }}?${params.toString()}`, { method: 'GET' });
@@ -1502,29 +1538,30 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const openServerFileModal = async (targetInput, extensions = '.pkl') => {
+    const openServerFileModal = async (targetInput, extensions = '.pkl', historyKey = KERNEL_SERVER_FILE_HISTORY_KEY) => {
         pendingFileInput = targetInput;
         pendingFileExtensions = String(extensions || '.pkl').trim() || '.pkl';
+        pendingFileHistoryKey = String(historyKey || KERNEL_SERVER_FILE_HISTORY_KEY);
         if (!serverFileModal) return;
         serverFileModal.classList.remove('hidden');
         serverFileModal.classList.add('flex');
         const inputValue = String(targetInput?.value || '').trim();
         const startPath = inputValue && inputValue.includes('/')
             ? inputValue.slice(0, inputValue.lastIndexOf('/'))
-            : String((window.__webuiRuntime || {}).server_home_dir || '').trim();
+            : '';
         serverFileSelectedPath = inputValue || '';
-        await loadServerFile(startPath, pendingFileExtensions);
+        await loadServerFile(startPath, pendingFileExtensions, pendingFileHistoryKey);
     };
 
     if (serverFolderClose) {
         serverFolderClose.addEventListener('click', () => closeServerFolderModal());
     }
     if (serverFolderRefresh) {
-        serverFolderRefresh.addEventListener('click', () => loadServerFolder(serverFolderPath));
+        serverFolderRefresh.addEventListener('click', () => loadServerFolder(serverFolderPath, pendingFolderHistoryKey));
     }
     if (serverFolderUp) {
         serverFolderUp.addEventListener('click', () => {
-            if (serverFolderParent) loadServerFolder(serverFolderParent);
+            if (serverFolderParent) loadServerFolder(serverFolderParent, pendingFolderHistoryKey);
         });
     }
     if (serverFolderSelect) {
@@ -1533,11 +1570,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 setServerFolderError('No target input selected.');
                 return;
             }
+            const fieldName = String(pendingFolderInput?.name || '').trim();
+            const historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY_BY_FIELD[fieldName] || KERNEL_SERVER_FOLDER_HISTORY_KEY;
             const state = getFolderSelectionState(pendingFolderInput);
             if (state) {
                 state.serverPath = serverFolderPath;
             }
             applyFolderSelectionForMode('server-path', pendingFolderInput, pendingFolderDisplayInput, pendingFolderSourceInput);
+            rememberPathHistory(historyKey, serverFolderPath);
             closeServerFolderModal();
         });
     }
@@ -1617,11 +1657,11 @@ document.addEventListener('DOMContentLoaded', () => {
         serverFileClose.addEventListener('click', () => closeServerFileModal());
     }
     if (serverFileRefresh) {
-        serverFileRefresh.addEventListener('click', () => loadServerFile(serverFilePath, pendingFileExtensions));
+        serverFileRefresh.addEventListener('click', () => loadServerFile(serverFilePath, pendingFileExtensions, pendingFileHistoryKey));
     }
     if (serverFileUp) {
         serverFileUp.addEventListener('click', () => {
-            if (serverFileParent) loadServerFile(serverFileParent, pendingFileExtensions);
+            if (serverFileParent) loadServerFile(serverFileParent, pendingFileExtensions, pendingFileHistoryKey);
         });
     }
     if (serverFileSelect) {
@@ -1632,6 +1672,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             pendingFileInput.value = serverFileSelectedPath;
             pendingFileInput.dispatchEvent(new Event('input', { bubbles: true }));
+            rememberPathHistory(pendingFileHistoryKey, serverFileSelectedPath);
             closeServerFileModal();
         });
     }
@@ -1659,7 +1700,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     await pickLocalFolderFromBrowser(hiddenInput ? hiddenInput.name : '', displayInput, hiddenInput, sourceInput, localInput);
                     return;
                 }
-                await openServerFolderModal(displayInput, hiddenInput, sourceInput);
+                const fieldName = String(hiddenInput?.name || '').trim();
+                const historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY_BY_FIELD[fieldName] || KERNEL_SERVER_FOLDER_HISTORY_KEY;
+                await openServerFolderModal(displayInput, hiddenInput, sourceInput, historyKey);
             } catch (err) {
                 const msg = (err && err.message) ? err.message : 'Failed to select folder.';
                 alert(msg);
@@ -1682,7 +1725,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? String(explicitModeInput.value || '').trim()
                     : getKernelBrowseSourceMode();
                 if (sourceMode === 'local-picker') {
-                    const selectedPath = await pickNativePath('file', extensions, '/home');
+                    const currentValue = String(textInput.value || '').trim();
+                    const pickerStart = currentValue && currentValue.includes('/')
+                        ? currentValue.slice(0, currentValue.lastIndexOf('/'))
+                        : '';
+                    const selectedPath = await pickNativePath('file', extensions, pickerStart, KERNEL_NATIVE_FILE_HISTORY_KEY);
                     textInput.value = selectedPath;
                     textInput.dispatchEvent(new Event('input', { bubbles: true }));
                 } else {
@@ -1775,7 +1822,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (kernelParamsBrowseServerBtn && kernelParamsModuleInput) {
         kernelParamsBrowseServerBtn.addEventListener('click', async () => {
             setKernelParamsBrowseMode('server-path');
-            await openServerFileModal(kernelParamsModuleInput, '.py');
+            await openServerFileModal(
+                kernelParamsModuleInput,
+                '.py',
+                KERNEL_SERVER_FILE_HISTORY_KEY_BY_INPUT.kernel_params_module,
+            );
         });
     }
     setKernelParamsBrowseMode(

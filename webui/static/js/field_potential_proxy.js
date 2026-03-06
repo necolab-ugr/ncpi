@@ -72,6 +72,7 @@ function createProxyServerFileBrowser() {
     }
 
     const runtime = window.__webuiRuntime || {};
+    const BROWSE_HISTORY_KEY = 'field_potential_proxy:file_browser';
     let currentPath = '';
     let parentPath = '';
     let selectedFilePath = '';
@@ -148,6 +149,7 @@ function createProxyServerFileBrowser() {
             const params = new URLSearchParams();
             const targetPath = String(path || '').trim();
             if (targetPath) params.set('path', targetPath);
+            params.set('history_key', BROWSE_HISTORY_KEY);
             params.set('include_files', '1');
             params.set('extensions', currentExtensions || '.pkl,.pickle');
             const response = await fetch(`${browseUrl}?${params.toString()}`, { method: 'GET' });
@@ -197,8 +199,7 @@ function createProxyServerFileBrowser() {
             onSelect = typeof onFileSelect === 'function' ? onFileSelect : null;
             modal.classList.remove('hidden');
             modal.classList.add('flex');
-            const fallback = String(runtime.server_home_dir || '').trim();
-            const resolvedStart = String(startPath || '').trim() || fallback;
+            const resolvedStart = String(startPath || '').trim() || '';
             void load(resolvedStart);
         },
     };
@@ -339,7 +340,7 @@ function setupUploadZones() {
                 return;
             }
             const selected = String(serverPathInput.value || '').trim();
-            const startPath = parentDirPath(selected) || String(runtime.server_home_dir || '').trim();
+            const startPath = parentDirPath(selected) || '';
             serverBrowser.open({
                 startPath,
                 selectedPath: selected,

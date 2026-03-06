@@ -1000,6 +1000,11 @@
 
     function bindInferenceServerBrowsers(onAssetsSourceChange) {
         const runtime = window.__webuiRuntime || {};
+        const FEATURES_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:features_file_browser";
+        const ASSETS_MODEL_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:assets_model_file_browser";
+        const ASSETS_SCALER_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:assets_scaler_file_browser";
+        const ASSETS_DENSITY_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:assets_density_file_browser";
+        const ASSETS_SERVER_FOLDERS_HISTORY_KEY = "inference_compute_predictions:assets_folder_browser";
         const getState = () => getInferenceState();
         const featuresSourceModeInput = byId("features-source-mode");
         const featuresServerFilePathInput = byId("features-server-file-path");
@@ -1051,6 +1056,8 @@
         let activeFileTarget = "features";
         let currentFolderPath = "";
         let parentFolderPath = "";
+        let activeFileHistoryKey = FEATURES_SERVER_FILES_HISTORY_KEY;
+        let activeFolderHistoryKey = ASSETS_SERVER_FOLDERS_HISTORY_KEY;
 
         const clearServerFolderInspection = () => {
             const state = getState();
@@ -1122,6 +1129,61 @@
             const text = String(message || "").trim();
             el.textContent = text;
             el.classList.toggle("hidden", !text);
+        };
+
+        const shouldFallbackToBrowser = (error) => (
+            String(error && error.message ? error.message : "")
+                .toLowerCase()
+                .includes("native file/folder picker is unavailable")
+        );
+
+        const pickNativeServerFile = async (historyKey, startPath = "", extensions = ".pkl,.pickle") => {
+            const formData = new FormData();
+            formData.append("mode", "file");
+            if (extensions) {
+                formData.append("extensions", extensions);
+            }
+            formData.append("history_key", historyKey);
+            const cleanStartPath = String(startPath || "").trim();
+            if (cleanStartPath) {
+                formData.append("start_path", cleanStartPath);
+            }
+            const response = await fetch('{{ url_for("features_select_folder") }}', {
+                method: "POST",
+                body: formData,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || "Path selection cancelled.");
+            }
+            const selectedPath = String(payload.path || "").trim();
+            if (!selectedPath) {
+                throw new Error("No file selected.");
+            }
+            return selectedPath;
+        };
+
+        const pickNativeServerFolder = async (historyKey, startPath = "") => {
+            const formData = new FormData();
+            formData.append("mode", "folder");
+            formData.append("history_key", historyKey);
+            const cleanStartPath = String(startPath || "").trim();
+            if (cleanStartPath) {
+                formData.append("start_path", cleanStartPath);
+            }
+            const response = await fetch('{{ url_for("features_select_folder") }}', {
+                method: "POST",
+                body: formData,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || "Path selection cancelled.");
+            }
+            const selectedPath = String(payload.path || "").trim();
+            if (!selectedPath) {
+                throw new Error("No folder selected.");
+            }
+            return selectedPath;
         };
 
         const closeFileModal = () => {
@@ -1199,6 +1261,7 @@
                 const params = new URLSearchParams();
                 const targetPath = String(path || "").trim();
                 if (targetPath) params.set("path", targetPath);
+                params.set("history_key", activeFileHistoryKey);
                 params.set("include_files", "1");
                 if (activeFileTarget === "features") {
                     params.set("extensions", ".pkl,.pickle");
@@ -1225,6 +1288,7 @@
                 const params = new URLSearchParams();
                 const targetPath = String(path || "").trim();
                 if (targetPath) params.set("path", targetPath);
+                params.set("history_key", activeFolderHistoryKey);
                 const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
                 const payload = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(payload.error || "Failed to list server folders.");
@@ -1246,7 +1310,7 @@
             const current = String(currentSelectionPath || "").trim();
             const startPath = current && current.includes("/")
                 ? current.slice(0, current.lastIndexOf("/"))
-                : String(runtime.server_home_dir || "").trim();
+                : "";
             selectedFilePath = current;
             await loadServerFiles(startPath);
         };
@@ -1257,6 +1321,29 @@
             featuresSourceModeInput.value = "server-path";
             syncInputValue(featuresSourceModeInput);
             activeFileTarget = "features";
+            activeFileHistoryKey = FEATURES_SERVER_FILES_HISTORY_KEY;
+            const current = String(featuresServerFilePathInput.value || "").trim();
+            const startPath = current && current.includes("/")
+                ? current.slice(0, current.lastIndexOf("/"))
+                : "";
+            try {
+                const selectedPath = await pickNativeServerFile(
+                    FEATURES_SERVER_FILES_HISTORY_KEY,
+                    startPath,
+                    ".pkl,.pickle",
+                );
+                featuresServerFilePathInput.value = selectedPath;
+                syncInputValue(featuresServerFilePathInput);
+                if (state) state.featuresServerFilePath = selectedPath;
+                refreshFeaturesLoadStatus();
+                return;
+            } catch (error) {
+                if (!shouldFallbackToBrowser(error)) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             await openFileModalAtPath(featuresServerFilePathInput.value || "");
             refreshFeaturesLoadStatus();
         });
@@ -1267,9 +1354,43 @@
             modelAssetsSourceInput.value = "server-path";
             syncInputValue(modelAssetsSourceInput);
             if (state) state.assetsUploadMode = "folder";
+            const current = String(assetsServerFolderInput.value || "").trim() || "";
+            activeFolderHistoryKey = ASSETS_SERVER_FOLDERS_HISTORY_KEY;
+            try {
+                const selectedPath = await pickNativeServerFolder(
+                    ASSETS_SERVER_FOLDERS_HISTORY_KEY,
+                    current,
+                );
+                if (state) {
+                    state.assetsSourceMode = "server-path";
+                    state.assetsUploadMode = "folder";
+                    state.assetsServerFolderPath = selectedPath;
+                    state.assetsModelServerFilePath = "";
+                    state.assetsScalerServerFilePath = "";
+                    state.assetsDensityServerFilePath = "";
+                }
+                modelAssetsSourceInput.value = "server-path";
+                assetsServerFolderInput.value = selectedPath;
+                assetsModelServerFilePathInput.value = "";
+                assetsScalerServerFilePathInput.value = "";
+                assetsDensityServerFilePathInput.value = "";
+                syncInputValue(modelAssetsSourceInput);
+                syncInputValue(assetsServerFolderInput);
+                syncInputValue(assetsModelServerFilePathInput);
+                syncInputValue(assetsScalerServerFilePathInput);
+                syncInputValue(assetsDensityServerFilePathInput);
+                await inspectServerFolderAssets(selectedPath);
+                if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+                return;
+            } catch (error) {
+                if (!shouldFallbackToBrowser(error)) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             folderModal.classList.remove("hidden");
             folderModal.classList.add("flex");
-            const current = String(assetsServerFolderInput.value || "").trim() || String(runtime.server_home_dir || "").trim();
             await loadServerFolders(current);
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });
@@ -1284,6 +1405,32 @@
             modelAssetsSourceInput.value = "server-path";
             syncInputValue(modelAssetsSourceInput);
             activeFileTarget = "assets-model";
+            activeFileHistoryKey = ASSETS_MODEL_SERVER_FILES_HISTORY_KEY;
+            const current = String(assetsModelServerFilePathInput.value || "").trim();
+            const startPath = current && current.includes("/")
+                ? current.slice(0, current.lastIndexOf("/"))
+                : "";
+            try {
+                const selectedPath = await pickNativeServerFile(
+                    ASSETS_MODEL_SERVER_FILES_HISTORY_KEY,
+                    startPath,
+                );
+                assetsServerFolderInput.value = "";
+                syncInputValue(assetsServerFolderInput);
+                if (state) state.assetsServerFolderPath = "";
+                clearServerFolderInspection();
+                assetsModelServerFilePathInput.value = selectedPath;
+                syncInputValue(assetsModelServerFilePathInput);
+                if (state) state.assetsModelServerFilePath = selectedPath;
+                if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+                return;
+            } catch (error) {
+                if (!shouldFallbackToBrowser(error)) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             await openFileModalAtPath(assetsModelServerFilePathInput.value || "");
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });
@@ -1298,6 +1445,32 @@
             modelAssetsSourceInput.value = "server-path";
             syncInputValue(modelAssetsSourceInput);
             activeFileTarget = "assets-scaler";
+            activeFileHistoryKey = ASSETS_SCALER_SERVER_FILES_HISTORY_KEY;
+            const current = String(assetsScalerServerFilePathInput.value || "").trim();
+            const startPath = current && current.includes("/")
+                ? current.slice(0, current.lastIndexOf("/"))
+                : "";
+            try {
+                const selectedPath = await pickNativeServerFile(
+                    ASSETS_SCALER_SERVER_FILES_HISTORY_KEY,
+                    startPath,
+                );
+                assetsServerFolderInput.value = "";
+                syncInputValue(assetsServerFolderInput);
+                if (state) state.assetsServerFolderPath = "";
+                clearServerFolderInspection();
+                assetsScalerServerFilePathInput.value = selectedPath;
+                syncInputValue(assetsScalerServerFilePathInput);
+                if (state) state.assetsScalerServerFilePath = selectedPath;
+                if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+                return;
+            } catch (error) {
+                if (!shouldFallbackToBrowser(error)) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             await openFileModalAtPath(assetsScalerServerFilePathInput.value || "");
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });
@@ -1312,6 +1485,32 @@
             modelAssetsSourceInput.value = "server-path";
             syncInputValue(modelAssetsSourceInput);
             activeFileTarget = "assets-density";
+            activeFileHistoryKey = ASSETS_DENSITY_SERVER_FILES_HISTORY_KEY;
+            const current = String(assetsDensityServerFilePathInput.value || "").trim();
+            const startPath = current && current.includes("/")
+                ? current.slice(0, current.lastIndexOf("/"))
+                : "";
+            try {
+                const selectedPath = await pickNativeServerFile(
+                    ASSETS_DENSITY_SERVER_FILES_HISTORY_KEY,
+                    startPath,
+                );
+                assetsServerFolderInput.value = "";
+                syncInputValue(assetsServerFolderInput);
+                if (state) state.assetsServerFolderPath = "";
+                clearServerFolderInspection();
+                assetsDensityServerFilePathInput.value = selectedPath;
+                syncInputValue(assetsDensityServerFilePathInput);
+                if (state) state.assetsDensityServerFilePath = selectedPath;
+                if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
+                return;
+            } catch (error) {
+                if (!shouldFallbackToBrowser(error)) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             await openFileModalAtPath(assetsDensityServerFilePathInput.value || "");
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });

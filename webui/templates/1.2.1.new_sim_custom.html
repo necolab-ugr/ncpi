@@ -278,6 +278,7 @@
 <script>
 (() => {
     const runtime = window.__webuiRuntime || {};
+    const SERVER_BROWSER_HISTORY_KEY = "simulation_custom:file_browser";
     const defaultMode = String(runtime.default_simulation_source_mode || "upload").toLowerCase() === "server-path" ? "server-path" : "upload";
     const form = document.getElementById("custom-simulation-form");
     const formError = document.getElementById("custom-form-error");
@@ -471,6 +472,7 @@
             if (targetPath) {
                 params.set("path", targetPath);
             }
+            params.set("history_key", SERVER_BROWSER_HISTORY_KEY);
             params.set("include_files", "1");
             params.set("extensions", ".py");
 
@@ -502,7 +504,7 @@
         selectedPath = String(getServerInput(field)?.value || "").trim();
         const startPath = selectedPath && selectedPath.includes("/")
             ? selectedPath.slice(0, selectedPath.lastIndexOf("/"))
-            : String(runtime.server_home_dir || "").trim();
+            : "";
         modal.classList.remove("hidden");
         modal.classList.add("flex");
         await loadServerFiles(startPath);

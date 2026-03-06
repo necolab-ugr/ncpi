@@ -498,12 +498,25 @@
 
     function getState() {
         const root = document.getElementById("inference-training-root");
-        return (root && root.__x && root.__x.$data) ? root.__x.$data : null;
+        if (!root) return null;
+        if (root.__x && root.__x.$data) return root.__x.$data;
+        if (Array.isArray(root._x_dataStack) && root._x_dataStack.length > 0) {
+            return root._x_dataStack[0];
+        }
+        if (window.Alpine && typeof window.Alpine.$data === "function") {
+            try {
+                return window.Alpine.$data(root);
+            } catch (_err) {
+                return null;
+            }
+        }
+        return null;
     }
 
     document.addEventListener("DOMContentLoaded", () => {
         const runtime = window.__webuiRuntime || {};
-        const state = getState();
+        const FEATURES_SERVER_BROWSER_HISTORY_KEY = "inference_new_training:features_file_browser";
+        const PARAMETERS_SERVER_BROWSER_HISTORY_KEY = "inference_new_training:parameters_file_browser";
         const form = document.querySelector("form[action*='inference_training']");
 
         const featuresInput = byId("training-features-file");
@@ -551,9 +564,11 @@
         let currentPath = "";
         let parentPath = "";
         let selectedFilePath = "";
+        let activeHistoryKey = FEATURES_SERVER_BROWSER_HISTORY_KEY;
 
         const clearLocalFile = (input, uploadKey) => {
             input.value = "";
+            const state = getState();
             if (state && typeof state.clearUpload === "function") {
                 state.clearUpload(uploadKey);
             }
@@ -567,6 +582,7 @@
 
         const syncStateFromRuntime = () => {
             const defaultMode = runtime.is_server_runtime ? "server-path" : "upload";
+            const state = getState();
             if (!state) return;
             if (!state.featuresServerFilePath && !(featuresInput.files && featuresInput.files.length)) {
                 state.featuresSourceMode = defaultMode;
@@ -648,7 +664,9 @@
                 if (targetPath) {
                     params.set("path", targetPath);
                 }
+                params.set("history_key", activeHistoryKey);
                 params.set("include_files", "1");
+                params.set("extensions", ".pkl,.pickle");
 
                 const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
                 const payload = await response.json().catch(() => ({}));
@@ -666,6 +684,30 @@
             } finally {
                 modalLoadingEl.classList.add("hidden");
             }
+        };
+
+        const pickNativeInferenceTrainingServerFile = async (historyKey, startPath = "") => {
+            const formData = new FormData();
+            formData.append("mode", "file");
+            formData.append("extensions", ".pkl,.pickle");
+            formData.append("history_key", historyKey);
+            const cleanStartPath = String(startPath || "").trim();
+            if (cleanStartPath) {
+                formData.append("start_path", cleanStartPath);
+            }
+            const response = await fetch('{{ url_for("features_select_folder") }}', {
+                method: "POST",
+                body: formData,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || "Path selection cancelled.");
+            }
+            const selectedPath = String(payload.path || "").trim();
+            if (!selectedPath) {
+                throw new Error("No file selected.");
+            }
+            return selectedPath;
         };
 
         featuresUploadBtn.addEventListener("click", () => {
@@ -687,13 +729,35 @@
 
         featuresBrowseBtn.addEventListener("click", async () => {
             activeTarget = "features";
+            activeHistoryKey = FEATURES_SERVER_BROWSER_HISTORY_KEY;
             featuresModeInput.value = "server-path";
+            const state = getState();
             if (state) state.featuresSourceMode = "server-path";
             clearLocalFile(featuresInput, "training-features-file");
             const current = String(featuresServerPathInput.value || "").trim();
             const startPath = current && current.includes("/")
                 ? current.slice(0, current.lastIndexOf("/"))
-                : String(runtime.server_home_dir || "").trim();
+                : "";
+            try {
+                const selectedPath = await pickNativeInferenceTrainingServerFile(
+                    FEATURES_SERVER_BROWSER_HISTORY_KEY,
+                    startPath,
+                );
+                featuresServerPathInput.value = selectedPath;
+                const state = getState();
+                if (state) {
+                    state.featuresServerFilePath = selectedPath;
+                }
+                return;
+            } catch (error) {
+                const errorMessage = String(error && error.message ? error.message : "").toLowerCase();
+                const shouldFallbackToBrowser = errorMessage.includes("native file/folder picker is unavailable");
+                if (!shouldFallbackToBrowser) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             selectedFilePath = current;
             openModal();
             await loadServerFiles(startPath);
@@ -701,13 +765,35 @@
 
         parametersBrowseBtn.addEventListener("click", async () => {
             activeTarget = "parameters";
+            activeHistoryKey = PARAMETERS_SERVER_BROWSER_HISTORY_KEY;
             parametersModeInput.value = "server-path";
+            const state = getState();
             if (state) state.parametersSourceMode = "server-path";
             clearLocalFile(parametersInput, "training-parameters-file");
             const current = String(parametersServerPathInput.value || "").trim();
             const startPath = current && current.includes("/")
                 ? current.slice(0, current.lastIndexOf("/"))
-                : String(runtime.server_home_dir || "").trim();
+                : "";
+            try {
+                const selectedPath = await pickNativeInferenceTrainingServerFile(
+                    PARAMETERS_SERVER_BROWSER_HISTORY_KEY,
+                    startPath,
+                );
+                parametersServerPathInput.value = selectedPath;
+                const state = getState();
+                if (state) {
+                    state.parametersServerFilePath = selectedPath;
+                }
+                return;
+            } catch (error) {
+                const errorMessage = String(error && error.message ? error.message : "").toLowerCase();
+                const shouldFallbackToBrowser = errorMessage.includes("native file/folder picker is unavailable");
+                if (!shouldFallbackToBrowser) {
+                    console.debug("Native server picker dismissed; not opening in-app browser fallback.", error);
+                    return;
+                }
+                console.debug("Native server picker unavailable, opening in-app browser.", error);
+            }
             selectedFilePath = current;
             openModal();
             await loadServerFiles(startPath);
@@ -761,6 +847,7 @@
                 setError("Select a server file.");
                 return;
             }
+            const state = getState();
             if (activeTarget === "features") {
                 featuresServerPathInput.value = selectedFilePath;
                 featuresModeInput.value = "server-path";
