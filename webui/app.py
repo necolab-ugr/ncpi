@@ -1,4 +1,3 @@
-import tempfile
 import os
 import shutil
 import subprocess
@@ -16,27 +15,14 @@ import traceback
 from pathlib import Path
 from collections import deque
 from itertools import product
+from tmp_paths import configure_temp_environment, tmp_subdir
 
-# Folder for temporary files > 5 GB
-# Set BEFORE any flask imports if possible
-def _resolve_tempdir():
-    candidates = []
-    env_tmp = os.environ.get('TMPDIR')
-    if env_tmp:
-        candidates.append(env_tmp)
-    candidates.extend(['/home/necolab/tmp', '/tmp'])
-    for path in candidates:
-        if os.path.isdir(path) and os.access(path, os.W_OK | os.X_OK):
-            return path
-    return tempfile.gettempdir()
-
-_tempdir = _resolve_tempdir()
-tempfile.tempdir = _tempdir
-os.environ['TMPDIR'] = _tempdir
+# Resolve shared temp root before importing other runtime modules.
+_tempdir = configure_temp_environment()
 
 # Temporary folder for uploaded files of forms.
 # Keep this outside the repository (and OneDrive-synced paths) to avoid long blocking writes.
-temp_uploaded_files = os.path.join(_tempdir, "ncpi_temp_uploaded_files")
+temp_uploaded_files = tmp_subdir("ncpi_temp_uploaded_files")
 
 # Prefer the local repository package over any globally installed ncpi version.
 _webui_dir = os.path.dirname(os.path.abspath(__file__))
@@ -83,7 +69,7 @@ GRID_PREFIX = "grid="
 SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
 SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
 PATH_HISTORY_CLIENT_ID_SESSION_KEY = "webui_path_history_client_id"
-PATH_HISTORY_STORAGE_DIR = os.path.join(_tempdir, "ncpi_webui_path_history")
+PATH_HISTORY_STORAGE_DIR = tmp_subdir("ncpi_webui_path_history")
 PATH_HISTORY_MAX_FIELDS = 256
 PATH_HISTORY_MAX_VALUE_LEN = 4096
 
@@ -455,6 +441,27 @@ def _append_job_output(job_status, job_id, message):
     if len(lines) > MAX_OUTPUT_LINES:
         lines = lines[-MAX_OUTPUT_LINES:]
     job_status[job_id]["output"] = "\n".join(lines)
+
+
+def _announce_saved_output_folders(job_status, job_id, module_name, *paths):
+    folders = []
+    seen = set()
+    for raw in paths:
+        if not raw:
+            continue
+        candidate = os.path.realpath(str(raw))
+        folder = candidate if os.path.isdir(candidate) else os.path.dirname(candidate)
+        if not folder:
+            continue
+        folder = os.path.realpath(folder)
+        if folder in seen:
+            continue
+        seen.add(folder)
+        folders.append(folder)
+    if folders:
+        message = f"[{module_name}] output folder(s): {', '.join(folders)}"
+        _append_job_output(job_status, job_id, message)
+        print(message, flush=True)
 
 
 class JobCancelledError(RuntimeError):
@@ -914,12 +921,12 @@ def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
 
 
 def _simulation_grid_metadata_path(output_dir=None):
-    root = output_dir if output_dir else os.path.join(tempfile.gettempdir(), "simulation_data")
+    root = output_dir if output_dir else os.path.join(_tempdir, "simulation_data")
     return os.path.join(root, SIMULATION_GRID_METADATA_FILE)
 
 
 def _clear_simulation_grid_metadata_file(output_dir=None):
-    root = output_dir if output_dir else os.path.join(tempfile.gettempdir(), "simulation_data")
+    root = output_dir if output_dir else os.path.join(_tempdir, "simulation_data")
     targets = {SIMULATION_GRID_METADATA_FILE, *SIMULATION_GRID_METADATA_LEGACY_FILES}
     for name in targets:
         path = os.path.join(root, name)
@@ -945,14 +952,10 @@ def _ensure_sequence(value, name):
 
 
 def _field_potential_dirs():
-    temp_dir = tempfile.gettempdir()
     return [
-        os.path.join("/tmp", "field_potential_proxy"),
-        os.path.join("/tmp", "field_potential_kernel"),
-        os.path.join("/tmp", "field_potential_meeg"),
-        os.path.join(temp_dir, "field_potential_proxy"),
-        os.path.join(temp_dir, "field_potential_kernel"),
-        os.path.join(temp_dir, "field_potential_meeg"),
+        tmp_subdir("field_potential_proxy"),
+        tmp_subdir("field_potential_kernel"),
+        tmp_subdir("field_potential_meeg"),
     ]
 
 
@@ -982,41 +985,21 @@ def _field_potential_output_name(fp_type, safe_name):
 
 
 def _features_data_dir(create=False):
-    path = os.path.realpath("/tmp/features_data")
-    if create:
-        os.makedirs(path, exist_ok=True)
-    return path
+    return tmp_subdir("features_data", create=create)
 
 
 def _predictions_data_dir(create=False):
-    path = os.path.realpath("/tmp/predictions_data")
-    if create:
-        os.makedirs(path, exist_ok=True)
-    return path
+    return tmp_subdir("predictions_data", create=create)
 
 
 def _features_data_candidate_dirs():
-    raw_paths = [
-        "/tmp/features_data",
-        os.path.join(tempfile.gettempdir(), "features_data"),
-        os.path.join(_tempdir, "features_data"),
-        "/home/necolab/tmp/features_data",
-    ]
-    seen = set()
-    candidates = []
-    for raw_path in raw_paths:
-        if not raw_path:
-            continue
-        path = os.path.realpath(os.path.expanduser(raw_path))
-        if path in seen:
-            continue
-        seen.add(path)
-        candidates.append(path)
-    return candidates
+    return [os.path.realpath(_features_data_dir(create=False))]
 
 
 def _sync_features_data_from_candidates():
-    primary = os.path.realpath(_features_data_dir(create=True))
+    primary = os.path.realpath(_features_data_dir(create=False))
+    if not os.path.isdir(primary):
+        return
     for candidate_dir in _features_data_candidate_dirs():
         if candidate_dir == primary:
             continue
@@ -1046,6 +1029,19 @@ def _sync_features_data_from_candidates():
                     shutil.copy2(src, dst)
                 except OSError:
                     continue
+
+
+def _remove_dir_if_empty(path):
+    target = os.path.realpath(path or "")
+    if not target or not os.path.isdir(target):
+        return False
+    try:
+        if os.listdir(target):
+            return False
+        os.rmdir(target)
+        return True
+    except OSError:
+        return False
 
 
 def _list_features_data_files():
@@ -1127,7 +1123,7 @@ def _list_predictions_data_files():
 
 
 def _list_simulation_data_files():
-    simulation_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_dir = os.path.join(_tempdir, "simulation_data")
     if not os.path.isdir(simulation_dir):
         return []
     files = []
@@ -1213,7 +1209,7 @@ def _list_detected_analysis_data_files():
             "path": os.path.join(predictions_root, name),
         })
 
-    simulation_root = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_root = os.path.join(_tempdir, "simulation_data")
     for name in _list_simulation_data_files():
         entries.append({
             "key": f"simulation::{name}",
@@ -2853,7 +2849,7 @@ def _build_four_area_network_params(form):
 # Main dashboard page loading
 @app.route("/")
 def dashboard():
-    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
     if os.path.isdir(simulation_data_dir):
         simulation_pkl_files = sorted(
             f for f in os.listdir(simulation_data_dir)
@@ -2869,7 +2865,7 @@ def dashboard():
             for name in files:
                 if name.endswith(".pkl"):
                     field_potential_files.append(name)
-    analysis_data_dir = os.path.join(tempfile.gettempdir(), "analysis_data")
+    analysis_data_dir = os.path.join(_tempdir, "analysis_data")
     if os.path.isdir(analysis_data_dir):
         analysis_data_files = sorted(
             f for f in os.listdir(analysis_data_dir)
@@ -2902,7 +2898,7 @@ def simulation():
 
 @app.route("/simulation/upload_sim")
 def upload_sim():
-    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
     if os.path.isdir(simulation_data_dir):
         simulation_pkl_files = sorted(
             f for f in os.listdir(simulation_data_dir)
@@ -2920,7 +2916,7 @@ def upload_sim():
 def upload_sim_files():
     _remember_path_history_from_form(request.form, "upload_sim_files")
     source_mode = (request.form.get("simulation_source_mode") or "upload").strip().lower()
-    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
     os.makedirs(simulation_data_dir, exist_ok=True)
 
     if source_mode == "server-path":
@@ -2982,7 +2978,7 @@ def upload_sim_files():
 @app.route("/simulation/remove_file", methods=["POST"])
 def remove_simulation_file():
     filename = (request.form.get("filename") or "").strip()
-    simulation_root = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_root = os.path.join(_tempdir, "simulation_data")
     try:
         target_path = _validate_relative_pickle_path(filename, simulation_root, "Simulation file")
         os.remove(target_path)
@@ -3024,7 +3020,7 @@ def clear_predictions_data():
 
 
 def _clear_simulation_data_files():
-    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
     if not os.path.isdir(simulation_data_dir):
         return
     for name in os.listdir(simulation_data_dir):
@@ -3045,7 +3041,7 @@ def _clear_simulation_data_files():
 
 
 def _clear_simulation_output_folder_all_files():
-    simulation_data_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
     if not os.path.isdir(simulation_data_dir):
         return
     for name in os.listdir(simulation_data_dir):
@@ -3190,6 +3186,7 @@ def new_sim_custom():
 
 
 def _simulation_computation(job_id, job_status, params):
+    simulation_runs_root = os.path.join(_tempdir, "simulation_runs")
     try:
         model_type = params["model_type"]
         run_mode = params.get("run_mode", "single")
@@ -3209,7 +3206,7 @@ def _simulation_computation(job_id, job_status, params):
             )
             sim_defaults = FOUR_AREA_DEFAULTS
 
-        output_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+        output_dir = os.path.join(_tempdir, "simulation_data")
         os.makedirs(output_dir, exist_ok=True)
         _clear_simulation_grid_metadata_file(output_dir)
         for name in os.listdir(output_dir):
@@ -3253,7 +3250,7 @@ def _simulation_computation(job_id, job_status, params):
             simulation_params_content = _build_simulation_params(form, sim_defaults)
 
             run_id = str(uuid.uuid4())
-            run_root = os.path.join(tempfile.gettempdir(), "simulation_runs", run_id)
+            run_root = os.path.join(simulation_runs_root, run_id)
             params_dir = os.path.join(run_root, "params")
             python_dir = os.path.join(run_root, "python")
             trial_output_dir = os.path.join(run_root, "output")
@@ -3383,6 +3380,7 @@ def _simulation_computation(job_id, job_status, params):
             "results": output_dir,
             "error": False,
         })
+        _announce_saved_output_folders(job_status, job_id, "simulation", output_dir)
 
     except Exception as exc:
         _clear_simulation_output_folder_all_files()
@@ -3390,17 +3388,20 @@ def _simulation_computation(job_id, job_status, params):
             _mark_job_cancelled(job_id, str(exc))
         else:
             _mark_job_failed(job_id, exc)
+    finally:
+        _remove_dir_if_empty(simulation_runs_root)
 
 
 def _simulation_computation_custom(job_id, job_status, params):
     temp_run_dir = None
     upload_root = params.get("upload_root")
+    simulation_runs_root = os.path.join(_tempdir, "simulation_runs")
     try:
         input_paths = params["input_paths"]
         estimate_seconds = params.get("estimate_seconds", 60.0)
 
         run_id = str(uuid.uuid4())
-        temp_run_dir = os.path.join(tempfile.gettempdir(), "simulation_runs", run_id)
+        temp_run_dir = os.path.join(simulation_runs_root, run_id)
         params_dir = os.path.join(temp_run_dir, "params")
         python_dir = os.path.join(temp_run_dir, "python")
         os.makedirs(params_dir, exist_ok=True)
@@ -3412,7 +3413,7 @@ def _simulation_computation_custom(job_id, job_status, params):
         shutil.copy(input_paths["simulation_py"], os.path.join(python_dir, "simulation.py"))
         _enforce_simulation_chunk_seconds(os.path.join(python_dir, "simulation.py"), chunk_ms=1000.0)
 
-        output_dir = os.path.join(tempfile.gettempdir(), "simulation_data")
+        output_dir = os.path.join(_tempdir, "simulation_data")
         os.makedirs(output_dir, exist_ok=True)
         _clear_simulation_grid_metadata_file(output_dir)
 
@@ -3455,6 +3456,7 @@ def _simulation_computation_custom(job_id, job_status, params):
             "results": output_dir,
             "error": False,
         })
+        _announce_saved_output_folders(job_status, job_id, "simulation", output_dir)
 
     except Exception as exc:
         _clear_simulation_output_folder_all_files()
@@ -3467,6 +3469,8 @@ def _simulation_computation_custom(job_id, job_status, params):
             shutil.rmtree(temp_run_dir, ignore_errors=True)
         if upload_root and os.path.isdir(upload_root):
             shutil.rmtree(upload_root, ignore_errors=True)
+        _remove_dir_if_empty(simulation_runs_root)
+        _remove_dir_if_empty(os.path.join(_tempdir, "simulation_custom_uploads"))
 
 
 @app.route("/run_trial_simulation/<model_type>", methods=["POST"])
@@ -3546,7 +3550,7 @@ def run_trial_simulation_custom():
     }
 
     run_id = str(uuid.uuid4())
-    upload_root = os.path.join(tempfile.gettempdir(), "simulation_custom_uploads", run_id)
+    upload_root = os.path.join(_tempdir, "simulation_custom_uploads", run_id)
     os.makedirs(upload_root, exist_ok=True)
 
     input_paths = {}
@@ -3659,12 +3663,12 @@ def field_potential_load_precomputed():
     fp_type = (request.form.get("precomputed_fp_type") or "").strip().lower()
 
     destination_roots = {
-        "proxy": os.path.join(tempfile.gettempdir(), "field_potential_proxy"),
-        "cdm": os.path.join(tempfile.gettempdir(), "field_potential_kernel"),
-        "lfp": os.path.join(tempfile.gettempdir(), "field_potential_kernel"),
-        "eeg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
-        "meg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
-        "meeg": os.path.join(tempfile.gettempdir(), "field_potential_meeg"),
+        "proxy": os.path.join(_tempdir, "field_potential_proxy"),
+        "cdm": os.path.join(_tempdir, "field_potential_kernel"),
+        "lfp": os.path.join(_tempdir, "field_potential_kernel"),
+        "eeg": os.path.join(_tempdir, "field_potential_meeg"),
+        "meg": os.path.join(_tempdir, "field_potential_meeg"),
+        "meeg": os.path.join(_tempdir, "field_potential_meeg"),
     }
 
     inputs = []
@@ -3750,7 +3754,7 @@ def field_potential_kernel():
     if remembered_kernel_params:
         kernel_params_default = remembered_kernel_params
 
-    default_dir = "/tmp/simulation_data"
+    default_dir = os.path.join(_tempdir, "simulation_data")
     default_paths = {
         "times": os.path.join(default_dir, "times.pkl"),
         "gids": os.path.join(default_dir, "gids.pkl"),
@@ -3761,7 +3765,7 @@ def field_potential_kernel():
         "population_sizes": os.path.join(default_dir, "population_sizes.pkl"),
     }
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
-    kernel_output_root = "/tmp/field_potential_kernel"
+    kernel_output_root = os.path.join(_tempdir, "field_potential_kernel")
     preferred_cdm = []
     for fname in ("kernel_approx_cdm.pkl", "current_dipole_moment.pkl"):
         direct_path = os.path.join(kernel_output_root, fname)
@@ -3803,7 +3807,7 @@ def field_potential_kernel():
 
 @app.route("/field_potential/proxy")
 def field_potential_proxy():
-    default_dir = "/tmp/simulation_data"
+    default_dir = os.path.join(_tempdir, "simulation_data")
     default_paths = {
         "times": os.path.join(default_dir, "times.pkl"),
         "gids": os.path.join(default_dir, "gids.pkl"),
@@ -4336,7 +4340,7 @@ def stage_kernel_local_folder():
     if target_field not in {"mc_folder", "output_sim_path"}:
         target_field = "folder"
 
-    base_root = os.path.join(tempfile.gettempdir(), "field_potential_kernel", "local_folder_uploads")
+    base_root = os.path.join(_tempdir, "field_potential_kernel", "local_folder_uploads")
     session_id = uuid.uuid4().hex
     staging_root = os.path.realpath(os.path.join(base_root, f"{target_field}_{session_id}"))
     os.makedirs(staging_root, exist_ok=True)
@@ -4424,7 +4428,7 @@ def features_parser_inspect():
             ext = Path(file_name).suffix.lower()
             if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                 return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
-            inspect_root = os.path.join(tempfile.gettempdir(), "features_inspection")
+            inspect_root = os.path.join(_tempdir, "features_inspection")
             os.makedirs(inspect_root, exist_ok=True)
             temp_name = f"{uuid.uuid4()}_{file_name}"
             inspect_path = os.path.join(inspect_root, temp_name)
@@ -4674,7 +4678,7 @@ def compute_predictions():
     feature_data_files = _list_features_data_files()
     # Hard fallback: directly scan canonical folder in case helper discovery is bypassed.
     if not feature_data_files:
-        hard_root = os.path.realpath("/tmp/features_data")
+        hard_root = _features_data_dir(create=False)
         if os.path.isdir(hard_root):
             recovered = []
             for root, _, names in os.walk(hard_root):
@@ -4756,18 +4760,18 @@ def inference_detect_model_backend():
 
 # Analysis configuration page
 def _analysis_data_dir(create=False):
-    path = os.path.join(tempfile.gettempdir(), "analysis_data")
+    path = os.path.join(_tempdir, "analysis_data")
     if create:
         os.makedirs(path, exist_ok=True)
     return path
 
 
-def _analysis_mode_path():
-    return os.path.join(_analysis_data_dir(create=True), ".selection_mode")
+def _analysis_mode_path(create=False):
+    return os.path.join(_analysis_data_dir(create=create), ".selection_mode")
 
 
-def _analysis_selected_keys_path():
-    return os.path.join(_analysis_data_dir(create=True), ".selected_simulation_keys.json")
+def _analysis_selected_keys_path(create=False):
+    return os.path.join(_analysis_data_dir(create=create), ".selected_simulation_keys.json")
 
 
 def _set_analysis_selected_simulation_keys(keys):
@@ -4777,7 +4781,7 @@ def _set_analysis_selected_simulation_keys(keys):
         if str(key).strip()
     ]
     try:
-        with open(_analysis_selected_keys_path(), "w", encoding="utf-8") as f:
+        with open(_analysis_selected_keys_path(create=True), "w", encoding="utf-8") as f:
             json.dump(selected, f)
     except OSError:
         pass
@@ -4804,6 +4808,7 @@ def _clear_analysis_selected_simulation_keys():
             os.remove(path)
         except OSError:
             pass
+    _remove_dir_if_empty(_analysis_data_dir(create=False))
 
 
 def _set_analysis_selection_mode(mode):
@@ -4812,7 +4817,7 @@ def _set_analysis_selection_mode(mode):
         _clear_analysis_selection_mode()
         return
     try:
-        with open(_analysis_mode_path(), "w", encoding="utf-8") as f:
+        with open(_analysis_mode_path(create=True), "w", encoding="utf-8") as f:
             f.write(mode_value)
     except OSError:
         pass
@@ -4836,6 +4841,7 @@ def _clear_analysis_selection_mode():
             os.remove(path)
         except OSError:
             pass
+    _remove_dir_if_empty(_analysis_data_dir(create=False))
 
 
 def _list_analysis_data_files():
@@ -4864,6 +4870,7 @@ def _clear_analysis_data_files():
                 removed_files.append(name)
             except OSError:
                 pass
+    _remove_dir_if_empty(analysis_data_dir)
     return removed_files
 
 
@@ -4937,7 +4944,7 @@ def _analysis_data_path():
 
 
 def _simulation_output_root():
-    return os.path.join(tempfile.gettempdir(), "simulation_data")
+    return os.path.join(_tempdir, "simulation_data")
 
 
 def _simulation_output_file(name):
@@ -8410,7 +8417,7 @@ def download_results(job_id):
     # Retrieve the stored DataFrame
     output_df_path = status["results"] 
 
-    # Remove file after downloading it, except canonical pipeline outputs in /tmp.
+    # Remove file after downloading it, except canonical pipeline outputs in the shared temp root.
     if computation_type not in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'simulation'}:
         @after_this_request
         def cleanup(response):

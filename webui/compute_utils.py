@@ -25,10 +25,34 @@ import itertools
 import threading
 import time
 import traceback
+from tmp_paths import TMP_ROOT, configure_temp_environment, tmp_subdir
+
+configure_temp_environment()
+
+
+def _tmp_subdir(name, create=False):
+    return tmp_subdir(name, create=create)
+
+
+def _field_potential_output_dir(kind, create=False):
+    return _tmp_subdir(f"field_potential_{kind}", create=create)
+
+
+def _field_potential_kernel_search_roots():
+    roots = [_field_potential_output_dir("kernel", create=False)]
+    ordered = []
+    seen = set()
+    for path in roots:
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        ordered.append(path)
+    return ordered
+
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
-DEFAULT_SIM_DATA_DIR = '/tmp/simulation_data'
+DEFAULT_SIM_DATA_DIR = _tmp_subdir("simulation_data")
 MAX_OUTPUT_LINES = 200
 
 # Dataframe file upload format check
@@ -121,7 +145,7 @@ def save_df(job_id, output_df, temp_uploaded_files):
 
 
 def _features_data_dir():
-    path = os.path.realpath("/tmp/features_data")
+    path = _tmp_subdir("features_data")
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -191,6 +215,27 @@ def _append_job_output(job_status, job_id, message):
     combined = current + message
     lines = combined.splitlines()[-MAX_OUTPUT_LINES:]
     job_status[job_id]["output"] = "\n".join(lines)
+
+
+def _announce_saved_output_folders(job_status, job_id, module_name, *paths):
+    folders = []
+    seen = set()
+    for raw in paths:
+        if not raw:
+            continue
+        candidate = os.path.realpath(str(raw))
+        folder = candidate if os.path.isdir(candidate) else os.path.dirname(candidate)
+        if not folder:
+            continue
+        folder = os.path.realpath(folder)
+        if folder in seen:
+            continue
+        seen.add(folder)
+        folders.append(folder)
+    if folders:
+        message = f"[{module_name}] output folder(s): {', '.join(folders)}"
+        _append_job_output(job_status, job_id, message)
+        print(message, flush=True)
 
 
 def _mark_job_failed(job_status, job_id, exc):
@@ -1468,6 +1513,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             _append_job_output(job_status, job_id, f"Saved computed dataframe: {output_df_path}")
         persisted_dashboard_path = _persist_features_dataframe(output_df, method)
         _append_job_output(job_status, job_id, f"Persisted dashboard features file: {persisted_dashboard_path}")
+        _announce_saved_output_folders(job_status, job_id, "features", output_df_path, persisted_dashboard_path)
 
         job_status[job_id].update({
                 "status": "finished",
@@ -1705,7 +1751,7 @@ def _load_training_with_example_loader(features_path, parameters_path):
     if not callable(loader):
         raise AttributeError("load_model_features not found in examples/tools.py.")
 
-    temp_root = tempfile.mkdtemp(prefix="ncpi_train_loader_")
+    temp_root = tempfile.mkdtemp(prefix="ncpi_train_loader_", dir=TMP_ROOT)
     method_name = "uploaded"
     method_dir = os.path.join(temp_root, "data", method_name)
     os.makedirs(method_dir, exist_ok=True)
@@ -2212,7 +2258,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
         output_df_path = save_df(job_id, output_df, temp_uploaded_files)
         persisted_predictions_path = None
         try:
-            predictions_dir = os.path.realpath("/tmp/predictions_data")
+            predictions_dir = _tmp_subdir("predictions_data")
             os.makedirs(predictions_dir, exist_ok=True)
             persisted_name = "predictions.pkl"
             persisted_predictions_path = os.path.join(predictions_dir, persisted_name)
@@ -2221,6 +2267,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
         except Exception as persist_exc:
             _append_job_output(job_status, job_id, f"Warning: could not persist dashboard predictions file: {persist_exc}")
         _append_job_output(job_status, job_id, f"Saved predictions dataframe: {output_df_path}")
+        _announce_saved_output_folders(job_status, job_id, "inference", output_df_path, persisted_predictions_path)
         job_status[job_id].update({
             "status": "finished",
             "progress": 100,
@@ -2503,13 +2550,18 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         _append_job_output(job_status, job_id, f"Saved training artifacts archive: {zip_path}")
         persisted_zip_path = None
         try:
-            persisted_dir = os.path.realpath("/tmp/inference_training_data")
+            persisted_dir = _tmp_subdir("inference_training_data")
             os.makedirs(persisted_dir, exist_ok=True)
             persisted_zip_path = os.path.join(persisted_dir, "training_artifacts.zip")
             shutil.copy2(zip_path, persisted_zip_path)
             _append_job_output(job_status, job_id, f"Persisted training artifacts to: {persisted_zip_path}")
         except Exception as persist_exc:
-            _append_job_output(job_status, job_id, f"Warning: could not persist training artifacts to /tmp: {persist_exc}")
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Warning: could not persist training artifacts to {TMP_ROOT}: {persist_exc}",
+            )
+        _announce_saved_output_folders(job_status, job_id, "inference_training", persisted_zip_path or zip_path)
 
         job_status[job_id].update({
             "status": "finished",
@@ -2691,7 +2743,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
 
-        output_root = '/tmp/field_potential_proxy'
+        output_root = _field_potential_output_dir("proxy")
         os.makedirs(output_root, exist_ok=True)
         # Keep canonical short filenames for proxy outputs.
         for name in ('proxy.pkl', 'sim_data.pkl'):
@@ -2717,6 +2769,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             )
 
         _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {output_root}")
+        _announce_saved_output_folders(job_status, job_id, "field_potential_proxy", output_root)
         job_status[job_id].update({
                 "status": "finished",
                 "progress": 100,
@@ -2915,7 +2968,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             weights=weights,
         )
 
-        output_root = "/tmp/field_potential_kernel"
+        output_root = _field_potential_output_dir("kernel")
         os.makedirs(output_root, exist_ok=True)
         for name in os.listdir(output_root):
             lower = name.lower()
@@ -3177,6 +3230,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             results_path = combined_path
             _append_job_output(job_status, job_id, f"Saved combined probe outputs to {combined_path}")
 
+        _announce_saved_output_folders(job_status, job_id, "field_potential_kernel", output_root, results_path)
         job_status[job_id].update({
                 "status": "finished",
                 "progress": 100,
@@ -3198,18 +3252,20 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         cdm_path = file_paths.get("meeg_cdm_file")
         if not cdm_path or not os.path.exists(cdm_path):
             preferred = []
-            direct_cdm = os.path.join("/tmp/field_potential_kernel", "current_dipole_moment.pkl")
-            if os.path.isfile(direct_cdm):
-                preferred.append(direct_cdm)
-            preferred.extend(glob.glob(os.path.join("/tmp/field_potential_kernel", "*", "current_dipole_moment.pkl")))
+            for kernel_root in _field_potential_kernel_search_roots():
+                direct_cdm = os.path.join(kernel_root, "current_dipole_moment.pkl")
+                if os.path.isfile(direct_cdm):
+                    preferred.append(direct_cdm)
+                preferred.extend(glob.glob(os.path.join(kernel_root, "*", "current_dipole_moment.pkl")))
             if preferred:
                 cdm_path = max(preferred, key=os.path.getmtime)
             else:
                 fallback = []
-                direct_kernel_approx = os.path.join("/tmp/field_potential_kernel", "kernel_approx_cdm.pkl")
-                if os.path.isfile(direct_kernel_approx):
-                    fallback.append(direct_kernel_approx)
-                fallback.extend(glob.glob(os.path.join("/tmp/field_potential_kernel", "*", "kernel_approx_cdm.pkl")))
+                for kernel_root in _field_potential_kernel_search_roots():
+                    direct_kernel_approx = os.path.join(kernel_root, "kernel_approx_cdm.pkl")
+                    if os.path.isfile(direct_kernel_approx):
+                        fallback.append(direct_kernel_approx)
+                    fallback.extend(glob.glob(os.path.join(kernel_root, "*", "kernel_approx_cdm.pkl")))
                 if fallback:
                     cdm_path = max(fallback, key=os.path.getmtime)
         if not cdm_path or not os.path.exists(cdm_path):
@@ -3430,7 +3486,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed M/EEG trial {trial_idx + 1}/{trial_count}.")
 
-        output_root = "/tmp/field_potential_meeg"
+        output_root = _field_potential_output_dir("meeg")
         os.makedirs(output_root, exist_ok=True)
         for name in os.listdir(output_root):
             lower = name.lower()
@@ -3447,6 +3503,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             pickle.dump(trial_payloads if trial_count > 1 else trial_payloads[0], f)
 
         _append_job_output(job_status, job_id, f"Saved M/EEG to {meeg_path}")
+        _announce_saved_output_folders(job_status, job_id, "field_potential_meeg", output_root, meeg_path)
         job_status[job_id].update({
                 "status": "finished",
                 "progress": 100,
