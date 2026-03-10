@@ -4065,20 +4065,40 @@ def _collect_inference_assets_folder_files(folder_path):
 def inject_webui_runtime_context():
     return {"webui_runtime": _detect_webui_runtime_context(request)}
 
-
 # Features configuration page
 @app.route("/features", methods=["GET", "POST"])
 def features():
+    options = [
+        {
+            "url": url_for('features_content', entryChoice='load'),
+            "title": "Load data",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
+        },
+        {
+            "url": url_for('features_content', entryChoice='compute'),
+            "title": "Compute new features",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
+        },
+    ]
+    return render_template("3.features.html", options=options)
+
+# Features configuration page content
+@app.route("/features/compute", methods=["GET", "POST"])
+def features_content():
+    tab = request.args.get('entryChoice', 'load')
+
     pipeline_files = _collect_feature_pipeline_inputs()
     features_data_files = _list_features_data_files()
     runtime_context = _detect_webui_runtime_context(request)
+
     return render_template(
-        "3.features.html",
+        "3.1.features_content.html",
         pipeline_files=pipeline_files,
         has_pipeline_files=bool(pipeline_files),
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
         features_runtime=runtime_context,
+        entryChoice=tab,
     )
 
 
