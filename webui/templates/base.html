@@ -160,10 +160,11 @@
 					</footer>
 
 					<!-- My main JS files -->
-					<script src="{{ url_for('static', filename='js/darkModeToggle.js') }}"></script>
-					<script src="{{ url_for('static', filename='js/serverErrorBanner.js') }}"></script>
-					<!-- Handling of alert messages -->
-					<script src="{{ url_for('static', filename='js/alertMessages.js') }}"></script>
+						<script src="{{ url_for('static', filename='js/darkModeToggle.js') }}"></script>
+						<script src="{{ url_for('static', filename='js/serverErrorBanner.js') }}"></script>
+						<script src="{{ url_for('static', filename='js/nativePickerUX.js') }}"></script>
+						<!-- Handling of alert messages -->
+						<script src="{{ url_for('static', filename='js/alertMessages.js') }}"></script>
 					<!-- Block for page-specific JavaScript -->
 					{% block scripts %}{% endblock %}
 				</div>

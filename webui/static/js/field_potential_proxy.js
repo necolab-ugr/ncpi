@@ -205,26 +205,286 @@ function createProxyServerFileBrowser() {
     };
 }
 
+function createNuExtManager() {
+    const inferUrl = String(window.__proxyInferTrialsUrl || '').trim();
+    const modeSelect = document.getElementById('nuExtMode');
+    const sharedContainer = document.getElementById('nuExtSharedContainer');
+    const sharedInput = document.getElementById('nuExtSharedValue');
+    const perTrialContainer = document.getElementById('nuExtPerTrialContainer');
+    const perTrialInputs = document.getElementById('nuExtPerTrialInputs');
+    const detectedTrials = document.getElementById('nuExtDetectedTrials');
+    const detectionStatus = document.getElementById('nuExtDetectionStatus');
+    const valuesJsonInput = document.getElementById('nuExtValuesJson');
+
+    if (
+        !modeSelect || !sharedContainer || !sharedInput || !perTrialContainer ||
+        !perTrialInputs || !detectedTrials || !detectionStatus || !valuesJsonInput
+    ) {
+        return null;
+    }
+
+    let trialCount = 1;
+    let debounceTimer = null;
+    let requestCounter = 0;
+
+    const setStatus = (message, isError = false) => {
+        detectionStatus.textContent = String(message || '').trim();
+        detectionStatus.classList.toggle('text-red-600', !!isError);
+        detectionStatus.classList.toggle('dark:text-red-400', !!isError);
+        detectionStatus.classList.toggle('text-slate-500', !isError);
+        detectionStatus.classList.toggle('dark:text-slate-400', !isError);
+    };
+
+    const getMode = () => String(modeSelect.value || 'shared').trim().toLowerCase() === 'per-trial'
+        ? 'per-trial'
+        : 'shared';
+
+    const getPerTrialValues = () => {
+        const values = [];
+        const inputs = perTrialInputs.querySelectorAll('[data-nu-ext-trial-input]');
+        inputs.forEach((input) => {
+            values.push(String(input.value || '').trim());
+        });
+        return values;
+    };
+
+    const syncHiddenValues = () => {
+        if (getMode() !== 'per-trial') {
+            valuesJsonInput.value = '';
+            return;
+        }
+        valuesJsonInput.value = JSON.stringify(getPerTrialValues());
+    };
+
+    const buildPerTrialInputs = (seedValues = []) => {
+        perTrialInputs.innerHTML = '';
+        for (let idx = 0; idx < trialCount; idx += 1) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex flex-col gap-1';
+
+            const label = document.createElement('label');
+            label.className = 'text-xs font-semibold text-slate-700 dark:text-slate-200';
+            label.textContent = `Trial ${idx + 1}`;
+
+            const input = document.createElement('input');
+            input.type = 'number';
+            input.step = '0.1';
+            input.className = 'form-input h-10 rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary';
+            input.setAttribute('data-nu-ext-trial-input', '1');
+            if (idx < seedValues.length) {
+                input.value = String(seedValues[idx] || '').trim();
+            }
+            input.addEventListener('input', () => {
+                syncHiddenValues();
+                setStatus(`Detected ${trialCount} trial(s). Set one nu_ext value per trial.`);
+            });
+
+            wrapper.appendChild(label);
+            wrapper.appendChild(input);
+            perTrialInputs.appendChild(wrapper);
+        }
+        syncHiddenValues();
+    };
+
+    const applyModeUi = () => {
+        const mode = getMode();
+        const perTrial = mode === 'per-trial';
+        sharedContainer.classList.toggle('hidden', perTrial);
+        perTrialContainer.classList.toggle('hidden', !perTrial);
+        if (perTrial) {
+            const existing = getPerTrialValues();
+            const sharedValue = String(sharedInput.value || '').trim();
+            if (existing.length !== trialCount) {
+                const seed = [];
+                for (let idx = 0; idx < trialCount; idx += 1) {
+                    if (idx < existing.length && String(existing[idx] || '').trim()) {
+                        seed.push(existing[idx]);
+                    } else {
+                        seed.push(sharedValue);
+                    }
+                }
+                buildPerTrialInputs(seed);
+            } else {
+                syncHiddenValues();
+            }
+            setStatus(`Detected ${trialCount} trial(s). Set one nu_ext value per trial.`);
+        } else {
+            valuesJsonInput.value = '';
+            setStatus(`Detected ${trialCount} trial(s). One shared nu_ext value will be applied to all trials.`);
+        }
+    };
+
+    const parseTrialCount = (payload) => {
+        const raw = Number(payload && payload.trial_count);
+        if (!Number.isFinite(raw) || raw < 1) return 1;
+        return Math.max(1, Math.floor(raw));
+    };
+
+    const setTrialCount = (count, sourceLabel = '') => {
+        trialCount = Math.max(1, Number(count) || 1);
+        detectedTrials.textContent = String(trialCount);
+        if (sourceLabel) {
+            setStatus(`Detected ${trialCount} trial(s) from ${sourceLabel}.`);
+        } else {
+            setStatus(`Detected ${trialCount} trial(s).`);
+        }
+        applyModeUi();
+    };
+
+    const chooseCandidate = (candidates) => {
+        const items = Array.isArray(candidates) ? candidates : [];
+        const local = items.find((item) => item && item.kind === 'local' && item.file);
+        if (local) return local;
+        const server = items.find((item) => item && item.kind === 'server' && item.path);
+        if (server) return server;
+        const fallback = items.find((item) => item && item.kind === 'default' && item.useDefault);
+        return fallback || null;
+    };
+
+    const inferTrialCount = async (candidate) => {
+        if (!candidate || !candidate.fileKey || !inferUrl) {
+            setTrialCount(1);
+            return;
+        }
+
+        const requestId = ++requestCounter;
+        setStatus('Detecting trial count from selected simulation data...');
+        try {
+            const formData = new FormData();
+            formData.append('file_key', candidate.fileKey);
+            if (candidate.kind === 'local' && candidate.file) {
+                formData.append('local_file', candidate.file);
+            } else if (candidate.kind === 'server' && candidate.path) {
+                formData.append('server_path', candidate.path);
+            } else if (candidate.kind === 'default') {
+                formData.append('use_default', '1');
+            } else {
+                setTrialCount(1);
+                return;
+            }
+
+            const response = await fetch(inferUrl, { method: 'POST', body: formData });
+            const payload = await response.json().catch(() => ({}));
+            if (requestId !== requestCounter) {
+                return;
+            }
+            if (!response.ok) {
+                throw new Error(payload.error || 'Failed to detect trial count.');
+            }
+            const sourceKind = String(payload.source_kind || candidate.kind || 'selected data');
+            setTrialCount(parseTrialCount(payload), sourceKind);
+        } catch (error) {
+            if (requestId !== requestCounter) {
+                return;
+            }
+            setTrialCount(1);
+            setStatus(error && error.message ? error.message : 'Failed to detect trial count.', true);
+        }
+    };
+
+    const scheduleInferFromCandidates = (candidates) => {
+        if (debounceTimer) {
+            clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(() => {
+            const candidate = chooseCandidate(candidates);
+            void inferTrialCount(candidate);
+        }, 120);
+    };
+
+    const validateForSubmit = () => {
+        if (document.getElementById('proxyMethod')?.value !== 'ERWS2') {
+            return true;
+        }
+        if (getMode() === 'per-trial') {
+            const values = getPerTrialValues();
+            if (values.length !== trialCount) {
+                setStatus(`Per-trial nu_ext requires ${trialCount} values.`, true);
+                return false;
+            }
+            for (let idx = 0; idx < values.length; idx += 1) {
+                if (values[idx] === '' || Number.isNaN(Number(values[idx]))) {
+                    setStatus(`Invalid nu_ext value for trial ${idx + 1}.`, true);
+                    return false;
+                }
+            }
+            valuesJsonInput.value = JSON.stringify(values);
+            return true;
+        }
+        const shared = String(sharedInput.value || '').trim();
+        if (shared === '' || Number.isNaN(Number(shared))) {
+            setStatus('Provide a numeric shared nu_ext value.', true);
+            return false;
+        }
+        valuesJsonInput.value = '';
+        return true;
+    };
+
+    modeSelect.addEventListener('change', applyModeUi);
+    sharedInput.addEventListener('input', () => {
+        if (getMode() === 'shared') {
+            setStatus(`Detected ${trialCount} trial(s). One shared nu_ext value will be applied to all trials.`);
+        }
+    });
+    applyModeUi();
+
+    return {
+        scheduleInferFromCandidates,
+        validateForSubmit,
+    };
+}
+
 function setupUploadZones() {
     const runtime = window.__webuiRuntime || {};
     const defaultMode = String(runtime.default_simulation_source_mode || '').trim().toLowerCase() === 'server-path'
         ? 'server-path'
         : 'upload';
+    const nuExtManager = createNuExtManager();
     const serverBrowser = createProxyServerFileBrowser();
+    const zoneCandidateGetters = [];
+    const notifyNuExtTrialDetection = () => {
+        if (!nuExtManager) return;
+        const candidates = zoneCandidateGetters
+            .map((getter) => {
+                try {
+                    return getter();
+                } catch (error) {
+                    return null;
+                }
+            })
+            .filter(Boolean);
+        nuExtManager.scheduleInferFromCandidates(candidates);
+    };
     const zones = document.querySelectorAll('[data-upload]');
     zones.forEach((zone) => {
         const inputId = zone.getAttribute('data-upload');
         const input = document.getElementById(inputId);
         const sourceModeInputName = zone.getAttribute('data-source-mode-input');
         const serverPathInputName = zone.getAttribute('data-server-path-input');
+        const ignoreDefaultInputName = zone.getAttribute('data-ignore-default-input');
         const sourceModeInput = sourceModeInputName ? document.querySelector(`input[name="${sourceModeInputName}"]`) : null;
         const serverPathInput = serverPathInputName ? document.querySelector(`input[name="${serverPathInputName}"]`) : null;
+        const ignoreDefaultInput = ignoreDefaultInputName ? document.querySelector(`input[name="${ignoreDefaultInputName}"]`) : null;
         const filename = zone.querySelector('[data-filename]');
         const uploadedBox = zone.querySelector('[data-uploaded]');
         const uploadedName = zone.querySelector('[data-uploaded-name]');
         const uploadedLabel = zone.querySelector('[data-uploaded-label]');
         const clearSelectionBtn = zone.querySelector('[data-clear-upload]');
         const defaultName = uploadedBox ? String(uploadedBox.dataset.defaultName || '') : '';
+        const fileKey = sourceModeInputName
+            ? String(sourceModeInputName).replace(/_source_mode$/, '')
+            : '';
+
+        const isDefaultIgnored = () => {
+            if (!ignoreDefaultInput) return false;
+            const value = String(ignoreDefaultInput.value || '').trim().toLowerCase();
+            return value === '1' || value === 'true' || value === 'yes';
+        };
+
+        const setDefaultIgnored = (ignored) => {
+            if (!ignoreDefaultInput) return;
+            ignoreDefaultInput.value = ignored ? '1' : '0';
+        };
 
         if (!input) {
             return;
@@ -232,11 +492,11 @@ function setupUploadZones() {
 
         const syncUploadedBoxToDefault = () => {
             if (!uploadedBox || !uploadedName) return;
-            if (defaultName) {
+            if (defaultName && !isDefaultIgnored()) {
                 uploadedName.textContent = defaultName;
                 if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
                 uploadedBox.classList.remove('hidden');
-                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
+                if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
             } else {
                 uploadedName.textContent = '';
                 uploadedBox.classList.add('hidden');
@@ -294,8 +554,10 @@ function setupUploadZones() {
             }
             if (uploadedBox && uploadedName) {
                 if (selected) {
+                    // A new explicit selection replaces the preloaded default.
+                    setDefaultIgnored(true);
                     uploadedName.textContent = basenameFromPath(selected);
-                    if (uploadedLabel) uploadedLabel.textContent = 'Selected';
+                    if (uploadedLabel) uploadedLabel.textContent = 'Selected server file';
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
@@ -311,8 +573,10 @@ function setupUploadZones() {
             }
             if (uploadedBox && uploadedName) {
                 if (selectedFile) {
+                    // A new explicit selection replaces the preloaded default.
+                    setDefaultIgnored(true);
                     uploadedName.textContent = selectedFile.name;
-                    if (uploadedLabel) uploadedLabel.textContent = 'Uploaded';
+                    if (uploadedLabel) uploadedLabel.textContent = 'Selected local file';
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
@@ -348,6 +612,7 @@ function setupUploadZones() {
                 onFileSelect: (pickedPath) => {
                     serverPathInput.value = String(pickedPath || '').trim();
                     syncServerSelectionUi();
+                    notifyNuExtTrialDetection();
                 },
             });
         };
@@ -356,13 +621,14 @@ function setupUploadZones() {
             localBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 setMode('upload');
+                notifyNuExtTrialDetection();
             });
         }
         if (serverBtn) {
             serverBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 setMode('server-path');
-                openServerPicker();
+                notifyNuExtTrialDetection();
             });
         }
         if (clearSelectionBtn) {
@@ -371,11 +637,14 @@ function setupUploadZones() {
                 event.stopPropagation();
                 input.value = '';
                 serverPathInput.value = '';
+                // Clearing is explicit: keep defaults disabled for this field.
+                if (defaultName) setDefaultIgnored(true);
                 if (isServerPathMode()) {
                     syncServerSelectionUi();
                 } else {
                     syncLocalSelectionUi();
                 }
+                notifyNuExtTrialDetection();
             });
         }
 
@@ -409,6 +678,7 @@ function setupUploadZones() {
                 input.files = event.dataTransfer.files;
                 serverPathInput.value = '';
                 syncLocalSelectionUi();
+                notifyNuExtTrialDetection();
             }
         });
 
@@ -418,71 +688,37 @@ function setupUploadZones() {
             }
             serverPathInput.value = '';
             syncLocalSelectionUi();
+            notifyNuExtTrialDetection();
+        });
+
+        zoneCandidateGetters.push(() => {
+            const selectedFile = input.files && input.files[0] ? input.files[0] : null;
+            if (selectedFile) {
+                return { fileKey, kind: 'local', file: selectedFile };
+            }
+            const selectedServerPath = String(serverPathInput.value || '').trim();
+            if (selectedServerPath) {
+                return { fileKey, kind: 'server', path: selectedServerPath };
+            }
+            if (defaultName && !isDefaultIgnored()) {
+                return { fileKey, kind: 'default', useDefault: true };
+            }
+            return null;
         });
 
         const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
         setMode(initialMode === 'server-path' ? 'server-path' : defaultMode);
     });
 
-    const extInput = document.getElementById('extBackRateFile');
-    const extButton = document.getElementById('extBackRateButton');
-    const extFilename = document.getElementById('extBackRateFilename');
-    const extUploadedBox = document.getElementById('extBackRateUploaded');
-    const extUploadedName = document.getElementById('extBackRateUploadedName');
-    const extUploadedLabel = document.getElementById('extBackRateUploadedLabel');
-    const extClearBtn = document.getElementById('extBackRateClear');
-    const extDefaultName = extUploadedBox ? extUploadedBox.dataset.defaultName : '';
-    if (extInput && extButton) {
-        extButton.addEventListener('click', () => extInput.click());
-        extInput.addEventListener('change', () => {
-            if (extFilename) {
-                if (extInput.files && extInput.files[0]) {
-                    extFilename.textContent = extInput.files[0].name;
-                } else {
-                    extFilename.textContent = 'Local file not selected';
-                }
-            }
-            if (extUploadedBox && extUploadedName) {
-                if (extInput.files && extInput.files[0]) {
-                    extUploadedName.textContent = extInput.files[0].name;
-                    if (extUploadedLabel) {
-                        extUploadedLabel.textContent = 'Uploaded';
-                    }
-                    extUploadedBox.classList.remove('hidden');
-                    if (extClearBtn) {
-                        extClearBtn.classList.remove('hidden');
-                    }
-                } else {
-                    if (extDefaultName) {
-                        extUploadedName.textContent = extDefaultName;
-                        if (extUploadedLabel) {
-                            extUploadedLabel.textContent = 'Loaded';
-                        }
-                        extUploadedBox.classList.remove('hidden');
-                        if (extClearBtn) {
-                            extClearBtn.classList.add('hidden');
-                        }
-                    } else {
-                        extUploadedName.textContent = '';
-                        extUploadedBox.classList.add('hidden');
-                        if (extClearBtn) {
-                            extClearBtn.classList.add('hidden');
-                        }
-                    }
-                }
+    notifyNuExtTrialDetection();
+
+    const form = document.querySelector('form[action*="field_potential_proxy"]');
+    if (form && nuExtManager) {
+        form.addEventListener('submit', (event) => {
+            if (!nuExtManager.validateForSubmit()) {
+                event.preventDefault();
             }
         });
-        if (extClearBtn) {
-            extClearBtn.addEventListener('click', () => {
-                extInput.value = '';
-                extInput.dispatchEvent(new Event('change'));
-            });
-            if (extInput.files && extInput.files[0]) {
-                extClearBtn.classList.remove('hidden');
-            } else {
-                extClearBtn.classList.add('hidden');
-            }
-        }
     }
 }
 

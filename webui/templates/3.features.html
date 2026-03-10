@@ -53,18 +53,37 @@
 <script>
     window.__featuresPipelineFiles = {{ pipeline_files | tojson }};
     window.__featuresRuntime = {{ (features_runtime if features_runtime is defined else webui_runtime) | tojson }};
+    window.__featuresInitialEntry = {{ request.args.get('entry', '') | tojson }};
+    window.__featuresInitialTab = {{ request.args.get('tab', '') | tojson }};
 
     function featuresPage() {
         const runtime = window.__featuresRuntime || {};
         const SERVER_DIRECTORY_HISTORY_KEY = 'features:directory_browser';
         const defaultEmpiricalSourceMode = runtime.default_empirical_source_mode || 'server-path';
         const defaultSimulationSourceMode = runtime.default_simulation_source_mode || 'server-path';
+        const initialEntry = String(window.__featuresInitialEntry || '').trim().toLowerCase();
+        const initialTab = String(window.__featuresInitialTab || '').trim().toLowerCase();
+        const startOnLoadPrecomputed = initialEntry === 'load' || initialTab === 'load-precomputed';
+        const startOnCompute = initialEntry === 'compute' || ['load-data', 'select-method', 'configure-method'].includes(initialTab);
+        let initialActiveTab = 'entry';
+        let initialEntryChoice = '';
+        if (startOnLoadPrecomputed) {
+            initialEntryChoice = 'load';
+            initialActiveTab = 'load-precomputed';
+        } else if (startOnCompute) {
+            initialEntryChoice = 'compute';
+            if (['load-data', 'select-method', 'configure-method'].includes(initialTab)) {
+                initialActiveTab = initialTab;
+            } else {
+                initialActiveTab = 'load-data';
+            }
+        }
         const supportedParserFileExtensions = new Set([
             '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather'
         ]);
         return {
-            activeTab: 'entry',
-            entryChoice: '',
+            activeTab: initialActiveTab,
+            entryChoice: initialEntryChoice,
             uploads: {},
             pipelineFiles: window.__featuresPipelineFiles || [],
             runtime,
@@ -1260,13 +1279,13 @@
                     </p>
                 </div>
                 <div class="flex flex-wrap items-center justify-center gap-8 w-full">
-                    <button type="button" @click="chooseEntry('load')"
+                    <a href="{{ url_for('features_load_data') }}"
                         class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
                         <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
                             <span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>
                         </div>
                         <span class="text-2xl font-bold text-slate-800 dark:text-white text-center">Load data</span>
-                    </button>
+                    </a>
                     <button type="button" @click="chooseEntry('compute')"
                         class="flex flex-col items-center justify-center gap-6 p-10 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary dark:hover:border-primary transition-all duration-200 w-full max-w-[320px] aspect-square group shadow-sm">
                         <div class="p-5 rounded-full bg-slate-50 dark:bg-slate-800 group-hover:bg-primary/10 transition-colors">
@@ -2582,381 +2601,43 @@
 
 {% block scripts %}
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-<script defer src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+<script src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
 <script>
-    (() => {
-        const runtime = window.__featuresRuntime || {};
-        const PRECOMPUTED_SERVER_FILE_HISTORY_KEY = 'features:precomputed_file_browser';
-        const featuresUploadForm = document.getElementById('featuresUploadForm');
-        const featuresFileInput = document.getElementById('featuresFileInput');
-        const featuresDropZone = document.getElementById('featuresDropZone');
-        const precomputedFeaturesSourceModeInput = document.getElementById('precomputedFeaturesSourceModeInput');
-        const precomputedFeaturesServerFilePathInput = document.getElementById('precomputedFeaturesServerFilePathInput');
-        const precomputedFeaturesModeUploadBtn = document.getElementById('precomputedFeaturesModeUploadBtn');
-        const precomputedFeaturesModeServerBtn = document.getElementById('precomputedFeaturesModeServerBtn');
-        const precomputedFeaturesDropZoneHint = document.getElementById('precomputedFeaturesDropZoneHint');
-        const selectedFeaturesFiles = document.getElementById('selectedFeaturesFiles');
-        const selectedPrecomputedFeaturesServerFile = document.getElementById('selectedPrecomputedFeaturesServerFile');
-        const selectedPrecomputedFeaturesServerFilePath = document.getElementById('selectedPrecomputedFeaturesServerFilePath');
-
-        const precomputedFeaturesServerFileModal = document.getElementById('precomputedFeaturesServerFileModal');
-        const precomputedFeaturesServerFileBrowserPath = document.getElementById('precomputedFeaturesServerFileBrowserPath');
-        const precomputedFeaturesServerFileBrowserEntries = document.getElementById('precomputedFeaturesServerFileBrowserEntries');
-        const precomputedFeaturesServerFileBrowserError = document.getElementById('precomputedFeaturesServerFileBrowserError');
-        const precomputedFeaturesServerFileBrowserLoading = document.getElementById('precomputedFeaturesServerFileBrowserLoading');
-        const precomputedFeaturesServerFileBrowserUp = document.getElementById('precomputedFeaturesServerFileBrowserUp');
-        const precomputedFeaturesServerFileBrowserRefresh = document.getElementById('precomputedFeaturesServerFileBrowserRefresh');
-        const precomputedFeaturesServerFileBrowserSelect = document.getElementById('precomputedFeaturesServerFileBrowserSelect');
-        const precomputedFeaturesServerFileBrowserClose = document.getElementById('precomputedFeaturesServerFileBrowserClose');
-
-        let precomputedFeaturesSourceMode = 'upload';
-        let precomputedFeaturesServerBrowserCurrentPath = '';
-        let precomputedFeaturesServerBrowserParentPath = '';
-        let precomputedFeaturesServerBrowserSelectedPaths = [];
-        const allowServerSource = runtime.is_server_runtime !== false;
-
-        if (
-            !featuresUploadForm || !featuresFileInput || !featuresDropZone ||
-            !precomputedFeaturesSourceModeInput || !precomputedFeaturesServerFilePathInput ||
-            !precomputedFeaturesModeUploadBtn || !precomputedFeaturesModeServerBtn ||
-            !precomputedFeaturesDropZoneHint || !selectedFeaturesFiles ||
-            !selectedPrecomputedFeaturesServerFile || !selectedPrecomputedFeaturesServerFilePath ||
-            !precomputedFeaturesServerFileModal || !precomputedFeaturesServerFileBrowserPath ||
-            !precomputedFeaturesServerFileBrowserEntries || !precomputedFeaturesServerFileBrowserError ||
-            !precomputedFeaturesServerFileBrowserLoading || !precomputedFeaturesServerFileBrowserUp ||
-            !precomputedFeaturesServerFileBrowserRefresh || !precomputedFeaturesServerFileBrowserSelect ||
-            !precomputedFeaturesServerFileBrowserClose
-        ) {
-            return;
-        }
-
-        if (!allowServerSource) {
-            precomputedFeaturesModeServerBtn.classList.add('hidden');
-            selectedPrecomputedFeaturesServerFile.classList.add('hidden');
-        }
-
-        const submitFeaturesIfReady = () => {
-            if (precomputedFeaturesSourceMode === 'upload' && featuresFileInput.files && featuresFileInput.files.length > 0) {
-                featuresUploadForm.submit();
-            }
-            if (precomputedFeaturesSourceMode === 'server-path' && precomputedFeaturesServerFilePathInput.value.trim()) {
-                featuresUploadForm.submit();
-            }
-        };
-
-        const renderSelectedFeaturesFiles = (files) => {
-            const selectedFiles = document.getElementById('selectedFeaturesFiles');
-            const selectedFilesList = document.getElementById('selectedFeaturesFilesList');
-            if (!selectedFiles || !selectedFilesList) {
-                return;
-            }
-            selectedFilesList.innerHTML = '';
-            Array.from(files).forEach((file) => {
-                const line = document.createElement('span');
-                line.className = 'block';
-                line.textContent = file.name;
-                selectedFilesList.appendChild(line);
-            });
-            selectedFiles.classList.remove('hidden');
-        };
-
-        const setPrecomputedFeaturesSourceMode = (mode) => {
-            precomputedFeaturesSourceMode = allowServerSource && mode === 'server-path' ? 'server-path' : 'upload';
-            precomputedFeaturesSourceModeInput.value = precomputedFeaturesSourceMode;
-
-            const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
-            const inactiveClasses = ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-            precomputedFeaturesModeUploadBtn.classList.remove(...activeClasses);
-            precomputedFeaturesModeUploadBtn.classList.add(...inactiveClasses);
-            precomputedFeaturesModeServerBtn.classList.remove(...activeClasses);
-            precomputedFeaturesModeServerBtn.classList.add(...inactiveClasses);
-
-            if (precomputedFeaturesSourceMode === 'upload') {
-                precomputedFeaturesModeUploadBtn.classList.add(...activeClasses);
-                precomputedFeaturesModeUploadBtn.classList.remove(...inactiveClasses);
-                precomputedFeaturesDropZoneHint.textContent = 'Drag and drop pkl files or click to browse';
-                selectedPrecomputedFeaturesServerFile.classList.add('hidden');
-                precomputedFeaturesServerFilePathInput.value = '';
-                precomputedFeaturesServerBrowserSelectedPaths = [];
-            } else {
-                precomputedFeaturesModeServerBtn.classList.add(...activeClasses);
-                precomputedFeaturesModeServerBtn.classList.remove(...inactiveClasses);
-                precomputedFeaturesDropZoneHint.textContent = 'Drag and drop pkl files or click to browse';
-                selectedFeaturesFiles.classList.add('hidden');
-            }
-        };
-
-        const parseSelectedPrecomputedFeaturesServerFiles = () => (
-            String(precomputedFeaturesServerFilePathInput.value || '')
-                .split(/\r?\n/)
-                .map((item) => item.trim())
-                .filter(Boolean)
-        );
-
-        const setSelectedPrecomputedFeaturesServerFiles = (filePaths) => {
-            const unique = [];
-            const seen = new Set();
-            Array.from(filePaths || []).forEach((rawPath) => {
-                const cleanPath = String(rawPath || '').trim();
-                if (!cleanPath || seen.has(cleanPath)) {
-                    return;
-                }
-                seen.add(cleanPath);
-                unique.push(cleanPath);
-            });
-            precomputedFeaturesServerFilePathInput.value = unique.join('\n');
-            selectedPrecomputedFeaturesServerFilePath.innerHTML = '';
-            unique.forEach((pathValue) => {
-                const line = document.createElement('div');
-                line.className = 'font-mono break-all';
-                line.textContent = pathValue;
-                selectedPrecomputedFeaturesServerFilePath.appendChild(line);
-            });
-            selectedPrecomputedFeaturesServerFile.classList.toggle('hidden', unique.length === 0);
-        };
-
-        const setFeaturesInputFiles = (files) => {
-            const dataTransfer = new DataTransfer();
-            Array.from(files).forEach((file) => dataTransfer.items.add(file));
-            featuresFileInput.files = dataTransfer.files;
-        };
-
-        const showPrecomputedFeaturesServerBrowserError = (message) => {
-            const clean = String(message || '').trim();
-            precomputedFeaturesServerFileBrowserError.textContent = clean;
-            precomputedFeaturesServerFileBrowserError.classList.toggle('hidden', !clean);
-        };
-
-        const setPrecomputedFeaturesServerBrowserLoading = (loading) => {
-            precomputedFeaturesServerFileBrowserLoading.classList.toggle('hidden', !loading);
-        };
-
-        const renderPrecomputedFeaturesServerBrowserEntries = (dirs, files) => {
-            precomputedFeaturesServerFileBrowserEntries.innerHTML = '';
-            const directoryItems = Array.isArray(dirs) ? dirs : [];
-            const fileItems = Array.isArray(files) ? files : [];
-
-            directoryItems.forEach((entry) => {
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.className = 'w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]';
-                button.textContent = `${entry.name}/`;
-                button.addEventListener('click', () => {
-                    loadPrecomputedFeaturesServerFiles(entry.path);
-                });
-                precomputedFeaturesServerFileBrowserEntries.appendChild(button);
-            });
-
-            fileItems.forEach((entry) => {
-                const label = document.createElement('label');
-                label.className = 'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33] cursor-pointer';
-                const input = document.createElement('input');
-                input.type = 'checkbox';
-                input.value = entry.path;
-                input.className = 'text-primary focus:ring-primary';
-                if (precomputedFeaturesServerBrowserSelectedPaths.includes(entry.path)) {
-                    input.checked = true;
-                }
-                input.addEventListener('change', (event) => {
-                    if (event.target.checked) {
-                        if (!precomputedFeaturesServerBrowserSelectedPaths.includes(entry.path)) {
-                            precomputedFeaturesServerBrowserSelectedPaths.push(entry.path);
-                        }
-                    } else {
-                        precomputedFeaturesServerBrowserSelectedPaths = precomputedFeaturesServerBrowserSelectedPaths.filter(
-                            (selectedPath) => selectedPath !== entry.path
-                        );
-                    }
-                });
-                const span = document.createElement('span');
-                span.className = 'font-mono';
-                span.textContent = entry.name;
-                label.appendChild(input);
-                label.appendChild(span);
-                precomputedFeaturesServerFileBrowserEntries.appendChild(label);
-            });
-
-            if (directoryItems.length === 0 && fileItems.length === 0) {
-                const empty = document.createElement('p');
-                empty.className = 'px-3 py-2 text-xs text-gray-500 dark:text-gray-400';
-                empty.textContent = 'No matching files or subdirectories found.';
-                precomputedFeaturesServerFileBrowserEntries.appendChild(empty);
-            }
-        };
-
-        const loadPrecomputedFeaturesServerFiles = async (path) => {
-            setPrecomputedFeaturesServerBrowserLoading(true);
-            showPrecomputedFeaturesServerBrowserError('');
-            try {
-                const params = new URLSearchParams();
-                const targetPath = String(path || '').trim();
-                if (targetPath) {
-                    params.set('path', targetPath);
-                }
-                params.set('history_key', PRECOMPUTED_SERVER_FILE_HISTORY_KEY);
-                params.set('include_files', '1');
-                params.set('extensions', '.pkl,.pickle');
-                const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(payload.error || 'Failed to list server files.');
-                }
-                precomputedFeaturesServerBrowserCurrentPath = String(payload.path || '');
-                precomputedFeaturesServerBrowserParentPath = String(payload.parent || '');
-                precomputedFeaturesServerFileBrowserPath.textContent = precomputedFeaturesServerBrowserCurrentPath || '/';
-                renderPrecomputedFeaturesServerBrowserEntries(payload.dirs || [], payload.files || []);
-                precomputedFeaturesServerFileBrowserUp.disabled = !precomputedFeaturesServerBrowserParentPath;
-            } catch (error) {
-                showPrecomputedFeaturesServerBrowserError(error.message || 'Failed to list server files.');
-            } finally {
-                setPrecomputedFeaturesServerBrowserLoading(false);
-            }
-        };
-
-        const pickNativePrecomputedFeaturesServerFiles = async () => {
-            const formData = new FormData();
-            formData.append('mode', 'file');
-            formData.append('extensions', '.pkl,.pickle');
-            formData.append('allow_multiple', '1');
-            formData.append('history_key', PRECOMPUTED_SERVER_FILE_HISTORY_KEY);
-            const response = await fetch('{{ url_for("features_select_folder") }}', {
-                method: 'POST',
-                body: formData,
-            });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(payload.error || 'Path selection cancelled.');
-            }
-            const paths = Array.isArray(payload.paths)
-                ? payload.paths
-                : (payload.path ? [payload.path] : []);
-            const cleaned = paths.map((item) => String(item || '').trim()).filter(Boolean);
-            if (!cleaned.length) {
-                throw new Error('No files selected.');
-            }
-            return cleaned;
-        };
-
-        const openPrecomputedFeaturesServerFileModal = async () => {
-            precomputedFeaturesServerFileModal.classList.remove('hidden');
-            precomputedFeaturesServerFileModal.classList.add('flex');
-            precomputedFeaturesServerBrowserSelectedPaths = parseSelectedPrecomputedFeaturesServerFiles();
-            const current = precomputedFeaturesServerBrowserSelectedPaths.length > 0
-                ? precomputedFeaturesServerBrowserSelectedPaths[0]
-                : '';
-            const startPath = current && current.includes('/')
-                ? current.slice(0, current.lastIndexOf('/'))
-                : '';
-            await loadPrecomputedFeaturesServerFiles(startPath);
-        };
-
-        const openPrecomputedFeaturesServerFilePicker = async () => {
-            try {
-                const selected = await pickNativePrecomputedFeaturesServerFiles();
-                setSelectedPrecomputedFeaturesServerFiles(selected);
-                submitFeaturesIfReady();
-                return;
-            } catch (error) {
-                const errorMessage = String(error?.message || '').toLowerCase();
-                const shouldFallbackToBrowser = errorMessage.includes('native file/folder picker is unavailable');
-                if (!shouldFallbackToBrowser) {
-                    console.debug('Native server picker dismissed; not opening in-app browser fallback.', error);
-                    return;
-                }
-                console.debug('Native server picker unavailable, opening in-app browser.', error);
-            }
-            await openPrecomputedFeaturesServerFileModal();
-        };
-
-        const closePrecomputedFeaturesServerFileModal = () => {
-            precomputedFeaturesServerFileModal.classList.add('hidden');
-            precomputedFeaturesServerFileModal.classList.remove('flex');
-            showPrecomputedFeaturesServerBrowserError('');
-        };
-
-        featuresFileInput.addEventListener('change', () => {
-            renderSelectedFeaturesFiles(featuresFileInput.files);
-            setSelectedPrecomputedFeaturesServerFiles([]);
-            submitFeaturesIfReady();
+    if (typeof window.initUnifiedUploadFlow === 'function') {
+        window.initUnifiedUploadFlow({
+            runtime: window.__featuresRuntime || {},
+            historyKey: 'features:precomputed_file_browser',
+            localPickerId: 'features_load_data_local',
+            browseDirsUrl: '{{ url_for("features_browse_dirs") }}',
+            selectPathUrl: '{{ url_for("features_select_folder") }}',
+            formId: 'featuresUploadForm',
+            fileInputId: 'featuresFileInput',
+            dropZoneId: 'featuresDropZone',
+            sourceModeInputId: 'precomputedFeaturesSourceModeInput',
+            serverPathInputId: 'precomputedFeaturesServerFilePathInput',
+            modeUploadBtnId: 'precomputedFeaturesModeUploadBtn',
+            modeServerBtnId: 'precomputedFeaturesModeServerBtn',
+            dropZoneHintId: 'precomputedFeaturesDropZoneHint',
+            selectedLocalContainerId: 'selectedFeaturesFiles',
+            selectedLocalListId: 'selectedFeaturesFilesList',
+            selectedServerContainerId: 'selectedPrecomputedFeaturesServerFile',
+            selectedServerListId: 'selectedPrecomputedFeaturesServerFilePath',
+            modalRootId: 'precomputedFeaturesServerFileModal',
+            modalPathId: 'precomputedFeaturesServerFileBrowserPath',
+            modalEntriesId: 'precomputedFeaturesServerFileBrowserEntries',
+            modalErrorId: 'precomputedFeaturesServerFileBrowserError',
+            modalLoadingId: 'precomputedFeaturesServerFileBrowserLoading',
+            modalUpId: 'precomputedFeaturesServerFileBrowserUp',
+            modalRefreshId: 'precomputedFeaturesServerFileBrowserRefresh',
+            modalSelectId: 'precomputedFeaturesServerFileBrowserSelect',
+            modalCloseId: 'precomputedFeaturesServerFileBrowserClose',
+            activeButtonClasses: ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'],
+            inactiveButtonClasses: ['border-gray-200', 'dark:border-[#323b67]', 'text-gray-600', 'dark:text-gray-300'],
+            dragActiveClasses: ['simulation-accent-border'],
+            directoryEntryClass: 'w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]',
+            fileEntryClass: 'w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33] cursor-pointer',
+            emptyEntryClass: 'px-3 py-2 text-xs text-gray-500 dark:text-gray-400',
         });
-
-        featuresDropZone.addEventListener('click', () => {
-            if (precomputedFeaturesSourceMode === 'upload') {
-                featuresFileInput.click();
-            } else {
-                openPrecomputedFeaturesServerFilePicker();
-            }
-        });
-
-        precomputedFeaturesModeUploadBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            setPrecomputedFeaturesSourceMode('upload');
-        });
-
-        precomputedFeaturesModeServerBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            setPrecomputedFeaturesSourceMode('server-path');
-        });
-
-        ['dragenter', 'dragover'].forEach((eventName) => {
-            featuresDropZone.addEventListener(eventName, (event) => {
-                event.preventDefault();
-                if (precomputedFeaturesSourceMode !== 'upload') return;
-                featuresDropZone.classList.add('simulation-accent-border');
-            });
-        });
-
-        ['dragleave', 'drop'].forEach((eventName) => {
-            featuresDropZone.addEventListener(eventName, (event) => {
-                event.preventDefault();
-                if (precomputedFeaturesSourceMode !== 'upload') return;
-                featuresDropZone.classList.remove('simulation-accent-border');
-            });
-        });
-
-        featuresDropZone.addEventListener('drop', (event) => {
-            if (precomputedFeaturesSourceMode !== 'upload') {
-                return;
-            }
-            const files = event.dataTransfer.files;
-            if (!files || files.length === 0) {
-                return;
-            }
-            setFeaturesInputFiles(files);
-            renderSelectedFeaturesFiles(files);
-            setSelectedPrecomputedFeaturesServerFiles([]);
-            submitFeaturesIfReady();
-        });
-
-        precomputedFeaturesServerFileBrowserUp.addEventListener('click', () => {
-            if (precomputedFeaturesServerBrowserParentPath) {
-                loadPrecomputedFeaturesServerFiles(precomputedFeaturesServerBrowserParentPath);
-            }
-        });
-
-        precomputedFeaturesServerFileBrowserRefresh.addEventListener('click', () => {
-            loadPrecomputedFeaturesServerFiles(precomputedFeaturesServerBrowserCurrentPath);
-        });
-
-        precomputedFeaturesServerFileBrowserSelect.addEventListener('click', () => {
-            if (!precomputedFeaturesServerBrowserSelectedPaths.length) {
-                showPrecomputedFeaturesServerBrowserError('Select at least one file.');
-                return;
-            }
-            setSelectedPrecomputedFeaturesServerFiles(precomputedFeaturesServerBrowserSelectedPaths);
-            closePrecomputedFeaturesServerFileModal();
-            submitFeaturesIfReady();
-        });
-
-        precomputedFeaturesServerFileBrowserClose.addEventListener('click', closePrecomputedFeaturesServerFileModal);
-        precomputedFeaturesServerFileModal.addEventListener('click', (event) => {
-            if (event.target === precomputedFeaturesServerFileModal) {
-                closePrecomputedFeaturesServerFileModal();
-            }
-        });
-
-        const runtimeDefaultMode = (runtime.default_simulation_source_mode || '').toLowerCase();
-        setPrecomputedFeaturesSourceMode(runtimeDefaultMode === 'server-path' ? 'server-path' : 'upload');
-    })();
+    }
 </script>
 {% endblock %}

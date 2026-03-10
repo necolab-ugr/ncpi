@@ -1,0 +1,879 @@
+{% extends "4.inference.html" %}
+{% block title %}New training{% endblock %}
+
+{% block head %}
+{{ super() }}
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
+<style>
+    [x-cloak] {
+        display: none !important;
+    }
+    .drop-zone {
+        border-style: dashed;
+    }
+    body {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    .code-editor::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    .code-editor::-webkit-scrollbar-track {
+        background: #f1f5f9;
+    }
+    .code-editor::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+    }
+    .dark .code-editor::-webkit-scrollbar-track {
+        background: #1e293b;
+    }
+    .dark .code-editor::-webkit-scrollbar-thumb {
+        background: #475569;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div
+    id="inference-training-root"
+    x-data="{
+        runtime: (window.__webuiRuntime || {}),
+        modelName: 'MLPRegressor',
+        cvEnabled: false,
+        paramGridEnabled: false,
+        featuresSourceMode: 'upload',
+        featuresServerFilePath: '',
+        parametersSourceMode: 'upload',
+        parametersServerFilePath: '',
+        uploads: {},
+        isUploaded(id) { return this.uploads[id]?.uploaded === true; },
+        getFileName(id) { return this.uploads[id]?.name || ''; },
+        clearUpload(id) { this.uploads[id] = { uploaded: false, name: '' }; },
+        onFileSelected(event, id) {
+            const input = event && event.target ? event.target : null;
+            const file = input && input.files && input.files[0] ? input.files[0] : null;
+            if (!file) {
+                this.clearUpload(id);
+                return;
+            }
+            this.uploads[id] = { uploaded: true, name: file.name };
+        },
+        isSbiModel() {
+            const selected = this.modelName === '__custom__'
+                ? ((this.$refs.customModelName && this.$refs.customModelName.value) ? this.$refs.customModelName.value.trim() : '')
+                : this.modelName;
+            return ['NPE', 'NLE', 'NRE'].includes(selected);
+        }
+    }"
+    class="max-w-5xl mx-auto"
+>
+    <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Inference Training Configuration</h1>
+    <p class="text-slate-600 dark:text-slate-400 mb-8">Configure training and launch a model-training job from uploaded features and parameters.</p>
+
+    <form action="{{ url_for('start_computation_redirect', computation_type='inference_training') }}" method="POST" enctype="multipart/form-data" class="space-y-8">
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">A</span>
+                Dataset Upload
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Features Data <span class="text-red-500">*</span>
+                    </label>
+                    <div
+                        class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer"
+                        data-field="training_features_file"
+                        data-label="Features Data"
+                    >
+                        <input id="training_features_file_input" name="training_features_file" type="file" class="hidden" />
+                        <input id="training_features_file_source_mode" name="training_features_source_mode" type="hidden" value="upload" />
+                        <input id="training_features_file_server_path" name="training_features_server_file_path" type="hidden" value="" />
+                        <div class="flex flex-wrap justify-center gap-2">
+                            <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                            <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                        </div>
+                        <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                        <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Features Data</p>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop files or click to browse</p>
+                        <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="local-summary">
+                            <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                            <div class="mt-1 flex items-start justify-between gap-2">
+                                <span class="block flex-1" data-role="local-name"></span>
+                                <button type="button" data-role="local-clear" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="server-summary">
+                            <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                            <div class="mt-1 flex items-start justify-between gap-2">
+                                <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
+                                <button type="button" data-role="server-clear" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Features matrix/dataframe (X). If dataframe contains <code>Features</code>, it will be used directly.</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        Parameters Data <span class="text-red-500">*</span>
+                    </label>
+                    <div
+                        class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer"
+                        data-field="training_parameters_file"
+                        data-label="Parameters Data"
+                    >
+                        <input id="training_parameters_file_input" name="training_parameters_file" type="file" class="hidden" />
+                        <input id="training_parameters_file_source_mode" name="training_parameters_source_mode" type="hidden" value="upload" />
+                        <input id="training_parameters_file_server_path" name="training_parameters_server_file_path" type="hidden" value="" />
+                        <div class="flex flex-wrap justify-center gap-2">
+                            <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                            <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                        </div>
+                        <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                        <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Parameters Data</p>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop files or click to browse</p>
+                        <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="local-summary">
+                            <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                            <div class="mt-1 flex items-start justify-between gap-2">
+                                <span class="block flex-1" data-role="local-name"></span>
+                                <button type="button" data-role="local-clear" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="server-summary">
+                            <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                            <div class="mt-1 flex items-start justify-between gap-2">
+                                <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
+                                <button type="button" data-role="server-clear" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Target parameters matrix/vector (Y, θ).</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">B</span>
+                Core Setup
+            </h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-model-name">Model</label>
+                    <select
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        id="training-model-name"
+                        name="training_model_name"
+                        x-model="modelName"
+                    >
+                        <optgroup label="Sklearn">
+                            <option value="MLPRegressor">MLPRegressor</option>
+                            <option value="RandomForestRegressor">RandomForestRegressor</option>
+                            <option value="Ridge">Ridge</option>
+                            <option value="SVR">SVR</option>
+                            <option value="LinearRegression">LinearRegression</option>
+                        </optgroup>
+                        <optgroup label="SBI">
+                            <option value="NPE">NPE</option>
+                            <option value="NLE">NLE</option>
+                            <option value="NRE">NRE</option>
+                        </optgroup>
+                        <option value="__custom__">Custom model name...</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-model-name-custom">Custom Model Name</label>
+                    <input
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        id="training-model-name-custom"
+                        name="training_model_name_custom"
+                        type="text"
+                        placeholder="e.g., ExtraTreesRegressor"
+                        x-ref="customModelName"
+                        :disabled="modelName !== '__custom__'"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-seed">Random Seed</label>
+                    <input
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        id="training-seed"
+                        name="training_seed"
+                        type="number"
+                        value="0"
+                    />
+                </div>
+                <div class="flex items-center pt-6">
+                    <label class="inline-flex items-center gap-2">
+                        <input class="rounded border-slate-300 text-primary focus:ring-primary" name="training_use_scaler" type="checkbox" value="1" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Scale input features during training</span>
+                    </label>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">C</span>
+                Training Strategy
+            </h2>
+
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-hyperparams-json">Base Hyperparameters (dict)</label>
+                    <textarea
+                        id="training-hyperparams-json"
+                        name="training_hyperparams_json"
+                        rows="3"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+
+                <div class="flex items-center">
+                    <label class="inline-flex items-center gap-2">
+                        <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_enable_cv" value="1" x-model="cvEnabled" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable cross-validation / repeated CV</span>
+                    </label>
+                </div>
+                <p class="text-xs text-slate-500 dark:text-slate-400" x-show="!cvEnabled">
+                    Direct training mode: model is trained once on the full (or subsampled) dataset without CV.
+                </p>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="cvEnabled" x-cloak>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-splits">CV Splits (n_splits)</label>
+                        <input
+                            id="training-n-splits"
+                            name="training_n_splits"
+                            type="number"
+                            min="2"
+                            value="10"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-repeats">CV Repeats (n_repeats)</label>
+                        <input
+                            id="training-n-repeats"
+                            name="training_n_repeats"
+                            type="number"
+                            min="1"
+                            value="10"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-subsample-percent">Random Subsample (%)</label>
+                    <input
+                        id="training-subsample-percent"
+                        name="training_subsample_percent"
+                        type="number"
+                        min="0.1"
+                        max="100"
+                        step="0.1"
+                        placeholder="100 (default)"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Randomly samples this percentage of rows before training.</p>
+                </div>
+
+                <div class="flex items-center">
+                    <label class="inline-flex items-center gap-2">
+                        <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_enable_param_grid" value="1" x-model="paramGridEnabled" :disabled="!cvEnabled" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable hyperparameter search (param_grid)</span>
+                    </label>
+                </div>
+                <div x-show="cvEnabled && paramGridEnabled" x-cloak>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-param-grid-json">Parameter Grid (dict of lists or list of dicts)</label>
+                    <textarea
+                        id="training-param-grid-json"
+                        name="training_param_grid_json"
+                        rows="4"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                        placeholder="e.g. {'n_estimators': [100, 300], 'max_depth': [5, 10]}"
+                    ></textarea>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700" x-show="isSbiModel()" x-cloak>
+            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
+                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">D</span>
+                SBI Settings
+            </h2>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-prior-low">Prior Low</label>
+                    <input
+                        id="training-sbi-prior-low"
+                        name="training_sbi_prior_low"
+                        type="text"
+                        placeholder="0 or [0, 0, 0]"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-prior-high">Prior High</label>
+                    <input
+                        id="training-sbi-prior-high"
+                        name="training_sbi_prior_high"
+                        type="text"
+                        placeholder="1 or [1, 1, 1]"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-estimator">Estimator</label>
+                    <select
+                        id="training-sbi-estimator"
+                        name="training_sbi_estimator"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    >
+                        <option value="nsf">nsf</option>
+                        <option value="maf">maf</option>
+                        <option value="mdn">mdn</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">CV Posterior Samples</label>
+                    <input
+                        id="training-sbi-eval-num"
+                        name="training_sbi_eval_num_posterior_samples"
+                        type="number"
+                        min="1"
+                        value="2000"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">CV Eval Batch Size</label>
+                    <input
+                        id="training-sbi-eval-batch"
+                        name="training_sbi_eval_batch_size"
+                        type="number"
+                        min="1"
+                        value="256"
+                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                    />
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs (dict)</label>
+                    <textarea
+                        id="training-sbi-estimator-kwargs"
+                        name="training_sbi_estimator_kwargs_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs (dict)</label>
+                    <textarea
+                        id="training-sbi-inference-kwargs"
+                        name="training_sbi_inference_kwargs_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs (dict)</label>
+                    <textarea
+                        id="training-sbi-build-posterior-kwargs"
+                        name="training_sbi_build_posterior_kwargs_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train params (dict)</label>
+                    <textarea
+                        id="training-sbi-train-params"
+                        name="training_sbi_train_params_json"
+                        rows="2"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    >{"max_num_epochs": 50}</textarea>
+                </div>
+            </div>
+        </section>
+
+        <div class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
+            <a href="{{ url_for('inference') }}"
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
+                <span class="material-symbols-outlined">arrow_back</span>
+                Back to Inference
+            </a>
+            <button type="submit"
+                class="flex items-center justify-center gap-2 py-2.5 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                Start Training
+                <span class="material-symbols-outlined">play_arrow</span>
+            </button>
+        </div>
+    </form>
+
+    <div id="inferenceTrainingServerFileBrowserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+            <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+                <button type="button" id="inferenceTrainingServerFileBrowserClose"
+                    class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+            </div>
+            <div class="p-4 space-y-3">
+                <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                    Current folder: <span id="inferenceTrainingServerFileBrowserPath" class="font-mono"></span>
+                </p>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" id="inferenceTrainingServerFileBrowserUp"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Up
+                    </button>
+                    <button type="button" id="inferenceTrainingServerFileBrowserRefresh"
+                        class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                        Refresh
+                    </button>
+                    <button type="button" id="inferenceTrainingServerFileBrowserSelect"
+                        class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                        Select file
+                    </button>
+                </div>
+                <div id="inferenceTrainingServerFileBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+                <div id="inferenceTrainingServerFileBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+                <div id="inferenceTrainingServerFileBrowserEntries"
+                    class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+(() => {
+    const runtime = window.__webuiRuntime || {};
+    const allowServerSource = runtime.is_server_runtime !== false;
+    const runtimeDefaultMode = String(runtime.default_simulation_source_mode || "upload").toLowerCase();
+    const defaultMode = (allowServerSource && runtimeDefaultMode === "server-path") ? "server-path" : "upload";
+
+    const SERVER_BROWSER_HISTORY_KEYS = {
+        training_features_file: "inference_new_training:features_file_browser",
+        training_parameters_file: "inference_new_training:parameters_file_browser",
+    };
+    const requiredFields = ["training_features_file", "training_parameters_file"];
+
+    const form = document.querySelector("form[action*='inference_training']");
+    const modal = document.getElementById("inferenceTrainingServerFileBrowserModal");
+    const modalPath = document.getElementById("inferenceTrainingServerFileBrowserPath");
+    const modalEntries = document.getElementById("inferenceTrainingServerFileBrowserEntries");
+    const modalError = document.getElementById("inferenceTrainingServerFileBrowserError");
+    const modalLoading = document.getElementById("inferenceTrainingServerFileBrowserLoading");
+    const modalUp = document.getElementById("inferenceTrainingServerFileBrowserUp");
+    const modalRefresh = document.getElementById("inferenceTrainingServerFileBrowserRefresh");
+    const modalSelect = document.getElementById("inferenceTrainingServerFileBrowserSelect");
+    const modalClose = document.getElementById("inferenceTrainingServerFileBrowserClose");
+
+    if (
+        !form || !modal || !modalPath || !modalEntries || !modalError || !modalLoading
+        || !modalUp || !modalRefresh || !modalSelect || !modalClose
+    ) {
+        return;
+    }
+
+    const cards = Array.from(document.querySelectorAll(".custom-file-card"))
+        .filter((card) => requiredFields.includes(card.dataset.field || ""));
+    if (cards.length !== requiredFields.length) {
+        return;
+    }
+
+    let activeField = "";
+    let currentPath = "";
+    let parentPath = "";
+    let selectedPath = "";
+    let activeHistoryKey = SERVER_BROWSER_HISTORY_KEYS.training_features_file;
+
+    const getCard = (field) => cards.find((card) => card.dataset.field === field);
+    const getModeInput = (field) => document.getElementById(`${field}_source_mode`);
+    const getServerInput = (field) => document.getElementById(`${field}_server_path`);
+    const getFileInput = (field) => document.getElementById(`${field}_input`);
+
+    const setModalLoading = (loading) => {
+        modalLoading.classList.toggle("hidden", !loading);
+    };
+
+    const setModalError = (message) => {
+        const clean = String(message || "").trim();
+        modalError.textContent = clean;
+        modalError.classList.toggle("hidden", !clean);
+    };
+
+    const setModeVisuals = (field, mode) => {
+        const card = getCard(field);
+        if (!card) return;
+        const uploadBtn = card.querySelector(".custom-mode-upload-btn");
+        const serverBtn = card.querySelector(".custom-mode-server-btn");
+        const hint = card.querySelector('[data-role="hint"]');
+        const localSummary = card.querySelector('[data-role="local-summary"]');
+        const serverSummary = card.querySelector('[data-role="server-summary"]');
+
+        const activeClasses = ["border-primary", "bg-primary/10", "text-primary", "font-semibold"];
+        const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
+
+        [uploadBtn, serverBtn].forEach((btn) => {
+            if (!btn) return;
+            btn.classList.remove(...activeClasses);
+            btn.classList.add(...inactiveClasses);
+        });
+
+        if (!allowServerSource && serverBtn) {
+            serverBtn.classList.add("hidden");
+        }
+
+        if (mode === "server-path" && allowServerSource) {
+            if (serverBtn) {
+                serverBtn.classList.add(...activeClasses);
+                serverBtn.classList.remove(...inactiveClasses);
+            }
+            if (hint) {
+                hint.textContent = "Drag and drop files or click to browse";
+            }
+            if (localSummary) {
+                localSummary.classList.add("hidden");
+            }
+        } else {
+            if (uploadBtn) {
+                uploadBtn.classList.add(...activeClasses);
+                uploadBtn.classList.remove(...inactiveClasses);
+            }
+            if (hint) {
+                hint.textContent = "Drag and drop files or click to browse";
+            }
+            if (serverSummary) {
+                serverSummary.classList.add("hidden");
+            }
+        }
+    };
+
+    const setMode = (field, mode) => {
+        const normalized = (!allowServerSource || mode !== "server-path") ? "upload" : "server-path";
+        const modeInput = getModeInput(field);
+        const fileInput = getFileInput(field);
+        const serverInput = getServerInput(field);
+        if (!modeInput || !fileInput || !serverInput) return;
+
+        modeInput.value = normalized;
+        if (normalized === "server-path") {
+            fileInput.value = "";
+            const card = getCard(field);
+            const localName = card ? card.querySelector('[data-role="local-name"]') : null;
+            const localSummary = card ? card.querySelector('[data-role="local-summary"]') : null;
+            if (localName) localName.textContent = "";
+            if (localSummary) localSummary.classList.add("hidden");
+        } else {
+            serverInput.value = "";
+            const card = getCard(field);
+            const serverPath = card ? card.querySelector('[data-role="server-path"]') : null;
+            const serverSummary = card ? card.querySelector('[data-role="server-summary"]') : null;
+            if (serverPath) serverPath.textContent = "";
+            if (serverSummary) serverSummary.classList.add("hidden");
+        }
+        setModeVisuals(field, normalized);
+    };
+
+    const setLocalSelection = (field, fileName) => {
+        const card = getCard(field);
+        if (!card) return;
+        const localName = card.querySelector('[data-role="local-name"]');
+        const localSummary = card.querySelector('[data-role="local-summary"]');
+        const serverSummary = card.querySelector('[data-role="server-summary"]');
+        const serverInput = getServerInput(field);
+        if (localName) localName.textContent = fileName || "";
+        if (localSummary) localSummary.classList.toggle("hidden", !fileName);
+        if (serverSummary) serverSummary.classList.add("hidden");
+        if (serverInput) serverInput.value = "";
+    };
+
+    const setServerSelection = (field, pathValue) => {
+        const card = getCard(field);
+        const serverInput = getServerInput(field);
+        if (!card || !serverInput) return;
+        const cleanPath = String(pathValue || "").trim();
+        serverInput.value = cleanPath;
+        const serverPath = card.querySelector('[data-role="server-path"]');
+        const serverSummary = card.querySelector('[data-role="server-summary"]');
+        const localSummary = card.querySelector('[data-role="local-summary"]');
+        const localName = card.querySelector('[data-role="local-name"]');
+        const fileInput = getFileInput(field);
+
+        if (serverPath) serverPath.textContent = cleanPath;
+        if (serverSummary) serverSummary.classList.toggle("hidden", !cleanPath);
+        if (localSummary) localSummary.classList.add("hidden");
+        if (localName) localName.textContent = "";
+        if (fileInput) fileInput.value = "";
+    };
+
+    const renderModalEntries = (dirs, files) => {
+        modalEntries.innerHTML = "";
+        const dirItems = Array.isArray(dirs) ? dirs : [];
+        const fileItems = Array.isArray(files) ? files : [];
+
+        dirItems.forEach((entry) => {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "w-full px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800";
+            btn.textContent = `${entry.name}/`;
+            btn.addEventListener("click", () => {
+                loadServerFiles(entry.path);
+            });
+            modalEntries.appendChild(btn);
+        });
+
+        fileItems.forEach((entry) => {
+            const label = document.createElement("label");
+            label.className = "w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer";
+            const input = document.createElement("input");
+            input.type = "radio";
+            input.name = "inference-training-server-file-selected";
+            input.value = entry.path;
+            input.className = "text-primary focus:ring-primary";
+            if (selectedPath && selectedPath === entry.path) {
+                input.checked = true;
+            }
+            input.addEventListener("change", () => {
+                selectedPath = entry.path;
+            });
+            const span = document.createElement("span");
+            span.className = "font-mono";
+            span.textContent = entry.name;
+            label.appendChild(input);
+            label.appendChild(span);
+            modalEntries.appendChild(label);
+        });
+
+        if (dirItems.length === 0 && fileItems.length === 0) {
+            const empty = document.createElement("p");
+            empty.className = "px-3 py-2 text-xs text-slate-500 dark:text-slate-400";
+            empty.textContent = "No files or subdirectories found.";
+            modalEntries.appendChild(empty);
+        }
+    };
+
+    const loadServerFiles = async (pathValue) => {
+        setModalLoading(true);
+        setModalError("");
+        try {
+            const params = new URLSearchParams();
+            const targetPath = String(pathValue || "").trim();
+            if (targetPath) {
+                params.set("path", targetPath);
+            }
+            params.set("history_key", activeHistoryKey);
+            params.set("include_files", "1");
+
+            const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(payload.error || "Failed to list server files.");
+            }
+
+            currentPath = String(payload.path || "");
+            parentPath = String(payload.parent || "");
+            modalPath.textContent = currentPath || "/";
+            modalUp.disabled = !parentPath;
+            renderModalEntries(payload.dirs || [], payload.files || []);
+
+            if (selectedPath) {
+                const stillPresent = (payload.files || []).some((entry) => entry.path === selectedPath);
+                if (!stillPresent) selectedPath = "";
+            }
+        } catch (error) {
+            setModalError(error && error.message ? error.message : "Failed to list server files.");
+        } finally {
+            setModalLoading(false);
+        }
+    };
+
+    const openModalForField = async (field) => {
+        activeField = field;
+        activeHistoryKey = SERVER_BROWSER_HISTORY_KEYS[field] || SERVER_BROWSER_HISTORY_KEYS.training_features_file;
+        selectedPath = String(getServerInput(field)?.value || "").trim();
+        const startPath = selectedPath && selectedPath.includes("/")
+            ? selectedPath.slice(0, selectedPath.lastIndexOf("/"))
+            : "";
+        modal.classList.remove("hidden");
+        modal.classList.add("flex");
+        await loadServerFiles(startPath);
+    };
+
+    const closeModal = () => {
+        modal.classList.add("hidden");
+        modal.classList.remove("flex");
+        setModalError("");
+    };
+
+    cards.forEach((card) => {
+        const field = card.dataset.field;
+        if (!field || !requiredFields.includes(field)) return;
+
+        const fileInput = getFileInput(field);
+        const modeInput = getModeInput(field);
+        const uploadBtn = card.querySelector(".custom-mode-upload-btn");
+        const serverBtn = card.querySelector(".custom-mode-server-btn");
+        const localClearBtn = card.querySelector('[data-role="local-clear"]');
+        const serverClearBtn = card.querySelector('[data-role="server-clear"]');
+        if (!fileInput || !modeInput || !uploadBtn || !serverBtn) return;
+
+        const hasServer = Boolean(String(getServerInput(field)?.value || "").trim());
+        const hasLocal = Boolean(fileInput.files && fileInput.files[0]);
+        if (hasServer && !hasLocal && allowServerSource) {
+            setMode(field, "server-path");
+            setServerSelection(field, getServerInput(field).value);
+        } else if (hasLocal) {
+            setMode(field, "upload");
+            setLocalSelection(field, fileInput.files[0].name);
+        } else {
+            setMode(field, defaultMode);
+        }
+
+        uploadBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            setMode(field, "upload");
+        });
+
+        serverBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (!allowServerSource) return;
+            setMode(field, "server-path");
+        });
+
+        if (localClearBtn) {
+            localClearBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                fileInput.value = "";
+                setLocalSelection(field, "");
+            });
+        }
+
+        if (serverClearBtn) {
+            serverClearBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setServerSelection(field, "");
+            });
+        }
+
+        card.addEventListener("click", () => {
+            if (modeInput.value === "upload") {
+                fileInput.click();
+            } else if (allowServerSource) {
+                openModalForField(field);
+            }
+        });
+
+        fileInput.addEventListener("change", () => {
+            const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+            setLocalSelection(field, file ? file.name : "");
+        });
+
+        ["dragenter", "dragover"].forEach((eventName) => {
+            card.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (modeInput.value !== "upload") return;
+                card.classList.add("border-primary");
+            });
+        });
+
+        ["dragleave", "drop"].forEach((eventName) => {
+            card.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (modeInput.value !== "upload") return;
+                card.classList.remove("border-primary");
+            });
+        });
+
+        card.addEventListener("drop", (event) => {
+            if (modeInput.value !== "upload") return;
+            const files = event.dataTransfer && event.dataTransfer.files ? event.dataTransfer.files : null;
+            if (!files || files.length === 0) return;
+            const dt = new DataTransfer();
+            dt.items.add(files[0]);
+            fileInput.files = dt.files;
+            setLocalSelection(field, files[0].name);
+        });
+    });
+
+    modalUp.addEventListener("click", () => {
+        if (parentPath) {
+            loadServerFiles(parentPath);
+        }
+    });
+
+    modalRefresh.addEventListener("click", () => {
+        loadServerFiles(currentPath);
+    });
+
+    modalSelect.addEventListener("click", () => {
+        if (!activeField) {
+            setModalError("No target field selected.");
+            return;
+        }
+        if (!selectedPath) {
+            setModalError("Select a file.");
+            return;
+        }
+        setMode(activeField, "server-path");
+        setServerSelection(activeField, selectedPath);
+        closeModal();
+    });
+
+    modalClose.addEventListener("click", closeModal);
+    modal.addEventListener("click", (event) => {
+        if (event.target === modal) {
+            closeModal();
+        }
+    });
+
+    form.addEventListener("submit", (event) => {
+        const missing = [];
+        requiredFields.forEach((field) => {
+            const card = getCard(field);
+            const label = card ? (card.dataset.label || field) : field;
+            const mode = String(getModeInput(field)?.value || "upload").trim().toLowerCase();
+            const fileInput = getFileInput(field);
+            const serverPath = String(getServerInput(field)?.value || "").trim();
+
+            if (mode === "server-path") {
+                if (!serverPath) {
+                    missing.push(`${label}: select a server file`);
+                }
+            } else {
+                const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+                if (!file) {
+                    missing.push(`${label}: upload a local file`);
+                }
+            }
+        });
+
+        if (missing.length > 0) {
+            event.preventDefault();
+            window.alert(`Provide both Features Data and Parameters Data. ${missing.join("; ")}`);
+        }
+    });
+})();
+</script>
+{% endblock %}

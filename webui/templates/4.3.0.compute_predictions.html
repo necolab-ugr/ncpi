@@ -28,6 +28,9 @@
     .dark .code-editor::-webkit-scrollbar-thumb {
         background: #475569;
     }
+    .drop-zone {
+        border-style: dashed;
+    }
     .loader {
         border-top-color: #39E079;
         -webkit-animation: spinner 1.5s linear infinite;
@@ -118,6 +121,7 @@
                     <input id="existing-features-file" type="hidden" name="existing_features_file" value="{{ default_feature_file | default('') }}">
                     <input id="features-source-mode" type="hidden" name="features_source_mode" value="upload">
                     <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="">
+                    <input id="file-upload-features" class="hidden" name="features_predict_file" type="file" />
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                         Features Data <span class="text-red-500">*</span>
                     </label>
@@ -132,56 +136,33 @@
                     </div>
                     <div
                         id="features-drop-zone"
-                        @click="if (featuresSourceMode === 'upload') { document.getElementById('file-upload-features').click(); } else { const btn = document.getElementById('features-server-browse-btn'); if (btn) { btn.click(); } }"
-                        class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors cursor-pointer bg-slate-50 dark:bg-slate-800/30">
-                        <div class="space-y-2 text-center">
-                            <div class="flex flex-wrap justify-center gap-2">
-                                <button id="features-source-upload-btn" type="button" @click.stop="featuresSourceMode = 'upload'; featuresServerFilePath = ''"
-                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                    :class="featuresSourceMode === 'upload' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                    Local upload
-                                </button>
-                                <button id="features-source-server-btn" type="button" @click.stop="featuresSourceMode = 'server-path'"
-                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                    :class="featuresSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                    Server file
-                                </button>
-                            </div>
-                            <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                            <div class="flex justify-center" x-show="featuresSourceMode === 'upload'" x-cloak>
-                                <input accept=".pkl,.pickle" class="sr-only" id="file-upload-features"
-                                    name="features_predict_file" type="file" :disabled="featuresSourceMode !== 'upload'" />
-                                <button type="button"
-                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                    onclick="document.getElementById('file-upload-features').click()">
-                                    Browse local files
-                                </button>
-                            </div>
-                            <div class="flex justify-center" x-show="featuresSourceMode === 'server-path' && !featuresServerFilePath" x-cloak>
-                                <button type="button" id="features-server-browse-btn" @click.stop
-                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                    Browse server files
-                                </button>
-                            </div>
-                            <p class="text-xs text-slate-500 dark:text-slate-500" x-show="featuresSourceMode === 'upload'" x-cloak>
-                                Select an existing local file.
-                            </p>
-                            <p class="text-xs text-slate-500 dark:text-slate-500" x-show="featuresSourceMode === 'server-path'" x-cloak>
-                                Select an existing server file.
-                            </p>
-                            <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="featuresSourceMode === 'server-path' && featuresServerFilePath" x-cloak x-text="featuresServerFilePath"></p>
+                        class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
+                        <div class="flex flex-wrap justify-center gap-2">
+                            <button id="features-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                            <button id="features-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                            <button id="features-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                         </div>
-                    </div>
-                    <div
-                        id="features-uploaded-status"
-                        class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
-                        style="display:none;"
-                    >
-                        <span class="inline-flex items-center gap-2">
-                            <span class="material-symbols-outlined text-base">check_circle</span>
-                            <span>File selected:</span>
-                            <span id="features-uploaded-name"></span>
-                        </span>
+                        <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                        <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Features Data</p>
+                        <p id="features-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
+                        <div id="features-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                            <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                            <div class="mt-1 flex items-start justify-between gap-2">
+                                <span id="features-selected-local-name" class="block flex-1"></span>
+                                <button id="features-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="features-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                            <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                            <div class="mt-1 flex items-start justify-between gap-2">
+                                <span id="features-selected-server-path" class="block flex-1 font-mono break-all"></span>
+                                <button id="features-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <div
                         id="features-not-loaded-status"
@@ -280,110 +261,40 @@
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'server-path' && assetsUploadMode === 'individual'" x-cloak>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsUploadMode === 'individual'" x-cloak>
                     <div>
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                            Model / Posterior <span class="text-red-500">*</span>
-                        </label>
-                        <div
-                            @click="const btn = document.getElementById('assets-model-server-browse-btn'); if (btn) { btn.click(); }"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-2 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing server file.</p>
-                                <div class="flex justify-center" x-show="!assetsModelServerFilePath" x-cloak>
-                                    <button type="button" id="assets-model-server-browse-btn" @click.stop
-                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                        Browse server files
-                                    </button>
-                                </div>
-                                <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsModelServerFilePath" x-cloak x-text="assetsModelServerFilePath"></p>
-                            </div>
-                        </div>
-                        <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
-                            x-show="assetsModelServerFilePath" x-cloak>
-                            Selected: <span x-text="shortName(assetsModelServerFilePath)"></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                            Scaler (optional)
-                        </label>
-                        <div
-                            @click="const btn = document.getElementById('assets-scaler-server-browse-btn'); if (btn) { btn.click(); }"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-2 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing server file.</p>
-                                <div class="flex justify-center" x-show="!assetsScalerServerFilePath" x-cloak>
-                                    <button type="button" id="assets-scaler-server-browse-btn" @click.stop
-                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                        Browse server files
-                                    </button>
-                                </div>
-                                <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsScalerServerFilePath" x-cloak x-text="assetsScalerServerFilePath"></p>
-                            </div>
-                        </div>
-                        <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
-                            x-show="assetsScalerServerFilePath" x-cloak>
-                            Selected: <span x-text="shortName(assetsScalerServerFilePath)"></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                            Density Estimator (optional)
-                        </label>
-                        <div
-                            @click="const btn = document.getElementById('assets-density-server-browse-btn'); if (btn) { btn.click(); }"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-2 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing server file.</p>
-                                <div class="flex justify-center" x-show="!assetsDensityServerFilePath" x-cloak>
-                                    <button type="button" id="assets-density-server-browse-btn" @click.stop
-                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                        Browse server files
-                                    </button>
-                                </div>
-                                <p class="text-xs text-slate-600 dark:text-slate-300 font-mono break-all" x-show="assetsDensityServerFilePath" x-cloak x-text="assetsDensityServerFilePath"></p>
-                            </div>
-                        </div>
-                        <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
-                            x-show="assetsDensityServerFilePath" x-cloak>
-                            Selected: <span x-text="shortName(assetsDensityServerFilePath)"></span>
-                        </div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'upload' && assetsUploadMode === 'individual'" x-cloak>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="file-upload-model">
                             Model / Posterior <span class="text-red-500">*</span>
                         </label>
                         <input class="hidden" id="file-upload-model" name="model_file" type="file" />
-                        <div
-                            id="assets-model-drop-zone"
-                            @click="document.getElementById('file-upload-model').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-2 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local file.</p>
-                                <div class="flex justify-center">
-                                    <button type="button" @click.stop onclick="document.getElementById('file-upload-model').click()"
-                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                        Browse local files
+                        <div id="assets-model-drop-zone"
+                            class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
+                            <div class="flex flex-wrap justify-center gap-2">
+                                <button id="assets-model-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                                <button id="assets-model-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                                <button id="assets-model-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
+                            </div>
+                            <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                            <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Model / Posterior</p>
+                            <p id="assets-model-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
+                            <div id="assets-model-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                                <div class="mt-1 flex items-start justify-between gap-2">
+                                    <span id="assets-model-selected-local-name" class="block flex-1"></span>
+                                    <button id="assets-model-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>
                             </div>
-                        </div>
-                        <div id="asset-model-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
-                            style="display:none;">
-                            <span class="inline-flex items-center gap-2">
-                                <span class="material-symbols-outlined text-base">check_circle</span>
-                                <span>File selected:</span>
-                                <span id="asset-model-name"></span>
-                            </span>
+                            <div id="assets-model-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                                <div class="mt-1 flex items-start justify-between gap-2">
+                                    <span id="assets-model-selected-server-path" class="block flex-1 font-mono break-all"></span>
+                                    <button id="assets-model-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div>
@@ -391,62 +302,69 @@
                             Scaler (optional)
                         </label>
                         <input class="hidden" id="file-upload-scaler" name="scaler_file" type="file" />
-                        <div
-                            id="assets-scaler-drop-zone"
-                            @click="document.getElementById('file-upload-scaler').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-2 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local file.</p>
-                                <div class="flex justify-center">
-                                    <button type="button" @click.stop onclick="document.getElementById('file-upload-scaler').click()"
-                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                        Browse local files
+                        <div id="assets-scaler-drop-zone"
+                            class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
+                            <div class="flex flex-wrap justify-center gap-2">
+                                <button id="assets-scaler-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                                <button id="assets-scaler-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                                <button id="assets-scaler-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
+                            </div>
+                            <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                            <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Scaler (optional)</p>
+                            <p id="assets-scaler-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
+                            <div id="assets-scaler-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                                <div class="mt-1 flex items-start justify-between gap-2">
+                                    <span id="assets-scaler-selected-local-name" class="block flex-1"></span>
+                                    <button id="assets-scaler-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                    </button>
+                                </div>
+                            </div>
+                            <div id="assets-scaler-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                                <div class="mt-1 flex items-start justify-between gap-2">
+                                    <span id="assets-scaler-selected-server-path" class="block flex-1 font-mono break-all"></span>
+                                    <button id="assets-scaler-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
-                        <div id="asset-scaler-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
-                            style="display:none;">
-                            <span class="inline-flex items-center gap-2">
-                                <span class="material-symbols-outlined text-base">check_circle</span>
-                                <span>File selected:</span>
-                                <span id="asset-scaler-name"></span>
-                            </span>
-                        </div>
                     </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="assetsSourceMode === 'upload' && assetsUploadMode === 'individual'" x-cloak>
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="file-upload-density-estimator">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                             Density Estimator (optional)
                         </label>
                         <input class="hidden" id="file-upload-density-estimator" name="density_estimator_file" type="file" />
-                        <div
-                            id="assets-density-drop-zone"
-                            @click="document.getElementById('file-upload-density-estimator').click()"
-                            class="mt-1 flex justify-center rounded-md border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 pt-5 pb-6 hover:border-primary dark:hover:border-primary transition-colors bg-slate-50 dark:bg-slate-800/30">
-                            <div class="space-y-2 text-center">
-                                <span class="material-symbols-outlined text-4xl text-slate-400">upload_file</span>
-                                <p class="text-xs text-slate-500 dark:text-slate-500">Select an existing local file.</p>
-                                <div class="flex justify-center">
-                                    <button type="button" @click.stop onclick="document.getElementById('file-upload-density-estimator').click()"
-                                        class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                        Browse local files
+                        <div id="assets-density-drop-zone"
+                            class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
+                            <div class="flex flex-wrap justify-center gap-2">
+                                <button id="assets-density-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
+                                <button id="assets-density-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                                <button id="assets-density-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
+                            </div>
+                            <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                            <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Density Estimator (optional)</p>
+                            <p id="assets-density-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
+                            <div id="assets-density-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                                <div class="mt-1 flex items-start justify-between gap-2">
+                                    <span id="assets-density-selected-local-name" class="block flex-1"></span>
+                                    <button id="assets-density-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>
                             </div>
-                        </div>
-                        <div id="asset-density-status"
-                            class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
-                            style="display:none;">
-                            <span class="inline-flex items-center gap-2">
-                                <span class="material-symbols-outlined text-base">check_circle</span>
-                                <span>File selected:</span>
-                                <span id="asset-density-name"></span>
-                            </span>
+                            <div id="assets-density-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                                <div class="mt-1 flex items-start justify-between gap-2">
+                                    <span id="assets-density-selected-server-path" class="block flex-1 font-mono break-all"></span>
+                                    <button id="assets-density-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                        <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -817,13 +735,30 @@
         const featuresSourceModeInput = byId("features-source-mode");
         const featuresServerFilePathInput = byId("features-server-file-path");
         const loadedStatus = byId("features-loaded-status");
-        const uploadedStatus = byId("features-uploaded-status");
-        const uploadedName = byId("features-uploaded-name");
         const notLoadedStatus = byId("features-not-loaded-status");
+        const localSummary = byId("features-selected-local");
+        const localName = byId("features-selected-local-name");
+        const serverSummary = byId("features-selected-server");
+        const serverPathEl = byId("features-selected-server-path");
+        const uploadBtn = byId("features-source-upload-btn");
+        const serverBtn = byId("features-source-server-btn");
+        const hintEl = byId("features-drop-zone-hint");
+        const state = getInferenceState();
 
-        if (!input || !existingInput || !featuresSourceModeInput || !featuresServerFilePathInput || !loadedStatus || !uploadedStatus || !notLoadedStatus) {
+        if (
+            !input || !existingInput || !featuresSourceModeInput || !featuresServerFilePathInput
+            || !loadedStatus || !notLoadedStatus || !localSummary || !localName
+            || !serverSummary || !serverPathEl || !uploadBtn || !serverBtn
+        ) {
             return;
         }
+
+        const activeClasses = ["border-primary", "bg-primary/10", "text-primary", "font-semibold"];
+        const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
+        [uploadBtn, serverBtn].forEach((btn) => {
+            btn.classList.remove(...activeClasses);
+            btn.classList.add(...inactiveClasses);
+        });
 
         const sourceMode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
         const serverPath = String(featuresServerFilePathInput.value || "").trim();
@@ -831,34 +766,150 @@
         const existingName = (existingInput.value || "").trim();
 
         if (sourceMode === "server-path") {
+            serverBtn.classList.add(...activeClasses);
+            serverBtn.classList.remove(...inactiveClasses);
+            if (hintEl) hintEl.textContent = "Drag and drop files or click to browse";
+            localSummary.classList.add("hidden");
             loadedStatus.style.display = "none";
+            serverPathEl.textContent = serverPath;
             if (serverPath) {
-                uploadedName.textContent = basenameFromPath(serverPath);
-                uploadedStatus.style.display = "";
+                serverSummary.classList.remove("hidden");
                 notLoadedStatus.style.display = "none";
             } else {
-                uploadedStatus.style.display = "none";
+                serverSummary.classList.add("hidden");
                 notLoadedStatus.style.display = "";
+            }
+            if (state) {
+                state.featuresSourceMode = "server-path";
+                state.featuresServerFilePath = serverPath;
             }
             return;
         }
 
+        uploadBtn.classList.add(...activeClasses);
+        uploadBtn.classList.remove(...inactiveClasses);
+        if (hintEl) hintEl.textContent = "Drag and drop files or click to browse";
+        serverSummary.classList.add("hidden");
+        serverPathEl.textContent = "";
+        if (state) {
+            state.featuresSourceMode = "upload";
+            state.featuresServerFilePath = "";
+        }
+
         if (file) {
-            uploadedName.textContent = file.name;
-            uploadedStatus.style.display = "";
+            localName.textContent = file.name;
+            localSummary.classList.remove("hidden");
             loadedStatus.style.display = "none";
             notLoadedStatus.style.display = "none";
             existingInput.value = "";
             return;
         }
 
-        uploadedStatus.style.display = "none";
+        localName.textContent = "";
+        localSummary.classList.add("hidden");
         if (existingName) {
             loadedStatus.style.display = "";
             notLoadedStatus.style.display = "none";
         } else {
             loadedStatus.style.display = "none";
             notLoadedStatus.style.display = "";
+        }
+    }
+
+    function refreshAssetsIndividualCards() {
+        const assetsSourceInput = byId("model-assets-source");
+        const assetsModeIndividual = byId("assets-mode-individual");
+        const state = getInferenceState();
+        if (!assetsSourceInput || !assetsModeIndividual) return;
+
+        const sourceMode = String(assetsSourceInput.value || "upload").trim().toLowerCase() === "server-path"
+            ? "server-path"
+            : "upload";
+        const isIndividual = Boolean(assetsModeIndividual.checked);
+        const activeClasses = ["border-primary", "bg-primary/10", "text-primary", "font-semibold"];
+        const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
+
+        const cards = [
+            {
+                key: "model",
+                input: byId("file-upload-model"),
+                serverInput: byId("inference-model-server-file-path"),
+                uploadBtn: byId("assets-model-source-upload-btn"),
+                serverBtn: byId("assets-model-source-server-btn"),
+                hint: byId("assets-model-drop-zone-hint"),
+                localSummary: byId("assets-model-selected-local"),
+                localName: byId("assets-model-selected-local-name"),
+                serverSummary: byId("assets-model-selected-server"),
+                serverPath: byId("assets-model-selected-server-path"),
+            },
+            {
+                key: "scaler",
+                input: byId("file-upload-scaler"),
+                serverInput: byId("inference-scaler-server-file-path"),
+                uploadBtn: byId("assets-scaler-source-upload-btn"),
+                serverBtn: byId("assets-scaler-source-server-btn"),
+                hint: byId("assets-scaler-drop-zone-hint"),
+                localSummary: byId("assets-scaler-selected-local"),
+                localName: byId("assets-scaler-selected-local-name"),
+                serverSummary: byId("assets-scaler-selected-server"),
+                serverPath: byId("assets-scaler-selected-server-path"),
+            },
+            {
+                key: "density",
+                input: byId("file-upload-density-estimator"),
+                serverInput: byId("inference-density-server-file-path"),
+                uploadBtn: byId("assets-density-source-upload-btn"),
+                serverBtn: byId("assets-density-source-server-btn"),
+                hint: byId("assets-density-drop-zone-hint"),
+                localSummary: byId("assets-density-selected-local"),
+                localName: byId("assets-density-selected-local-name"),
+                serverSummary: byId("assets-density-selected-server"),
+                serverPath: byId("assets-density-selected-server-path"),
+            },
+        ];
+
+        cards.forEach((card) => {
+            if (
+                !card.input || !card.serverInput || !card.uploadBtn || !card.serverBtn
+                || !card.localSummary || !card.localName || !card.serverSummary || !card.serverPath
+            ) {
+                return;
+            }
+
+            [card.uploadBtn, card.serverBtn].forEach((btn) => {
+                btn.classList.remove(...activeClasses);
+                btn.classList.add(...inactiveClasses);
+            });
+
+            const file = card.input.files && card.input.files[0] ? card.input.files[0] : null;
+            const serverPath = String(card.serverInput.value || "").trim();
+
+            if (!isIndividual) {
+                card.localSummary.classList.add("hidden");
+                card.serverSummary.classList.add("hidden");
+                return;
+            }
+
+            if (sourceMode === "server-path") {
+                card.serverBtn.classList.add(...activeClasses);
+                card.serverBtn.classList.remove(...inactiveClasses);
+                if (card.hint) card.hint.textContent = "Drag and drop files or click to browse";
+                card.localSummary.classList.add("hidden");
+                card.serverPath.textContent = serverPath;
+                card.serverSummary.classList.toggle("hidden", !serverPath);
+            } else {
+                card.uploadBtn.classList.add(...activeClasses);
+                card.uploadBtn.classList.remove(...inactiveClasses);
+                if (card.hint) card.hint.textContent = "Drag and drop files or click to browse";
+                card.serverSummary.classList.add("hidden");
+                card.serverPath.textContent = "";
+                card.localName.textContent = file ? file.name : "";
+                card.localSummary.classList.toggle("hidden", !file);
+            }
+        });
+
+        if (state) {
+            state.assetsSourceMode = sourceMode;
         }
     }
 
@@ -1152,7 +1203,7 @@
                 .includes("native file/folder picker is unavailable")
         );
 
-        const pickNativeServerFile = async (historyKey, startPath = "", extensions = ".pkl,.pickle") => {
+        const pickNativeServerFile = async (historyKey, startPath = "", extensions = "") => {
             const formData = new FormData();
             formData.append("mode", "file");
             if (extensions) {
@@ -1278,9 +1329,6 @@
                 if (targetPath) params.set("path", targetPath);
                 params.set("history_key", activeFileHistoryKey);
                 params.set("include_files", "1");
-                if (activeFileTarget === "features") {
-                    params.set("extensions", ".pkl,.pickle");
-                }
                 const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: "GET" });
                 const payload = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(payload.error || "Failed to list server files.");
@@ -1345,7 +1393,6 @@
                 const selectedPath = await pickNativeServerFile(
                     FEATURES_SERVER_FILES_HISTORY_KEY,
                     startPath,
-                    ".pkl,.pickle",
                 );
                 featuresServerFilePathInput.value = selectedPath;
                 syncInputValue(featuresServerFilePathInput);
@@ -1736,6 +1783,7 @@
         };
 
         modelSelect.addEventListener("change", refresh);
+        modelAssetsSourceInput.addEventListener("change", refresh);
         modelInput.addEventListener("change", refresh);
         folderInput.addEventListener("change", refresh);
         individualRadio.addEventListener("change", refresh);
@@ -1761,6 +1809,9 @@
         const featuresServerFilePathInput = byId("features-server-file-path");
         const featuresSourceUploadBtn = byId("features-source-upload-btn");
         const featuresSourceServerBtn = byId("features-source-server-btn");
+        const featuresServerBrowseBtn = byId("features-server-browse-btn");
+        const featuresLocalClearBtn = byId("features-local-clear");
+        const featuresServerClearBtn = byId("features-server-clear");
         const assetsSourceButtons = Array.from(document.querySelectorAll("[data-assets-source-btn]"));
         const modelAssetsSourceInput = byId("model-assets-source");
         const assetsServerFolderInput = byId("inference-assets-server-folder-path");
@@ -1777,6 +1828,21 @@
         const assetsScalerDropZone = byId("assets-scaler-drop-zone");
         const assetsDensityDropZone = byId("assets-density-drop-zone");
         const assetsFolderDropZone = byId("assets-folder-drop-zone");
+        const assetsModelUploadBtn = byId("assets-model-source-upload-btn");
+        const assetsModelServerBtn = byId("assets-model-source-server-btn");
+        const assetsModelBrowseBtn = byId("assets-model-server-browse-btn");
+        const assetsModelLocalClearBtn = byId("assets-model-local-clear");
+        const assetsModelServerClearBtn = byId("assets-model-server-clear");
+        const assetsScalerUploadBtn = byId("assets-scaler-source-upload-btn");
+        const assetsScalerServerBtn = byId("assets-scaler-source-server-btn");
+        const assetsScalerBrowseBtn = byId("assets-scaler-server-browse-btn");
+        const assetsScalerLocalClearBtn = byId("assets-scaler-local-clear");
+        const assetsScalerServerClearBtn = byId("assets-scaler-server-clear");
+        const assetsDensityUploadBtn = byId("assets-density-source-upload-btn");
+        const assetsDensityServerBtn = byId("assets-density-source-server-btn");
+        const assetsDensityBrowseBtn = byId("assets-density-server-browse-btn");
+        const assetsDensityLocalClearBtn = byId("assets-density-local-clear");
+        const assetsDensityServerClearBtn = byId("assets-density-server-clear");
 
         const setInputFiles = (targetInput, files, limitToFirst = false) => {
             if (!targetInput) return false;
@@ -1803,37 +1869,80 @@
             input.addEventListener("change", refreshFeaturesLoadStatus);
             input.dataset.ncpiFeaturesBound = "1";
         }
-        bindSingleFileStatus("file-upload-model", "asset-model-status", "asset-model-name");
-        bindSingleFileStatus("file-upload-scaler", "asset-scaler-status", "asset-scaler-name");
-        bindSingleFileStatus("file-upload-density-estimator", "asset-density-status", "asset-density-name");
+        if (modelInput) {
+            modelInput.addEventListener("change", refreshAssetsIndividualCards);
+        }
+        if (scalerInput) {
+            scalerInput.addEventListener("change", refreshAssetsIndividualCards);
+        }
+        if (densityInput) {
+            densityInput.addEventListener("change", refreshAssetsIndividualCards);
+        }
+        if (assetsModelServerFilePathInput) {
+            assetsModelServerFilePathInput.addEventListener("change", refreshAssetsIndividualCards);
+        }
+        if (assetsScalerServerFilePathInput) {
+            assetsScalerServerFilePathInput.addEventListener("change", refreshAssetsIndividualCards);
+        }
+        if (assetsDensityServerFilePathInput) {
+            assetsDensityServerFilePathInput.addEventListener("change", refreshAssetsIndividualCards);
+        }
         bindAssetsFolderStatus();
         const syncAssetsMode = bindAssetsModeExclusivity();
-        bindInferenceServerBrowsers(syncAssetsMode);
+        bindInferenceServerBrowsers(() => {
+            if (typeof syncAssetsMode === "function") syncAssetsMode();
+            refreshFeaturesLoadStatus();
+            refreshAssetsIndividualCards();
+        });
         if (featuresSourceUploadBtn && featuresSourceModeInput && featuresServerFilePathInput) {
-                featuresSourceUploadBtn.addEventListener("click", () => {
-                    if (state) {
-                        state.featuresSourceMode = "upload";
-                        state.featuresServerFilePath = "";
-                    }
-                    featuresSourceModeInput.value = "upload";
-                    featuresServerFilePathInput.value = "";
-                    syncInputValue(featuresSourceModeInput);
-                    syncInputValue(featuresServerFilePathInput);
-                    refreshFeaturesLoadStatus();
-                });
-            }
-            if (featuresSourceServerBtn && featuresSourceModeInput && input) {
-                featuresSourceServerBtn.addEventListener("click", () => {
+            featuresSourceUploadBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (state) {
+                    state.featuresSourceMode = "upload";
+                    state.featuresServerFilePath = "";
+                }
+                featuresSourceModeInput.value = "upload";
+                featuresServerFilePathInput.value = "";
+                syncInputValue(featuresSourceModeInput);
+                syncInputValue(featuresServerFilePathInput);
+                refreshFeaturesLoadStatus();
+            });
+        }
+        if (featuresSourceServerBtn && featuresSourceModeInput && input) {
+            featuresSourceServerBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
                 if (state) {
                     state.featuresSourceMode = "server-path";
-                    }
-                    featuresSourceModeInput.value = "server-path";
-                    syncInputValue(featuresSourceModeInput);
-                    input.value = "";
-                    if (existingInput) existingInput.value = "";
-                    refreshFeaturesLoadStatus();
-                });
-            }
+                    state.featuresServerFilePath = "";
+                }
+                featuresSourceModeInput.value = "server-path";
+                syncInputValue(featuresSourceModeInput);
+                input.value = "";
+                if (existingInput) existingInput.value = "";
+                refreshFeaturesLoadStatus();
+            });
+        }
+        if (featuresLocalClearBtn && input) {
+            featuresLocalClearBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                input.value = "";
+                refreshFeaturesLoadStatus();
+            });
+        }
+        if (featuresServerClearBtn && featuresServerFilePathInput && featuresSourceModeInput) {
+            featuresServerClearBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                featuresServerFilePathInput.value = "";
+                featuresSourceModeInput.value = "server-path";
+                syncInputValue(featuresSourceModeInput);
+                syncInputValue(featuresServerFilePathInput);
+                refreshFeaturesLoadStatus();
+            });
+        }
         const applyAssetsSourceMode = (mode) => {
             if (!modelAssetsSourceInput) return;
             const normalizedMode = String(mode || "upload").trim().toLowerCase() === "server-path" ? "server-path" : "upload";
@@ -1866,6 +1975,7 @@
                 if (assetsDensityServerFilePathInput) syncInputValue(assetsDensityServerFilePathInput);
             }
             if (typeof syncAssetsMode === "function") syncAssetsMode();
+            refreshAssetsIndividualCards();
         };
 
         assetsSourceButtons.forEach((button) => {
@@ -1874,12 +1984,25 @@
             });
         });
 
+        if (featuresDropZone && input && featuresSourceModeInput) {
+            featuresDropZone.addEventListener("click", () => {
+                const mode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
+                if (mode === "server-path") {
+                    if (featuresServerBrowseBtn) {
+                        featuresServerBrowseBtn.click();
+                    }
+                    return;
+                }
+                input.value = "";
+                input.click();
+            });
+        }
+
         bindDropZone(featuresDropZone, (event) => {
             const sourceMode = String(featuresSourceModeInput && featuresSourceModeInput.value ? featuresSourceModeInput.value : "upload").trim().toLowerCase();
             if (sourceMode !== "upload" || !input) return;
             const dropped = event.dataTransfer && event.dataTransfer.files ? Array.from(event.dataTransfer.files) : [];
-            const accepted = dropped.filter((file) => /\.(pkl|pickle)$/i.test(String(file && file.name ? file.name : "")));
-            if (!setInputFiles(input, accepted, true)) return;
+            if (!setInputFiles(input, dropped, true)) return;
             if (state) {
                 state.featuresSourceMode = "upload";
                 state.featuresServerFilePath = "";
@@ -1890,6 +2013,111 @@
             if (featuresServerFilePathInput) syncInputValue(featuresServerFilePathInput);
             if (existingInput) existingInput.value = "";
             input.dispatchEvent(new Event("change", { bubbles: true }));
+        });
+
+        const setAssetsIndividualSourceMode = (mode) => {
+            applyAssetsSourceMode(mode);
+            if (assetsModeIndividual) {
+                assetsModeIndividual.checked = true;
+            }
+            if (assetsModeFolder) {
+                assetsModeFolder.checked = false;
+            }
+            if (assetsServerFolderInput) {
+                assetsServerFolderInput.value = "";
+                syncInputValue(assetsServerFolderInput);
+            }
+            if (state) {
+                state.assetsUploadMode = "individual";
+                state.assetsServerFolderPath = "";
+                state.assetsServerDetectedModel = "";
+                state.assetsServerDetectedScaler = "";
+                state.assetsServerDetectedDensity = "";
+                state.assetsServerInspectError = "";
+                state.assetsServerFolderFilesPreview = [];
+                state.assetsServerFolderFilesTotal = 0;
+                state.assetsServerFolderFilesMore = 0;
+            }
+            if (typeof syncAssetsMode === "function") syncAssetsMode();
+            refreshAssetsIndividualCards();
+        };
+
+        const bindAssetCard = (config) => {
+            if (!config.dropZone || !config.input || !config.serverInput) return;
+
+            if (config.uploadBtn) {
+                config.uploadBtn.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setAssetsIndividualSourceMode("upload");
+                });
+            }
+            if (config.serverBtn) {
+                config.serverBtn.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setAssetsIndividualSourceMode("server-path");
+                });
+            }
+            if (config.localClearBtn) {
+                config.localClearBtn.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    config.input.value = "";
+                    refreshAssetsIndividualCards();
+                });
+            }
+            if (config.serverClearBtn) {
+                config.serverClearBtn.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    config.serverInput.value = "";
+                    syncInputValue(config.serverInput);
+                    refreshAssetsIndividualCards();
+                });
+            }
+            config.dropZone.addEventListener("click", () => {
+                const sourceMode = String(modelAssetsSourceInput && modelAssetsSourceInput.value ? modelAssetsSourceInput.value : "upload").trim().toLowerCase();
+                if (sourceMode === "server-path") {
+                    if (config.browseBtn) {
+                        config.browseBtn.click();
+                    }
+                    return;
+                }
+                config.input.value = "";
+                config.input.click();
+            });
+        };
+
+        bindAssetCard({
+            dropZone: assetsModelDropZone,
+            input: modelInput,
+            serverInput: assetsModelServerFilePathInput,
+            uploadBtn: assetsModelUploadBtn,
+            serverBtn: assetsModelServerBtn,
+            browseBtn: assetsModelBrowseBtn,
+            localClearBtn: assetsModelLocalClearBtn,
+            serverClearBtn: assetsModelServerClearBtn,
+        });
+        bindAssetCard({
+            dropZone: assetsScalerDropZone,
+            input: scalerInput,
+            serverInput: assetsScalerServerFilePathInput,
+            uploadBtn: assetsScalerUploadBtn,
+            serverBtn: assetsScalerServerBtn,
+            browseBtn: assetsScalerBrowseBtn,
+            localClearBtn: assetsScalerLocalClearBtn,
+            serverClearBtn: assetsScalerServerClearBtn,
+        });
+        bindAssetCard({
+            dropZone: assetsDensityDropZone,
+            input: densityInput,
+            serverInput: assetsDensityServerFilePathInput,
+            uploadBtn: assetsDensityUploadBtn,
+            serverBtn: assetsDensityServerBtn,
+            browseBtn: assetsDensityBrowseBtn,
+            localClearBtn: assetsDensityLocalClearBtn,
+            serverClearBtn: assetsDensityServerClearBtn,
         });
 
         const canDropIndividualAsset = () => (
@@ -2076,6 +2304,7 @@
         bindAutoModelDetection();
         if (typeof syncAssetsMode === "function") syncAssetsMode();
         refreshFeaturesLoadStatus();
+        refreshAssetsIndividualCards();
     };
 
     if (document.readyState === "complete") {

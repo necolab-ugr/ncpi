@@ -34,6 +34,9 @@
     window.__webuiRuntime = {{ webui_runtime | tojson }};
 </script>
 <style>
+    .drop-zone {
+        border-style: dashed;
+    }
     body {
         -webkit-font-smoothing: antialiased;
         -moz-osx-font-smoothing: grayscale;
@@ -63,6 +66,9 @@
             serverFileBrowserLoading: false,
             serverFileBrowserError: '',
             serverFileBrowserSelectedPath: '',
+            analysisServerSelectedPath: '',
+            analysisLastLoadedSource: '',
+            analysisBrowseRequestId: 0,
             uploadInProgress: false,
             uploadProgress: 0,
             uploadTotal: 0,
@@ -107,6 +113,59 @@
             selectedDataframeName: '',
             isUploaded(id) { return this.uploads[id]?.uploaded === true; },
             getFileName(id) { return this.uploads[id]?.name || ''; },
+            getAnalysisLocalSelectionName() {
+                if (this.analysisUploadKind === 'simulation') {
+                    if (!this.isSimulationSelectionActive()) {
+                        return '';
+                    }
+                    if (this.selectedSimulationFiles.length === 1) {
+                        return this.selectedSimulationFiles[0]?.name || this.getFileName('simulation-upload');
+                    }
+                    return `${this.selectedSimulationFiles.length} files selected`;
+                }
+                if (!this.isDataframeSelected()) {
+                    return '';
+                }
+                return this.getFileName('dataframe-upload') || this.selectedDataframeName || '';
+            },
+            getAnalysisServerSelectionPath() {
+                return String(this.analysisServerSelectedPath || '').trim();
+            },
+            hasAnalysisLocalSelection() {
+                return this.analysisLastLoadedSource === 'upload' && !!this.getAnalysisLocalSelectionName();
+            },
+            hasAnalysisServerSelection() {
+                return this.analysisLastLoadedSource === 'server-path' && !!this.getAnalysisServerSelectionPath();
+            },
+            async clearAnalysisCardSelection() {
+                if (this.analysisUploadKind === 'simulation') {
+                    if (Array.isArray(this.selectedSimulationFiles) && this.selectedSimulationFiles.length > 0) {
+                        this.selectedSimulationFiles = [];
+                        if (this.uploads && this.uploads['simulation-upload']) {
+                            delete this.uploads['simulation-upload'];
+                        }
+                        await this.syncSelectedSimulationFilesOnServer();
+                    }
+                    return;
+                }
+                if (this.isDataframeSelected()) {
+                    await this.unselectDataframe();
+                }
+            },
+            async clearAnalysisLocalSelection() {
+                const uploadInput = document.getElementById('analysis-upload-auto');
+                if (uploadInput) {
+                    uploadInput.value = '';
+                }
+                this.analysisLastLoadedSource = '';
+                await this.clearAnalysisCardSelection();
+            },
+            async clearAnalysisServerSelection() {
+                this.analysisServerSelectedPath = '';
+                this.serverFileBrowserSelectedPath = '';
+                this.analysisLastLoadedSource = '';
+                await this.clearAnalysisCardSelection();
+            },
             hideServerErrorBanner() {
                 if (window.ncpiServerErrorBanner && typeof window.ncpiServerErrorBanner.hide === 'function') {
                     window.ncpiServerErrorBanner.hide();
@@ -123,6 +182,17 @@
             },
             setAnalysisSourceMode(mode) {
                 this.analysisSourceMode = mode === 'upload' ? 'upload' : 'server-path';
+                this.analysisBrowseRequestId += 1;
+                const uploadInput = document.getElementById('analysis-upload-auto');
+                if (this.analysisSourceMode === 'upload') {
+                    this.serverFileBrowserOpen = false;
+                    this.serverFileBrowserLoading = false;
+                    this.serverFileBrowserError = '';
+                    this.serverFileBrowserSelectedPath = '';
+                    this.analysisServerSelectedPath = '';
+                } else if (uploadInput) {
+                    uploadInput.value = '';
+                }
                 this.columnsError = '';
             },
             setAnalysisUploadKind(kind) {
@@ -172,34 +242,14 @@
                 }
             },
             async openAnalysisServerFileBrowser() {
+                if (this.analysisSourceMode !== 'server-path') {
+                    return;
+                }
                 this.serverFileBrowserOpen = true;
                 const selected = String(this.serverFileBrowserSelectedPath || '').trim();
                 const selectedParent = selected.includes('/') ? selected.slice(0, selected.lastIndexOf('/')) : '';
                 const startPath = String(this.serverFileBrowserPath || '').trim() || selectedParent || '';
                 await this.loadAnalysisServerFileBrowser(startPath);
-            },
-            async pickNativeAnalysisServerFile(startPath) {
-                const formData = new FormData();
-                formData.append('mode', 'file');
-                formData.append('extensions', '.pkl,.pickle');
-                formData.append('history_key', 'analysis:file_browser');
-                const cleanStartPath = String(startPath || '').trim();
-                if (cleanStartPath) {
-                    formData.append('start_path', cleanStartPath);
-                }
-                const response = await fetch('{{ url_for("features_select_folder") }}', {
-                    method: 'POST',
-                    body: formData,
-                });
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(payload.error || 'Path selection cancelled.');
-                }
-                const selectedPath = String(payload.path || '').trim();
-                if (!selectedPath) {
-                    throw new Error('No file selected.');
-                }
-                return selectedPath;
             },
             async chooseAnalysisServerFile() {
                 const selectedPath = String(this.serverFileBrowserSelectedPath || '').trim();
@@ -208,6 +258,8 @@
                     return;
                 }
                 this.closeAnalysisServerFileBrowser();
+                this.analysisServerSelectedPath = selectedPath;
+                this.analysisLastLoadedSource = 'server-path';
                 if (this.analysisUploadKind === 'simulation') {
                     await this.loadSimulationFilesFromServerPath(selectedPath);
                 } else {
@@ -231,15 +283,52 @@
                     ? this.canSelectSimulation()
                     : this.canSelectDataframe();
             },
-            browseAnalysisUpload() {
+            async pickLocalAnalysisFilesWithMemory() {
+                if (typeof window.showOpenFilePicker !== 'function' || !window.isSecureContext) {
+                    return null;
+                }
+                const simulationMode = this.analysisUploadKind === 'simulation';
+                const pickerId = simulationMode
+                    ? 'analysis_load_data_simulation_local'
+                    : 'analysis_load_data_dataframe_local';
+                const pickerOptions = {
+                    id: pickerId,
+                    multiple: simulationMode,
+                    types: [{
+                        description: 'Pickle files',
+                        accept: { 'application/octet-stream': ['.pkl', '.pickle'] },
+                    }],
+                };
+                try {
+                    const handles = await window.showOpenFilePicker(pickerOptions);
+                    const files = [];
+                    for (const handle of (Array.isArray(handles) ? handles : [])) {
+                        if (!handle || typeof handle.getFile !== 'function') continue;
+                        const file = await handle.getFile();
+                        if (file) files.push(file);
+                    }
+                    return files;
+                } catch (error) {
+                    if (String(error && error.name ? error.name : '') === 'AbortError') {
+                        return [];
+                    }
+                    return null;
+                }
+            },
+            async browseAnalysisUpload() {
                 if (!this.canUseUploadCard()) {
                     return;
                 }
+                const requestId = this.analysisBrowseRequestId + 1;
+                this.analysisBrowseRequestId = requestId;
                 if (this.analysisSourceMode === 'server-path') {
-                    this.pickServerAnalysisFile();
+                    await this.pickServerAnalysisFile(requestId);
                     return;
                 }
                 const uploadInput = document.getElementById('analysis-upload-auto');
+                if (requestId !== this.analysisBrowseRequestId || this.analysisSourceMode !== 'upload') {
+                    return;
+                }
                 if (uploadInput) {
                     uploadInput.click();
                 }
@@ -322,6 +411,9 @@
             },
             async unselectDataframe() {
                 this.selectedDataframeName = '';
+                this.analysisServerSelectedPath = '';
+                this.serverFileBrowserSelectedPath = '';
+                this.analysisLastLoadedSource = '';
                 if (this.uploads && this.uploads['dataframe-upload']) {
                     delete this.uploads['dataframe-upload'];
                 }
@@ -347,6 +439,14 @@
                 const idx = this.selectedSimulationFiles.findIndex(item => item && item.key === key);
                 if (idx >= 0) {
                     this.selectedSimulationFiles.splice(idx, 1);
+                }
+                if (!this.selectedSimulationFiles.length) {
+                    this.analysisServerSelectedPath = '';
+                    this.serverFileBrowserSelectedPath = '';
+                    this.analysisLastLoadedSource = '';
+                    if (this.uploads && this.uploads['simulation-upload']) {
+                        delete this.uploads['simulation-upload'];
+                    }
                 }
                 if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
                     this.simPlotType = 'raster';
@@ -470,6 +570,9 @@
                     this.columnsError = 'Select one or more .pkl/.pickle files.';
                     return;
                 }
+                this.analysisServerSelectedPath = '';
+                this.serverFileBrowserSelectedPath = '';
+                this.analysisLastLoadedSource = 'upload';
 
                 if (this.analysisUploadKind === 'simulation') {
                     if (!this.canSelectSimulation()) {
@@ -654,6 +757,9 @@
                     this.existingDataFiles = [file.name];
                     this.hasExistingData = true;
                     this.selectedDataframeName = file.name;
+                    this.analysisServerSelectedPath = '';
+                    this.serverFileBrowserSelectedPath = '';
+                    this.analysisLastLoadedSource = 'upload';
                     this.setAnalysisUploadKind('dataframe');
                     if (!this.uploads['dataframe-upload']) {
                         this.uploads['dataframe-upload'] = { name: file.name, uploaded: true };
@@ -681,6 +787,9 @@
                     this.columnsError = 'No server file path was selected.';
                     return;
                 }
+                this.analysisServerSelectedPath = selectedPath;
+                this.serverFileBrowserSelectedPath = selectedPath;
+                this.analysisLastLoadedSource = 'server-path';
                 this.columnsError = '';
                 this.dfColumns = [];
                 this.columnsLoading = true;
@@ -719,7 +828,7 @@
                     this.columnsLoading = false;
                 }
             },
-            async pickServerAnalysisFile() {
+            async pickServerAnalysisFile(requestId = null) {
                 if (this.analysisUploadKind === 'simulation' && !this.canSelectSimulation()) {
                     this.columnsError = 'Unselect the dataframe before selecting simulation outputs.';
                     return;
@@ -729,25 +838,8 @@
                     return;
                 }
                 this.columnsError = '';
-                const selected = String(this.serverFileBrowserSelectedPath || '').trim();
-                const selectedParent = selected.includes('/') ? selected.slice(0, selected.lastIndexOf('/')) : '';
-                const startPath = String(this.serverFileBrowserPath || '').trim() || selectedParent || '';
-                try {
-                    const selectedPath = await this.pickNativeAnalysisServerFile(startPath);
-                    if (this.analysisUploadKind === 'simulation') {
-                        await this.loadSimulationFilesFromServerPath(selectedPath);
-                    } else {
-                        await this.loadColumnsFromServerPath(selectedPath);
-                    }
+                if ((requestId !== null && requestId !== this.analysisBrowseRequestId) || this.analysisSourceMode !== 'server-path') {
                     return;
-                } catch (error) {
-                    const errorMessage = String(error && error.message ? error.message : '').toLowerCase();
-                    const shouldFallbackToBrowser = errorMessage.includes('native file/folder picker is unavailable');
-                    if (!shouldFallbackToBrowser) {
-                        console.debug('Native server picker dismissed; not opening in-app browser fallback.', error);
-                        return;
-                    }
-                    console.debug('Native server picker unavailable, opening in-app browser.', error);
                 }
                 await this.openAnalysisServerFileBrowser();
             },
@@ -828,6 +920,9 @@
                 }
                 this.columnsError = '';
                 this.hideServerErrorBanner();
+                this.analysisServerSelectedPath = '';
+                this.serverFileBrowserSelectedPath = '';
+                this.analysisLastLoadedSource = 'upload';
                 this.uploadInProgress = true;
                 this.uploadProgress = 0;
                 this.uploadTotal = selectedFiles.reduce((acc, item) => acc + (item && item.size ? item.size : 0), 0);
@@ -884,6 +979,9 @@
                     this.columnsError = 'No server file path was selected.';
                     return;
                 }
+                this.analysisServerSelectedPath = selectedPath;
+                this.serverFileBrowserSelectedPath = selectedPath;
+                this.analysisLastLoadedSource = 'server-path';
                 this.columnsError = '';
                 this.hideServerErrorBanner();
                 this.uploadInProgress = true;
@@ -914,6 +1012,9 @@
                 if (!entry || !entry.key) {
                     return;
                 }
+                this.analysisServerSelectedPath = '';
+                this.serverFileBrowserSelectedPath = '';
+                this.analysisLastLoadedSource = '';
                 if (this.isSimulationEntry(entry)) {
                     if (!this.canSelectSimulation()) {
                         return;
@@ -1088,50 +1189,62 @@
                                 </button>
                             </div>
                             <div
-                                :class="canUseUploadCard() ? 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-300 dark:border-slate-600 px-6 py-10 cursor-pointer' : 'mt-4 flex justify-center rounded-lg border-2 border-dashed border-slate-200 dark:border-slate-700 px-6 py-10 opacity-60 cursor-not-allowed'"
-                                @click="browseAnalysisUpload()"
-                                @dragenter.prevent
-                                @dragover.prevent
-                                @drop.prevent="handleFileDrop($event)">
-                                <div class="text-center">
-                                    <div class="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-2" x-cloak>
-                                        <button type="button" @click.stop="setAnalysisSourceMode('upload')"
-                                            class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                            :class="analysisSourceMode === 'upload' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                            Local file (browser upload)
-                                        </button>
-                                        <button type="button" @click.stop="setAnalysisSourceMode('server-path')"
-                                            class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                            :class="analysisSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                            Server file path
+                                class="mt-4 custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer"
+                                :class="canUseUploadCard() ? '' : 'opacity-60 cursor-not-allowed'"
+                                @click="if (canUseUploadCard()) { browseAnalysisUpload(); }"
+                                @dragenter.prevent="if (canUseUploadCard() && analysisSourceMode === 'upload') { $el.classList.add('border-primary'); }"
+                                @dragover.prevent="if (canUseUploadCard() && analysisSourceMode === 'upload') { $el.classList.add('border-primary'); }"
+                                @dragleave.prevent="if (analysisSourceMode === 'upload') { $el.classList.remove('border-primary'); }"
+                                @drop.prevent="if (canUseUploadCard() && analysisSourceMode === 'upload') { $el.classList.remove('border-primary'); handleFileDrop($event); }">
+                                <input class="hidden" id="analysis-upload-auto" type="file"
+                                    :multiple="analysisUploadKind === 'simulation'"
+                                    accept=".pkl,.pickle" @change="handleAutoFileInput($event)"
+                                    :disabled="!canUseUploadCard() || analysisSourceMode !== 'upload'" />
+                                <input id="analysis-upload-source-mode" type="hidden" :value="analysisSourceMode" />
+                                <input id="analysis-upload-server-path" type="hidden" :value="analysisServerSelectedPath" />
+                                <div class="flex flex-wrap justify-center gap-2">
+                                    <button type="button" @click.stop="setAnalysisSourceMode('upload')"
+                                        class="px-3 py-1.5 text-xs rounded-lg border"
+                                        :class="analysisSourceMode === 'upload'
+                                            ? 'border-primary bg-primary/10 text-primary font-semibold'
+                                            : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                                        Local upload
+                                    </button>
+                                    <button type="button" @click.stop="setAnalysisSourceMode('server-path')"
+                                        class="px-3 py-1.5 text-xs rounded-lg border"
+                                        :class="analysisSourceMode === 'server-path'
+                                            ? 'border-primary bg-primary/10 text-primary font-semibold'
+                                            : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
+                                        Server file
+                                    </button>
+                                </div>
+                                <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
+                                <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center"
+                                    x-text="analysisUploadKind === 'simulation' ? 'Simulation outputs (.pkl/.pickle)' : 'Dataframe (.pkl/.pickle)'"></p>
+                                <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop pkl files or click to browse</p>
+                                <div x-show="analysisSourceMode === 'upload' && hasAnalysisLocalSelection()" x-cloak
+                                    class="mt-3 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                                    <div class="mt-1 flex items-start justify-between gap-2">
+                                        <span class="block flex-1" x-text="getAnalysisLocalSelectionName()"></span>
+                                        <button type="button" @click.stop.prevent="clearAnalysisLocalSelection()"
+                                            class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                            title="Remove selected local file" aria-label="Remove selected local file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
                                         </button>
                                     </div>
-                                    <span class="material-icons text-4xl text-slate-400 mx-auto">upload_file</span>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500" x-show="analysisUploadKind === 'dataframe' && analysisSourceMode === 'server-path'">
-                                        Browse and select an existing dataframe `.pkl`/`.pickle` file on the server.
-                                    </p>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500" x-show="analysisUploadKind === 'dataframe' && analysisSourceMode !== 'server-path'">
-                                        Upload one dataframe `.pkl`/`.pickle` file.
-                                    </p>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500" x-show="analysisUploadKind === 'simulation' && analysisSourceMode === 'server-path'">
-                                        Browse and select an existing simulation `.pkl`/`.pickle` file on the server.
-                                    </p>
-                                    <p class="mt-2 text-xs text-slate-500 dark:text-slate-500" x-show="analysisUploadKind === 'simulation' && analysisSourceMode !== 'server-path'">
-                                        Upload one or more simulation `.pkl`/`.pickle` files.
-                                    </p>
-                                    <input class="sr-only" id="analysis-upload-auto" type="file" multiple
-                                        accept=".pkl,.pickle" @change="handleAutoFileInput($event)"
-                                        :disabled="!canUseUploadCard() || analysisSourceMode !== 'upload'" />
-                                    <button
-                                        @click.stop="browseAnalysisUpload()"
-                                        :disabled="!canUseUploadCard()"
-                                        :class="canUseUploadCard()
-                                            ? 'mt-2 rounded-md bg-white dark:bg-slate-700/50 px-2.5 py-1.5 text-sm font-semibold text-slate-900 dark:text-slate-200 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700'
-                                            : 'mt-2 rounded-md bg-slate-100 dark:bg-slate-800 px-2.5 py-1.5 text-sm font-semibold text-slate-400 dark:text-slate-500 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 cursor-not-allowed'"
-                                        type="button"
-                                        x-text="analysisSourceMode === 'upload'
-                                            ? (analysisUploadKind === 'simulation' ? 'Browse simulation files' : 'Browse dataframe file')
-                                            : 'Browse server files'"></button>
+                                </div>
+                                <div x-show="analysisSourceMode === 'server-path' && hasAnalysisServerSelection()" x-cloak
+                                    class="mt-3 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                                    <div class="mt-1 flex items-start justify-between gap-2">
+                                        <span class="block flex-1 font-mono break-all" x-text="getAnalysisServerSelectionPath()"></span>
+                                        <button type="button" @click.stop.prevent="clearAnalysisServerSelection()"
+                                            class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                            title="Remove selected server file" aria-label="Remove selected server file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                             <div x-show="uploadInProgress" class="mt-4">

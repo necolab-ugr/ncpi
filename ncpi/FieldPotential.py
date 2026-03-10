@@ -823,6 +823,10 @@ class FieldPotential:
             if sensor_locations is None:
                 raise ValueError("sensor_locations must be provided for this model.")
             sensor_locations = np.asarray(sensor_locations, dtype=float)
+            if sensor_locations.ndim == 1:
+                if sensor_locations.shape[0] != 3:
+                    raise ValueError("sensor_locations must have shape (n_sensors, 3).")
+                sensor_locations = sensor_locations.reshape(1, 3)
             if sensor_locations.ndim != 2 or sensor_locations.shape[1] != 3:
                 raise ValueError("sensor_locations must have shape (n_sensors, 3).")
         else:

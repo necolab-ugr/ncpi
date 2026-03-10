@@ -43,6 +43,12 @@
         <p class="text-sm text-text-light-secondary dark:text-[#929bc9]" x-show="simulationTotal > 1">
             Simulations done: <span x-text="`${simulationCompleted}/${simulationTotal}`"></span>
         </p>
+        <p class="text-sm text-text-light-secondary dark:text-[#929bc9]" x-show="meegSensorsTotal > 0">
+            Electrodes/sensors: <span x-text="`${meegSensorsCompleted}/${meegSensorsTotal}`"></span>
+            <span x-show="meegTrialTotal > 1">
+                (trial <span x-text="meegTrialIndex"></span>/<span x-text="meegTrialTotal"></span>)
+            </span>
+        </p>
         <p class="text-sm text-text-light-secondary dark:text-[#929bc9]">
             Elapsed: <span x-text="elapsedTime"></span>
         </p>
@@ -161,6 +167,10 @@ document.addEventListener('alpine:init', () => {
         uploadMessage: "",
         simulationTotal: 0,
         simulationCompleted: 0,
+        meegTrialTotal: 0,
+        meegTrialIndex: 0,
+        meegSensorsTotal: 0,
+        meegSensorsCompleted: 0,
         
         init() {
             this.startTime = Date.now();
@@ -203,7 +213,10 @@ document.addEventListener('alpine:init', () => {
                 this.schedulePendingPoll();
                 return;
             }
-            fetch(`/status/${this.jobId}`)
+            fetch(`/status/${this.jobId}`, {
+                cache: 'no-store',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+            })
                 .then(response => response.json())
                 .then(data => {
                     this.status = data.status || 'in_progress';
@@ -212,6 +225,10 @@ document.addEventListener('alpine:init', () => {
                     this.cancelRequested = !!data.cancel_requested || this.status === 'cancelled';
                     this.simulationTotal = Number(data.simulation_total || 0);
                     this.simulationCompleted = Number(data.simulation_completed || 0);
+                    this.meegTrialTotal = Number(data.meeg_trial_total || 0);
+                    this.meegTrialIndex = Number(data.meeg_trial_index || 0);
+                    this.meegSensorsTotal = Number(data.meeg_sensors_total || 0);
+                    this.meegSensorsCompleted = Number(data.meeg_sensors_completed || 0);
                     this.$nextTick(() => {
                         if (this.$refs.log) {
                             this.$refs.log.scrollTop = this.$refs.log.scrollHeight;
@@ -230,8 +247,8 @@ document.addEventListener('alpine:init', () => {
                         this.cancelling = false;
                     } else if (data.status === 'in_progress') {
                         this.error = null;
-                        // Poll again after 1 second (simplest polling interval)
-                        setTimeout(() => this.pollStatus(), 1500); 
+                        const pollMs = this.computationType === 'field_potential_meeg' ? 250 : 1500;
+                        setTimeout(() => this.pollStatus(), pollMs);
 
                     } else { // Failed
                         this.error = data.error || 'Unknown error';  // Set error message
@@ -243,12 +260,14 @@ document.addEventListener('alpine:init', () => {
                 .catch(error => {
                     console.error("Error polling status:", error);
                     // Retry polling after a longer delay on network error
-                    setTimeout(() => this.pollStatus(), 5000); 
+                    const retryMs = this.computationType === 'field_potential_meeg' ? 1000 : 5000;
+                    setTimeout(() => this.pollStatus(), retryMs);
                 });
         },
         schedulePendingPoll() {
             if (!this.pending) return;
-            setTimeout(() => this.pollStatus(), 1500);
+            const pollMs = this.computationType === 'field_potential_meeg' ? 500 : 1500;
+            setTimeout(() => this.pollStatus(), pollMs);
         },
         downloadResults() {
             if (this.pending || this.status !== 'finished' || this.hasBeenClicked) return;

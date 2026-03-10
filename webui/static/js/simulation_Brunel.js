@@ -1,4 +1,4 @@
-// static/js/simulation.js
+// static/js/simulation_Brunel.js
 document.addEventListener('DOMContentLoaded', function() {
     const simulationOnlyParams = new Set(['tstop', 'dt', 'local_num_threads']);
     const fixedGridParams = new Set(['X', 'model']);

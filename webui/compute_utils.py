@@ -30,12 +30,28 @@ from tmp_paths import TMP_ROOT, configure_temp_environment, tmp_subdir
 configure_temp_environment()
 
 
-def _tmp_subdir(name, create=False):
-    return tmp_subdir(name, create=create)
+_MODULE_TMP_NAMES = {"simulation", "field_potential", "features", "inference", "analysis"}
+
+
+def _module_tmp_subdir(module_name, *parts, create=False):
+    module_key = str(module_name or "").strip().lower()
+    if module_key not in _MODULE_TMP_NAMES:
+        raise ValueError(f"Unknown module tmp root: {module_name}")
+    clean_parts = [module_key]
+    for raw in parts:
+        token = str(raw or "").strip().replace("\\", "/").strip("/")
+        if not token:
+            continue
+        clean_parts.extend(seg for seg in token.split("/") if seg and seg != ".")
+    rel_path = os.path.join(*clean_parts)
+    return tmp_subdir(rel_path, create=create)
 
 
 def _field_potential_output_dir(kind, create=False):
-    return _tmp_subdir(f"field_potential_{kind}", create=create)
+    kind_key = str(kind or "").strip().lower()
+    if kind_key not in {"proxy", "kernel", "meeg"}:
+        raise ValueError(f"Unsupported field potential output kind: {kind}")
+    return _module_tmp_subdir("field_potential", kind_key, create=create)
 
 
 def _field_potential_kernel_search_roots():
@@ -52,7 +68,10 @@ def _field_potential_kernel_search_roots():
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
-DEFAULT_SIM_DATA_DIR = _tmp_subdir("simulation_data")
+DEFAULT_SIM_DATA_DIR = _module_tmp_subdir("simulation", "data")
+FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
+PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
+INFERENCE_TRAINING_DATA_DIR = _module_tmp_subdir("inference", "training_data")
 MAX_OUTPUT_LINES = 200
 
 # Dataframe file upload format check
@@ -145,7 +164,7 @@ def save_df(job_id, output_df, temp_uploaded_files):
 
 
 def _features_data_dir():
-    path = _tmp_subdir("features_data")
+    path = FEATURES_DATA_DIR
     os.makedirs(path, exist_ok=True)
     return path
 
@@ -2258,7 +2277,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
         output_df_path = save_df(job_id, output_df, temp_uploaded_files)
         persisted_predictions_path = None
         try:
-            predictions_dir = _tmp_subdir("predictions_data")
+            predictions_dir = PREDICTIONS_DATA_DIR
             os.makedirs(predictions_dir, exist_ok=True)
             persisted_name = "predictions.pkl"
             persisted_predictions_path = os.path.join(predictions_dir, persisted_name)
@@ -2550,7 +2569,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         _append_job_output(job_status, job_id, f"Saved training artifacts archive: {zip_path}")
         persisted_zip_path = None
         try:
-            persisted_dir = _tmp_subdir("inference_training_data")
+            persisted_dir = INFERENCE_TRAINING_DATA_DIR
             os.makedirs(persisted_dir, exist_ok=True)
             persisted_zip_path = os.path.join(persisted_dir, "training_artifacts.zip")
             shutil.copy2(zip_path, persisted_zip_path)
@@ -2581,14 +2600,15 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
 
 def analysis_computation(job_id, job_status, params, temp_uploaded_files):
     try:
-        # Save the image in temp_uploaded_files/LFP_predictions.png
+        results_path = os.path.join(temp_uploaded_files, "LFP_predictions.png")
+        # Save the image in the module upload folder.
         # LFP_predictions_webversion.run_full_pipeline([params['method-plot']], params['method'])
         
         job_status[job_id].update({
                 "status": "finished",
                 "progress": 100,
                 "estimated_time_remaining": 0,
-                "results": f'{temp_uploaded_files}/LFP_predictions.png', # Return to the client the output filepath
+                "results": results_path, # Return to the client the output filepath
                 "error": False
             })
 
@@ -2621,6 +2641,17 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         sim_data = {}
         fr_times = None
         fr_gids = None
+        nu_ext_mode = str(params.get("nu_ext_mode") or "shared").strip().lower()
+        if nu_ext_mode not in {"shared", "per-trial"}:
+            nu_ext_mode = "shared"
+
+        def _is_truthy(value):
+            return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+        def _resolve_proxy_file(key, default_name, required=True):
+            ignore_default = _is_truthy(params.get(f"{key}_ignore_default"))
+            fallback_name = None if ignore_default else default_name
+            return _resolve_sim_file(file_paths, key, fallback_name, required=required)
 
         dt_from_stage, dt_path = _load_simulation_dt_ms(file_paths)
         proxy_sim_step = None
@@ -2628,8 +2659,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         if method == 'FR':
             _append_job_output(job_status, job_id, "Loading spike times and gids...")
-            times_path = _resolve_sim_file(file_paths, 'times_file', 'times.pkl', required=True)
-            gids_path = _resolve_sim_file(file_paths, 'gids_file', 'gids.pkl', required=True)
+            times_path = _resolve_proxy_file('times_file', 'times.pkl', required=True)
+            gids_path = _resolve_proxy_file('gids_file', 'gids.pkl', required=True)
             fr_times = read_file(times_path)
             fr_gids = read_file(gids_path)
             proxy_sim_step = float(bin_size)
@@ -2637,38 +2668,28 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         elif method == 'AMPA':
             _append_job_output(job_status, job_id, "Loading AMPA currents...")
-            ampa_path = _resolve_sim_file(file_paths, 'ampa_file', 'ampa.pkl', required=True)
+            ampa_path = _resolve_proxy_file('ampa_file', 'ampa.pkl', required=True)
             sim_data['AMPA'] = read_file(ampa_path)
 
         elif method == 'GABA':
             _append_job_output(job_status, job_id, "Loading GABA currents...")
-            gaba_path = _resolve_sim_file(file_paths, 'gaba_file', 'gaba.pkl', required=True)
+            gaba_path = _resolve_proxy_file('gaba_file', 'gaba.pkl', required=True)
             sim_data['GABA'] = read_file(gaba_path)
 
         elif method == 'Vm':
             _append_job_output(job_status, job_id, "Loading membrane potentials...")
-            vm_path = _resolve_sim_file(file_paths, 'vm_file', 'vm.pkl', required=True)
+            vm_path = _resolve_proxy_file('vm_file', 'vm.pkl', required=True)
             sim_data['Vm'] = read_file(vm_path)
 
         elif method in {'I', 'I_abs', 'LRWS', 'ERWS1', 'ERWS2'}:
             _append_job_output(job_status, job_id, "Loading AMPA and GABA currents...")
-            ampa_path = _resolve_sim_file(file_paths, 'ampa_file', 'ampa.pkl', required=True)
-            gaba_path = _resolve_sim_file(file_paths, 'gaba_file', 'gaba.pkl', required=True)
+            ampa_path = _resolve_proxy_file('ampa_file', 'ampa.pkl', required=True)
+            gaba_path = _resolve_proxy_file('gaba_file', 'gaba.pkl', required=True)
             sim_data['AMPA'] = read_file(ampa_path)
             sim_data['GABA'] = read_file(gaba_path)
 
             if method == 'ERWS2':
-                _append_job_output(job_status, job_id, "Loading nu_ext...")
-                nu_ext_path = _resolve_sim_file(file_paths, 'nu_ext_file', 'nu_ext.pkl', required=False)
-                nu_ext_value = params.get('nu_ext_value')
-                if nu_ext_path:
-                    sim_data['nu_ext'] = read_file(nu_ext_path)
-                elif nu_ext_value not in (None, ''):
-                    sim_data['nu_ext'] = float(nu_ext_value)
-                else:
-                    raise FileNotFoundError(
-                        f"Missing nu_ext. Upload a file or provide a value, or place nu_ext.pkl in {DEFAULT_SIM_DATA_DIR}."
-                    )
+                _append_job_output(job_status, job_id, f"Preparing nu_ext values ({nu_ext_mode} mode)...")
         else:
             raise ValueError(f"Unknown proxy method '{method}'.")
 
@@ -2700,6 +2721,34 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         if trial_count > 1:
             _append_job_output(job_status, job_id, f"Detected {trial_count} trial(s); computing proxy for each trial.")
 
+        if method == "ERWS2":
+            if nu_ext_mode == "per-trial":
+                raw_values = params.get("nu_ext_values_json")
+                try:
+                    parsed_values = json.loads(raw_values) if raw_values else []
+                except Exception:
+                    raise ValueError("Per-trial nu_ext values must be valid JSON.")
+                if not isinstance(parsed_values, list) or not parsed_values:
+                    raise ValueError("Provide one nu_ext value per detected trial.")
+                numeric_values = []
+                for idx, value in enumerate(parsed_values):
+                    numeric = _safe_float(value)
+                    if numeric is None:
+                        raise ValueError(f"Invalid nu_ext value for trial {idx + 1}: {value}")
+                    numeric_values.append(float(numeric))
+                if len(numeric_values) != trial_count:
+                    raise ValueError(
+                        f"Per-trial nu_ext values count ({len(numeric_values)}) does not match detected trials ({trial_count})."
+                    )
+                sim_data["nu_ext"] = numeric_values
+                _append_job_output(job_status, job_id, f"Using per-trial nu_ext values for {trial_count} trial(s).")
+            else:
+                nu_ext_value = _safe_float(params.get("nu_ext_value"))
+                if nu_ext_value is None:
+                    raise ValueError("Provide a numeric nu_ext value for ERWS2.")
+                sim_data["nu_ext"] = float(nu_ext_value)
+                _append_job_output(job_status, job_id, f"Using shared nu_ext value: {float(nu_ext_value):g}.")
+
         _append_job_output(job_status, job_id, "Computing proxy with ncpi.FieldPotential.compute_proxy...")
         potential = ncpi.FieldPotential()
         trial_sim_payloads = []
@@ -2713,7 +2762,15 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 trial_sim_data = {
                     key: _pick_trial_item(value, trial_idx)
                     for key, value in sim_data.items()
+                    if key != "nu_ext"
                 }
+                if method == "ERWS2":
+                    nu_ext_payload = sim_data.get("nu_ext")
+                    if isinstance(nu_ext_payload, (list, tuple)):
+                        idx = trial_idx if trial_idx < len(nu_ext_payload) else len(nu_ext_payload) - 1
+                        trial_sim_data["nu_ext"] = float(nu_ext_payload[idx])
+                    else:
+                        trial_sim_data["nu_ext"] = nu_ext_payload
 
             proxy = potential.compute_proxy(method, trial_sim_data, proxy_sim_step, excitatory_only=excitatory_only)
             dt_ms = _safe_float(proxy_sim_step)
@@ -3275,6 +3332,11 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         trial_count = max(1, len(cdm_trials_raw))
         if trial_count > 1:
             _append_job_output(job_status, job_id, f"Detected {trial_count} CDM trial(s); computing M/EEG for each trial.")
+        if job_id in job_status:
+            job_status[job_id]["meeg_trial_total"] = int(trial_count)
+            job_status[job_id]["meeg_trial_index"] = 0
+            job_status[job_id]["meeg_sensors_total"] = 0
+            job_status[job_id]["meeg_sensors_completed"] = 0
         job_status[job_id]["progress"] = 20
 
         dipole_locations = None
@@ -3404,6 +3466,10 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 if trial_sensor_locations is None:
                     raise ValueError("sensor_locations must be provided for this model.")
                 trial_sensor_locations = np.asarray(trial_sensor_locations, dtype=float)
+                if trial_sensor_locations.ndim == 1:
+                    if trial_sensor_locations.shape[0] != 3:
+                        raise ValueError("sensor_locations must have shape (n_sensors, 3).")
+                    trial_sensor_locations = trial_sensor_locations.reshape(1, 3)
                 if trial_sensor_locations.ndim != 2 or trial_sensor_locations.shape[1] != 3:
                     raise ValueError("sensor_locations must have shape (n_sensors, 3).")
                 if model == "FourSphereVolumeConductor":
@@ -3440,12 +3506,26 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 raise ValueError("Unable to determine number of sensors/electrodes.")
 
             n_times = p_use_list[0].shape[1]
+            _append_job_output(
+                job_status,
+                job_id,
+                f"M/EEG workload (trial {trial_idx + 1}/{trial_count}): {n_sensors} sensors/electrodes x {n_times} time points.",
+            )
             if is_meg:
                 meeg = np.zeros((n_sensors, 3, n_times))
             else:
                 meeg = np.zeros((n_sensors, n_times))
+            if job_id in job_status:
+                job_status[job_id]["meeg_trial_index"] = int(trial_idx + 1)
+                job_status[job_id]["meeg_sensors_total"] = int(n_sensors)
+                job_status[job_id]["meeg_sensors_completed"] = 0
 
-            log_every = max(1, n_sensors // 50)
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Computing electrodes/sensors for trial {trial_idx + 1}/{trial_count}: 0/{n_sensors}",
+            )
+            log_every = 1 if n_sensors <= 300 else max(1, n_sensors // 100)
             trial_progress_start = 50 + int((trial_idx / trial_count) * 40)
             trial_progress_end = 50 + int(((trial_idx + 1) / trial_count) * 40)
             for idx in range(n_sensors):
@@ -3464,10 +3544,12 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     _append_job_output(
                         job_status,
                         job_id,
-                        f"Computed electrodes: {idx + 1}/{n_sensors} (trial {trial_idx + 1}/{trial_count})",
+                        f"Computed electrodes/sensors: {idx + 1}/{n_sensors} (trial {trial_idx + 1}/{trial_count})",
                     )
                 progress = trial_progress_start + int((idx + 1) / n_sensors * max(1, (trial_progress_end - trial_progress_start)))
                 job_status[job_id]["progress"] = progress
+                if job_id in job_status:
+                    job_status[job_id]["meeg_sensors_completed"] = int(idx + 1)
 
             meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
             meeg_decimation = int(cdm_meta.get("decimation_factor", 1))

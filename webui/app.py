@@ -18,11 +18,52 @@ from itertools import product
 from tmp_paths import configure_temp_environment, tmp_subdir
 
 # Resolve shared temp root before importing other runtime modules.
-_tempdir = configure_temp_environment()
+configure_temp_environment()
 
-# Temporary folder for uploaded files of forms.
-# Keep this outside the repository (and OneDrive-synced paths) to avoid long blocking writes.
-temp_uploaded_files = tmp_subdir("ncpi_temp_uploaded_files")
+_MODULE_TMP_NAMES = {"simulation", "field_potential", "features", "inference", "analysis"}
+
+
+def _module_tmp_subdir(module_name, *parts, create=False):
+    module_key = str(module_name or "").strip().lower()
+    if module_key not in _MODULE_TMP_NAMES:
+        raise ValueError(f"Unknown module tmp root: {module_name}")
+    clean_parts = [module_key]
+    for raw in parts:
+        token = str(raw or "").strip().replace("\\", "/").strip("/")
+        if not token:
+            continue
+        clean_parts.extend(seg for seg in token.split("/") if seg and seg != ".")
+    rel_path = os.path.join(*clean_parts)
+    return tmp_subdir(rel_path, create=create)
+
+
+SIMULATION_DATA_DIR = _module_tmp_subdir("simulation", "data")
+SIMULATION_RUNS_DIR = _module_tmp_subdir("simulation", "runs")
+SIMULATION_CUSTOM_UPLOADS_DIR = _module_tmp_subdir("simulation", "custom_uploads")
+FIELD_POTENTIAL_PROXY_DIR = _module_tmp_subdir("field_potential", "proxy")
+FIELD_POTENTIAL_KERNEL_DIR = _module_tmp_subdir("field_potential", "kernel")
+FIELD_POTENTIAL_MEEG_DIR = _module_tmp_subdir("field_potential", "meeg")
+FIELD_POTENTIAL_KERNEL_LOCAL_UPLOADS_DIR = _module_tmp_subdir("field_potential", "kernel", "local_folder_uploads")
+FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
+FEATURES_INSPECTION_DIR = _module_tmp_subdir("features", "inspection")
+PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
+INFERENCE_UPLOADS_DIR = _module_tmp_subdir("inference", "uploads")
+ANALYSIS_DATA_DIR = _module_tmp_subdir("analysis", "data")
+
+
+def _module_uploads_dir_for(computation_type):
+    key = str(computation_type or "").strip().lower()
+    if key.startswith("field_potential"):
+        return _module_tmp_subdir("field_potential", "uploads")
+    if key == "simulation":
+        return _module_tmp_subdir("simulation", "uploads")
+    if key == "features":
+        return _module_tmp_subdir("features", "uploads")
+    if key in {"inference", "inference_training"}:
+        return _module_tmp_subdir("inference", "uploads")
+    if key == "analysis":
+        return _module_tmp_subdir("analysis", "uploads")
+    return INFERENCE_UPLOADS_DIR
 
 # Prefer the local repository package over any globally installed ncpi version.
 _webui_dir = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +109,7 @@ MAX_SIMULATION_GRID_COMBINATIONS = 256
 GRID_PREFIX = "grid="
 SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
 SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
+NATIVE_PATH_PICKER_ENABLED = str(os.environ.get("NCPI_ENABLE_NATIVE_PATH_PICKER", "0")).strip().lower() in {"1", "true", "yes", "on"}
 PATH_HISTORY_CLIENT_ID_SESSION_KEY = "webui_path_history_client_id"
 PATH_HISTORY_STORAGE_DIR = tmp_subdir("ncpi_webui_path_history")
 PATH_HISTORY_MAX_FIELDS = 256
@@ -921,12 +963,12 @@ def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
 
 
 def _simulation_grid_metadata_path(output_dir=None):
-    root = output_dir if output_dir else os.path.join(_tempdir, "simulation_data")
+    root = output_dir if output_dir else SIMULATION_DATA_DIR
     return os.path.join(root, SIMULATION_GRID_METADATA_FILE)
 
 
 def _clear_simulation_grid_metadata_file(output_dir=None):
-    root = output_dir if output_dir else os.path.join(_tempdir, "simulation_data")
+    root = output_dir if output_dir else SIMULATION_DATA_DIR
     targets = {SIMULATION_GRID_METADATA_FILE, *SIMULATION_GRID_METADATA_LEGACY_FILES}
     for name in targets:
         path = os.path.join(root, name)
@@ -953,9 +995,9 @@ def _ensure_sequence(value, name):
 
 def _field_potential_dirs():
     return [
-        tmp_subdir("field_potential_proxy"),
-        tmp_subdir("field_potential_kernel"),
-        tmp_subdir("field_potential_meeg"),
+        FIELD_POTENTIAL_PROXY_DIR,
+        FIELD_POTENTIAL_KERNEL_DIR,
+        FIELD_POTENTIAL_MEEG_DIR,
     ]
 
 
@@ -985,11 +1027,11 @@ def _field_potential_output_name(fp_type, safe_name):
 
 
 def _features_data_dir(create=False):
-    return tmp_subdir("features_data", create=create)
+    return _module_tmp_subdir("features", "data", create=create)
 
 
 def _predictions_data_dir(create=False):
-    return tmp_subdir("predictions_data", create=create)
+    return _module_tmp_subdir("inference", "predictions", create=create)
 
 
 def _features_data_candidate_dirs():
@@ -1123,7 +1165,7 @@ def _list_predictions_data_files():
 
 
 def _list_simulation_data_files():
-    simulation_dir = os.path.join(_tempdir, "simulation_data")
+    simulation_dir = SIMULATION_DATA_DIR
     if not os.path.isdir(simulation_dir):
         return []
     files = []
@@ -1209,7 +1251,7 @@ def _list_detected_analysis_data_files():
             "path": os.path.join(predictions_root, name),
         })
 
-    simulation_root = os.path.join(_tempdir, "simulation_data")
+    simulation_root = SIMULATION_DATA_DIR
     for name in _list_simulation_data_files():
         entries.append({
             "key": f"simulation::{name}",
@@ -1404,15 +1446,28 @@ def _resolve_file_extracted_value(file_name, locator):
 
 def _collect_feature_pipeline_inputs():
     source_labels = {
+        "proxy": "Field Potential Proxy",
+        "kernel": "Field Potential Kernel",
+        "meeg": "Field Potential M/EEG",
         "field_potential_proxy": "Field Potential Proxy",
         "field_potential_kernel": "Field Potential Kernel",
         "field_potential_meeg": "Field Potential M/EEG",
     }
+
+    def _normalize_fp_source_key(folder_name):
+        key = str(folder_name or "").strip().lower()
+        if key in {"field_potential_proxy", "proxy"}:
+            return "proxy"
+        if key in {"field_potential_kernel", "kernel"}:
+            return "kernel"
+        if key in {"field_potential_meeg", "meeg"}:
+            return "meeg"
+        return key
     discovered = {}
     for fp_dir in _field_potential_dirs():
         if not os.path.isdir(fp_dir):
             continue
-        source_key = os.path.basename(fp_dir)
+        source_key = _normalize_fp_source_key(os.path.basename(fp_dir))
         source_label = source_labels.get(source_key, source_key)
         for root, _, files in os.walk(fp_dir):
             for name in files:
@@ -1426,10 +1481,10 @@ def _collect_feature_pipeline_inputs():
                 # - CDM/LFP probe outputs
                 # - M/EEG outputs
                 # Exclude intermediate kernel objects (e.g., kernels.pkl).
-                if source_key == "field_potential_proxy":
+                if source_key == "proxy":
                     if not lower_name.startswith("proxy"):
                         continue
-                elif source_key == "field_potential_kernel":
+                elif source_key == "kernel":
                     allowed_kernel_outputs = {
                         "kernel_approx_cdm.pkl",
                         "current_dipole_moment.pkl",
@@ -1438,7 +1493,7 @@ def _collect_feature_pipeline_inputs():
                     }
                     if lower_name not in allowed_kernel_outputs:
                         continue
-                elif source_key == "field_potential_meeg":
+                elif source_key == "meeg":
                     if lower_name not in {"meeg.pkl", "eeg.pkl", "meg.pkl", "lfp.pkl"}:
                         continue
                 else:
@@ -2425,7 +2480,7 @@ def _build_parse_config_from_form(form):
     )
 
 
-def _normalize_features_input_path(source_path, form, job_id):
+def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
     source_obj = _load_features_source(source_path)
     data_source_kind = (form.get("data_source_kind") or "").strip()
 
@@ -2476,7 +2531,9 @@ def _normalize_features_input_path(source_path, form, job_id):
     if file_extracted_fields:
         for col_name, locator in file_extracted_fields.items():
             parsed_df[col_name] = _resolve_file_extracted_value(source_label, locator)
-    normalized_path = os.path.join(temp_uploaded_files, f"features_data_file_0_{job_id}_parsed.pkl")
+    target_upload_dir = upload_dir or _module_uploads_dir_for("features")
+    os.makedirs(target_upload_dir, exist_ok=True)
+    normalized_path = os.path.join(target_upload_dir, f"features_data_file_0_{job_id}_parsed.pkl")
     parsed_df.to_pickle(normalized_path)
     return normalized_path
 
@@ -2849,7 +2906,7 @@ def _build_four_area_network_params(form):
 # Main dashboard page loading
 @app.route("/")
 def dashboard():
-    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
+    simulation_data_dir = SIMULATION_DATA_DIR
     if os.path.isdir(simulation_data_dir):
         simulation_pkl_files = sorted(
             f for f in os.listdir(simulation_data_dir)
@@ -2865,7 +2922,7 @@ def dashboard():
             for name in files:
                 if name.endswith(".pkl"):
                     field_potential_files.append(name)
-    analysis_data_dir = os.path.join(_tempdir, "analysis_data")
+    analysis_data_dir = ANALYSIS_DATA_DIR
     if os.path.isdir(analysis_data_dir):
         analysis_data_files = sorted(
             f for f in os.listdir(analysis_data_dir)
@@ -2898,7 +2955,7 @@ def simulation():
 
 @app.route("/simulation/upload_sim")
 def upload_sim():
-    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
+    simulation_data_dir = SIMULATION_DATA_DIR
     if os.path.isdir(simulation_data_dir):
         simulation_pkl_files = sorted(
             f for f in os.listdir(simulation_data_dir)
@@ -2907,7 +2964,7 @@ def upload_sim():
     else:
         simulation_pkl_files = []
     return render_template(
-        "1.1.upload_sim.html",
+        "1.1.0.upload_sim.html",
         simulation_pkl_files=simulation_pkl_files,
         has_simulation_pkl=bool(simulation_pkl_files),
     )
@@ -2916,7 +2973,7 @@ def upload_sim():
 def upload_sim_files():
     _remember_path_history_from_form(request.form, "upload_sim_files")
     source_mode = (request.form.get("simulation_source_mode") or "upload").strip().lower()
-    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
+    simulation_data_dir = SIMULATION_DATA_DIR
     os.makedirs(simulation_data_dir, exist_ok=True)
 
     if source_mode == "server-path":
@@ -2978,7 +3035,7 @@ def upload_sim_files():
 @app.route("/simulation/remove_file", methods=["POST"])
 def remove_simulation_file():
     filename = (request.form.get("filename") or "").strip()
-    simulation_root = os.path.join(_tempdir, "simulation_data")
+    simulation_root = SIMULATION_DATA_DIR
     try:
         target_path = _validate_relative_pickle_path(filename, simulation_root, "Simulation file")
         os.remove(target_path)
@@ -2988,39 +3045,47 @@ def remove_simulation_file():
 
 @app.route("/clear_simulation_data", methods=["POST"])
 def clear_simulation_data():
+    clear_scope = (request.form.get("clear_scope") or "all").strip().lower()
     _clear_simulation_data_files()
-    _clear_field_potential_data_files()
-    _clear_features_data_files()
-    _clear_predictions_data_files()
-    _clear_analysis_state()
+    if clear_scope != "only":
+        _clear_field_potential_data_files()
+        _clear_features_data_files()
+        _clear_predictions_data_files()
+        _clear_analysis_state()
     return redirect(url_for('dashboard'))
 
 @app.route("/clear_field_potential_data", methods=["POST"])
 def clear_field_potential_data():
+    clear_scope = (request.form.get("clear_scope") or "all").strip().lower()
     _clear_field_potential_data_files()
-    _clear_features_data_files()
-    _clear_predictions_data_files()
-    _clear_analysis_state()
+    if clear_scope != "only":
+        _clear_features_data_files()
+        _clear_predictions_data_files()
+        _clear_analysis_state()
     return redirect(url_for('dashboard'))
 
 
 @app.route("/clear_features_data", methods=["POST"])
 def clear_features_data():
+    clear_scope = (request.form.get("clear_scope") or "all").strip().lower()
     _clear_features_data_files()
-    _clear_predictions_data_files()
-    _clear_analysis_state()
+    if clear_scope != "only":
+        _clear_predictions_data_files()
+        _clear_analysis_state()
     return redirect(url_for('dashboard'))
 
 
 @app.route("/clear_predictions_data", methods=["POST"])
 def clear_predictions_data():
+    clear_scope = (request.form.get("clear_scope") or "all").strip().lower()
     _clear_predictions_data_files()
-    _clear_analysis_state()
+    if clear_scope != "only":
+        _clear_analysis_state()
     return redirect(url_for('dashboard'))
 
 
 def _clear_simulation_data_files():
-    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
+    simulation_data_dir = SIMULATION_DATA_DIR
     if not os.path.isdir(simulation_data_dir):
         return
     for name in os.listdir(simulation_data_dir):
@@ -3041,7 +3106,7 @@ def _clear_simulation_data_files():
 
 
 def _clear_simulation_output_folder_all_files():
-    simulation_data_dir = os.path.join(_tempdir, "simulation_data")
+    simulation_data_dir = SIMULATION_DATA_DIR
     if not os.path.isdir(simulation_data_dir):
         return
     for name in os.listdir(simulation_data_dir):
@@ -3186,7 +3251,7 @@ def new_sim_custom():
 
 
 def _simulation_computation(job_id, job_status, params):
-    simulation_runs_root = os.path.join(_tempdir, "simulation_runs")
+    simulation_runs_root = SIMULATION_RUNS_DIR
     try:
         model_type = params["model_type"]
         run_mode = params.get("run_mode", "single")
@@ -3206,7 +3271,7 @@ def _simulation_computation(job_id, job_status, params):
             )
             sim_defaults = FOUR_AREA_DEFAULTS
 
-        output_dir = os.path.join(_tempdir, "simulation_data")
+        output_dir = SIMULATION_DATA_DIR
         os.makedirs(output_dir, exist_ok=True)
         _clear_simulation_grid_metadata_file(output_dir)
         for name in os.listdir(output_dir):
@@ -3395,7 +3460,7 @@ def _simulation_computation(job_id, job_status, params):
 def _simulation_computation_custom(job_id, job_status, params):
     temp_run_dir = None
     upload_root = params.get("upload_root")
-    simulation_runs_root = os.path.join(_tempdir, "simulation_runs")
+    simulation_runs_root = SIMULATION_RUNS_DIR
     try:
         input_paths = params["input_paths"]
         estimate_seconds = params.get("estimate_seconds", 60.0)
@@ -3413,7 +3478,7 @@ def _simulation_computation_custom(job_id, job_status, params):
         shutil.copy(input_paths["simulation_py"], os.path.join(python_dir, "simulation.py"))
         _enforce_simulation_chunk_seconds(os.path.join(python_dir, "simulation.py"), chunk_ms=1000.0)
 
-        output_dir = os.path.join(_tempdir, "simulation_data")
+        output_dir = SIMULATION_DATA_DIR
         os.makedirs(output_dir, exist_ok=True)
         _clear_simulation_grid_metadata_file(output_dir)
 
@@ -3470,7 +3535,7 @@ def _simulation_computation_custom(job_id, job_status, params):
         if upload_root and os.path.isdir(upload_root):
             shutil.rmtree(upload_root, ignore_errors=True)
         _remove_dir_if_empty(simulation_runs_root)
-        _remove_dir_if_empty(os.path.join(_tempdir, "simulation_custom_uploads"))
+        _remove_dir_if_empty(SIMULATION_CUSTOM_UPLOADS_DIR)
 
 
 @app.route("/run_trial_simulation/<model_type>", methods=["POST"])
@@ -3550,7 +3615,7 @@ def run_trial_simulation_custom():
     }
 
     run_id = str(uuid.uuid4())
-    upload_root = os.path.join(_tempdir, "simulation_custom_uploads", run_id)
+    upload_root = os.path.join(SIMULATION_CUSTOM_UPLOADS_DIR, run_id)
     os.makedirs(upload_root, exist_ok=True)
 
     input_paths = {}
@@ -3624,7 +3689,7 @@ def field_potential():
 def field_potential_load():
     field_potential_entries = _list_field_potential_detected_files()
     return render_template(
-        "2.3.field_potential_load.html",
+        "2.1.0.field_potential_load.html",
         field_potential_entries=field_potential_entries,
         has_field_potential_data=bool(field_potential_entries),
     )
@@ -3663,12 +3728,12 @@ def field_potential_load_precomputed():
     fp_type = (request.form.get("precomputed_fp_type") or "").strip().lower()
 
     destination_roots = {
-        "proxy": os.path.join(_tempdir, "field_potential_proxy"),
-        "cdm": os.path.join(_tempdir, "field_potential_kernel"),
-        "lfp": os.path.join(_tempdir, "field_potential_kernel"),
-        "eeg": os.path.join(_tempdir, "field_potential_meeg"),
-        "meg": os.path.join(_tempdir, "field_potential_meeg"),
-        "meeg": os.path.join(_tempdir, "field_potential_meeg"),
+        "proxy": FIELD_POTENTIAL_PROXY_DIR,
+        "cdm": FIELD_POTENTIAL_KERNEL_DIR,
+        "lfp": FIELD_POTENTIAL_KERNEL_DIR,
+        "eeg": FIELD_POTENTIAL_MEEG_DIR,
+        "meg": FIELD_POTENTIAL_MEEG_DIR,
+        "meeg": FIELD_POTENTIAL_MEEG_DIR,
     }
 
     inputs = []
@@ -3754,7 +3819,15 @@ def field_potential_kernel():
     if remembered_kernel_params:
         kernel_params_default = remembered_kernel_params
 
-    default_dir = os.path.join(_tempdir, "simulation_data")
+    remembered_mc_folder_local = _path_history_value_for_key("field_potential_kernel:mc_folder_local_staged")
+    if remembered_mc_folder_local and not os.path.isdir(remembered_mc_folder_local):
+        remembered_mc_folder_local = ""
+
+    remembered_output_sim_local = _path_history_value_for_key("field_potential_kernel:output_sim_path_local_staged")
+    if remembered_output_sim_local and not os.path.isdir(remembered_output_sim_local):
+        remembered_output_sim_local = ""
+
+    default_dir = SIMULATION_DATA_DIR
     default_paths = {
         "times": os.path.join(default_dir, "times.pkl"),
         "gids": os.path.join(default_dir, "gids.pkl"),
@@ -3765,7 +3838,7 @@ def field_potential_kernel():
         "population_sizes": os.path.join(default_dir, "population_sizes.pkl"),
     }
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
-    kernel_output_root = os.path.join(_tempdir, "field_potential_kernel")
+    kernel_output_root = FIELD_POTENTIAL_KERNEL_DIR
     preferred_cdm = []
     for fname in ("kernel_approx_cdm.pkl", "current_dipole_moment.pkl"):
         direct_path = os.path.join(kernel_output_root, fname)
@@ -3794,8 +3867,30 @@ def field_potential_kernel():
     requested_tab = request.args.get("tab", "")
     allowed_tabs = {"create_kernel", "cdm_computation", "meeg"}
     initial_tab = requested_tab if requested_tab in allowed_tabs else "create_kernel"
+    biophys_options = []
+    try:
+        neuron_utils_mod = getattr(ncpi, "neuron_utils", None)
+        if neuron_utils_mod is not None:
+            excluded_biophys_methods = {"compute_nu_X"}
+            for name, obj in inspect.getmembers(neuron_utils_mod):
+                if name.startswith("_") or name in excluded_biophys_methods:
+                    continue
+                if not callable(obj):
+                    continue
+                try:
+                    signature = inspect.signature(obj)
+                    params = list(signature.parameters.values())
+                except Exception:
+                    continue
+                if params and params[0].name == "cell":
+                    biophys_options.append(name)
+    except Exception:
+        biophys_options = []
+    biophys_options = sorted(set(biophys_options))
+    if not biophys_options:
+        biophys_options = ["set_Ih_linearized_hay2011", "make_cell_uniform"]
     return render_template(
-        "2.1.field_potential_kernel.html",
+        "2.2.0.field_potential_kernel.html",
         mc_models_default=mc_models_default,
         mc_outputs_default=mc_outputs_default,
         kernel_params_default=kernel_params_default,
@@ -3803,11 +3898,14 @@ def field_potential_kernel():
         default_sim_paths=default_paths,
         default_meeg=default_meeg,
         initial_tab=initial_tab,
+        biophys_options=biophys_options,
+        mc_models_local_staged_default=remembered_mc_folder_local,
+        mc_outputs_local_staged_default=remembered_output_sim_local,
     )
 
 @app.route("/field_potential/proxy")
 def field_potential_proxy():
-    default_dir = os.path.join(_tempdir, "simulation_data")
+    default_dir = SIMULATION_DATA_DIR
     default_paths = {
         "times": os.path.join(default_dir, "times.pkl"),
         "gids": os.path.join(default_dir, "gids.pkl"),
@@ -3819,11 +3917,76 @@ def field_potential_proxy():
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
     webui_runtime = _detect_webui_runtime_context(request)
     return render_template(
-        "2.2.field_potential_proxy.html",
+        "2.3.0.field_potential_proxy.html",
         default_sim=default_sim,
         default_sim_paths=default_paths,
         webui_runtime=webui_runtime,
     )
+
+
+@app.route("/field_potential/proxy/infer_trials", methods=["POST"])
+def field_potential_proxy_infer_trials():
+    file_key = (request.form.get("file_key") or "").strip()
+    default_names = {
+        "times_file": "times.pkl",
+        "gids_file": "gids.pkl",
+        "vm_file": "vm.pkl",
+        "ampa_file": "ampa.pkl",
+        "gaba_file": "gaba.pkl",
+    }
+    if file_key not in default_names:
+        return jsonify({"error": "Invalid simulation file key for trial detection."}), 400
+
+    source_path = None
+    temp_uploaded_path = None
+    source_kind = "unknown"
+    try:
+        local_file = request.files.get("local_file")
+        server_path_raw = (request.form.get("server_path") or "").strip()
+        use_default = (request.form.get("use_default") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+        if local_file and local_file.filename:
+            safe_name = secure_filename(local_file.filename)
+            if not safe_name:
+                return jsonify({"error": "Invalid uploaded file name."}), 400
+            ext = Path(safe_name).suffix.lower()
+            if ext not in PICKLE_EXTENSIONS:
+                return jsonify({"error": "Trial detection expects a .pkl/.pickle file."}), 400
+            uploads_dir = _module_uploads_dir_for("field_potential_proxy")
+            os.makedirs(uploads_dir, exist_ok=True)
+            temp_name = f"trial_detect_{uuid.uuid4()}_{safe_name}"
+            temp_uploaded_path = os.path.join(uploads_dir, temp_name)
+            local_file.save(temp_uploaded_path)
+            source_path = temp_uploaded_path
+            source_kind = "local-upload"
+        elif server_path_raw:
+            source_path = _validate_existing_pickle_file_path(server_path_raw, "Server simulation file")
+            source_kind = "server-path"
+        elif use_default:
+            default_path = os.path.join(SIMULATION_DATA_DIR, default_names[file_key])
+            if not os.path.isfile(default_path):
+                return jsonify({"error": f"Default file not found: {default_path}"}), 404
+            source_path = default_path
+            source_kind = "default-simulation"
+        else:
+            return jsonify({"error": "No file source provided for trial detection."}), 400
+
+        payload = compute_utils.read_file(source_path)
+        trial_count = int(compute_utils._infer_trial_count_from_values(payload))
+        trial_count = max(1, trial_count)
+        return jsonify({
+            "trial_count": trial_count,
+            "source_kind": source_kind,
+            "file_key": file_key,
+        })
+    except Exception as exc:
+        return jsonify({"error": f"Failed to detect trials: {exc}"}), 400
+    finally:
+        if temp_uploaded_path and os.path.isfile(temp_uploaded_path):
+            try:
+                os.remove(temp_uploaded_path)
+            except OSError:
+                pass
 
 
 def _is_loopback_identifier(value):
@@ -3876,7 +4039,9 @@ def _detect_webui_runtime_context(req):
     server_default_browse_dir = _path_history_start_directory(default_value=server_real_home_dir)
     return {
         "is_server_runtime": is_server_runtime,
-        "native_picker_available": bool(shutil.which("zenity") and os.environ.get("DISPLAY")),
+        "native_picker_available": bool(
+            NATIVE_PATH_PICKER_ENABLED and shutil.which("zenity") and os.environ.get("DISPLAY")
+        ),
         "default_empirical_source_mode": "server-path" if is_server_runtime else "upload",
         "default_simulation_source_mode": "server-path" if is_server_runtime else "upload",
         "default_analysis_source_mode": "server-path" if is_server_runtime else "upload",
@@ -4039,6 +4204,11 @@ def inject_webui_runtime_context():
 # Features configuration page
 @app.route("/features", methods=["GET", "POST"])
 def features():
+    requested_entry = (request.args.get("entry") or "").strip().lower()
+    requested_tab = (request.args.get("tab") or "").strip().lower()
+    if requested_entry == "load" or requested_tab == "load-precomputed":
+        return redirect(url_for("features_load_data"))
+
     pipeline_files = _collect_feature_pipeline_inputs()
     features_data_files = _list_features_data_files()
     runtime_context = _detect_webui_runtime_context(request)
@@ -4049,6 +4219,16 @@ def features():
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
         features_runtime=runtime_context,
+    )
+
+
+@app.route("/features/load_data")
+def features_load_data():
+    features_data_files = _list_features_data_files()
+    return render_template(
+        "3.0.load_precomputed_features.html",
+        features_data_files=features_data_files,
+        has_features_data=bool(features_data_files),
     )
 
 
@@ -4223,37 +4403,137 @@ def features_select_folder():
             _remember_path_history(f"features_select_folder:selected_file[{idx}]", normalized_path)
         return {"path": normalized_paths[0], "paths": normalized_paths}, None, None
 
+    if not NATIVE_PATH_PICKER_ENABLED:
+        return jsonify({
+            "error": (
+                "Native file/folder picker is unavailable in this runtime. "
+                "Use Server folders or type the path manually."
+            ),
+            "details": "Native picker disabled by configuration (NCPI_ENABLE_NATIVE_PATH_PICKER=0).",
+        }), 400
+
     picker_errors = []
 
     if shutil.which("zenity"):
         try:
-            cmd = ["zenity", "--file-selection"]
+            zenity_title = "NCPI - Select data folder" if mode == "folder" else "NCPI - Select data file"
+            cmd = ["zenity", "--file-selection", "--modal", f"--title={zenity_title}"]
+
+            # Best effort: attach the picker to the currently active X11 window so it is raised.
+            if shutil.which("xprop"):
+                try:
+                    active_proc = subprocess.run(
+                        ["xprop", "-root", "_NET_ACTIVE_WINDOW"],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                    )
+                    active_out = (active_proc.stdout or "").strip().lower()
+                    marker = "window id # "
+                    if marker in active_out:
+                        active_id = active_out.split(marker, 1)[1].strip().split()[0]
+                        if active_id and active_id != "0x0":
+                            cmd.append(f"--attach={active_id}")
+                except Exception:
+                    pass
+
             if start_path:
                 zenity_start = start_path
                 if not zenity_start.endswith(os.sep):
                     zenity_start = f"{zenity_start}{os.sep}"
                 cmd.append(f"--filename={zenity_start}")
             if mode == "folder":
-                cmd.extend(["--directory", "--title=Select data folder"])
+                cmd.append("--directory")
             else:
-                cmd.extend(["--title=Select data file"])
                 if allow_multiple:
                     cmd.extend(["--multiple", "--separator=\n"])
-            proc = subprocess.run(
+
+            proc = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=300,
                 env=os.environ.copy(),
             )
+
+            focus_stop = threading.Event()
+            focus_thread = None
+
+            def _focus_zenity_window():
+                # Some window managers only put Zenity in the taskbar/sidebar;
+                # repeatedly request activation during the initial popup period.
+                deadline = time.time() + 15.0
+                has_xdotool = bool(shutil.which("xdotool"))
+                has_wmctrl = bool(shutil.which("wmctrl"))
+                while not focus_stop.is_set() and proc.poll() is None and time.time() < deadline:
+                    focused = False
+                    if has_xdotool:
+                        try:
+                            search = subprocess.run(
+                                ["xdotool", "search", "--name", zenity_title],
+                                capture_output=True,
+                                text=True,
+                                timeout=1,
+                            )
+                            if search.returncode == 0:
+                                window_ids = [line.strip() for line in (search.stdout or "").splitlines() if line.strip()]
+                                if window_ids:
+                                    window_id = window_ids[-1]
+                                    subprocess.run(
+                                        ["xdotool", "windowactivate", "--sync", window_id],
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=1,
+                                    )
+                                    subprocess.run(
+                                        ["xdotool", "windowraise", window_id],
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=1,
+                                    )
+                                    focused = True
+                        except Exception:
+                            pass
+                    if not focused and has_wmctrl:
+                        try:
+                            subprocess.run(
+                                ["wmctrl", "-a", zenity_title],
+                                capture_output=True,
+                                text=True,
+                                timeout=1,
+                            )
+                        except Exception:
+                            pass
+                    if focused:
+                        break
+                    time.sleep(0.25)
+
+            if shutil.which("xdotool") or shutil.which("wmctrl"):
+                focus_thread = threading.Thread(target=_focus_zenity_window, daemon=True)
+                focus_thread.start()
+
+            try:
+                stdout_text, stderr_text = proc.communicate(timeout=300)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                try:
+                    proc.communicate(timeout=2)
+                except Exception:
+                    pass
+                raise
+            finally:
+                focus_stop.set()
+                if focus_thread is not None and focus_thread.is_alive():
+                    focus_thread.join(timeout=1)
+
             if proc.returncode == 0:
-                raw_output = (proc.stdout or "").replace("\r", "\n")
+                raw_output = (stdout_text or "").replace("\r", "\n")
                 picked_items = [chunk.strip() for chunk in raw_output.split("\n") if chunk.strip()]
                 payload, error_response, error_code = _normalize_and_validate_paths(picked_items)
                 if error_response is not None:
                     return error_response, error_code
                 return jsonify(payload)
-            stderr_text = (proc.stderr or "").strip()
+            stderr_text = (stderr_text or "").strip()
             if proc.returncode == 1 and not stderr_text:
                 return jsonify({"error": "Path selection cancelled."}), 400
             picker_errors.append(f"zenity failed (code {proc.returncode}): {stderr_text or 'no error details'}")
@@ -4340,7 +4620,7 @@ def stage_kernel_local_folder():
     if target_field not in {"mc_folder", "output_sim_path"}:
         target_field = "folder"
 
-    base_root = os.path.join(_tempdir, "field_potential_kernel", "local_folder_uploads")
+    base_root = FIELD_POTENTIAL_KERNEL_LOCAL_UPLOADS_DIR
     session_id = uuid.uuid4().hex
     staging_root = os.path.realpath(os.path.join(base_root, f"{target_field}_{session_id}"))
     os.makedirs(staging_root, exist_ok=True)
@@ -4428,7 +4708,7 @@ def features_parser_inspect():
             ext = Path(file_name).suffix.lower()
             if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                 return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
-            inspect_root = os.path.join(_tempdir, "features_inspection")
+            inspect_root = FEATURES_INSPECTION_DIR
             os.makedirs(inspect_root, exist_ok=True)
             temp_name = f"{uuid.uuid4()}_{file_name}"
             inspect_path = os.path.join(inspect_root, temp_name)
@@ -4459,6 +4739,9 @@ def features_parser_inspect():
 
 @app.route("/features/load_precomputed", methods=["POST"])
 def features_load_precomputed():
+    def _redirect_to_features_load_tab():
+        return redirect(url_for("features_load_data"))
+
     _remember_path_history_from_form(request.form, "features_load_precomputed")
     source_mode = (request.form.get("precomputed_features_source_mode") or "upload").strip().lower()
     uploads = [file for file in request.files.getlist("precomputed_features_file") if file and file.filename]
@@ -4468,21 +4751,21 @@ def features_load_precomputed():
     if source_mode == "server-path":
         if not server_file_paths:
             flash("Select at least one server features file (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("features"))
+            return _redirect_to_features_load_tab()
         for server_path in server_file_paths:
             try:
                 source_path = _validate_existing_pickle_file_path(server_path, "Features server file")
                 safe_name = secure_filename(os.path.basename(source_path))
             except Exception as exc:
                 flash(str(exc), "error")
-                return redirect(request.referrer or url_for("features"))
+                return _redirect_to_features_load_tab()
             if not safe_name:
                 continue
             inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
     else:
         if len(uploads) == 0:
             flash("Upload at least one precomputed features dataframe (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("features"))
+            return _redirect_to_features_load_tab()
         for upload in uploads:
             safe_name = secure_filename(upload.filename)
             if not safe_name:
@@ -4490,12 +4773,12 @@ def features_load_precomputed():
             ext = Path(safe_name).suffix.lower()
             if ext not in PICKLE_EXTENSIONS:
                 flash("Precomputed features must be a pickle file (.pkl/.pickle).", "error")
-                return redirect(request.referrer or url_for("features"))
+                return _redirect_to_features_load_tab()
             inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
 
     if not inputs:
         flash("No valid precomputed features files were provided.", "error")
-        return redirect(request.referrer or url_for("features"))
+        return _redirect_to_features_load_tab()
 
     features_dir = _features_data_dir(create=True)
     loaded_count = 0
@@ -4529,17 +4812,15 @@ def features_load_precomputed():
     if loaded_count == 0:
         detail = errors[0] if errors else "Unknown error."
         flash(f"Failed to load precomputed features: {detail}", "error")
-        return redirect(request.referrer or url_for("features"))
+        return _redirect_to_features_load_tab()
 
     if errors:
         shown = "; ".join(errors[:3])
         if len(errors) > 3:
             shown += f"; ... ({len(errors) - 3} more)"
         flash(f"Loaded {loaded_count} features file(s), but some failed: {shown}", "error")
-    elif loaded_count > 1:
-        flash(f"Loaded {loaded_count} precomputed features files.", "success")
 
-    return redirect(request.referrer or url_for("features"))
+    return _redirect_to_features_load_tab()
 
 
 @app.route("/features/remove_file", methods=["POST"])
@@ -4551,7 +4832,7 @@ def remove_features_file():
         os.remove(target_path)
     except Exception as exc:
         flash(str(exc), "error")
-    return redirect(url_for("features"))
+    return redirect(request.referrer or url_for("features_load_data"))
 
 # Inference configuration page
 @app.route("/inference")
@@ -4563,7 +4844,7 @@ def inference():
 def inference_load_data():
     predictions_data_files = _list_predictions_data_files()
     return render_template(
-        "4.0.load_data.html",
+        "4.1.0.load_precomputed_predictions.html",
         predictions_data_files=predictions_data_files,
         has_predictions_data=bool(predictions_data_files),
     )
@@ -4571,6 +4852,9 @@ def inference_load_data():
 
 @app.route("/inference/load_precomputed", methods=["POST"])
 def inference_load_precomputed():
+    def _redirect_to_inference_load_tab():
+        return redirect(url_for("inference_load_data"))
+
     _remember_path_history_from_form(request.form, "inference_load_precomputed")
     source_mode = (request.form.get("precomputed_predictions_source_mode") or "upload").strip().lower()
     uploads = [file for file in request.files.getlist("precomputed_predictions_file") if file and file.filename]
@@ -4580,21 +4864,21 @@ def inference_load_precomputed():
     if source_mode == "server-path":
         if not server_file_paths:
             flash("Select at least one server predictions file (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("inference_load_data"))
+            return _redirect_to_inference_load_tab()
         for server_path in server_file_paths:
             try:
                 source_path = _validate_existing_pickle_file_path(server_path, "Predictions server file")
                 safe_name = secure_filename(os.path.basename(source_path))
             except Exception as exc:
                 flash(str(exc), "error")
-                return redirect(request.referrer or url_for("inference_load_data"))
+                return _redirect_to_inference_load_tab()
             if not safe_name:
                 continue
             inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
     else:
         if len(uploads) == 0:
             flash("Upload at least one precomputed predictions dataframe (.pkl/.pickle).", "error")
-            return redirect(request.referrer or url_for("inference_load_data"))
+            return _redirect_to_inference_load_tab()
         for upload in uploads:
             safe_name = secure_filename(upload.filename)
             if not safe_name:
@@ -4602,12 +4886,12 @@ def inference_load_precomputed():
             ext = Path(safe_name).suffix.lower()
             if ext not in PICKLE_EXTENSIONS:
                 flash("Precomputed predictions must be a pickle file (.pkl/.pickle).", "error")
-                return redirect(request.referrer or url_for("inference_load_data"))
+                return _redirect_to_inference_load_tab()
             inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
 
     if not inputs:
         flash("No valid precomputed predictions files were provided.", "error")
-        return redirect(request.referrer or url_for("inference_load_data"))
+        return _redirect_to_inference_load_tab()
 
     predictions_dir = _predictions_data_dir(create=True)
     loaded_count = 0
@@ -4641,18 +4925,14 @@ def inference_load_precomputed():
     if loaded_count == 0:
         detail = errors[0] if errors else "Unknown error."
         flash(f"Failed to load precomputed predictions: {detail}", "error")
-        return redirect(request.referrer or url_for("inference_load_data"))
+        return _redirect_to_inference_load_tab()
 
     if errors:
         shown = "; ".join(errors[:3])
         if len(errors) > 3:
             shown += f"; ... ({len(errors) - 3} more)"
         flash(f"Loaded {loaded_count} predictions file(s), but some failed: {shown}", "error")
-    elif loaded_count == 1:
-        flash(f"Predictions file loaded: {inputs[0]['safe_name']}", "success")
-    else:
-        flash(f"Loaded {loaded_count} predictions files.", "success")
-    return redirect(request.referrer or url_for("inference_load_data"))
+    return _redirect_to_inference_load_tab()
 
 
 @app.route("/inference/remove_file", methods=["POST"])
@@ -4669,7 +4949,7 @@ def remove_inference_file():
 # New training for inference configuration page
 @app.route("/inference/new_training")
 def new_training():
-    return render_template("4.1.new_training.html")
+    return render_template("4.2.0.new_training.html")
 
 # Compute predictions for inference configuration page
 @app.route("/inference/compute_predictions")
@@ -4712,7 +4992,7 @@ def compute_predictions():
         except Exception:
             default_feature_file = feature_data_files[-1]
     return render_template(
-        "4.2.compute_predictions.html",
+        "4.3.0.compute_predictions.html",
         feature_data_files=feature_data_files,
         has_feature_data=bool(feature_data_files),
         default_feature_file=default_feature_file,
@@ -4729,8 +5009,9 @@ def inference_detect_model_backend():
     if not safe_name:
         return jsonify({"ok": False, "error": "Invalid uploaded file name."}), 400
 
-    os.makedirs(temp_uploaded_files, exist_ok=True)
-    temp_path = os.path.join(temp_uploaded_files, f"detect_model_{uuid.uuid4().hex}_{safe_name}")
+    inference_upload_dir = _module_uploads_dir_for("inference")
+    os.makedirs(inference_upload_dir, exist_ok=True)
+    temp_path = os.path.join(inference_upload_dir, f"detect_model_{uuid.uuid4().hex}_{safe_name}")
     upload.save(temp_path)
 
     try:
@@ -4760,7 +5041,7 @@ def inference_detect_model_backend():
 
 # Analysis configuration page
 def _analysis_data_dir(create=False):
-    path = os.path.join(_tempdir, "analysis_data")
+    path = ANALYSIS_DATA_DIR
     if create:
         os.makedirs(path, exist_ok=True)
     return path
@@ -4908,7 +5189,7 @@ def analysis():
         simulation_model = ""
         simulation_welch_defaults = None
     return render_template(
-        "5.analysis.html",
+        "5.1.0.analysis.html",
         analysis_data_files=analysis_data_files,
         has_analysis_data=bool(analysis_data_files),
         has_analysis_dataframe=has_analysis_dataframe,
@@ -4944,7 +5225,7 @@ def _analysis_data_path():
 
 
 def _simulation_output_root():
-    return os.path.join(_tempdir, "simulation_data")
+    return SIMULATION_DATA_DIR
 
 
 def _simulation_output_file(name):
@@ -5474,12 +5755,15 @@ def analysis_select_features_file():
     if not src_path or not os.path.isfile(src_path):
         return jsonify({"error": "Selected file was not found on disk."}), 404
 
-    analysis_data_dir = _analysis_data_dir(create=True)
     _clear_analysis_data_files()
+    analysis_data_dir = _analysis_data_dir(create=True)
 
     dst_name = secure_filename(filename)
     dst_path = os.path.join(analysis_data_dir, dst_name)
-    shutil.copy2(src_path, dst_path)
+    try:
+        shutil.copy2(src_path, dst_path)
+    except OSError as exc:
+        return jsonify({"error": f"Failed to stage selected file for analysis: {exc}"}), 500
 
     if source in {"simulation", "field_potential"}:
         _set_analysis_selection_mode("simulation")
@@ -5535,8 +5819,8 @@ def analysis_sync_selected_simulation_files():
             continue
         selected_entries.append(entry)
 
-    analysis_data_dir = _analysis_data_dir(create=True)
     _clear_analysis_data_files()
+    analysis_data_dir = _analysis_data_dir(create=True)
 
     copied_files = []
     used_names = set()
@@ -5553,7 +5837,10 @@ def analysis_sync_selected_simulation_files():
             suffix += 1
         used_names.add(candidate)
         dst_path = os.path.join(analysis_data_dir, candidate)
-        shutil.copy2(src_path, dst_path)
+        try:
+            shutil.copy2(src_path, dst_path)
+        except OSError:
+            continue
         copied_files.append(candidate)
 
     if copied_files:
@@ -5707,7 +5994,7 @@ def analysis_upload_simulation_files():
 def _analysis_plot_error(message, status=400, log_output=""):
     return (
         render_template(
-            "analysis_plot_result.html",
+            "5.2.0.analysis_plot_results.html",
             title="Analysis plot",
             subtitle="Plotting failed.",
             error=message,
@@ -5739,7 +6026,7 @@ def _render_analysis_plot(title, subtitle, image_bytes, log_output="", **extra_c
     }
     if extra_context:
         context.update(extra_context)
-    return render_template("analysis_plot_result.html", **context)
+    return render_template("5.2.0.analysis_plot_results.html", **context)
 
 
 def _find_column(df, candidates):
@@ -5770,8 +6057,8 @@ def analysis_columns():
     dataframe_path = (request.form.get("dataframe_path") or "").strip()
     upload = request.files.get("dataframe")
     
-    analysis_data_dir = _analysis_data_dir(create=True)
     _clear_analysis_data_files()
+    analysis_data_dir = _analysis_data_dir(create=True)
 
     if dataframe_path:
         source_path = os.path.realpath(os.path.expanduser(dataframe_path))
@@ -5798,7 +6085,10 @@ def analysis_columns():
         if file_extension not in {".pkl", ".pickle"}:
             return jsonify({"error": "Only .pkl/.pickle files are supported."}), 400
         temp_path = os.path.join(analysis_data_dir, filename)
-        upload.save(temp_path)
+        try:
+            upload.save(temp_path)
+        except OSError as exc:
+            return jsonify({"error": f"Failed to save uploaded file: {exc}"}), 400
 
     try:
         df = compute_utils.read_df_file(temp_path)
@@ -7856,7 +8146,8 @@ def start_computation_redirect(computation_type):
     if computation_type == 'field_potential_meeg':
         estimated_time_remaining = time.time() + 30
 
-    os.makedirs(temp_uploaded_files, exist_ok=True)
+    module_upload_dir = _module_uploads_dir_for(computation_type)
+    os.makedirs(module_upload_dir, exist_ok=True)
 
     # If everything is OK, save/prepare the file(s)
     file_paths = {}
@@ -7871,10 +8162,15 @@ def start_computation_redirect(computation_type):
         if data_source_kind == "pipeline":
             existing_path = _validate_feature_existing_path(request.form.get("existing_data_path"))
             copied_name = f"features_data_file_0_{job_id}_{os.path.basename(existing_path)}"
-            copied_path = os.path.join(temp_uploaded_files, copied_name)
+            copied_path = os.path.join(module_upload_dir, copied_name)
             shutil.copy2(existing_path, copied_path)
             try:
-                normalized_path = _normalize_features_input_path(copied_path, request.form, job_id)
+                normalized_path = _normalize_features_input_path(
+                    copied_path,
+                    request.form,
+                    job_id,
+                    upload_dir=module_upload_dir,
+                )
                 if normalized_path != copied_path and os.path.exists(copied_path):
                     os.remove(copied_path)
                 file_paths["data_file"] = normalized_path
@@ -7922,7 +8218,7 @@ def start_computation_redirect(computation_type):
                         if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                             continue
                         unique_filename = f"features_simulation_file_{idx}_{job_id}_{safe_name}"
-                        file_path = os.path.join(temp_uploaded_files, unique_filename)
+                        file_path = os.path.join(module_upload_dir, unique_filename)
                         save_one_started = time.perf_counter()
                         upload.save(file_path)
                         save_one_ms = (time.perf_counter() - save_one_started) * 1000.0
@@ -7999,7 +8295,7 @@ def start_computation_redirect(computation_type):
                         if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                             continue
                         unique_filename = f"features_empirical_file_{idx}_{job_id}_{safe_name}"
-                        file_path = os.path.join(temp_uploaded_files, unique_filename)
+                        file_path = os.path.join(module_upload_dir, unique_filename)
                         save_one_started = time.perf_counter()
                         upload.save(file_path)
                         save_one_ms = (time.perf_counter() - save_one_started) * 1000.0
@@ -8067,7 +8363,7 @@ def start_computation_redirect(computation_type):
                     continue
                 continue
             unique_filename = f"{computation_type}_{file_key}_{i}_{job_id}_{file.filename}" # E.g. features_ data_file_ 0_ 444961cc-5b72-43fc-b87e-3f4c8304ecdd_ df_inputIn_features_lfp.pkl
-            file_path = os.path.join(temp_uploaded_files, unique_filename)
+            file_path = os.path.join(module_upload_dir, unique_filename)
             file.save(file_path)
             # Save dictionary with file_key: file_path
             normalized_key = file_key
@@ -8112,7 +8408,7 @@ def start_computation_redirect(computation_type):
                     flash(str(exc), "error")
                     return redirect(request.referrer or url_for(redirect_target))
                 copied_name = f"{computation_type}_{file_key}_{job_id}_{os.path.basename(source_path)}"
-                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                copied_path = os.path.join(module_upload_dir, copied_name)
                 shutil.copy2(source_path, copied_path)
                 file_paths[file_key] = copied_path
         if computation_type == "field_potential_kernel":
@@ -8141,7 +8437,7 @@ def start_computation_redirect(computation_type):
                         flash(str(exc), "error")
                         return redirect(request.referrer or url_for("field_potential_kernel"))
                     copied_name = f"{computation_type}_kernel_params_module_{job_id}_{os.path.basename(source_path)}"
-                    copied_path = os.path.join(temp_uploaded_files, copied_name)
+                    copied_path = os.path.join(module_upload_dir, copied_name)
                     shutil.copy2(source_path, copied_path)
                     file_paths["kernel_params_module_file"] = copied_path
                     kernel_params_module_override = copied_path
@@ -8155,7 +8451,7 @@ def start_computation_redirect(computation_type):
                     if not safe_name:
                         continue
                     unique_filename = f"{computation_type}_inference_assets_folder_{idx}_{job_id}_{safe_name}"
-                    file_path = os.path.join(temp_uploaded_files, unique_filename)
+                    file_path = os.path.join(module_upload_dir, unique_filename)
                     upload.save(file_path)
 
                     normalized_key = _infer_inference_asset_role(safe_name)
@@ -8172,7 +8468,7 @@ def start_computation_redirect(computation_type):
 
             if inference_features_source_mode == "server-path" and inference_features_server_path:
                 copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(inference_features_server_path)}"
-                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                copied_path = os.path.join(module_upload_dir, copied_name)
                 shutil.copy2(inference_features_server_path, copied_path)
                 file_paths["features_predict"] = copied_path
             else:
@@ -8183,7 +8479,7 @@ def start_computation_redirect(computation_type):
                         src_path = os.path.join(_features_data_dir(create=False), existing_features_file)
                         if os.path.isfile(src_path):
                             copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(src_path)}"
-                            copied_path = os.path.join(temp_uploaded_files, copied_name)
+                            copied_path = os.path.join(module_upload_dir, copied_name)
                             shutil.copy2(src_path, copied_path)
                             file_paths["features_predict"] = copied_path
 
@@ -8193,18 +8489,18 @@ def start_computation_redirect(computation_type):
                     if not source_path:
                         continue
                     copied_name = f"inference_{asset_key}_{job_id}_{os.path.basename(source_path)}"
-                    copied_path = os.path.join(temp_uploaded_files, copied_name)
+                    copied_path = os.path.join(module_upload_dir, copied_name)
                     shutil.copy2(source_path, copied_path)
                     file_paths[asset_key] = copied_path
         if computation_type == "inference_training":
             if inference_training_features_source_mode == "server-path" and inference_training_features_server_path:
                 copied_name = f"inference_training_features_{job_id}_{os.path.basename(inference_training_features_server_path)}"
-                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                copied_path = os.path.join(module_upload_dir, copied_name)
                 shutil.copy2(inference_training_features_server_path, copied_path)
                 file_paths["training_features_file"] = copied_path
             if inference_training_parameters_source_mode == "server-path" and inference_training_parameters_server_path:
                 copied_name = f"inference_training_parameters_{job_id}_{os.path.basename(inference_training_parameters_server_path)}"
-                copied_path = os.path.join(temp_uploaded_files, copied_name)
+                copied_path = os.path.join(module_upload_dir, copied_name)
                 shutil.copy2(inference_training_parameters_server_path, copied_path)
                 file_paths["training_parameters_file"] = copied_path
 
@@ -8251,7 +8547,7 @@ def start_computation_redirect(computation_type):
         "cancel_requested": False,
         "computation_type": computation_type,
         "output": "",
-        "progress_mode": "manual" if computation_type in {"features", "inference", "inference_training"} else "time",
+        "progress_mode": "manual" if computation_type in {"features", "inference", "inference_training", "field_potential_meeg"} else "time",
     }
 
     # Submit the long-running task according to the computation type.
@@ -8283,7 +8579,7 @@ def start_computation_redirect(computation_type):
                 upstream_module,
                 func,
                 data,
-                temp_uploaded_files,
+                module_upload_dir,
             )
             job_futures[job_id] = future
 
@@ -8295,7 +8591,7 @@ def start_computation_redirect(computation_type):
             upstream_module,
             func,
             data,
-            temp_uploaded_files,
+            module_upload_dir,
         )
         job_futures[job_id] = future
 
@@ -8399,6 +8695,10 @@ def get_status(job_id):
         "simulation_total": status.get("simulation_total"),
         "simulation_completed": status.get("simulation_completed"),
         "simulation_mode": status.get("simulation_mode"),
+        "meeg_trial_total": status.get("meeg_trial_total"),
+        "meeg_trial_index": status.get("meeg_trial_index"),
+        "meeg_sensors_total": status.get("meeg_sensors_total"),
+        "meeg_sensors_completed": status.get("meeg_sensors_completed"),
         "can_download": bool(status.get("status") == "finished" and status.get("results")),
     })
 
@@ -8416,6 +8716,7 @@ def download_results(job_id):
 
     # Retrieve the stored DataFrame
     output_df_path = status["results"] 
+    download_tmp_dir = _module_uploads_dir_for(computation_type)
 
     # Remove file after downloading it, except canonical pipeline outputs in the shared temp root.
     if computation_type not in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'simulation'}:
@@ -8431,7 +8732,7 @@ def download_results(job_id):
 
     if computation_type == 'analysis':
         return send_file(
-            f'{temp_uploaded_files}/LFP_predictions.png',
+            output_df_path,
             mimetype='image/png',
             as_attachment=True,
             download_name='LFP_predictions.png'
@@ -8440,8 +8741,8 @@ def download_results(job_id):
         if not os.path.isdir(output_df_path):
             return "Simulation outputs directory is not available.", 404
 
-        os.makedirs(temp_uploaded_files, exist_ok=True)
-        archive_base = os.path.join(temp_uploaded_files, f"simulation_results_{job_id}")
+        os.makedirs(download_tmp_dir, exist_ok=True)
+        archive_base = os.path.join(download_tmp_dir, f"simulation_results_{job_id}")
         archive_path = shutil.make_archive(archive_base, "zip", root_dir=output_df_path)
 
         @after_this_request

@@ -24,7 +24,7 @@
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
 									<!-- <span class="material-symbols-outlined !text-3xl">psychology</span> -->
-									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Simulation module w transparency.png')}}" alt="Neuron simulation" class="h-31 w-31 object-contain"/>
+									 <img src="{{url_for('static', filename='images/module_icons/Simulation module w transparency.png')}}" alt="Neuron simulation" class="h-31 w-31 object-contain"/>
 								</div>
 								<div class="flex flex-col gap-1 items-center justify-center">
 									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Simulation</h2>
@@ -37,7 +37,7 @@
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
 									<!-- <span class="material-symbols-outlined !text-3xl">waves</span> -->
-									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Field Potential module w transparency.svg')}}" alt="EEG signals" class="h-29 w-28 object-contain"/>
+									 <img src="{{url_for('static', filename='images/module_icons/Field Potential module w transparency.svg')}}" alt="EEG signals" class="h-29 w-28 object-contain"/>
 								</div>
 								<div class="flex flex-col gap-1 items-center">
 									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Field Potential</h2>
@@ -50,7 +50,7 @@
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
 									<!-- <span class="material-symbols-outlined !text-3xl">analytics</span> -->
-									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Features module w transparency.png')}}" alt="Feature extraction" class="h-31 w-31 object-contain"/>
+									 <img src="{{url_for('static', filename='images/module_icons/Features module w transparency.png')}}" alt="Feature extraction" class="h-31 w-31 object-contain"/>
 								</div>
 								<div class="flex flex-col gap-1 items-center ">
 									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Features</h2>
@@ -63,7 +63,7 @@
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary p-2">
 									<!-- <span class="material-symbols-outlined !text-3xl">share</span> -->
-									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Inference module w transparency.svg')}}" alt="Inference" class="h-full w-full object-contain"/>
+									 <img src="{{url_for('static', filename='images/module_icons/Inference module w transparency.svg')}}" alt="Inference" class="h-full w-full object-contain"/>
 								</div>
 								<div class="flex flex-col gap-1 items-center ">
 									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Inference</h2>
@@ -76,7 +76,7 @@
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary p-2">
 									<!-- <span class="material-symbols-outlined !text-3xl">query_stats</span> -->
-									 <img src="{{url_for('static', filename='images/Icons of module containers from the dashboard/Analysis module w transparency.png')}}" alt="Analysis" class="h-full w-full object-contain"/>
+									 <img src="{{url_for('static', filename='images/module_icons/Analysis module w transparency.png')}}" alt="Analysis" class="h-full w-full object-contain"/>
 								</div>
 								<div class="flex flex-col gap-1 items-center ">
 									<h2 class="text-lg font-bold text-gray-900 dark:text-white">Analysis</h2>
@@ -248,25 +248,34 @@
 							<div class="w-full max-w-lg rounded-xl border border-red-300 bg-white p-6 shadow-2xl dark:border-red-700/80 dark:bg-slate-900">
 								<div class="flex items-start gap-3">
 									<span class="material-symbols-outlined text-3xl text-red-600 dark:text-red-400">warning</span>
-									<div>
-										<h3 id="clearDataModalTitle" class="text-lg font-bold text-red-700 dark:text-red-300">
-											Warning
-										</h3>
-										<p id="clearDataModalMessage" class="mt-2 text-sm text-slate-700 dark:text-slate-200"></p>
+										<div>
+											<h3 id="clearDataModalTitle" class="text-lg font-bold text-red-700 dark:text-red-300">
+												Choose Clear Scope
+											</h3>
+											<p id="clearDataModalMessage" class="mt-2 text-sm text-slate-700 dark:text-slate-200"></p>
+											<ul class="mt-3 list-disc space-y-1 pl-5 text-xs text-slate-600 dark:text-slate-300">
+												<li id="clearDataModalOptionOnly"></li>
+												<li id="clearDataModalOptionAll"></li>
+												<li id="clearDataModalOptionCancel"></li>
+											</ul>
+										</div>
+									</div>
+									<div class="mt-6 flex justify-end gap-3">
+										<button id="cancelClearDataBtn" type="button"
+											class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
+											Cancel
+										</button>
+										<button id="clearOnlyDataBtn" type="button"
+											class="rounded-md border border-amber-700 bg-amber-600 px-3 py-2 text-sm font-semibold text-white hover:bg-amber-700">
+											Clear only selected data
+										</button>
+										<button id="confirmClearDataBtn" type="button"
+											class="rounded-md border border-red-700 bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">
+											Clear selected and downstream data
+										</button>
 									</div>
 								</div>
-								<div class="mt-6 flex justify-end gap-3">
-									<button id="cancelClearDataBtn" type="button"
-										class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
-										Cancel
-									</button>
-									<button id="confirmClearDataBtn" type="button"
-										class="rounded-md border border-red-700 bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">
-										Yes, clear all data
-									</button>
-								</div>
 							</div>
-						</div>
 {% endblock %}
 
 {% block scripts %}
@@ -275,9 +284,39 @@
 		const clearForms = document.querySelectorAll(".js-clear-data-form");
 		const modal = document.getElementById("clearDataConfirmModal");
 		const modalMessage = document.getElementById("clearDataModalMessage");
+		const optionOnly = document.getElementById("clearDataModalOptionOnly");
+		const optionAll = document.getElementById("clearDataModalOptionAll");
+		const optionCancel = document.getElementById("clearDataModalOptionCancel");
+		const clearOnlyBtn = document.getElementById("clearOnlyDataBtn");
 		const confirmBtn = document.getElementById("confirmClearDataBtn");
 		const cancelBtn = document.getElementById("cancelClearDataBtn");
 		let pendingForm = null;
+
+		if (!modal || !modalMessage || !optionOnly || !optionAll || !optionCancel || !clearOnlyBtn || !confirmBtn || !cancelBtn) {
+			return;
+		}
+
+		const setClearScope = (form, scope) => {
+			let scopeInput = form.querySelector('input[name="clear_scope"]');
+			if (!scopeInput) {
+				scopeInput = document.createElement("input");
+				scopeInput.type = "hidden";
+				scopeInput.name = "clear_scope";
+				form.appendChild(scopeInput);
+			}
+			scopeInput.value = scope;
+		};
+
+		const submitPendingForm = (scope) => {
+			if (!pendingForm) {
+				closeModal();
+				return;
+			}
+			const formToSubmit = pendingForm;
+			setClearScope(formToSubmit, scope);
+			closeModal();
+			formToSubmit.submit();
+		};
 
 		const closeModal = () => {
 			modal.classList.add("hidden");
@@ -292,24 +331,29 @@
 
 				const clearLabel = form.dataset.clearLabel || "selected data";
 				const clearAlso = (form.dataset.clearAlso || "").trim();
-				const warningText = clearAlso
-					? `Warning! Clearing ${clearLabel} will also clear ${clearAlso}. Are you really sure?`
-					: `Warning! Clearing ${clearLabel} cannot be undone. Are you really sure?`; // In case Analysis data is cleared
+				const hasDownstream = clearAlso.length > 0;
 
-				modalMessage.textContent = warningText;
+				modalMessage.textContent = `You are about to clear ${clearLabel}. Choose one option:`;
+				optionOnly.textContent = `Clear only ${clearLabel}.`;
+				optionCancel.textContent = "Cancel without clearing any data.";
+				clearOnlyBtn.textContent = `Clear only ${clearLabel}`;
+				if (hasDownstream) {
+					optionAll.textContent = `Clear ${clearLabel} and downstream data: ${clearAlso}.`;
+					optionAll.classList.remove("hidden");
+					confirmBtn.classList.remove("hidden");
+					confirmBtn.textContent = `Clear ${clearLabel} and downstream data`;
+				} else {
+					optionAll.classList.add("hidden");
+					confirmBtn.classList.add("hidden");
+				}
 				modal.classList.remove("hidden");
 				modal.classList.add("flex");
 			});
 		});
 
+		clearOnlyBtn.addEventListener("click", () => submitPendingForm("only"));
 		confirmBtn.addEventListener("click", () => {
-			if (!pendingForm) {
-				closeModal();
-				return;
-			}
-			const formToSubmit = pendingForm;
-			closeModal();
-			formToSubmit.submit();
+			submitPendingForm("all");
 		});
 
 		cancelBtn.addEventListener("click", closeModal);

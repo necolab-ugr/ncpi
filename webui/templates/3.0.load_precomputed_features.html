@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}Load Precomputed Features{% endblock %}
+
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#1337ec",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
+<style type="text/tailwindcss">
+    .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24
+    }
+    .drop-zone {
+        border-style: dashed;
+    }
+    @layer utilities {
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="flex h-full">
+    <main class="w-full lg:w-3/5 xl:w-2/3 h-full flex flex-col overflow-y-auto hide-scrollbar">
+        <div class="max-w-4xl w-full mx-auto flex flex-col h-full">
+            <div class="mb-10">
+                <h1 class="text-4xl font-black leading-tight tracking-tight mb-2">Features Configuration: Load Data</h1>
+                <p class="text-slate-500 dark:text-slate-400 text-lg">Select and upload precomputed features files.</p>
+            </div>
+            <div class="flex flex-col gap-6 flex-grow mb-12">
+                <div class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-bold flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary">analytics</span>
+                            Load precomputed features files
+                        </h3>
+                    </div>
+
+                    <form id="featuresLoadUploadForm" action="{{ url_for('features_load_precomputed') }}" method="POST" enctype="multipart/form-data">
+                        <input type="file" id="featuresLoadFileInput" name="precomputed_features_file" class="hidden" accept=".pkl,.pickle" multiple />
+                        <input type="hidden" id="featuresLoadSourceModeInput" name="precomputed_features_source_mode" value="upload" />
+                        <input type="hidden" id="featuresLoadServerFilePathInput" name="precomputed_features_server_file_path" value="" />
+                        <div id="featuresLoadDropZone"
+                            class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
+                            <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" id="featuresLoadModeUploadBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
+                                    Local upload
+                                </button>
+                                <button type="button" id="featuresLoadModeServerBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                                    Server file
+                                </button>
+                            </div>
+                            <span class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">upload_file</span>
+                            <p id="featuresLoadDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
+                                Drag and drop pkl files or click to browse
+                            </p>
+                            <div id="selectedFeaturesLoadFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local files</span>
+                                <div id="selectedFeaturesLoadFilesList" class="mt-2"></div>
+                            </div>
+                            <div id="selectedFeaturesLoadServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server files</span>
+                                <div id="selectedFeaturesLoadServerFilePath" class="mt-2 font-mono break-all"></div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="mt-8 flex justify-end">
+                    {% if has_features_data %}
+                    <a href="{{url_for('inference')}}"
+                        class="bg-primary text-white px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+                        Continue to Inference
+                    </a>
+                    {% else %}
+                    <span class="bg-slate-200 text-slate-500 px-10 py-3 rounded-lg font-bold text-lg cursor-not-allowed select-none">
+                        Continue to Inference
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="mt-auto pt-6 flex flex-wrap gap-4 border-t border-slate-200 dark:border-slate-800">
+                <a href="{{url_for('dashboard')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                    <span class="material-symbols-outlined text-lg">dashboard</span>
+                    Back to the dashboard
+                </a>
+                <a href="{{url_for('features')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                    <span class="material-symbols-outlined text-lg">arrow_back</span>
+                    Back to features options
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <aside class="lg:flex w-2/5 xl:w-1/3 bg-white dark:bg-slate-900/50 border-l border-slate-200 dark:border-slate-800 flex-col overflow-y-auto">
+        <div class="p-8 xl:p-12 space-y-10">
+            <div>
+                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Upload Status</h4>
+                <div class="bg-slate-100 dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+                    <div class="flex items-center gap-4">
+                        <div class="relative flex">
+                            {% if has_features_data %}
+                            <span class="material-symbols-outlined text-green-500 text-3xl">check_circle</span>
+                            {% else %}
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-20"></span>
+                            <span class="material-symbols-outlined text-primary text-3xl">hourglass_empty</span>
+                            {% endif %}
+                        </div>
+                        <div>
+                            {% if has_features_data %}
+                            <p class="text-sm font-bold text-green-600 dark:text-green-500">Status: Files detected</p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Features files are ready.</p>
+                            <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                                {% for filename in features_data_files %}
+                                <div class="flex items-center justify-between gap-2 py-0.5">
+                                    <span class="truncate" title="{{ filename }}">{{ filename }}</span>
+                                    <form action="{{ url_for('remove_features_file') }}" method="POST" class="shrink-0">
+                                        <input type="hidden" name="filename" value="{{ filename }}">
+                                        <button type="submit" class="inline-flex items-center gap-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                                            <span class="material-symbols-outlined text-sm">delete</span>
+                                            Remove
+                                        </button>
+                                    </form>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <p class="text-sm font-bold">Status: Awaiting files</p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Please select files to continue</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="space-y-6">
+                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400">Formatting Tips</h4>
+                <div class="space-y-4">
+                    <div class="flex gap-4">
+                        <span class="material-symbols-outlined text-primary shrink-0">info</span>
+                        <div>
+                            <h5 class="text-sm font-bold mb-1">Supported Formats</h5>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">Ensure your data is saved in .pkl or .pickle.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <span class="material-symbols-outlined text-primary shrink-0">grid_on</span>
+                        <div>
+                            <h5 class="text-sm font-bold mb-1">Data Structure</h5>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">An uploaded dataframe is expected, with one column named <code>Features</code>.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="pt-10 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400 leading-relaxed">
+                <p>Once the files are successfully uploaded and validated, the inference module is ready for the next step.</p>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<div id="featuresLoadServerFileModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+            <button type="button" id="featuresLoadServerFileBrowserClose"
+                class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+        </div>
+        <div class="p-4 space-y-3">
+            <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                Current folder: <span id="featuresLoadServerFileBrowserPath" class="font-mono"></span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="featuresLoadServerFileBrowserUp"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Up
+                </button>
+                <button type="button" id="featuresLoadServerFileBrowserRefresh"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Refresh
+                </button>
+                <button type="button" id="featuresLoadServerFileBrowserSelect"
+                    class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                    Select files
+                </button>
+            </div>
+            <div id="featuresLoadServerFileBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+            <div id="featuresLoadServerFileBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+            <div id="featuresLoadServerFileBrowserEntries"
+                class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+<script>
+    if (typeof window.initUnifiedUploadFlow === 'function') {
+        window.initUnifiedUploadFlow({
+            runtime: window.__webuiRuntime || {},
+            historyKey: 'features_load_data:file_browser',
+            localPickerId: 'features_load_data_local',
+            browseDirsUrl: '{{ url_for("features_browse_dirs") }}',
+            selectPathUrl: '{{ url_for("features_select_folder") }}',
+            formId: 'featuresLoadUploadForm',
+            fileInputId: 'featuresLoadFileInput',
+            dropZoneId: 'featuresLoadDropZone',
+            sourceModeInputId: 'featuresLoadSourceModeInput',
+            serverPathInputId: 'featuresLoadServerFilePathInput',
+            modeUploadBtnId: 'featuresLoadModeUploadBtn',
+            modeServerBtnId: 'featuresLoadModeServerBtn',
+            dropZoneHintId: 'featuresLoadDropZoneHint',
+            selectedLocalContainerId: 'selectedFeaturesLoadFiles',
+            selectedLocalListId: 'selectedFeaturesLoadFilesList',
+            selectedServerContainerId: 'selectedFeaturesLoadServerFile',
+            selectedServerListId: 'selectedFeaturesLoadServerFilePath',
+            modalRootId: 'featuresLoadServerFileModal',
+            modalPathId: 'featuresLoadServerFileBrowserPath',
+            modalEntriesId: 'featuresLoadServerFileBrowserEntries',
+            modalErrorId: 'featuresLoadServerFileBrowserError',
+            modalLoadingId: 'featuresLoadServerFileBrowserLoading',
+            modalUpId: 'featuresLoadServerFileBrowserUp',
+            modalRefreshId: 'featuresLoadServerFileBrowserRefresh',
+            modalSelectId: 'featuresLoadServerFileBrowserSelect',
+            modalCloseId: 'featuresLoadServerFileBrowserClose',
+            activeButtonClasses: ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'],
+            inactiveButtonClasses: ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'],
+            dragActiveClasses: ['border-primary'],
+        });
+    }
+</script>
+{% endblock %}

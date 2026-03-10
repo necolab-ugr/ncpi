@@ -57,8 +57,7 @@
 
 {% block content %}
 <div class="bg-container-light dark:bg-[#111422] rounded-xl border border-border-light dark:border-[#323b67]/50 p-6"
-    x-data="{ activeTab: '{{ initial_tab }}', browseSourceMode: ((window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path') }">
-    <input id="kernel-browse-source-mode" type="hidden" x-model="browseSourceMode" />
+    x-data="{ activeTab: '{{ initial_tab }}' }">
 
     <!-- Menu tabs -->
     <div class="mb-6 border-b border-border-light dark:border-[#323b67]/50">
@@ -100,40 +99,59 @@
                             </div>
                             <h3 class="text-lg font-bold">1. Paths</h3>
                         </div>
-                        <div class="space-y-1">
-                            <div class="mb-4 p-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/40">
-                                <p class="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">Browse source</p>
-                                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                    <button id="kernel-browse-mode-local" type="button" @click="browseSourceMode = 'local-picker'"
-                                        class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                        :data-active="browseSourceMode === 'local-picker' ? '1' : '0'"
-                                        :class="browseSourceMode === 'local-picker' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                        Local paths
-                                    </button>
-                                    <button id="kernel-browse-mode-server" type="button" @click="browseSourceMode = 'server-path'"
-                                        class="px-3 py-2 text-xs rounded-lg border transition-colors"
-                                        :data-active="browseSourceMode === 'server-path' ? '1' : '0'"
-                                        :class="browseSourceMode === 'server-path' ? 'bg-primary/10 border-primary text-primary' : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
-                                        Server paths
-                                    </button>
-                                </div>
-                            </div>
+                        <div class="space-y-4">
                             <div class="input-group">
                                 <label class="input-label">Multicompartment neuron model folder</label>
                                 <p class="input-subtext">Folder containing the multicompartment neuron model
                                     descriptions (cell parameters and morphologies).</p>
-                                <div class="flex items-center gap-2" data-folder-input>
-                                    <input id="mcFolderDisplayInput" class="input-field flex-1" placeholder="/path/to/mc_folder/" type="text" value="{{ mc_models_default }}" data-folder-display />
-                                    <input id="mcFolderHiddenInput" type="hidden" name="mc_folder" value="{{ mc_models_default }}" data-folder-hidden />
-                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="server-path" data-folder-source />
-                                    <input id="kernelMcFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple data-folder-local />
-                                    <button
-                                        type="button"
-                                        class="folder-picker inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-primary hover:border-primary/40 bg-white dark:bg-slate-900/40"
-                                        title="Browse folder"
-                                        aria-label="Browse folder">
-                                        <span class="material-symbols-outlined text-base leading-none">folder_open</span>
-                                    </button>
+                                <div id="kernelMcFolderUploadCard"
+                                    class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
+                                    <input id="mcFolderDisplayInput" class="hidden" type="text" value="{{ mc_models_default }}" />
+                                    <input id="mcFolderHiddenInput" type="hidden" name="mc_folder" value="{{ mc_models_default }}" />
+                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="server-path" />
+                                    <input id="kernelMcFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple />
+                                    <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
+                                        <button type="button" data-path-action="true" class="kernel-path-upload-local px-2.5 py-1 text-[10px] rounded border">Local folder</button>
+                                        <button type="button" data-path-action="true" class="kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border">Server folder</button>
+                                    </div>
+                                    <span class="material-symbols-outlined text-slate-400">folder_open</span>
+                                    <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Multicompartment neuron model folder</span>
+                                    <p class="text-[10px] text-slate-400">Click to browse folder paths</p>
+                                    <div class="mt-2 hidden w-full rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 px-3 py-2 text-xs text-blue-700 dark:text-blue-300"
+                                        data-role="upload-progress">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="font-semibold" data-role="upload-progress-text">Uploading folder...</span>
+                                            <span class="font-mono text-[11px]" data-role="upload-progress-percent"></span>
+                                        </div>
+                                        <div class="mt-2 h-1.5 w-full rounded bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
+                                            <div class="h-full w-0 bg-blue-500 dark:bg-blue-400 transition-[width] duration-150"
+                                                data-role="upload-progress-bar"></div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                        data-role="local-summary">
+                                        <span class="font-semibold text-green-800 dark:text-green-200">Selected local folder:</span>
+                                        <div class="mt-1 flex items-start justify-between gap-2">
+                                            <span class="block flex-1 break-all" data-role="local-name"></span>
+                                            <button type="button" data-path-action="true" data-role="local-clear"
+                                                class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                                title="Remove selected local folder" aria-label="Remove selected local folder">
+                                                <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                        data-role="server-summary">
+                                        <span class="font-semibold text-green-800 dark:text-green-200">Selected server folder:</span>
+                                        <div class="mt-1 flex items-start justify-between gap-2">
+                                            <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
+                                            <button type="button" data-path-action="true" data-role="server-clear"
+                                                class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                                title="Remove selected server folder" aria-label="Remove selected server folder">
+                                                <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="input-group">
@@ -141,18 +159,54 @@
                                 <p class="input-subtext">Folder containing MC network simulation outputs. If not specified,
                                     both mean firing rates (mean_nu_X) and resting membrane potential (Vrest) must be
                                     provided.</p>
-                                <div class="flex items-center gap-2" data-folder-input>
-                                    <input id="outputSimDisplayInput" class="input-field flex-1" placeholder="/path/to/mc_network/simulation_outputs/" type="text" value="{{ mc_outputs_default }}" data-folder-display />
-                                    <input id="outputSimHiddenInput" type="hidden" name="output_sim_path" value="{{ mc_outputs_default }}" data-folder-hidden />
-                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="server-path" data-folder-source />
-                                    <input id="kernelOutputFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple data-folder-local />
-                                    <button
-                                        type="button"
-                                        class="folder-picker inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-primary hover:border-primary/40 bg-white dark:bg-slate-900/40"
-                                        title="Browse folder"
-                                        aria-label="Browse folder">
-                                        <span class="material-symbols-outlined text-base leading-none">folder_open</span>
-                                    </button>
+                                <div id="kernelOutputSimUploadCard"
+                                    class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
+                                    <input id="outputSimDisplayInput" class="hidden" type="text" value="{{ mc_outputs_default }}" />
+                                    <input id="outputSimHiddenInput" type="hidden" name="output_sim_path" value="{{ mc_outputs_default }}" />
+                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="server-path" />
+                                    <input id="kernelOutputFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple />
+                                    <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
+                                        <button type="button" data-path-action="true" class="kernel-path-upload-local px-2.5 py-1 text-[10px] rounded border">Local folder</button>
+                                        <button type="button" data-path-action="true" class="kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border">Server folder</button>
+                                    </div>
+                                    <span class="material-symbols-outlined text-slate-400">folder_open</span>
+                                    <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Multicompartment network simulation outputs</span>
+                                    <p class="text-[10px] text-slate-400">Click to browse folder paths</p>
+                                    <div class="mt-2 hidden w-full rounded-md border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/30 px-3 py-2 text-xs text-blue-700 dark:text-blue-300"
+                                        data-role="upload-progress">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="font-semibold" data-role="upload-progress-text">Uploading folder...</span>
+                                            <span class="font-mono text-[11px]" data-role="upload-progress-percent"></span>
+                                        </div>
+                                        <div class="mt-2 h-1.5 w-full rounded bg-blue-100 dark:bg-blue-950/60 overflow-hidden">
+                                            <div class="h-full w-0 bg-blue-500 dark:bg-blue-400 transition-[width] duration-150"
+                                                data-role="upload-progress-bar"></div>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                        data-role="local-summary">
+                                        <span class="font-semibold text-green-800 dark:text-green-200">Selected local folder:</span>
+                                        <div class="mt-1 flex items-start justify-between gap-2">
+                                            <span class="block flex-1 break-all" data-role="local-name"></span>
+                                            <button type="button" data-path-action="true" data-role="local-clear"
+                                                class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                                title="Remove selected local folder" aria-label="Remove selected local folder">
+                                                <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                        data-role="server-summary">
+                                        <span class="font-semibold text-green-800 dark:text-green-200">Selected server folder:</span>
+                                        <div class="mt-1 flex items-start justify-between gap-2">
+                                            <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
+                                            <button type="button" data-path-action="true" data-role="server-clear"
+                                                class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                                title="Remove selected server folder" aria-label="Remove selected server folder">
+                                                <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -177,12 +231,12 @@
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Presynaptic Activation Time (t_X)</label>
-                                <p class="input-subtext"></p>
+                                <p class="input-subtext">Activation onset (ms) for presynaptic populations when generating kernels. If empty, defaults to <code>KernelParams.transient</code>.</p>
                                 <input class="input-field" step="0.1" type="number" name="t_x" value="" />
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Kernel Time Lag (tau)</label>
-                                <p class="input-subtext"></p>
+                                <p class="input-subtext">Kernel duration / lag window (ms) used for kernel construction. If empty, defaults to <code>KernelParams.tau</code>.</p>
                                 <input class="input-field" step="0.1" type="number" name="tau" value="" />
                             </div>
                         </div>
@@ -201,34 +255,42 @@
                             <p class="input-subtext">Module or object containing the full specification of the multicompartment
                                 network model (for an example implementation, see:
                                 examples/simulation/Hagen_model/simulation/params/analysis_params.py.)</p>
-                            <input type="hidden" id="kernel-params-browse-mode" name="kernel_params_module_source_mode" value="server-path" />
-                            <input class="hidden" type="file" id="kernelParamsModuleFile" name="kernel_params_file" accept=".py" />
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-2">
-                                <button type="button" id="kernel-params-mode-local"
-                                    class="px-3 py-2 text-xs rounded-lg border transition-colors">
-                                    Local upload
-                                </button>
-                                <button type="button" id="kernel-params-mode-server"
-                                    class="px-3 py-2 text-xs rounded-lg border transition-colors">
-                                    Server files
-                                </button>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2 mb-2">
-                                <button type="button" id="kernel-params-browse-local"
-                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                    Browse local files
-                                </button>
-                                <button type="button" id="kernel-params-browse-server"
-                                    class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800">
-                                    Browse server files
-                                </button>
-                            </div>
-                            <div id="kernel-params-local-selected" class="hidden text-xs text-slate-500 dark:text-slate-400 mb-2">
-                                <span class="font-semibold text-slate-600 dark:text-slate-300">Selected local file:</span>
-                                <span id="kernel-params-local-selected-name" class="font-mono"></span>
-                            </div>
-                            <div class="relative">
-                                <input class="input-field" type="text" name="kernel_params_module" value="{{ kernel_params_default }}" />
+                            <div id="kernelParamsModuleUpload"
+                                class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
+                                <input class="hidden" type="file" id="kernelParamsModuleFile" name="kernel_params_file" accept=".py" />
+                                <input type="hidden" id="kernelParamsModuleSourceMode" name="kernel_params_module_source_mode" value="server-path" />
+                                <input type="hidden" id="kernelParamsModuleServerPath" name="kernel_params_module" value="{{ kernel_params_default }}" />
+                                <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
+                                    <button type="button" data-kernel-params-action="true" class="kernel-params-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
+                                    <button type="button" data-kernel-params-action="true" class="kernel-params-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
+                                </div>
+                                <span class="material-symbols-outlined text-slate-400">upload_file</span>
+                                <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Kernel parameters module (.py)</span>
+                                <p class="text-[10px] text-slate-400" data-role="hint">Drag and drop Python files or click to browse</p>
+                                <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                    data-role="local-summary">
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                                    <div class="mt-1 flex items-start justify-between gap-2">
+                                        <span class="block flex-1 break-all" data-role="local-name"></span>
+                                        <button type="button" data-kernel-params-action="true" data-role="local-clear"
+                                            class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                            title="Remove selected local file" aria-label="Remove selected local file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                    data-role="server-summary">
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                                    <div class="mt-1 flex items-start justify-between gap-2">
+                                        <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
+                                        <button type="button" data-kernel-params-action="true" data-role="server-clear"
+                                            class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                                            title="Remove selected server file" aria-label="Remove selected server file">
+                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="input-group !mb-0">
@@ -256,7 +318,7 @@
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div class="input-group !mb-0">
                                 <label class="input-label">External synapse counts (n_ext)</label>
-                                <p class="input-subtext">Must be specified if multicompartment network simulation outputs are not provided.</p>
+                                <p class="input-subtext">Optional override for external synapse counts per population. If empty, <code>KernelParams.MC_params['n_ext']</code> is used (and this field is only required when that value is not defined).</p>
                                 <input class="input-field" min="0" step="1" type="number" name="n_ext" value="" />
                             </div>
                             <div class="input-group !mb-0">
@@ -310,12 +372,12 @@
                                 data-source-mode-input="kernel_spike_times_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelSpikeTimesFile" name="kernel_spike_times_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="upload" />
-                                <input type="hidden" name="kernel_spike_times_file_server_path" value="" />
+                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="server-path" />
+                                <input type="hidden" name="kernel_spike_times_file_server_path" value="{{ default_sim_paths.times if default_sim.times else '' }}" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
                                 <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
-                                <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.times %}hidden{% endif %}"
+                                <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                                     data-uploaded data-default-name="{{ 'times.pkl' if default_sim.times else '' }}">
                                     <div class="flex items-start justify-between gap-2">
                                         <span><span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span></span>
@@ -334,12 +396,12 @@
                                 data-source-mode-input="kernel_population_sizes_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelPopulationSizesFile" name="kernel_population_sizes_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_population_sizes_file_source_mode" value="upload" />
+                                <input type="hidden" name="kernel_population_sizes_file_source_mode" value="server-path" />
                                 <input type="hidden" name="kernel_population_sizes_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Population sizes (population_sizes.pkl)</span>
                                 <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
-                                <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.population_sizes %}hidden{% endif %}"
+                                <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                                     data-uploaded data-default-name="{{ 'population_sizes.pkl' if default_sim.population_sizes else '' }}">
                                     <div class="flex items-start justify-between gap-2">
                                         <span><span data-uploaded-label>{% if default_sim.population_sizes %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.population_sizes %}population_sizes.pkl{% endif %}</span></span>
@@ -358,7 +420,7 @@
                                 data-source-mode-input="electrode_parameters_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelElectrodeParametersFile" name="electrode_parameters_file" accept=".pkl" />
-                                <input type="hidden" name="electrode_parameters_file_source_mode" value="upload" />
+                                <input type="hidden" name="electrode_parameters_file_source_mode" value="server-path" />
                                 <input type="hidden" name="electrode_parameters_file_server_path" value="" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Electrode parameters (.pkl)</span>
@@ -512,12 +574,12 @@
                             data-source-mode-input="meeg_cdm_file_source_mode"
                             class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                             <input class="hidden" type="file" id="meegCdmFile" name="meeg_cdm_file" accept=".pkl" />
-                            <input type="hidden" name="meeg_cdm_file_source_mode" value="upload" />
-                            <input type="hidden" name="meeg_cdm_file_server_path" value="" />
+                            <input type="hidden" name="meeg_cdm_file_source_mode" value="server-path" />
+                            <input type="hidden" name="meeg_cdm_file_server_path" value="{{ default_meeg.cdm if default_meeg.cdm_exists else '' }}" />
                             <span class="material-symbols-outlined text-slate-400">upload_file</span>
                             <span class="text-xs font-bold lowercase tracking-wider text-slate-500">CDM (.pkl)</span>
                             <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
-                            <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_meeg.cdm_exists %}hidden{% endif %}"
+                            <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
                                 data-uploaded data-default-name="{{ default_meeg.cdm_name }}">
                                 <div class="flex items-start justify-between gap-2">
                                     <span><span data-uploaded-label>{% if default_meeg.cdm_exists %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_meeg.cdm_exists %}{{ default_meeg.cdm_name }}{% endif %}</span></span>
@@ -534,12 +596,15 @@
                         Pickle must contain a NumPy array shaped (3,) for a single dipole or (n_dipoles, 3) for multiple dipoles.
                         Units: mm for NYHeadModel, um for other models.
                     </p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        You can either upload a dipole locations file or enter coordinates manually below (X, Y, Z).
+                    </p>
                     <div id="meegDipoleUpload"
                         data-upload="meegDipoleFile"
                         data-source-mode-input="meeg_dipole_file_source_mode"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="meegDipoleFile" name="meeg_dipole_file" accept=".pkl" />
-                        <input type="hidden" name="meeg_dipole_file_source_mode" value="upload" />
+                        <input type="hidden" name="meeg_dipole_file_source_mode" value="server-path" />
                         <input type="hidden" name="meeg_dipole_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Dipole locations (.pkl)</span>
@@ -587,12 +652,15 @@
                         Pickle must contain a NumPy array shaped (n_sensors, 3). Required for non-NYHead models and must be
                         None for NYHeadModel. Units: mm for NYHeadModel, um for other models.
                     </p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        You can either upload a sensor locations file or enter coordinates manually below (X, Y, Z).
+                    </p>
                     <div id="meegSensorUpload"
                         data-upload="meegSensorFile"
                         data-source-mode-input="meeg_sensor_file_source_mode"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="meegSensorFile" name="meeg_sensor_file" accept=".pkl" />
-                        <input type="hidden" name="meeg_sensor_file_source_mode" value="upload" />
+                        <input type="hidden" name="meeg_sensor_file_source_mode" value="server-path" />
                         <input type="hidden" name="meeg_sensor_file_server_path" value="" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Sensor locations (.pkl)</span>
@@ -856,6 +924,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const biophysItemsContainer = document.getElementById('biophysItems');
     const biophysAddBtn = document.getElementById('biophysAddBtn');
     const biophysHidden = document.getElementById('biophysHidden');
+    const availableBiophysOptions = {{ biophys_options | tojson }};
     const defaultBiophysItems = ['set_Ih_linearized_hay2011', 'make_cell_uniform'];
 
     const syncBiophysHidden = () => {
@@ -875,7 +944,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const row = document.createElement('div');
         row.className = 'flex items-center gap-2';
         row.innerHTML = `
-            <input class="input-field flex-1" type="text" data-biophys-item />
+            <select class="input-field flex-1" data-biophys-item></select>
             <button type="button" class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-700 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800" data-biophys-remove>
                 Remove
             </button>
@@ -883,8 +952,34 @@ document.addEventListener('DOMContentLoaded', () => {
         const input = row.querySelector('[data-biophys-item]');
         const removeBtn = row.querySelector('[data-biophys-remove]');
         if (input) {
-            input.value = value;
-            input.addEventListener('input', () => syncBiophysHidden());
+            const selectedValue = String(value || '').trim();
+            input.innerHTML = '';
+
+            const placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.textContent = 'Select property...';
+            input.appendChild(placeholder);
+
+            const optionNames = Array.isArray(availableBiophysOptions)
+                ? availableBiophysOptions.map((item) => String(item || '').trim()).filter(Boolean)
+                : [];
+            const uniqueOptions = Array.from(new Set(optionNames));
+            uniqueOptions.forEach((name) => {
+                const option = document.createElement('option');
+                option.value = name;
+                option.textContent = name;
+                input.appendChild(option);
+            });
+
+            if (selectedValue && !uniqueOptions.includes(selectedValue)) {
+                const legacyOption = document.createElement('option');
+                legacyOption.value = selectedValue;
+                legacyOption.textContent = `${selectedValue} (custom)`;
+                input.appendChild(legacyOption);
+            }
+
+            input.value = selectedValue;
+            input.addEventListener('change', () => syncBiophysHidden());
         }
         if (removeBtn) {
             removeBtn.addEventListener('click', () => {
@@ -914,39 +1009,29 @@ document.addEventListener('DOMContentLoaded', () => {
         mc_folder: 'field_potential_kernel:mc_folder_browser',
         output_sim_path: 'field_potential_kernel:output_sim_path_browser',
     };
+    const KERNEL_LOCAL_STAGED_HISTORY_KEY_BY_FIELD = {
+        mc_folder: 'field_potential_kernel:mc_folder_local_staged',
+        output_sim_path: 'field_potential_kernel:output_sim_path_local_staged',
+    };
     const KERNEL_SERVER_FILE_HISTORY_KEY_BY_INPUT = {
         kernel_params_module: 'field_potential_kernel:kernel_params_module_browser',
     };
-    const KERNEL_NATIVE_FILE_HISTORY_KEY = 'field_potential_kernel:native_file_picker';
 
-    const pickNativePath = async (mode, extensions = '', startPath = '', historyKey = '') => {
-        const formData = new FormData();
-        formData.append('mode', mode);
-        if (extensions) {
-            formData.append('extensions', extensions);
+    const formatBytes = (value) => {
+        const bytes = Number(value);
+        if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+        const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+        let size = bytes;
+        let idx = 0;
+        while (size >= 1024 && idx < units.length - 1) {
+            size /= 1024;
+            idx += 1;
         }
-        if (startPath) {
-            formData.append('start_path', startPath);
-        }
-        if (historyKey) {
-            formData.append('history_key', historyKey);
-        }
-        const response = await fetch('{{ url_for("features_select_folder") }}', {
-            method: 'POST',
-            body: formData,
-        });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(payload.error || 'Path selection cancelled.');
-        }
-        const selectedPath = String(payload.path || '').trim();
-        if (!selectedPath) {
-            throw new Error('No path selected.');
-        }
-        return selectedPath;
+        const rounded = size >= 100 || idx === 0 ? size.toFixed(0) : size.toFixed(1);
+        return `${rounded} ${units[idx]}`;
     };
 
-    const stageKernelLocalFolder = async (targetFieldName, files) => {
+    const stageKernelLocalFolder = (targetFieldName, files, onProgress = null) => {
         const entries = Array.isArray(files) ? files : Array.from(files || []);
         if (!entries.length) {
             throw new Error('No local folder files selected.');
@@ -960,19 +1045,42 @@ document.addEventListener('DOMContentLoaded', () => {
             ).replace(/\\/g, '/');
             formData.append('folder_files', file, relative || file.name);
         });
-        const response = await fetch('{{ url_for("stage_kernel_local_folder") }}', {
-            method: 'POST',
-            body: formData,
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '{{ url_for("stage_kernel_local_folder") }}', true);
+
+            if (xhr.upload && typeof onProgress === 'function') {
+                xhr.upload.onprogress = (event) => {
+                    const total = event && event.lengthComputable ? Number(event.total || 0) : 0;
+                    const loaded = Number((event && event.loaded) || 0);
+                    const percent = total > 0 ? Math.min(100, Math.max(0, (loaded / total) * 100)) : null;
+                    onProgress({ loaded, total: total > 0 ? total : null, percent });
+                };
+            }
+
+            xhr.onerror = () => reject(new Error('Failed to stage local folder.'));
+            xhr.onabort = () => reject(new Error('Local folder upload was cancelled.'));
+            xhr.onload = () => {
+                let payload = {};
+                try {
+                    payload = JSON.parse(String(xhr.responseText || '{}'));
+                } catch (error) {
+                    payload = {};
+                }
+                if (xhr.status < 200 || xhr.status >= 300) {
+                    reject(new Error(payload.error || 'Failed to stage local folder.'));
+                    return;
+                }
+                const stagedPath = String(payload.path || '').trim();
+                if (!stagedPath) {
+                    reject(new Error('No staged folder path returned.'));
+                    return;
+                }
+                resolve(stagedPath);
+            };
+
+            xhr.send(formData);
         });
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-            throw new Error(payload.error || 'Failed to stage local folder.');
-        }
-        const stagedPath = String(payload.path || '').trim();
-        if (!stagedPath) {
-            throw new Error('No staged folder path returned.');
-        }
-        return stagedPath;
     };
 
     const serverFolderModal = document.getElementById('kernel-server-folder-browser');
@@ -984,9 +1092,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const serverFolderError = document.getElementById('kernel-server-folder-error');
     const serverFolderLoading = document.getElementById('kernel-server-folder-loading');
     const serverFolderList = document.getElementById('kernel-server-folder-list');
-    const kernelBrowseSourceModeInput = document.getElementById('kernel-browse-source-mode');
-    const kernelBrowseModeLocalBtn = document.getElementById('kernel-browse-mode-local');
-    const kernelBrowseModeServerBtn = document.getElementById('kernel-browse-mode-server');
+    const kernelMcFolderUploadCard = document.getElementById('kernelMcFolderUploadCard');
+    const kernelOutputSimUploadCard = document.getElementById('kernelOutputSimUploadCard');
     const kernelMcFolderInput = document.getElementById('mcFolderHiddenInput');
     const kernelMcFolderDisplayInput = document.getElementById('mcFolderDisplayInput');
     const kernelMcFolderSourceInput = document.getElementById('mcFolderSourceInput');
@@ -1016,8 +1123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let serverFolderPath = '';
     let serverFolderParent = '';
     let pendingFolderInput = null;
-    let pendingFolderDisplayInput = null;
-    let pendingFolderSourceInput = null;
+    let pendingFolderFieldName = '';
     let pendingLocalFolderInput = null;
     let localFolderStack = [];
     let serverFilePath = '';
@@ -1028,9 +1134,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingFolderHistoryKey = KERNEL_SERVER_FOLDER_HISTORY_KEY;
     let pendingFileHistoryKey = KERNEL_SERVER_FILE_HISTORY_KEY;
 
-    const normalizeKernelBrowseSourceMode = (value) => (
-        String(value || '').trim().toLowerCase() === 'local-picker' ? 'local-picker' : 'server-path'
-    );
+    const normalizeKernelBrowseSourceMode = (value) => {
+        const raw = String(value || '').trim().toLowerCase();
+        if (raw === 'local-picker' || raw === 'local-upload') {
+            return 'local-upload';
+        }
+        return 'server-path';
+    };
 
     const basenameFromFolderPath = (rawValue) => {
         const value = String(rawValue || '').trim().replace(/\\/g, '/');
@@ -1039,22 +1149,29 @@ document.addEventListener('DOMContentLoaded', () => {
         return parts.length ? parts[parts.length - 1] : value;
     };
 
-    let kernelBrowseSourceModeState = normalizeKernelBrowseSourceMode(
-        kernelBrowseSourceModeInput
-            ? (kernelBrowseSourceModeInput.value || kernelBrowseSourceModeInput.getAttribute('value') || '')
-            : ((window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path')
+    const rememberedLocalStagedByField = {
+        mc_folder: String({{ mc_models_local_staged_default | tojson }} || '').trim(),
+        output_sim_path: String({{ mc_outputs_local_staged_default | tojson }} || '').trim(),
+    };
+    const runtimeDefaultPathMode = normalizeKernelBrowseSourceMode(
+        (window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path'
     );
+    const resolveInitialFolderMode = (fieldName, sourceInput) => {
+        return normalizeKernelBrowseSourceMode(sourceInput?.value || runtimeDefaultPathMode);
+    };
 
     const folderSelectionStateByName = {
         mc_folder: {
+            mode: resolveInitialFolderMode('mc_folder', kernelMcFolderSourceInput),
             serverPath: String(kernelMcFolderInput?.value || '').trim(),
-            localStagedPath: '',
-            localLabel: '',
+            localStagedPath: rememberedLocalStagedByField.mc_folder || '',
+            localLabel: basenameFromFolderPath(rememberedLocalStagedByField.mc_folder || ''),
         },
         output_sim_path: {
+            mode: resolveInitialFolderMode('output_sim_path', kernelOutputSimSourceInput),
             serverPath: String(kernelOutputSimPathInput?.value || '').trim(),
-            localStagedPath: '',
-            localLabel: '',
+            localStagedPath: rememberedLocalStagedByField.output_sim_path || '',
+            localLabel: basenameFromFolderPath(rememberedLocalStagedByField.output_sim_path || ''),
         },
     };
 
@@ -1062,64 +1179,6 @@ document.addEventListener('DOMContentLoaded', () => {
         const key = String(hiddenInput?.name || '').trim();
         if (!key) return null;
         return folderSelectionStateByName[key] || null;
-    };
-
-    const applyFolderSelectionForMode = (mode, hiddenInput, displayInput, sourceInput) => {
-        if (!hiddenInput || !displayInput || !sourceInput) return;
-        const state = getFolderSelectionState(hiddenInput);
-        if (!state) return;
-        if (mode === 'local-picker') {
-            sourceInput.value = 'local-upload';
-            hiddenInput.value = state.localStagedPath || '';
-            displayInput.value = state.localLabel || 'home';
-            displayInput.readOnly = true;
-            return;
-        }
-        sourceInput.value = 'server-path';
-        hiddenInput.value = state.serverPath || '';
-        displayInput.value = basenameFromFolderPath(state.serverPath || '');
-        displayInput.readOnly = true;
-    };
-
-    const setKernelBrowseSourceModeState = (mode) => {
-        kernelBrowseSourceModeState = normalizeKernelBrowseSourceMode(mode);
-        if (kernelBrowseSourceModeInput) {
-            kernelBrowseSourceModeInput.value = kernelBrowseSourceModeState;
-        }
-        if (kernelBrowseModeLocalBtn) {
-            kernelBrowseModeLocalBtn.dataset.active = kernelBrowseSourceModeState === 'local-picker' ? '1' : '0';
-        }
-        if (kernelBrowseModeServerBtn) {
-            kernelBrowseModeServerBtn.dataset.active = kernelBrowseSourceModeState === 'server-path' ? '1' : '0';
-        }
-        applyFolderSelectionForMode(kernelBrowseSourceModeState, kernelMcFolderInput, kernelMcFolderDisplayInput, kernelMcFolderSourceInput);
-        applyFolderSelectionForMode(kernelBrowseSourceModeState, kernelOutputSimPathInput, kernelOutputSimDisplayInput, kernelOutputSimSourceInput);
-    };
-
-    if (kernelBrowseModeLocalBtn) {
-        kernelBrowseModeLocalBtn.addEventListener('click', () => setKernelBrowseSourceModeState('local-picker'));
-    }
-    if (kernelBrowseModeServerBtn) {
-        kernelBrowseModeServerBtn.addEventListener('click', () => setKernelBrowseSourceModeState('server-path'));
-    }
-    if (kernelBrowseSourceModeInput) {
-        kernelBrowseSourceModeInput.addEventListener('input', () => {
-            setKernelBrowseSourceModeState(kernelBrowseSourceModeInput.value);
-        });
-        kernelBrowseSourceModeInput.addEventListener('change', () => {
-            setKernelBrowseSourceModeState(kernelBrowseSourceModeInput.value);
-        });
-    }
-    setKernelBrowseSourceModeState(kernelBrowseSourceModeState);
-
-    const getKernelBrowseSourceMode = () => {
-        if (kernelBrowseModeLocalBtn && kernelBrowseModeLocalBtn.dataset.active === '1') {
-            return 'local-picker';
-        }
-        if (kernelBrowseModeServerBtn && kernelBrowseModeServerBtn.dataset.active === '1') {
-            return 'server-path';
-        }
-        return kernelBrowseSourceModeState;
     };
 
     const setDisplayValue = (displayInput, value) => {
@@ -1138,6 +1197,148 @@ document.addEventListener('DOMContentLoaded', () => {
         if (!sourceInput) return;
         sourceInput.value = value;
         sourceInput.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const kernelPathCardsByField = {
+        mc_folder: {
+            card: kernelMcFolderUploadCard,
+            hiddenInput: kernelMcFolderInput,
+            displayInput: kernelMcFolderDisplayInput,
+            sourceInput: kernelMcFolderSourceInput,
+            localInput: document.getElementById('kernelMcFolderLocalInput'),
+            localModeBtn: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('.kernel-path-upload-local') : null,
+            serverModeBtn: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('.kernel-path-upload-server') : null,
+            uploadProgress: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="upload-progress"]') : null,
+            uploadProgressText: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="upload-progress-text"]') : null,
+            uploadProgressPercent: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="upload-progress-percent"]') : null,
+            uploadProgressBar: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="upload-progress-bar"]') : null,
+            localSummary: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="local-summary"]') : null,
+            localName: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="local-name"]') : null,
+            localClear: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="local-clear"]') : null,
+            serverSummary: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="server-summary"]') : null,
+            serverPath: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="server-path"]') : null,
+            serverClear: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="server-clear"]') : null,
+        },
+        output_sim_path: {
+            card: kernelOutputSimUploadCard,
+            hiddenInput: kernelOutputSimPathInput,
+            displayInput: kernelOutputSimDisplayInput,
+            sourceInput: kernelOutputSimSourceInput,
+            localInput: document.getElementById('kernelOutputFolderLocalInput'),
+            localModeBtn: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('.kernel-path-upload-local') : null,
+            serverModeBtn: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('.kernel-path-upload-server') : null,
+            uploadProgress: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="upload-progress"]') : null,
+            uploadProgressText: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="upload-progress-text"]') : null,
+            uploadProgressPercent: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="upload-progress-percent"]') : null,
+            uploadProgressBar: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="upload-progress-bar"]') : null,
+            localSummary: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="local-summary"]') : null,
+            localName: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="local-name"]') : null,
+            localClear: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="local-clear"]') : null,
+            serverSummary: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="server-summary"]') : null,
+            serverPath: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="server-path"]') : null,
+            serverClear: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="server-clear"]') : null,
+        },
+    };
+
+    const setKernelPathModeVisuals = (cfg, mode) => {
+        if (!cfg || !cfg.localModeBtn || !cfg.serverModeBtn) return;
+        const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
+        const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+        [cfg.localModeBtn, cfg.serverModeBtn].forEach((btn) => {
+            btn.classList.remove(...activeClasses);
+            btn.classList.add(...inactiveClasses);
+        });
+        if (mode === 'server-path') {
+            cfg.serverModeBtn.classList.add(...activeClasses);
+            cfg.serverModeBtn.classList.remove(...inactiveClasses);
+        } else {
+            cfg.localModeBtn.classList.add(...activeClasses);
+            cfg.localModeBtn.classList.remove(...inactiveClasses);
+        }
+    };
+
+    const refreshKernelPathCard = (fieldName) => {
+        const cfg = kernelPathCardsByField[fieldName];
+        const state = folderSelectionStateByName[fieldName];
+        if (!cfg || !state) return;
+
+        const normalizedMode = normalizeKernelBrowseSourceMode(state.mode);
+        state.mode = normalizedMode;
+        setKernelPathModeVisuals(cfg, normalizedMode);
+
+        if (normalizedMode === 'local-upload') {
+            const localPath = String(state.localStagedPath || '').trim();
+            const localLabel = String(state.localLabel || '').trim() || basenameFromFolderPath(localPath || '') || '';
+            setSourceModeValue(cfg.sourceInput, 'local-upload');
+            setHiddenValue(cfg.hiddenInput, localPath);
+            setDisplayValue(cfg.displayInput, localLabel);
+            if (cfg.localName) cfg.localName.textContent = localLabel;
+            if (cfg.localSummary) cfg.localSummary.classList.toggle('hidden', !localPath);
+            if (cfg.serverSummary) cfg.serverSummary.classList.add('hidden');
+            if (cfg.serverPath) cfg.serverPath.textContent = '';
+            return;
+        }
+
+        const serverPathValue = String(state.serverPath || '').trim();
+        setSourceModeValue(cfg.sourceInput, 'server-path');
+        setHiddenValue(cfg.hiddenInput, serverPathValue);
+        setDisplayValue(cfg.displayInput, basenameFromFolderPath(serverPathValue));
+        if (cfg.serverPath) cfg.serverPath.textContent = serverPathValue;
+        if (cfg.serverSummary) cfg.serverSummary.classList.toggle('hidden', !serverPathValue);
+        if (cfg.localSummary) cfg.localSummary.classList.add('hidden');
+        if (cfg.localName) cfg.localName.textContent = '';
+    };
+
+    const setKernelPathCardMode = (fieldName, mode) => {
+        const state = folderSelectionStateByName[fieldName];
+        if (!state) return;
+        state.mode = normalizeKernelBrowseSourceMode(mode);
+        refreshKernelPathCard(fieldName);
+    };
+
+    const setKernelPathUploadBusy = (fieldName, busy) => {
+        const cfg = kernelPathCardsByField[fieldName];
+        if (!cfg) return;
+        const isBusy = Boolean(busy);
+        if (cfg.card) {
+            cfg.card.classList.toggle('opacity-90', isBusy);
+        }
+        [cfg.localModeBtn, cfg.serverModeBtn, cfg.localClear, cfg.serverClear].forEach((node) => {
+            if (!node) return;
+            node.disabled = isBusy;
+            node.classList.toggle('opacity-60', isBusy);
+            node.classList.toggle('cursor-not-allowed', isBusy);
+        });
+    };
+
+    const setKernelPathUploadProgress = (fieldName, { visible = false, text = '', percent = null } = {}) => {
+        const cfg = kernelPathCardsByField[fieldName];
+        if (!cfg || !cfg.uploadProgress) return;
+        const show = Boolean(visible);
+        cfg.uploadProgress.classList.toggle('hidden', !show);
+        if (!show) {
+            if (cfg.uploadProgressText) cfg.uploadProgressText.textContent = '';
+            if (cfg.uploadProgressPercent) cfg.uploadProgressPercent.textContent = '';
+            if (cfg.uploadProgressBar) {
+                cfg.uploadProgressBar.style.width = '0%';
+                cfg.uploadProgressBar.classList.remove('animate-pulse');
+            }
+            return;
+        }
+        if (cfg.uploadProgressText) {
+            cfg.uploadProgressText.textContent = String(text || 'Uploading folder...');
+        }
+        if (cfg.uploadProgressBar) {
+            const hasPercent = Number.isFinite(percent);
+            const clamped = hasPercent ? Math.max(0, Math.min(100, Number(percent))) : 100;
+            cfg.uploadProgressBar.style.width = `${clamped}%`;
+            cfg.uploadProgressBar.classList.toggle('animate-pulse', !hasPercent);
+        }
+        if (cfg.uploadProgressPercent) {
+            cfg.uploadProgressPercent.textContent = Number.isFinite(percent)
+                ? `${Math.round(Number(percent))}%`
+                : '';
+        }
     };
 
     const rememberPathHistory = async (historyKey, pathValue) => {
@@ -1165,24 +1366,66 @@ document.addEventListener('DOMContentLoaded', () => {
         return rel.split('/')[0] || 'local-folder';
     };
 
-    const pickLocalFolderFromBrowser = async (targetFieldName, displayInput, hiddenInput, sourceInput, localInput) => {
+    const pickLocalFolderFromBrowser = async (targetFieldName, hiddenInput, localInput) => {
         const state = getFolderSelectionState(hiddenInput);
+        const applyLocalSelection = (folderLabel, stagedPath) => {
+            if (!state) return;
+            state.mode = 'local-upload';
+            state.localLabel = folderLabel;
+            state.localStagedPath = stagedPath;
+            const localHistoryKey = KERNEL_LOCAL_STAGED_HISTORY_KEY_BY_FIELD[targetFieldName];
+            if (localHistoryKey) {
+                rememberPathHistory(localHistoryKey, stagedPath);
+            }
+        };
+        const setScanProgress = (message) => {
+            setKernelPathUploadProgress(targetFieldName, {
+                visible: true,
+                text: message,
+                percent: null,
+            });
+        };
+        const setUploadProgress = (fileCount, loaded, total, percent) => {
+            const countText = `${Number(fileCount || 0)} file${Number(fileCount || 0) === 1 ? '' : 's'}`;
+            let details = '';
+            if (Number.isFinite(total) && Number(total) > 0) {
+                details = ` (${formatBytes(loaded)} / ${formatBytes(total)})`;
+            } else if (Number.isFinite(loaded) && Number(loaded) > 0) {
+                details = ` (${formatBytes(loaded)})`;
+            }
+            setKernelPathUploadProgress(targetFieldName, {
+                visible: true,
+                text: `Uploading ${countText}${details}`,
+                percent,
+            });
+        };
+
         if (localFolderApiSupported()) {
             const rootHandle = await window.showDirectoryPicker();
             const folderLabel = String(rootHandle.name || 'local-folder');
-            const files = [];
-            await collectLocalFolderFiles(rootHandle, folderLabel, files);
-            if (!files.length) {
-                throw new Error('Selected folder does not contain files.');
+            setKernelPathUploadBusy(targetFieldName, true);
+            setScanProgress('Scanning local folder...');
+            try {
+                const files = [];
+                await collectLocalFolderFiles(rootHandle, folderLabel, files);
+                if (!files.length) {
+                    throw new Error('Selected folder does not contain files.');
+                }
+                setUploadProgress(files.length, 0, null, 0);
+                const stagedPath = await stageKernelLocalFolder(targetFieldName, files, (progress) => {
+                    setUploadProgress(files.length, progress.loaded, progress.total, progress.percent);
+                });
+                setKernelPathUploadProgress(targetFieldName, {
+                    visible: true,
+                    text: 'Upload complete.',
+                    percent: 100,
+                });
+                applyLocalSelection(folderLabel, stagedPath);
+                refreshKernelPathCard(targetFieldName);
+            } finally {
+                setKernelPathUploadBusy(targetFieldName, false);
+                setKernelPathUploadProgress(targetFieldName, { visible: false });
             }
-            const stagedPath = await stageKernelLocalFolder(targetFieldName, files);
-            if (state) {
-                state.localLabel = folderLabel;
-                state.localStagedPath = stagedPath;
-            }
-            setDisplayValue(displayInput, folderLabel);
-            setSourceModeValue(sourceInput, 'local-upload');
-            setHiddenValue(hiddenInput, stagedPath);
             return;
         }
         if (!localInput) {
@@ -1198,18 +1441,24 @@ document.addEventListener('DOMContentLoaded', () => {
                         return;
                     }
                     const folderLabel = deriveLocalFolderLabelFromFiles(files);
-                    const stagedPath = await stageKernelLocalFolder(targetFieldName, files);
-                    if (state) {
-                        state.localLabel = folderLabel;
-                        state.localStagedPath = stagedPath;
-                    }
-                    setDisplayValue(displayInput, folderLabel);
-                    setSourceModeValue(sourceInput, 'local-upload');
-                    setHiddenValue(hiddenInput, stagedPath);
+                    setKernelPathUploadBusy(targetFieldName, true);
+                    setUploadProgress(files.length, 0, null, 0);
+                    const stagedPath = await stageKernelLocalFolder(targetFieldName, files, (progress) => {
+                        setUploadProgress(files.length, progress.loaded, progress.total, progress.percent);
+                    });
+                    setKernelPathUploadProgress(targetFieldName, {
+                        visible: true,
+                        text: 'Upload complete.',
+                        percent: 100,
+                    });
+                    applyLocalSelection(folderLabel, stagedPath);
+                    refreshKernelPathCard(targetFieldName);
                     resolve();
                 } catch (err) {
                     reject(err);
                 } finally {
+                    setKernelPathUploadBusy(targetFieldName, false);
+                    setKernelPathUploadProgress(targetFieldName, { visible: false });
                     localInput.value = '';
                     localInput.onchange = null;
                 }
@@ -1292,16 +1541,15 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const openServerFolderModal = async (displayInput, hiddenInput, sourceInput, historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY) => {
-        pendingFolderInput = hiddenInput || displayInput;
-        pendingFolderDisplayInput = displayInput;
-        pendingFolderSourceInput = sourceInput;
+    const openServerFolderModal = async (hiddenInput, historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY, fieldName = '') => {
+        pendingFolderInput = hiddenInput;
+        pendingFolderFieldName = String(fieldName || hiddenInput?.name || '').trim();
         pendingFolderHistoryKey = String(historyKey || KERNEL_SERVER_FOLDER_HISTORY_KEY);
         if (!serverFolderModal) return;
         serverFolderModal.classList.remove('hidden');
         serverFolderModal.classList.add('flex');
         const state = getFolderSelectionState(hiddenInput);
-        const startPath = String(state?.serverPath || hiddenInput?.value || displayInput?.value || '').trim()
+        const startPath = String(state?.serverPath || hiddenInput?.value || '').trim()
             || '';
         await loadServerFolder(startPath, pendingFolderHistoryKey);
     };
@@ -1571,12 +1819,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const fieldName = String(pendingFolderInput?.name || '').trim();
-            const historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY_BY_FIELD[fieldName] || KERNEL_SERVER_FOLDER_HISTORY_KEY;
+            const resolvedFieldName = pendingFolderFieldName || fieldName;
+            const historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY_BY_FIELD[resolvedFieldName] || KERNEL_SERVER_FOLDER_HISTORY_KEY;
             const state = getFolderSelectionState(pendingFolderInput);
             if (state) {
+                state.mode = 'server-path';
                 state.serverPath = serverFolderPath;
             }
-            applyFolderSelectionForMode('server-path', pendingFolderInput, pendingFolderDisplayInput, pendingFolderSourceInput);
+            refreshKernelPathCard(resolvedFieldName);
             rememberPathHistory(historyKey, serverFolderPath);
             closeServerFolderModal();
         });
@@ -1684,25 +1934,56 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    document.querySelectorAll('.folder-picker').forEach((icon) => {
-        icon.addEventListener('click', async () => {
-            const container = icon.closest('[data-folder-input]') || icon.parentElement;
-            const displayInput = container ? container.querySelector('input[data-folder-display]') : null;
-            const hiddenInput = container ? container.querySelector('input[data-folder-hidden]') : null;
-            const sourceInput = container ? container.querySelector('input[data-folder-source]') : null;
-            const localInput = container ? container.querySelector('input[data-folder-local]') : null;
-            if (!displayInput) {
+    Object.entries(kernelPathCardsByField).forEach(([fieldName, cfg]) => {
+        const state = folderSelectionStateByName[fieldName];
+        if (!cfg || !cfg.card || !state) return;
+
+        refreshKernelPathCard(fieldName);
+
+        if (cfg.localModeBtn) {
+            cfg.localModeBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setKernelPathCardMode(fieldName, 'local-upload');
+            });
+        }
+        if (cfg.serverModeBtn) {
+            cfg.serverModeBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setKernelPathCardMode(fieldName, 'server-path');
+            });
+        }
+        if (cfg.localClear) {
+            cfg.localClear.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                state.localStagedPath = '';
+                state.localLabel = '';
+                setKernelPathCardMode(fieldName, 'local-upload');
+            });
+        }
+        if (cfg.serverClear) {
+            cfg.serverClear.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                state.serverPath = '';
+                setKernelPathCardMode(fieldName, 'server-path');
+            });
+        }
+
+        cfg.card.addEventListener('click', async (event) => {
+            if (event.target && event.target.closest('[data-path-action]')) {
                 return;
             }
             try {
-                const sourceMode = getKernelBrowseSourceMode();
-                if (sourceMode === 'local-picker') {
-                    await pickLocalFolderFromBrowser(hiddenInput ? hiddenInput.name : '', displayInput, hiddenInput, sourceInput, localInput);
+                if (normalizeKernelBrowseSourceMode(state.mode) === 'local-upload') {
+                    await pickLocalFolderFromBrowser(fieldName, cfg.hiddenInput, cfg.localInput);
+                    refreshKernelPathCard(fieldName);
                     return;
                 }
-                const fieldName = String(hiddenInput?.name || '').trim();
                 const historyKey = KERNEL_SERVER_FOLDER_HISTORY_KEY_BY_FIELD[fieldName] || KERNEL_SERVER_FOLDER_HISTORY_KEY;
-                await openServerFolderModal(displayInput, hiddenInput, sourceInput, historyKey);
+                await openServerFolderModal(cfg.hiddenInput, historyKey, fieldName);
             } catch (err) {
                 const msg = (err && err.message) ? err.message : 'Failed to select folder.';
                 alert(msg);
@@ -1710,139 +1991,171 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     });
 
-    document.querySelectorAll('.file-picker').forEach((icon) => {
-        icon.addEventListener('click', async () => {
-            const container = icon.closest('.relative') || icon.parentElement;
-            const textInput = container ? container.querySelector('input[type="text"]') : null;
-            if (!textInput) {
-                return;
-            }
-            const extensions = String(icon.dataset.fileExtensions || '.pkl').trim() || '.pkl';
-            try {
-                const explicitModeInputId = String(icon.dataset.browseModeInput || '').trim();
-                const explicitModeInput = explicitModeInputId ? document.getElementById(explicitModeInputId) : null;
-                const sourceMode = explicitModeInput
-                    ? String(explicitModeInput.value || '').trim()
-                    : getKernelBrowseSourceMode();
-                if (sourceMode === 'local-picker') {
-                    const currentValue = String(textInput.value || '').trim();
-                    const pickerStart = currentValue && currentValue.includes('/')
-                        ? currentValue.slice(0, currentValue.lastIndexOf('/'))
-                        : '';
-                    const selectedPath = await pickNativePath('file', extensions, pickerStart, KERNEL_NATIVE_FILE_HISTORY_KEY);
-                    textInput.value = selectedPath;
-                    textInput.dispatchEvent(new Event('input', { bubbles: true }));
-                } else {
-                    await openServerFileModal(textInput, extensions);
-                }
-            } catch (err) {
-                const msg = (err && err.message) ? err.message : 'Failed to select file.';
-                alert(msg);
-            }
-        });
-    });
-
-    const kernelParamsBrowseModeInput = document.getElementById('kernel-params-browse-mode');
-    const kernelParamsModeLocalBtn = document.getElementById('kernel-params-mode-local');
-    const kernelParamsModeServerBtn = document.getElementById('kernel-params-mode-server');
-    const kernelParamsBrowseLocalBtn = document.getElementById('kernel-params-browse-local');
-    const kernelParamsBrowseServerBtn = document.getElementById('kernel-params-browse-server');
+    const kernelParamsUploadZone = document.getElementById('kernelParamsModuleUpload');
     const kernelParamsFileInput = document.getElementById('kernelParamsModuleFile');
-    const kernelParamsLocalSelected = document.getElementById('kernel-params-local-selected');
-    const kernelParamsLocalSelectedName = document.getElementById('kernel-params-local-selected-name');
-    const kernelParamsModuleInput = document.querySelector('input[name="kernel_params_module"]');
+    const kernelParamsSourceModeInput = document.getElementById('kernelParamsModuleSourceMode');
+    const kernelParamsServerPathInput = document.getElementById('kernelParamsModuleServerPath');
+    const kernelParamsLocalModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-upload-local') : null;
+    const kernelParamsServerModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-upload-server') : null;
+    const kernelParamsHint = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="hint"]') : null;
+    const kernelParamsLocalSummary = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="local-summary"]') : null;
+    const kernelParamsLocalName = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="local-name"]') : null;
+    const kernelParamsLocalClear = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="local-clear"]') : null;
+    const kernelParamsServerSummary = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-summary"]') : null;
+    const kernelParamsServerPath = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-path"]') : null;
+    const kernelParamsServerClear = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-clear"]') : null;
 
-    const syncKernelParamsLocalSelection = () => {
-        if (!kernelParamsLocalSelected || !kernelParamsLocalSelectedName || !kernelParamsFileInput) {
-            return;
-        }
-        const selectedFile = (kernelParamsFileInput.files && kernelParamsFileInput.files.length > 0)
-            ? kernelParamsFileInput.files[0]
-            : null;
-        if (selectedFile) {
-            kernelParamsLocalSelectedName.textContent = selectedFile.name;
-            kernelParamsLocalSelected.classList.remove('hidden');
-        } else {
-            kernelParamsLocalSelectedName.textContent = '';
-            kernelParamsLocalSelected.classList.add('hidden');
-        }
-    };
-
-    const clearKernelParamsLocalSelection = () => {
-        if (!kernelParamsFileInput) {
-            return;
-        }
-        kernelParamsFileInput.value = '';
-        syncKernelParamsLocalSelection();
-    };
-
-    const setKernelParamsBrowseMode = (mode) => {
-        if (!kernelParamsBrowseModeInput || !kernelParamsModeLocalBtn || !kernelParamsModeServerBtn) return;
-        const nextMode = mode === 'upload' ? 'upload' : 'server-path';
-        kernelParamsBrowseModeInput.value = nextMode;
-        const activeClasses = ['bg-primary/10', 'border-primary', 'text-primary', 'font-semibold'];
-        const inactiveClasses = ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-        [kernelParamsModeLocalBtn, kernelParamsModeServerBtn].forEach((btn) => {
+    const setKernelParamsModeVisuals = (mode) => {
+        if (!kernelParamsLocalModeBtn || !kernelParamsServerModeBtn) return;
+        const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
+        const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+        [kernelParamsLocalModeBtn, kernelParamsServerModeBtn].forEach((btn) => {
             btn.classList.remove(...activeClasses);
             btn.classList.add(...inactiveClasses);
         });
-        if (nextMode === 'upload') {
-            kernelParamsModeLocalBtn.classList.add(...activeClasses);
-            kernelParamsModeLocalBtn.classList.remove(...inactiveClasses);
+        if (mode === 'server-path') {
+            kernelParamsServerModeBtn.classList.add(...activeClasses);
+            kernelParamsServerModeBtn.classList.remove(...inactiveClasses);
         } else {
-            kernelParamsModeServerBtn.classList.add(...activeClasses);
-            kernelParamsModeServerBtn.classList.remove(...inactiveClasses);
-            clearKernelParamsLocalSelection();
+            kernelParamsLocalModeBtn.classList.add(...activeClasses);
+            kernelParamsLocalModeBtn.classList.remove(...inactiveClasses);
         }
-        if (kernelParamsBrowseLocalBtn) {
-            kernelParamsBrowseLocalBtn.classList.toggle('hidden', nextMode !== 'upload');
-        }
-        if (kernelParamsBrowseServerBtn) {
-            kernelParamsBrowseServerBtn.classList.toggle('hidden', nextMode !== 'server-path');
+        if (kernelParamsHint) {
+            kernelParamsHint.textContent = 'Drag and drop Python files or click to browse';
         }
     };
-    if (kernelParamsModeLocalBtn) {
-        kernelParamsModeLocalBtn.addEventListener('click', () => setKernelParamsBrowseMode('upload'));
-    }
-    if (kernelParamsModeServerBtn) {
-        kernelParamsModeServerBtn.addEventListener('click', () => setKernelParamsBrowseMode('server-path'));
-    }
-    if (kernelParamsBrowseLocalBtn && kernelParamsFileInput) {
-        kernelParamsBrowseLocalBtn.addEventListener('click', () => {
-            setKernelParamsBrowseMode('upload');
+
+    const setKernelParamsLocalSelection = (fileName) => {
+        const clean = String(fileName || '').trim();
+        if (kernelParamsLocalName) kernelParamsLocalName.textContent = clean;
+        if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.toggle('hidden', !clean);
+        if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
+        if (kernelParamsServerPathInput) kernelParamsServerPathInput.value = '';
+    };
+
+    const setKernelParamsServerSelection = (pathValue) => {
+        const clean = String(pathValue || '').trim();
+        if (kernelParamsServerPathInput) kernelParamsServerPathInput.value = clean;
+        if (kernelParamsServerPath) kernelParamsServerPath.textContent = clean;
+        if (kernelParamsServerSummary) kernelParamsServerSummary.classList.toggle('hidden', !clean);
+        if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
+        if (kernelParamsLocalName) kernelParamsLocalName.textContent = '';
+        if (kernelParamsFileInput) kernelParamsFileInput.value = '';
+    };
+
+    const setKernelParamsMode = (mode) => {
+        if (!kernelParamsSourceModeInput) return;
+        const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+        kernelParamsSourceModeInput.value = nextMode;
+        setKernelParamsModeVisuals(nextMode);
+        if (nextMode === 'server-path') {
+            if (kernelParamsFileInput) kernelParamsFileInput.value = '';
+            if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
+            if (kernelParamsLocalName) kernelParamsLocalName.textContent = '';
+            const currentServerPath = String(kernelParamsServerPathInput?.value || '').trim();
+            if (kernelParamsServerSummary) kernelParamsServerSummary.classList.toggle('hidden', !currentServerPath);
+            if (kernelParamsServerPath) kernelParamsServerPath.textContent = currentServerPath;
+        } else {
+            if (kernelParamsServerPathInput) kernelParamsServerPathInput.value = '';
+            if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
+            if (kernelParamsServerPath) kernelParamsServerPath.textContent = '';
+        }
+    };
+
+    if (kernelParamsUploadZone && kernelParamsFileInput && kernelParamsSourceModeInput && kernelParamsServerPathInput) {
+        const initialMode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase() === 'upload'
+            ? 'upload'
+            : 'server-path';
+        setKernelParamsMode(initialMode);
+        const initialServerPath = String(kernelParamsServerPathInput.value || '').trim();
+        if (initialServerPath) {
+            setKernelParamsServerSelection(initialServerPath);
+        }
+
+        if (kernelParamsLocalModeBtn) {
+            kernelParamsLocalModeBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                setKernelParamsMode('upload');
+            });
+        }
+        if (kernelParamsServerModeBtn) {
+            kernelParamsServerModeBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                setKernelParamsMode('server-path');
+            });
+        }
+        if (kernelParamsLocalClear) {
+            kernelParamsLocalClear.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                kernelParamsFileInput.value = '';
+                setKernelParamsLocalSelection('');
+            });
+        }
+        if (kernelParamsServerClear) {
+            kernelParamsServerClear.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setKernelParamsServerSelection('');
+            });
+        }
+
+        kernelParamsUploadZone.addEventListener('click', async (event) => {
+            if (event.target && event.target.closest('[data-kernel-params-action]')) {
+                return;
+            }
+            const mode = String(kernelParamsSourceModeInput.value || 'upload').trim().toLowerCase();
+            if (mode === 'server-path') {
+                await openServerFileModal(
+                    kernelParamsServerPathInput,
+                    '.py',
+                    KERNEL_SERVER_FILE_HISTORY_KEY_BY_INPUT.kernel_params_module,
+                );
+                setKernelParamsServerSelection(kernelParamsServerPathInput.value);
+                return;
+            }
             kernelParamsFileInput.click();
         });
-    }
-    if (kernelParamsFileInput) {
-        kernelParamsFileInput.addEventListener('change', () => {
-            setKernelParamsBrowseMode('upload');
-            syncKernelParamsLocalSelection();
-        });
-    }
-    if (kernelParamsBrowseServerBtn && kernelParamsModuleInput) {
-        kernelParamsBrowseServerBtn.addEventListener('click', async () => {
-            setKernelParamsBrowseMode('server-path');
-            await openServerFileModal(
-                kernelParamsModuleInput,
-                '.py',
-                KERNEL_SERVER_FILE_HISTORY_KEY_BY_INPUT.kernel_params_module,
-            );
-        });
-    }
-    setKernelParamsBrowseMode(
-        String(kernelParamsBrowseModeInput ? kernelParamsBrowseModeInput.value : '').trim().toLowerCase() === 'upload'
-            ? 'upload'
-            : 'server-path'
-    );
-    syncKernelParamsLocalSelection();
 
-    const basenameFromPath = (pathValue) => {
-        const value = String(pathValue || '').trim();
-        if (!value) return '';
-        const normalized = value.replace(/\\/g, '/');
-        const parts = normalized.split('/').filter(Boolean);
-        return parts.length ? parts[parts.length - 1] : value;
-    };
+        ['dragenter', 'dragover'].forEach((eventName) => {
+            kernelParamsUploadZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (String(kernelParamsSourceModeInput.value || '').trim().toLowerCase() !== 'upload') return;
+                kernelParamsUploadZone.classList.add('border-primary', 'bg-primary/5');
+            });
+        });
+        ['dragleave', 'drop'].forEach((eventName) => {
+            kernelParamsUploadZone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (String(kernelParamsSourceModeInput.value || '').trim().toLowerCase() !== 'upload') return;
+                kernelParamsUploadZone.classList.remove('border-primary', 'bg-primary/5');
+            });
+        });
+        kernelParamsUploadZone.addEventListener('drop', (event) => {
+            if (String(kernelParamsSourceModeInput.value || '').trim().toLowerCase() !== 'upload') return;
+            const files = event.dataTransfer.files;
+            if (!files || files.length === 0) return;
+            const dt = new DataTransfer();
+            dt.items.add(files[0]);
+            kernelParamsFileInput.files = dt.files;
+            setKernelParamsMode('upload');
+            setKernelParamsLocalSelection(files[0].name);
+        });
+
+        kernelParamsFileInput.addEventListener('change', () => {
+            const file = kernelParamsFileInput.files && kernelParamsFileInput.files[0]
+                ? kernelParamsFileInput.files[0]
+                : null;
+            setKernelParamsMode('upload');
+            setKernelParamsLocalSelection(file ? file.name : '');
+        });
+        kernelParamsServerPathInput.addEventListener('input', () => {
+            const mode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase();
+            if (mode === 'server-path') {
+                setKernelParamsServerSelection(kernelParamsServerPathInput.value);
+            }
+        });
+    }
 
     const serverAwareUploads = [
         {
@@ -1851,6 +2164,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInputName: 'kernel_spike_times_file_source_mode',
             serverPathName: 'kernel_spike_times_file_server_path',
             extensions: '.pkl,.pickle',
+            historyKey: 'field_potential_kernel:kernel_spike_times_browser',
         },
         {
             zoneId: 'kernelPopulationSizesUpload',
@@ -1858,6 +2172,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInputName: 'kernel_population_sizes_file_source_mode',
             serverPathName: 'kernel_population_sizes_file_server_path',
             extensions: '.pkl,.pickle',
+            historyKey: 'field_potential_kernel:kernel_population_sizes_browser',
         },
         {
             zoneId: 'kernelElectrodeParametersUpload',
@@ -1865,6 +2180,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInputName: 'electrode_parameters_file_source_mode',
             serverPathName: 'electrode_parameters_file_server_path',
             extensions: '.pkl,.pickle',
+            historyKey: 'field_potential_kernel:kernel_electrode_parameters_browser',
         },
         {
             zoneId: 'meegCdmUpload',
@@ -1872,6 +2188,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInputName: 'meeg_cdm_file_source_mode',
             serverPathName: 'meeg_cdm_file_server_path',
             extensions: '.pkl,.pickle',
+            historyKey: 'field_potential_kernel:meeg_cdm_browser',
         },
         {
             zoneId: 'meegDipoleUpload',
@@ -1879,6 +2196,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInputName: 'meeg_dipole_file_source_mode',
             serverPathName: 'meeg_dipole_file_server_path',
             extensions: '.pkl,.pickle',
+            historyKey: 'field_potential_kernel:meeg_dipole_browser',
         },
         {
             zoneId: 'meegSensorUpload',
@@ -1886,6 +2204,7 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInputName: 'meeg_sensor_file_source_mode',
             serverPathName: 'meeg_sensor_file_server_path',
             extensions: '.pkl,.pickle',
+            historyKey: 'field_potential_kernel:meeg_sensor_browser',
         },
     ];
 
@@ -1898,22 +2217,60 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        const legacyUploadedBox = zone.querySelector('[data-uploaded]');
+        const defaultLoadedName = legacyUploadedBox
+            ? String(legacyUploadedBox.dataset.defaultName || '').trim()
+            : '';
+        if (legacyUploadedBox) {
+            legacyUploadedBox.remove();
+        }
+
         const controls = document.createElement('div');
         controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
         controls.innerHTML = `
-            <button type="button" data-upload-action="true" class="kernel-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
-            <button type="button" data-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
+            <button type="button" data-kernel-upload-action="true" class="kernel-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
+            <button type="button" data-kernel-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
         `;
         zone.insertBefore(controls, zone.firstChild);
 
         const localBtn = controls.querySelector('.kernel-upload-local');
         const serverBtn = controls.querySelector('.kernel-upload-server');
-        const filenameEl = zone.querySelector('[data-filename]');
-        const uploadedBox = zone.querySelector('[data-uploaded]');
-        const uploadedName = zone.querySelector('[data-uploaded-name]');
-        const uploadedLabel = zone.querySelector('[data-uploaded-label]');
-        const clearSelectionBtn = zone.querySelector('[data-clear-upload]');
-        const defaultName = uploadedBox ? String(uploadedBox.dataset.defaultName || '') : '';
+        const hintEl = zone.querySelector('[data-role="hint"]') || zone.querySelector('p.text-\\[10px\\]');
+
+        const localSummary = document.createElement('div');
+        localSummary.className = 'mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300';
+        localSummary.innerHTML = `
+            <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+            <div class="mt-1 flex items-start justify-between gap-2">
+                <span class="block flex-1 break-all" data-role="local-name"></span>
+                <button type="button" data-kernel-upload-action="true" data-role="local-clear"
+                    class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                    title="Remove selected local file" aria-label="Remove selected local file">
+                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                </button>
+            </div>
+        `;
+        zone.appendChild(localSummary);
+
+        const serverSummary = document.createElement('div');
+        serverSummary.className = 'mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300';
+        serverSummary.innerHTML = `
+            <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+            <div class="mt-1 flex items-start justify-between gap-2">
+                <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
+                <button type="button" data-kernel-upload-action="true" data-role="server-clear"
+                    class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
+                    title="Remove selected server file" aria-label="Remove selected server file">
+                    <span class="material-symbols-outlined text-sm leading-none">close</span>
+                </button>
+            </div>
+        `;
+        zone.appendChild(serverSummary);
+
+        const localNameEl = localSummary.querySelector('[data-role="local-name"]');
+        const localClearBtn = localSummary.querySelector('[data-role="local-clear"]');
+        const serverPathEl = serverSummary.querySelector('[data-role="server-path"]');
+        const serverClearBtn = serverSummary.querySelector('[data-role="server-clear"]');
 
         const applyModeVisuals = (mode) => {
             const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
@@ -1931,142 +2288,167 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
-        const syncUploadedBoxToDefault = () => {
-            if (!uploadedBox || !uploadedName) return;
-            if (defaultName) {
-                uploadedName.textContent = defaultName;
-                if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
-                uploadedBox.classList.remove('hidden');
-                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
-            } else {
-                uploadedName.textContent = '';
-                uploadedBox.classList.add('hidden');
-                if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
+        if (hintEl) {
+            hintEl.textContent = 'Drag and drop files or click to browse';
+            hintEl.setAttribute('data-role', 'hint');
+        }
+
+        let fallbackDefaultName = defaultLoadedName;
+
+        const getMode = () => (
+            String(modeInput.value || '').trim().toLowerCase() === 'server-path' ? 'server-path' : 'upload'
+        );
+
+        const getSelectedLocalFile = () => (
+            fileInput.files && fileInput.files[0] ? fileInput.files[0] : null
+        );
+
+        const setLocalSummary = (name) => {
+            const clean = String(name || '').trim();
+            if (localNameEl) {
+                localNameEl.textContent = clean;
             }
+            localSummary.classList.toggle('hidden', !clean);
+            serverSummary.classList.add('hidden');
         };
 
-        const syncServerSelectionUi = () => {
-            const selected = serverPathInput.value.trim();
-            if (filenameEl) {
-                filenameEl.textContent = selected ? basenameFromPath(selected) : 'Server file not selected';
+        const setServerSummary = (pathValue) => {
+            const clean = String(pathValue || '').trim();
+            if (serverPathEl) {
+                serverPathEl.textContent = clean;
             }
-            if (uploadedBox && uploadedName) {
-                if (selected) {
-                    uploadedName.textContent = basenameFromPath(selected);
-                    if (uploadedLabel) uploadedLabel.textContent = 'Selected';
-                    uploadedBox.classList.remove('hidden');
-                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
-                } else {
-                    syncUploadedBoxToDefault();
-                }
-            }
+            serverSummary.classList.toggle('hidden', !clean);
+            localSummary.classList.add('hidden');
         };
 
-        const syncLocalSelectionUi = () => {
-            const selectedFile = (fileInput.files && fileInput.files[0]) ? fileInput.files[0] : null;
-            if (filenameEl) {
-                filenameEl.textContent = selectedFile ? selectedFile.name : 'Local file not selected';
-            }
-            if (uploadedBox && uploadedName) {
-                if (selectedFile) {
-                    uploadedName.textContent = selectedFile.name;
-                    if (uploadedLabel) uploadedLabel.textContent = 'Uploaded';
-                    uploadedBox.classList.remove('hidden');
-                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
-                } else {
-                    syncUploadedBoxToDefault();
-                }
-            }
+        const renderUploadMode = () => {
+            const selectedLocal = getSelectedLocalFile();
+            const localName = selectedLocal ? selectedLocal.name : fallbackDefaultName;
+            setLocalSummary(localName);
+        };
+
+        const renderServerMode = () => {
+            setServerSummary(serverPathInput.value);
         };
 
         const setMode = (mode) => {
             const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
             modeInput.value = nextMode;
             applyModeVisuals(nextMode);
-            if (nextMode === 'upload') {
-                serverPathInput.value = '';
-                syncLocalSelectionUi();
-            } else {
+            if (nextMode === 'server-path') {
                 fileInput.value = '';
-                syncServerSelectionUi();
+                renderServerMode();
+            } else {
+                serverPathInput.value = '';
+                renderUploadMode();
             }
         };
 
         localBtn.addEventListener('click', (event) => {
+            event.preventDefault();
             event.stopPropagation();
             setMode('upload');
         });
         serverBtn.addEventListener('click', (event) => {
+            event.preventDefault();
             event.stopPropagation();
             setMode('server-path');
         });
-        if (clearSelectionBtn) {
-            clearSelectionBtn.addEventListener('click', (event) => {
+
+        if (localClearBtn) {
+            localClearBtn.addEventListener('click', (event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                fileInput.value = '';
-                serverPathInput.value = '';
-                if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
-                    syncServerSelectionUi();
+                const selectedLocal = getSelectedLocalFile();
+                if (selectedLocal) {
+                    fileInput.value = '';
                 } else {
-                    syncLocalSelectionUi();
+                    fallbackDefaultName = '';
                 }
+                renderUploadMode();
+            });
+        }
+
+        if (serverClearBtn) {
+            serverClearBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                serverPathInput.value = '';
+                renderServerMode();
             });
         }
 
         zone.addEventListener('click', async (event) => {
-            if (event.target && event.target.closest('[data-upload-action]')) {
+            if (event.target && event.target.closest('[data-kernel-upload-action]')) {
                 return;
             }
-            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
-                await openServerFileModal(serverPathInput, cfg.extensions);
-                syncServerSelectionUi();
+            if (getMode() === 'server-path') {
+                await openServerFileModal(serverPathInput, cfg.extensions, cfg.historyKey || KERNEL_SERVER_FILE_HISTORY_KEY);
+                renderServerMode();
                 return;
             }
             fileInput.click();
         });
 
-        zone.addEventListener('dragover', (event) => {
-            event.preventDefault();
-            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
-                return;
-            }
-            zone.classList.add('border-primary', 'bg-primary/5');
+        ['dragenter', 'dragover'].forEach((eventName) => {
+            zone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (getMode() !== 'upload') {
+                    return;
+                }
+                zone.classList.add('border-primary', 'bg-primary/5');
+            });
         });
-
-        zone.addEventListener('dragleave', () => {
-            zone.classList.remove('border-primary', 'bg-primary/5');
+        ['dragleave', 'drop'].forEach((eventName) => {
+            zone.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                if (getMode() !== 'upload') {
+                    return;
+                }
+                zone.classList.remove('border-primary', 'bg-primary/5');
+            });
         });
-
         zone.addEventListener('drop', (event) => {
-            event.preventDefault();
-            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
+            if (getMode() !== 'upload') {
                 return;
             }
-            zone.classList.remove('border-primary', 'bg-primary/5');
-            if (event.dataTransfer.files && event.dataTransfer.files[0]) {
-                fileInput.files = event.dataTransfer.files;
-                serverPathInput.value = '';
-                syncLocalSelectionUi();
+            const files = event.dataTransfer.files;
+            if (!files || files.length === 0) {
+                return;
             }
-        });
-
-        serverPathInput.addEventListener('input', () => {
-            if (String(modeInput.value || '').trim().toLowerCase() === 'server-path') {
-                syncServerSelectionUi();
-            }
+            const dt = new DataTransfer();
+            dt.items.add(files[0]);
+            fileInput.files = dt.files;
+            fallbackDefaultName = '';
+            serverPathInput.value = '';
+            renderUploadMode();
         });
 
         fileInput.addEventListener('change', () => {
-            if (String(modeInput.value || '').trim().toLowerCase() !== 'upload') {
+            if (getMode() !== 'upload') {
                 return;
             }
+            if (getSelectedLocalFile()) {
+                fallbackDefaultName = '';
+            }
             serverPathInput.value = '';
-            syncLocalSelectionUi();
+            renderUploadMode();
         });
 
-        const runtimeDefault = String((window.__webuiRuntime || {}).default_simulation_source_mode || '').trim().toLowerCase();
-        setMode(runtimeDefault === 'server-path' ? 'server-path' : 'upload');
+        serverPathInput.addEventListener('input', () => {
+            if (getMode() !== 'server-path') {
+                return;
+            }
+            renderServerMode();
+        });
+
+        const initialMode = getMode();
+        applyModeVisuals(initialMode);
+        if (initialMode === 'server-path') {
+            renderServerMode();
+        } else {
+            renderUploadMode();
+        }
     });
 
     const cdmApproxCheckbox = document.querySelector('input[name="probe_kernel_approx"]');

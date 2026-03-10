@@ -1,0 +1,379 @@
+{% extends "base.html" %}
+{% block title %}Simulation data upload{% endblock %}
+
+<!-- Main color for simulation page: yellow -->
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#FAC638",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+<script>
+    window.__webuiRuntime = {{ webui_runtime | tojson }};
+</script>
+<style type="text/tailwindcss">
+    .material-symbols-outlined {
+        font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24
+    }
+    .drop-zone {
+        border-style: dashed;
+    }
+    @layer utilities {
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    }
+</style>
+{% endblock %}
+    
+<!-- Main content of the loading data page for simulation -->
+{% block content %}
+<div class="flex h-full">
+    <main class="w-full lg:w-3/5 xl:w-2/3 h-full flex flex-col overflow-y-auto hide-scrollbar">
+        <div class="max-w-4xl w-full mx-auto flex flex-col h-full">
+            <div class="mb-10">
+                <h1 class="text-4xl font-black leading-tight tracking-tight mb-2">Simulation Configuration: Load
+                    Data</h1>
+                <p class="text-slate-500 dark:text-slate-400 text-lg">Select and upload your simulation files.
+                </p>
+            </div>
+            <div class="flex flex-col gap-6 flex-grow mb-12">
+                <div
+                    class="bg-white dark:bg-slate-900 p-6 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-lg font-bold flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary">analytics</span>
+                            Load simulation output files (spike times, gids, ...)
+                        </h3>
+                    </div>
+
+                    <form id="simulationUploadForm" action="{{ url_for('upload_sim_files') }}" method="POST" enctype="multipart/form-data">
+                        <input type="file" id="spikeFileInput" name="simulation_files" class="hidden" accept=".pkl,.pickle" multiple />
+                        <input type="hidden" id="simulationSourceModeInput" name="simulation_source_mode" value="upload" />
+                        <input type="hidden" id="simulationServerFilePathInput" name="simulation_server_file_path" value="" />
+                        <div id="spikeDropZone"
+                            class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
+                            <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" id="simulationModeUploadBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
+                                    Local upload
+                                </button>
+                                <button type="button" id="simulationModeServerBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
+                                    Server file
+                                </button>
+                            </div>
+                            <span class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">upload_file</span>
+                            <p id="simulationDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
+                                Drag and drop pkl files or click to browse
+                            </p>
+                            <p id="simulationUploadValidationError" class="mt-2 hidden whitespace-pre-line break-words text-sm font-semibold text-red-600 dark:text-red-400 text-center">
+                                Only .pkl or .pickle files are supported.
+                            </p>
+                            <div id="selectedFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local files</span>
+                                <div id="selectedFilesList" class="mt-2"></div>
+                            </div>
+                            <div id="selectedSimulationServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server files</span>
+                                <div id="selectedSimulationServerFilePath" class="mt-2 font-mono break-all"></div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+                <div class="mt-8 flex justify-end">
+                    {% if has_simulation_pkl %}
+                    <a href="{{url_for('field_potential')}}"
+                        class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+                        Continue to Field Potential
+                    </a>
+                    {% else %}
+                    <span
+                        class="bg-slate-200 text-slate-500 px-10 py-3 rounded-lg font-bold text-lg cursor-not-allowed select-none">
+                        Continue to Field Potential
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+            <div class="mt-auto pt-6 flex flex-wrap gap-4 border-t border-slate-200 dark:border-slate-800">
+                <a
+                    href="{{url_for('dashboard')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                    <span class="material-symbols-outlined text-lg">dashboard</span>
+                    Back to the dashboard
+                </a>
+                <a
+                    href="{{url_for('simulation')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                    <span class="material-symbols-outlined text-lg">arrow_back</span>
+                    Back to simulation options
+                </a>
+            </div>
+        </div>
+    </main>
+    <aside
+        class="lg:flex w-2/5 xl:w-1/3 bg-white dark:bg-slate-900/50 border-l border-slate-200 dark:border-slate-800 flex-col overflow-y-auto">
+        <div class="p-8 xl:p-12 space-y-10">
+            <div>
+                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Upload Status</h4>
+                <div
+                    class="bg-slate-100 dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
+                    <div class="flex items-center gap-4">
+                        <div class="relative flex">
+                            {% if has_simulation_pkl %}
+                            <span class="material-symbols-outlined text-green-500 text-3xl">check_circle</span>
+                            {% else %}
+                            <span
+                                class="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-20"></span>
+                            <span class="material-symbols-outlined text-primary text-3xl">hourglass_empty</span>
+                            {% endif %}
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            {% if has_simulation_pkl %}
+                            <p class="text-sm font-bold text-green-600 dark:text-green-500">Status: Files detected</p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Simulation output files are ready.</p>
+                            <div class="mt-2 w-full min-w-0 text-xs text-slate-500 dark:text-slate-400">
+                                {% for filename in simulation_pkl_files %}
+                                <div class="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 py-0.5">
+                                    <span class="min-w-0 break-all" title="{{ filename }}">{{ filename }}</span>
+                                    <form action="{{ url_for('remove_simulation_file') }}" method="POST" class="ml-1 shrink-0">
+                                        <input type="hidden" name="filename" value="{{ filename }}">
+                                        <button type="submit" class="inline-flex items-center gap-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                                            <span class="material-symbols-outlined text-sm">delete</span>
+                                            Remove
+                                        </button>
+                                    </form>
+                                </div>
+                                {% endfor %}
+                            </div>
+                            {% else %}
+                            <p class="text-sm font-bold">Status: Awaiting files</p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Please select files to
+                                continue</p>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="space-y-6">
+                <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400">Formatting Tips</h4>
+                <div class="space-y-4">
+                    <div id="simulationSupportedFormatsTip" class="flex gap-4 rounded-lg transition-all">
+                        <span class="material-symbols-outlined text-primary shrink-0">info</span>
+                        <div>
+                            <h5 class="text-sm font-bold mb-1">Supported Formats</h5>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">Ensure your data is saved in .pkl.</p>
+                        </div>
+                    </div>
+                    <div class="flex gap-4">
+                        <span class="material-symbols-outlined text-primary shrink-0">grid_on</span>
+                        <div>
+                            <h5 class="text-sm font-bold mb-1">Data Structure</h5>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">Output files from the simulation should be saved as
+                                <span class="block">.pkl files (for example: times.pkl, gids.pkl, tstop.pkl, dt.pkl, network.pkl).</span>
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div
+                class="pt-10 border-t border-slate-200 dark:border-slate-800 text-xs text-slate-400 leading-relaxed">
+                <p>Once the files are successfully uploaded and validated, the field potential configuration module will become
+                    accessible.</p>
+            </div>
+        </div>
+    </aside>
+</div>
+
+<div id="simulationServerFileModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
+    <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+            <button type="button" id="simulationServerBrowserClose"
+                class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
+        </div>
+        <div class="p-4 space-y-3">
+            <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
+                Current folder: <span id="simulationServerBrowserPath" class="font-mono"></span>
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <button type="button" id="simulationServerBrowserUp"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Up
+                </button>
+                <button type="button" id="simulationServerBrowserRefresh"
+                    class="h-9 px-3 border border-slate-300 dark:border-slate-700 text-xs rounded-lg text-slate-600 dark:text-slate-300">
+                    Refresh
+                </button>
+                <button type="button" id="simulationServerBrowserSelect"
+                    class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10">
+                    Select files
+                </button>
+            </div>
+            <div id="simulationServerBrowserError" class="hidden text-xs text-red-600 dark:text-red-400"></div>
+            <div id="simulationServerBrowserLoading" class="hidden text-xs text-slate-500 dark:text-slate-400">Loading server paths...</div>
+            <div id="simulationServerBrowserEntries"
+                class="max-h-80 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-100 dark:divide-slate-700"></div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
+<script>
+    (() => {
+        const runtime = window.__webuiRuntime || {};
+        const simulationUploadValidationError = document.getElementById('simulationUploadValidationError');
+        const simulationSupportedFormatsTip = document.getElementById('simulationSupportedFormatsTip');
+        const simulationDropZoneHint = document.getElementById('simulationDropZoneHint');
+        const spikeDropZone = document.getElementById('spikeDropZone');
+        let simulationFormatFlashTimeout = null;
+        let simulationAutoSubmitTimeout = null;
+
+        const isSimulationFileExtensionValid = (fileName) => /\.(pkl|pickle)$/i.test(String(fileName || '').trim());
+
+        const flashSimulationFormatTip = () => {
+            if (!simulationSupportedFormatsTip) {
+                return;
+            }
+            simulationSupportedFormatsTip.classList.add(
+                'ring-2',
+                'ring-red-300',
+                'dark:ring-red-700',
+                'bg-red-50/70',
+                'dark:bg-red-900/20'
+            );
+            if (simulationFormatFlashTimeout) {
+                clearTimeout(simulationFormatFlashTimeout);
+            }
+            simulationFormatFlashTimeout = window.setTimeout(() => {
+                simulationSupportedFormatsTip.classList.remove(
+                    'ring-2',
+                    'ring-red-300',
+                    'dark:ring-red-700',
+                    'bg-red-50/70',
+                    'dark:bg-red-900/20'
+                );
+                simulationFormatFlashTimeout = null;
+            }, 3200);
+        };
+
+        const showSimulationUploadError = (message) => {
+            if (!simulationUploadValidationError || !simulationDropZoneHint || !spikeDropZone) {
+                return;
+            }
+            simulationUploadValidationError.textContent = String(message || '').trim() || 'Only .pkl or .pickle files are supported.';
+            simulationUploadValidationError.classList.remove('hidden');
+            simulationDropZoneHint.classList.add('text-red-600', 'dark:text-red-400');
+            simulationDropZoneHint.classList.remove('text-slate-600', 'dark:text-slate-400');
+            spikeDropZone.classList.add('border-red-400', 'bg-red-50/40', 'dark:bg-red-900/10');
+            flashSimulationFormatTip();
+        };
+
+        const clearSimulationUploadError = () => {
+            if (!simulationUploadValidationError || !simulationDropZoneHint || !spikeDropZone) {
+                return;
+            }
+            simulationUploadValidationError.classList.add('hidden');
+            simulationDropZoneHint.classList.remove('text-red-600', 'dark:text-red-400');
+            simulationDropZoneHint.classList.add('text-slate-600', 'dark:text-slate-400');
+            spikeDropZone.classList.remove('border-red-400', 'bg-red-50/40', 'dark:bg-red-900/10');
+        };
+
+        if (typeof window.initUnifiedUploadFlow !== 'function') {
+            return;
+        }
+
+        window.initUnifiedUploadFlow({
+            runtime,
+            historyKey: 'simulation_upload:file_browser',
+            localPickerId: 'simulation_load_data_local',
+            browseDirsUrl: '{{ url_for("features_browse_dirs") }}',
+            selectPathUrl: '{{ url_for("features_select_folder") }}',
+            formId: 'simulationUploadForm',
+            fileInputId: 'spikeFileInput',
+            dropZoneId: 'spikeDropZone',
+            sourceModeInputId: 'simulationSourceModeInput',
+            serverPathInputId: 'simulationServerFilePathInput',
+            modeUploadBtnId: 'simulationModeUploadBtn',
+            modeServerBtnId: 'simulationModeServerBtn',
+            dropZoneHintId: 'simulationDropZoneHint',
+            selectedLocalContainerId: 'selectedFiles',
+            selectedLocalListId: 'selectedFilesList',
+            selectedServerContainerId: 'selectedSimulationServerFile',
+            selectedServerListId: 'selectedSimulationServerFilePath',
+            modalRootId: 'simulationServerFileModal',
+            modalPathId: 'simulationServerBrowserPath',
+            modalEntriesId: 'simulationServerBrowserEntries',
+            modalErrorId: 'simulationServerBrowserError',
+            modalLoadingId: 'simulationServerBrowserLoading',
+            modalUpId: 'simulationServerBrowserUp',
+            modalRefreshId: 'simulationServerBrowserRefresh',
+            modalSelectId: 'simulationServerBrowserSelect',
+            modalCloseId: 'simulationServerBrowserClose',
+            activeButtonClasses: ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'],
+            inactiveButtonClasses: ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'],
+            dragActiveClasses: ['border-primary'],
+            noServerSelectionText: 'No server files selected.',
+            onLocalError: showSimulationUploadError,
+            onLocalErrorClear: clearSimulationUploadError,
+            processLocalFiles: (candidateFiles, helpers) => {
+                helpers.clearLocalError();
+                const allFiles = Array.from(candidateFiles || []);
+                if (!allFiles.length) {
+                    helpers.setInputFiles([]);
+                    helpers.hideLocalFiles();
+                    return;
+                }
+
+                const validFiles = allFiles.filter((file) => isSimulationFileExtensionValid(file && file.name));
+                const invalidFiles = allFiles.filter((file) => !isSimulationFileExtensionValid(file && file.name));
+                if (invalidFiles.length > 0) {
+                    const rejectedNames = invalidFiles.map((file) => `- ${file.name}`).join('\n');
+                    helpers.showLocalError(`Unsupported format:\n\n${rejectedNames}\n\nUse .pkl or .pickle.`);
+                }
+                if (!validFiles.length) {
+                    helpers.setInputFiles([]);
+                    helpers.hideLocalFiles();
+                    return;
+                }
+
+                helpers.setInputFiles(validFiles);
+                helpers.renderLocalFiles(validFiles);
+                helpers.setServerPaths([]);
+                if (simulationAutoSubmitTimeout) {
+                    clearTimeout(simulationAutoSubmitTimeout);
+                    simulationAutoSubmitTimeout = null;
+                }
+
+                if (invalidFiles.length > 0) {
+                    simulationAutoSubmitTimeout = window.setTimeout(() => {
+                        helpers.submitIfReady();
+                        simulationAutoSubmitTimeout = null;
+                    }, 3200);
+                    return;
+                }
+                helpers.submitIfReady();
+            },
+        });
+    })();
+</script>
+{% endblock %}
