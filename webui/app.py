@@ -2951,7 +2951,20 @@ def dashboard():
 # Simulation configuration page
 @app.route("/simulation")
 def simulation():
-    return render_template("1.simulation.html")
+    options = [
+        {
+            "url": url_for('upload_sim'),
+            "title": "Load data",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
+        },
+        {
+            "url": url_for('new_sim'),
+            "title": "New simulation",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
+        },
+    ]
+
+    return render_template("1.simulation.html", options=options)
 
 @app.route("/simulation/upload_sim")
 def upload_sim():
@@ -3682,8 +3695,24 @@ def run_trial_simulation_custom():
 # Field potential configuration page
 @app.route("/field_potential")
 def field_potential():
-    return render_template("2.field_potential.html")
-
+    options = [
+        {
+            "url": url_for('field_potential_load'),
+            "title": "Load data",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
+        },
+        {
+            "url": url_for('field_potential_kernel'),
+            "title": "Kernel",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">grain</span>',
+        },
+        {
+            "url": url_for('field_potential_proxy'),
+            "title": "Proxy",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">analytics</span>',
+        },
+    ]
+    return render_template("2.field_potential.html", options=options)
 
 @app.route("/field_potential/load")
 def field_potential_load():
@@ -4837,7 +4866,24 @@ def remove_features_file():
 # Inference configuration page
 @app.route("/inference")
 def inference():
-    return render_template("4.inference.html")
+    options = [
+        {
+            "url": url_for('inference_load_data'),
+            "title": "Load data",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
+        },
+        {
+            "url": url_for('new_training'),
+            "title": "New training",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
+        },
+        {
+            "url": url_for('compute_predictions'),
+            "title": "Compute predictions",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">query_stats</span>',
+        },
+    ]
+    return render_template("4.inference.html", options=options)
 
 # Load precomputed predictions for inference module
 @app.route("/inference/load_data")
