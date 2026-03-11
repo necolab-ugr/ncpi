@@ -1,53 +1,5 @@
-{% extends "base.html" %}
+{% extends "3.features.html" %}
 {% block title %}Features{% endblock %}
-
-{% block head %}
-{{ super() }}
-<script id="tailwind-config">
-    tailwind.config = {
-        darkMode: "class",
-        theme: {
-            extend: {
-                colors: {
-                    "primary": "#1337ec",
-                    "background-light": "#f6f6f8",
-                    "background-dark": "#101322",
-                },
-                fontFamily: {
-                    "display": ["Space Grotesk"]
-                },
-                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
-            },
-        },
-    }
-</script>
-
-<style>
-    [x-cloak] {
-        display: none !important;
-    }
-    .drop-zone {
-        border-style: dashed;
-    }
-    .hide-scrollbar::-webkit-scrollbar {
-        display: none;
-    }
-    .hide-scrollbar {
-        -ms-overflow-style: none;
-        scrollbar-width: none;
-    }
-    .simulation-accent-border {
-        border-color: #1337ec !important;
-    }
-    @keyframes upload-indeterminate {
-        0% { transform: translateX(-120%); }
-        100% { transform: translateX(320%); }
-    }
-    .upload-indeterminate {
-        animation: upload-indeterminate 1.2s linear infinite;
-    }
-</style>
-{% endblock %}
 
 {% block content %}
 <script>
