@@ -4213,7 +4213,7 @@ def features():
     features_data_files = _list_features_data_files()
     runtime_context = _detect_webui_runtime_context(request)
     return render_template(
-        "3.features.html",
+        "3.1.features_content.html",
         pipeline_files=pipeline_files,
         has_pipeline_files=bool(pipeline_files),
         features_data_files=features_data_files,
