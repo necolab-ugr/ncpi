@@ -4229,10 +4229,26 @@ def _collect_inference_assets_folder_files(folder_path):
 def inject_webui_runtime_context():
     return {"webui_runtime": _detect_webui_runtime_context(request)}
 
+# Features main selection menu page
+@app.route("/features")
+def features():
+    options = [
+        {
+            "url": url_for('features_load_data'),
+            "title": "Load data",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
+        },
+        {
+            "url": url_for('features_methods', entry='compute'),
+            "title": "Compute new features",
+            "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
+        },
+    ]
+    return render_template("3.features.html", options=options)
 
 # Features configuration page
-@app.route("/features", methods=["GET", "POST"])
-def features():
+@app.route("/features/methods", methods=["GET", "POST"])
+def features_methods():
     requested_entry = (request.args.get("entry") or "").strip().lower()
     requested_tab = (request.args.get("tab") or "").strip().lower()
     if requested_entry == "load" or requested_tab == "load-precomputed":
@@ -7738,7 +7754,7 @@ def start_computation_redirect(computation_type):
             f"Use at most {max_gb:.2f} GB for browser upload or use server folder path mode.",
             "error",
         )
-        return redirect(request.referrer or url_for("features"))
+        return redirect(request.referrer or url_for("features_methods"))
 
     # Build the name of the function to compute depending on the page form this function was called from
     func_name_string = f"{computation_type}_computation"
@@ -7794,12 +7810,12 @@ def start_computation_redirect(computation_type):
         valid_feature_methods = {"catch22", "specparam", "dfa", "fEI", "hctsa", "power_spectrum_parameterization", "fei"}
         if selected_method not in valid_feature_methods:
             flash('Select a valid features method before computing.', 'error')
-            return redirect(request.referrer or url_for('features'))
+            return redirect(request.referrer or url_for('features_methods'))
         if selected_method == "hctsa":
             hctsa_folder = (request.form.get("hctsa_folder") or "").strip()
             if not hctsa_folder:
                 flash('hctsa_folder is required for hctsa.', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
         app.logger.warning("[compute %s] features data_source_kind=%s", job_id, data_source_kind)
@@ -7807,29 +7823,29 @@ def start_computation_redirect(computation_type):
         existing_data_path = (request.form.get("existing_data_path") or "").strip()
         if not (request.form.get("parser_data_locator") or "").strip():
             flash('Select the data locator for EphysDatasetParser.', 'error')
-            return redirect(request.referrer or url_for('features'))
+            return redirect(request.referrer or url_for('features_methods'))
         epoching_enabled = str(request.form.get("parser_enable_epoching", "")).lower() in {"1", "true", "on", "yes"}
         if epoching_enabled:
             if _optional_float(request.form.get("parser_epoch_length_s")) is None:
                 flash('Set an epoch length in seconds.', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
             if _optional_float(request.form.get("parser_epoch_step_s")) is None:
                 flash('Set an epoch step in seconds.', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
 
         if data_source_kind == "pipeline":
             if uploaded_files:
                 flash('Do not upload files when using "Continue simulation pipeline".', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
             if not existing_data_path:
                 flash('Select a detected simulation pipeline file to continue.', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
             fs_source = (request.form.get("parser_fs_source") or "").strip()
             fs_manual = _optional_float(request.form.get("parser_fs_manual"))
             if fs_source == "__numeric__":
                 if fs_manual is None:
                     flash('Provide sampling frequency numeric value.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             elif fs_source == "__none__":
                 pass
             elif fs_source:
@@ -7838,17 +7854,17 @@ def start_computation_redirect(computation_type):
                 fs_locator = (request.form.get("parser_fs_locator") or "").strip()
                 if fs_locator and fs_manual is not None:
                     flash('Sampling frequency locator and sampling frequency value are mutually exclusive.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
                 if not fs_locator and fs_manual is None:
                     flash('Provide sampling frequency source (field, numeric value, or None).', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
 
             recording_type_source = (request.form.get("parser_recording_type_source") or "").strip()
             recording_type_value = (request.form.get("parser_recording_type") or "").strip()
             if recording_type_source == "__value__":
                 if not recording_type_value:
                     flash('Select a recording type value.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             elif recording_type_source == "__none__":
                 pass
             elif recording_type_source:
@@ -7857,14 +7873,14 @@ def start_computation_redirect(computation_type):
                 recording_type_locator = (request.form.get("parser_recording_type_locator") or "").strip()
                 if recording_type_locator and recording_type_value:
                     flash('Recording type locator and recording type value are mutually exclusive.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
 
             ch_names_source = (request.form.get("parser_ch_names_source") or "").strip()
             manual_sensor_names = _parse_sensor_names(request.form.get("parser_sensor_names"))
             if ch_names_source == "__manual__":
                 if not manual_sensor_names:
                     flash('Provide manual channel names (comma-separated).', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             elif ch_names_source == "__autocomplete__":
                 try:
                     _parse_nonnegative_int(
@@ -7874,26 +7890,26 @@ def start_computation_redirect(computation_type):
                     )
                 except Exception as exc:
                     flash(str(exc), 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             elif ch_names_source:
                 pass
             else:
                 ch_names_locator = (request.form.get("parser_ch_names_locator") or "").strip()
                 if ch_names_locator and manual_sensor_names:
                     flash('Channel names locator and manual channel names are mutually exclusive.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             try:
                 _validate_feature_existing_path(existing_data_path)
             except Exception as exc:
                 flash(str(exc), 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
         elif data_source_kind == "new-simulation":
             simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
             simulation_uploads = [f for f in _ensure_files_parsed().getlist("data_file") if f and f.filename]
             has_upload = len(simulation_uploads) > 0
             if has_upload and simulation_folder_path:
                 flash('Use either a local simulation folder upload or a server simulation folder path, not both.', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
             if simulation_folder_path:
                 try:
                     simulation_paths = _collect_simulation_folder_files(simulation_folder_path)
@@ -7905,7 +7921,7 @@ def start_computation_redirect(computation_type):
                     )
                 except Exception as exc:
                     flash(f"Invalid simulation outputs folder path: {exc}", 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             elif has_upload:
                 supported_uploads = []
                 for upload in simulation_uploads:
@@ -7920,10 +7936,10 @@ def start_computation_redirect(computation_type):
                 )
                 if not supported_uploads:
                     flash('No supported simulation output files were found in the selected local folder.', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             else:
                 flash('Provide a simulation outputs folder path or upload a local simulation outputs folder.', 'error')
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
         elif data_source_kind == "new-empirical":
             if empirical_source_mode == "server-path":
                 empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
@@ -7937,7 +7953,7 @@ def start_computation_redirect(computation_type):
                     )
                 except Exception as exc:
                     flash(f"Invalid empirical folder path: {exc}", 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
             else:
                 if request.content_length and request.content_length > MAX_EMPIRICAL_UPLOAD_BYTES:
                     max_gb = MAX_EMPIRICAL_UPLOAD_BYTES / float(1024 ** 3)
@@ -7946,15 +7962,15 @@ def start_computation_redirect(computation_type):
                         f"Use at most {max_gb:.2f} GB or switch to server folder path mode.",
                         'error',
                     )
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
                 empirical_uploads = [f for f in _ensure_files_parsed().getlist("empirical_files") if f and f.filename]
                 app.logger.warning("[compute %s] empirical upload count=%d", job_id, len(empirical_uploads))
                 if not empirical_uploads:
                     flash('Upload at least one empirical recording file (folder upload is supported).', 'error')
-                    return redirect(request.referrer or url_for('features'))
+                    return redirect(request.referrer or url_for('features_methods'))
         else:
             flash('Unknown data source for features computation.', 'error')
-            return redirect(request.referrer or url_for('features'))
+            return redirect(request.referrer or url_for('features_methods'))
         estimated_time_remaining = None
 
     if computation_type != 'features':
@@ -8222,7 +8238,7 @@ def start_computation_redirect(computation_type):
                 file_paths["data_file"] = normalized_path
             except Exception as exc:
                 flash(f"Failed to prepare selected pipeline file: {exc}", "error")
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
 
         elif data_source_kind == "new-simulation":
             try:
@@ -8301,7 +8317,7 @@ def start_computation_redirect(computation_type):
             except Exception as exc:
                 app.logger.exception("[compute %s] simulation staging failed", job_id)
                 flash(f"Simulation parser configuration failed: {exc}", "error")
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
 
         elif data_source_kind == "new-empirical":
             try:
@@ -8378,7 +8394,7 @@ def start_computation_redirect(computation_type):
             except Exception as exc:
                 app.logger.exception("[compute %s] empirical staging failed", job_id)
                 flash(f"Empirical parser configuration failed: {exc}", "error")
-                return redirect(request.referrer or url_for('features'))
+                return redirect(request.referrer or url_for('features_methods'))
     else:
         files_obj = _ensure_files_parsed()
         inference_file_key_map = {
