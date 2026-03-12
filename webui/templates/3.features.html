@@ -98,6 +98,8 @@
             parserInfo: null,
             parserLoading: false,
             parserError: '',
+            parserAnalysisFolderPaths: [],
+            parserAnalysisFolderNames: [],
             empiricalFileCount: 0,
             empiricalSampleName: '',
             empiricalUploadSummary: '',
@@ -105,6 +107,9 @@
             simulationFileCount: 0,
             simulationSampleName: '',
             simulationListedFileNames: [],
+            simulationFolderPaths: [],
+            simulationLocalFiles: [],
+            appendSimulationSelection: false,
             simulationDropActive: false,
             serverDirBrowserOpen: false,
             serverDirBrowserTarget: 'empirical',
@@ -214,6 +219,7 @@
                 if (input) input.value = '';
                 delete this.uploads['data-file'];
                 this.simulationListedFileNames = [];
+                this.simulationLocalFiles = [];
             },
             setSimulationSourceMode(mode) {
                 const nextMode = mode === 'upload' ? 'upload' : 'server-path';
@@ -225,13 +231,44 @@
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
                 this.simulationFolderPath = '';
+                this.simulationFolderPaths = [];
                 this.simulationListedFileNames = [];
+                this.simulationLocalFiles = [];
+                this.appendSimulationSelection = false;
                 if (nextMode === 'server-path') {
                     this.clearSimulationUploadInput();
                 }
             },
+            openSimulationFolderPicker(append = false) {
+                this.appendSimulationSelection = !!append;
+                const input = document.getElementById('data-file');
+                if (input) input.click();
+            },
+            persistSimulationLocalFiles(files) {
+                const input = document.getElementById('data-file');
+                if (!input) return;
+                const dataTransfer = new DataTransfer();
+                (files || []).forEach((file) => {
+                    if (file) dataTransfer.items.add(file);
+                });
+                input.files = dataTransfer.files;
+            },
             async onSimulationUploadSelected(event) {
-                const files = Array.from(event?.target?.files || []);
+                const incomingFiles = Array.from(event?.target?.files || []);
+                const shouldAppend = !!this.appendSimulationSelection;
+                this.appendSimulationSelection = false;
+                const previous = shouldAppend ? Array.from(this.simulationLocalFiles || []) : [];
+                const merged = [];
+                const seen = new Set();
+                for (const file of [...previous, ...incomingFiles]) {
+                    const rel = String(file?.webkitRelativePath || file?.name || '').trim();
+                    const key = `${rel}::${Number(file?.size || 0)}::${Number(file?.lastModified || 0)}`;
+                    if (!file || !rel || seen.has(key)) continue;
+                    seen.add(key);
+                    merged.push(file);
+                }
+                this.persistSimulationLocalFiles(merged);
+                this.simulationLocalFiles = merged;
                 this.submitError = '';
                 this.parserError = '';
                 this.dataSourceKind = 'new-simulation';
@@ -239,25 +276,28 @@
                 this.simulationSourceMode = 'upload';
                 this.simulationDropActive = false;
                 this.simulationFolderPath = '';
-                this.simulationFileCount = files.length;
-                this.simulationSampleName = files.length > 0 ? (files[0].name || '') : '';
-                this.simulationListedFileNames = files.map((item) => String(item?.name || '').trim()).filter((item) => item.length > 0);
-                if (files.length > 0) {
-                    this.uploads['data-file'] = { name: `${files.length} file(s) selected from local folder`, uploaded: false };
+                this.simulationFolderPaths = [];
+                this.simulationFileCount = merged.length;
+                this.simulationSampleName = merged.length > 0 ? (merged[0].webkitRelativePath || merged[0].name || '') : '';
+                this.simulationListedFileNames = merged
+                    .map((item) => String(item?.webkitRelativePath || item?.name || '').trim())
+                    .filter((item) => item.length > 0);
+                if (merged.length > 0) {
+                    this.uploads['data-file'] = { name: `${merged.length} file(s) selected from local folder(s)`, uploaded: false };
                     this.empiricalFolderPath = '';
                     this.empiricalFileCount = 0;
                     this.empiricalSampleName = '';
                     this.empiricalUploadSummary = '';
                     this.clearEmpiricalUploadInput();
                     this.resetParserConfig();
-                    const inspectCandidate = files.find((item) => {
+                    const inspectCandidate = merged.find((item) => {
                         const name = String(item?.name || '');
                         const idx = name.lastIndexOf('.');
                         if (idx < 0) return false;
                         return supportedParserFileExtensions.has(name.slice(idx).toLowerCase());
                     });
                     if (inspectCandidate) {
-                        this.simulationSampleName = inspectCandidate.name || this.simulationSampleName;
+                        this.simulationSampleName = inspectCandidate.webkitRelativePath || inspectCandidate.name || this.simulationSampleName;
                         await this.inspectParserSource('', inspectCandidate);
                     } else {
                         this.parserInfo = null;
@@ -267,6 +307,7 @@
                     delete this.uploads['data-file'];
                     this.parserInfo = null;
                     this.simulationListedFileNames = [];
+                    this.simulationLocalFiles = [];
                 }
             },
             onSimulationDrop(event) {
@@ -280,6 +321,7 @@
                     input.files = dataTransfer.files;
                 }
                 this.simulationDropActive = false;
+                this.appendSimulationSelection = false;
                 this.onSimulationUploadSelected({ target: { files: dataTransfer.files } });
             },
             setEmpiricalSourceMode(mode) {
@@ -366,10 +408,35 @@
                 this.serverDirBrowserTarget = target === 'simulation' ? 'simulation' : 'empirical';
                 this.serverDirBrowserOpen = true;
                 const preferredPath = this.serverDirBrowserTarget === 'simulation'
-                    ? String(this.simulationFolderPath || '').trim()
+                    ? String((this.simulationFolderPaths && this.simulationFolderPaths.length > 0
+                        ? this.simulationFolderPaths[this.simulationFolderPaths.length - 1]
+                        : this.simulationFolderPath) || '').trim()
                     : String(this.empiricalFolderPath || '').trim();
                 const startPath = preferredPath || '';
                 await this.loadServerDirectory(startPath);
+            },
+            async addSimulationFolderPath(path) {
+                const selectedPath = String(path || '').trim();
+                if (!selectedPath) return;
+                const current = Array.isArray(this.simulationFolderPaths) ? [...this.simulationFolderPaths] : [];
+                if (!current.includes(selectedPath)) current.push(selectedPath);
+                this.simulationFolderPaths = current;
+                this.simulationFolderPath = current.length > 0 ? current[0] : '';
+                await this.inspectSimulationFolderPath();
+            },
+            async removeSimulationFolderPath(path) {
+                const removePath = String(path || '').trim();
+                if (!removePath) return;
+                const current = Array.isArray(this.simulationFolderPaths) ? [...this.simulationFolderPaths] : [];
+                this.simulationFolderPaths = current.filter((item) => String(item || '').trim() !== removePath);
+                this.simulationFolderPath = this.simulationFolderPaths.length > 0 ? this.simulationFolderPaths[0] : '';
+                if (this.simulationFolderPaths.length > 0) {
+                    await this.inspectSimulationFolderPath();
+                    return;
+                }
+                this.simulationFileCount = 0;
+                this.simulationSampleName = '';
+                this.parserInfo = null;
             },
             async chooseServerDirectory() {
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
@@ -380,8 +447,7 @@
                 const target = this.serverDirBrowserTarget === 'simulation' ? 'simulation' : 'empirical';
                 this.closeServerDirectoryBrowser();
                 if (target === 'simulation') {
-                    this.simulationFolderPath = selectedPath;
-                    await this.inspectSimulationFolderPath();
+                    await this.addSimulationFolderPath(selectedPath);
                 } else {
                     this.empiricalFolderPath = selectedPath;
                     await this.inspectEmpiricalFolderPath();
@@ -439,6 +505,22 @@
                         rendered = `${rendered} (${sourceHint})`;
                     }
                 }
+                if (!this.parserIsVirtualField(key)) {
+                    const mapping = this.parserInfo?.candidate_field_folders;
+                    const folders = mapping && typeof mapping === 'object'
+                        ? (mapping[key] || []).map((name) => String(name || '').trim()).filter((name) => name.length > 0)
+                        : [];
+                    const folderCount = Array.isArray(this.parserInfo?.folder_summaries)
+                        ? this.parserInfo.folder_summaries.length
+                        : 0;
+                    const includeFolderHint = folderCount > 1;
+                    if (includeFolderHint && folders.length > 0 && !rendered.includes('[folders:')) {
+                        const suffix = folders.length > 4
+                            ? `${folders.slice(0, 4).join(', ')}, ...`
+                            : folders.join(', ');
+                        rendered = `${rendered} [folders: ${suffix}]`;
+                    }
+                }
                 return rendered;
             },
             parserFileIdOptionLabel() {
@@ -468,6 +550,161 @@
             parserNeutralOptionStyle() {
                 return 'color: #6b7280;';
             },
+            parserFolderSummaries() {
+                return Array.isArray(this.parserInfo?.folder_summaries) ? this.parserInfo.folder_summaries : [];
+            },
+            selectedAnalysisFolderSummary() {
+                const folders = this.parserFolderSummaries();
+                if (!folders.length) return null;
+                const selectedPath = Array.isArray(this.parserAnalysisFolderPaths) ? String(this.parserAnalysisFolderPaths[0] || '').trim() : '';
+                if (selectedPath) {
+                    const matchByPath = folders.find((folder) => String(folder?.folder_path || '').trim() === selectedPath);
+                    if (matchByPath) return matchByPath;
+                }
+                const selectedName = Array.isArray(this.parserAnalysisFolderNames) ? String(this.parserAnalysisFolderNames[0] || '').trim() : '';
+                if (selectedName) {
+                    const matchByName = folders.find((folder) => String(folder?.folder_name || '').trim() === selectedName);
+                    if (matchByName) return matchByName;
+                }
+                return folders[0] || null;
+            },
+            selectedAnalysisFolderName() {
+                const folder = this.selectedAnalysisFolderSummary();
+                return folder ? String(folder?.folder_name || '').trim() : '';
+            },
+            parserDataframeCandidateFields() {
+                const explicit = Array.isArray(this.parserInfo?.dataframe_candidate_fields)
+                    ? this.parserInfo.dataframe_candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0)
+                    : [];
+                if (explicit.length > 0) return explicit;
+
+                const details = Array.isArray(this.parserInfo?.field_details) ? this.parserInfo.field_details : [];
+                const seen = new Set();
+                const fromDetails = [];
+                for (const item of details) {
+                    const origin = String(item?.origin || '').trim().toLowerCase();
+                    const field = String(item?.field || '').trim();
+                    if (!field || origin !== 'dataframe' || seen.has(field)) continue;
+                    seen.add(field);
+                    fromDetails.push(field);
+                }
+                if (fromDetails.length > 0) return fromDetails;
+
+                if (String(this.parserInfo?.source_type || '').trim().toLowerCase() === 'dataframe') {
+                    return Array.isArray(this.parserInfo?.candidate_fields)
+                        ? this.parserInfo.candidate_fields
+                            .map((field) => String(field || '').trim())
+                            .filter((field) => field.length > 0)
+                        : [];
+                }
+                return [];
+            },
+            parserFallbackDataCandidateFields() {
+                return Array.isArray(this.parserInfo?.candidate_fields)
+                    ? this.parserInfo.candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0 && !this.parserIsVirtualField(field))
+                    : [];
+            },
+            parserUsingFallbackDataFields() {
+                const dataframeCandidates = this.parserDataframeCandidateFields();
+                if (dataframeCandidates.length > 0) return false;
+                return this.parserFallbackDataCandidateFields().length > 0;
+            },
+            parserDataLocatorCandidates() {
+                const dataframeCandidates = this.parserDataframeCandidateFields();
+                const candidates = dataframeCandidates.length > 0
+                    ? dataframeCandidates
+                    : this.parserFallbackDataCandidateFields();
+                const folders = this.parserFolderSummaries();
+                if (folders.length <= 1) return candidates;
+                const selectedFolderName = this.selectedAnalysisFolderName();
+                if (!selectedFolderName) return candidates;
+                const mapping = this.parserInfo?.candidate_field_folders;
+                if (!mapping || typeof mapping !== 'object') return candidates;
+                return candidates.filter((field) => {
+                    const owners = (mapping[field] || []).map((name) => String(name || '').trim()).filter((name) => name.length > 0);
+                    return owners.includes(selectedFolderName);
+                });
+            },
+            parserFolderSelectionCount() {
+                return this.parserFolderSummaries().length;
+            },
+            parserFolderToken(folder) {
+                const path = String(folder?.folder_path || '').trim();
+                if (path) {
+                    return { type: 'path', value: path };
+                }
+                const name = String(folder?.folder_name || '').trim();
+                return { type: 'name', value: name || 'selected_folder' };
+            },
+            parserIsFolderSelected(folder) {
+                const token = this.parserFolderToken(folder);
+                if (!token.value) return false;
+                if (token.type === 'path') {
+                    return (this.parserAnalysisFolderPaths || []).includes(token.value);
+                }
+                return (this.parserAnalysisFolderNames || []).includes(token.value);
+            },
+            parserToggleFolderSelection(folder) {
+                const token = this.parserFolderToken(folder);
+                if (!token.value) return;
+                if (token.type === 'path') {
+                    this.parserAnalysisFolderPaths = [token.value];
+                    this.parserAnalysisFolderNames = [];
+                    this.ensureDataLocatorMatchesSelectedFolder();
+                    return;
+                }
+                this.parserAnalysisFolderNames = [token.value];
+                this.parserAnalysisFolderPaths = [];
+                this.ensureDataLocatorMatchesSelectedFolder();
+            },
+            parserSelectedFolderCount() {
+                let selectedCount = 0;
+                for (const folder of this.parserFolderSummaries()) {
+                    if (this.parserIsFolderSelected(folder)) selectedCount += 1;
+                }
+                return selectedCount;
+            },
+            syncAnalysisFolderSelection(payload) {
+                const folders = Array.isArray(payload?.folder_summaries) ? payload.folder_summaries : [];
+                const availablePaths = folders
+                    .map((folder) => String(folder?.folder_path || '').trim())
+                    .filter((value) => value.length > 0);
+                const availableNames = folders
+                    .filter((folder) => String(folder?.folder_path || '').trim().length === 0)
+                    .map((folder) => String(folder?.folder_name || '').trim() || 'selected_folder');
+
+                const currentPaths = Array.isArray(this.parserAnalysisFolderPaths) ? this.parserAnalysisFolderPaths : [];
+                const currentNames = Array.isArray(this.parserAnalysisFolderNames) ? this.parserAnalysisFolderNames : [];
+
+                const currentPath = availablePaths.find((path) => currentPaths.includes(path)) || '';
+                const currentName = availableNames.find((name) => currentNames.includes(name)) || '';
+
+                this.parserAnalysisFolderPaths = currentPath
+                    ? [currentPath]
+                    : (availablePaths.length > 0 ? [availablePaths[0]] : []);
+                this.parserAnalysisFolderNames = currentName
+                    ? [currentName]
+                    : (availableNames.length > 0 ? [availableNames[0]] : []);
+                this.ensureDataLocatorMatchesSelectedFolder();
+            },
+            ensureDataLocatorMatchesSelectedFolder() {
+                const allowed = this.parserDataLocatorCandidates();
+                if (!Array.isArray(allowed) || allowed.length === 0) {
+                    this.parserDataLocator = '';
+                    return;
+                }
+                const current = String(this.parserDataLocator || '').trim();
+                if (current && allowed.includes(current)) return;
+                const preferred = this.autoPickCandidateField(
+                    ['lfp', 'eeg', 'meg', 'ecog', 'signal', 'data'],
+                    allowed,
+                );
+                this.parserDataLocator = preferred || allowed[0] || '';
+            },
             canSubmitFeatures() {
                 if (this.submitInProgress) return false;
                 const kind = this.resolvedDataSourceKind();
@@ -483,13 +720,16 @@
                 const chSource = String(this.parserChNamesSource || '').trim();
                 if (!chSource) return false;
                 if (chSource === '__manual__' && !String(this.parserSensorNames || '').trim()) return false;
+                if (this.parserFolderSelectionCount() > 1 && this.parserSelectedFolderCount() !== 1) return false;
 
                 if (kind === 'pipeline') {
                     if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
                 }
                 if (kind === 'new-simulation') {
-                    const hasSimulationPath = String(this.simulationFolderPath || '').trim().length > 0 && this.simulationFileCount > 0;
+                    const folderPaths = Array.isArray(this.simulationFolderPaths) ? this.simulationFolderPaths : [];
+                    const hasSimulationPath = (folderPaths.length > 0 || String(this.simulationFolderPath || '').trim().length > 0)
+                        && this.simulationFileCount > 0;
                     if (!this.isUploaded('data-file') && !hasSimulationPath) return false;
                     if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
@@ -504,7 +744,9 @@
                 }
                 if (kind === 'new-simulation') {
                     if (this.simulationSourceMode === 'server-path') {
-                        const folderPath = String(this.simulationFolderPath || '').trim();
+                        const folderPaths = Array.isArray(this.simulationFolderPaths) ? this.simulationFolderPaths : [];
+                        if (folderPaths.length > 1) return `${folderPaths.length} server folders selected`;
+                        const folderPath = String((folderPaths[0] || this.simulationFolderPath || '')).trim();
                         if (folderPath) return this.simulationSampleName || folderPath;
                         return 'Simulation server folder path not set';
                     }
@@ -528,8 +770,10 @@
                 if (this.dataSourceKind !== 'new-simulation') {
                     this.clearSimulationUploadInput();
                     this.simulationFolderPath = '';
+                    this.simulationFolderPaths = [];
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
+                    this.simulationLocalFiles = [];
                 }
                 this.empiricalFolderPath = '';
                 this.empiricalFileCount = 0;
@@ -577,6 +821,8 @@
                 this.parserAggregateOverSelected = ['sensor'];
                 this.parserAggregateMethod = 'sum';
                 this.parserAggregateLabels = '';
+                this.parserAnalysisFolderPaths = [];
+                this.parserAnalysisFolderNames = [];
             },
             selectPipeline(path) {
                 this.stopUploadWaitPulse();
@@ -591,11 +837,13 @@
                 this.simulationSourceMode = this.defaultSimulationSourceMode;
                 this.empiricalFolderPath = '';
                 this.simulationFolderPath = '';
+                this.simulationFolderPaths = [];
                 this.selectedPipelinePath = path;
                 this.dataSourceKind = 'pipeline';
                 this.clearSimulationUploadInput();
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
+                this.simulationLocalFiles = [];
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.empiricalUploadSummary = '';
@@ -619,10 +867,12 @@
                 this.simulationSourceMode = this.defaultSimulationSourceMode;
                 this.empiricalFolderPath = '';
                 this.simulationFolderPath = '';
+                this.simulationFolderPaths = [];
                 this.dataSourceKind = 'new-simulation';
                 this.selectedPipelinePath = '';
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
+                this.simulationLocalFiles = file ? [file] : [];
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.empiricalUploadSummary = '';
@@ -636,10 +886,12 @@
                 await this.openServerDirectoryBrowserFor('simulation');
             },
             async inspectSimulationFolderPath() {
-                const folderPath = String(this.simulationFolderPath || '').trim();
+                const folderPaths = Array.isArray(this.simulationFolderPaths) && this.simulationFolderPaths.length > 0
+                    ? this.simulationFolderPaths
+                    : (String(this.simulationFolderPath || '').trim() ? [String(this.simulationFolderPath || '').trim()] : []);
                 this.submitError = '';
                 this.parserError = '';
-                if (!folderPath) {
+                if (!folderPaths.length) {
                     this.parserError = 'Provide a valid simulation outputs folder path.';
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
@@ -651,8 +903,10 @@
                 try {
                     this.simulationSourceMode = 'server-path';
                     this.clearSimulationUploadInput();
+                    this.simulationLocalFiles = [];
                     const formData = new FormData();
-                    formData.append('simulation_folder_path', folderPath);
+                    formData.append('simulation_folder_paths', JSON.stringify(folderPaths));
+                    if (folderPaths.length === 1) formData.append('simulation_folder_path', folderPaths[0]);
                     const response = await fetch('{{ url_for('features_parser_inspect') }}', {
                         method: 'POST',
                         body: formData,
@@ -663,6 +917,12 @@
                     this.applyParserDefaults(payload);
                     this.simulationFileCount = Number(payload.folder_file_count || 0);
                     this.simulationSampleName = payload.source_name || '';
+                    const reportedFolders = Array.isArray(payload.folder_summaries)
+                        ? payload.folder_summaries.map((item) => String(item?.folder_path || '').trim()).filter((item) => item.length > 0)
+                        : [];
+                    this.simulationFolderPaths = reportedFolders.length > 0 ? reportedFolders : folderPaths;
+                    this.simulationFolderPath = this.simulationFolderPaths.length > 0 ? this.simulationFolderPaths[0] : '';
+                    this.simulationListedFileNames = [];
                     this.dataSourceKind = 'new-simulation';
                     this.selectedPipelinePath = '';
                 } catch (error) {
@@ -716,10 +976,47 @@
                     this.parserLoading = false;
                 }
             },
+            autoPickCandidateField(keywords, customCandidates = null) {
+                const candidates = Array.isArray(customCandidates)
+                    ? customCandidates
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0 && !this.parserIsVirtualField(field))
+                    : (Array.isArray(this.parserInfo?.candidate_fields)
+                        ? this.parserInfo.candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0 && !this.parserIsVirtualField(field))
+                        : []);
+                const keyList = Array.isArray(keywords)
+                    ? keywords.map((value) => String(value || '').trim().toLowerCase()).filter((value) => value.length > 0)
+                    : [];
+                if (!candidates.length || !keyList.length) return '';
+                for (const candidate of candidates) {
+                    const lowerCandidate = candidate.toLowerCase();
+                    const tokens = lowerCandidate.split(/[^a-z0-9]+/).filter((token) => token.length > 0);
+                    for (const keyword of keyList) {
+                        if (tokens.includes(keyword)) return candidate;
+                        if (lowerCandidate.endsWith(`.${keyword}`)) return candidate;
+                        const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        const boundaryExpr = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`);
+                        if (boundaryExpr.test(lowerCandidate)) return candidate;
+                        if (keyword.length >= 4 && lowerCandidate.includes(keyword)) return candidate;
+                    }
+                }
+                return '';
+            },
             applyParserDefaults(payload) {
+                this.syncAnalysisFolderSelection(payload);
                 const defaults = payload?.defaults || {};
-                if (!this.parserDataLocator) this.parserDataLocator = defaults.data || '';
-                if (!this.parserFsLocator) this.parserFsLocator = defaults.fs || '';
+                const dataCandidates = this.parserDataLocatorCandidates();
+                const autoData = this.autoPickCandidateField(['lfp', 'eeg', 'meg', 'ecog', 'signal', 'data'], dataCandidates);
+                const autoFs = this.autoPickCandidateField(['fs', 'sfreq', 'freq', 'frequency', 'sampling_rate', 'sampling_frequency']);
+                const autoChannels = this.autoPickCandidateField(['ch_names', 'channels', 'channel_names', 'channel', 'sensors', 'sensor', 'ch']);
+                const defaultData = String(defaults.data || '').trim();
+                const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
+                if (!this.parserDataLocator || !dataCandidates.includes(String(this.parserDataLocator || '').trim())) {
+                    this.parserDataLocator = (defaultDataAllowed ? defaultData : '') || autoData || (dataCandidates[0] || '');
+                }
+                if (!this.parserFsLocator) this.parserFsLocator = defaults.fs || autoFs || '';
                 if (!this.parserRecordingTypeLocator) this.parserRecordingTypeLocator = defaults.recording_type || '';
                 if (!this.parserSubjectIdLocator) this.parserSubjectIdLocator = defaults.subject_id || '';
                 if (!this.parserGroupLocator) this.parserGroupLocator = defaults.group || '';
@@ -729,7 +1026,7 @@
                 if (this.parserMetadataGroupSource === '__none__' && defaults.group) this.parserMetadataGroupSource = defaults.group;
                 if (this.parserMetadataSpeciesSource === '__none__' && defaults.species) this.parserMetadataSpeciesSource = defaults.species;
                 if (this.parserMetadataConditionSource === '__none__' && defaults.condition) this.parserMetadataConditionSource = defaults.condition;
-                if (!this.parserChNamesLocator) this.parserChNamesLocator = defaults.ch_names || '';
+                if (!this.parserChNamesLocator) this.parserChNamesLocator = defaults.ch_names || autoChannels || '';
                 const validAggregate = new Set(this.aggregateOverOptions());
                 this.parserAggregateOverSelected = (this.parserAggregateOverSelected || []).filter((dim) => validAggregate.has(dim));
                 if (this.parserAggregateOverSelected.length === 0) this.parserAggregateOverSelected = ['sensor'];
@@ -1514,7 +1811,11 @@
                     <input type="hidden" name="existing_data_path" :value="selectedPipelinePath">
                     <input type="hidden" name="empirical_source_mode" :value="empiricalSourceMode">
                     <input type="hidden" name="empirical_folder_path" :value="empiricalFolderPath">
+                    <input type="hidden" name="empirical_folder_paths" :value="JSON.stringify(empiricalFolderPath ? [empiricalFolderPath] : [])">
                     <input type="hidden" name="simulation_folder_path" :value="simulationFolderPath">
+                    <input type="hidden" name="simulation_folder_paths" :value="JSON.stringify(simulationFolderPaths || [])">
+                    <input type="hidden" name="parser_analysis_folder_paths" :value="JSON.stringify(parserAnalysisFolderPaths || [])">
+                    <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
 
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
@@ -1557,7 +1858,7 @@
                             <div
                                 class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
                                 :class="(simulationDropActive && simulationSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
-                                @click="if (simulationSourceMode === 'upload') { document.getElementById('data-file').click(); } else { pickSimulationFolder(); }"
+                                @click="if (simulationSourceMode === 'upload') { openSimulationFolderPicker(false); } else { pickSimulationFolder(); }"
                                 @dragenter.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
                                 @dragover.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
                                 @dragleave.prevent="simulationDropActive = false"
@@ -1582,27 +1883,248 @@
                                     Select an existing server folder
                                 </p>
                                 <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
-                                    <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="document.getElementById('data-file').click()"
+                                    <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="openSimulationFolderPicker(false)"
                                         class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
                                         Browse local folder
                                     </button>
+                                    <button type="button" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak @click.stop="openSimulationFolderPicker(true)"
+                                        class="h-9 px-3 rounded-lg border border-primary text-xs font-semibold text-primary hover:bg-primary/10">
+                                        Add another local folder
+                                    </button>
                                     <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFolder()"
                                         class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                        Browse server folder
+                                        Add server folder
                                     </button>
                                 </div>
                                 <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
                                     <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
                                     <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
                                 </div>
-                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && simulationFolderPath" x-cloak>
-                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folder</span>
-                                    <div class="mt-2 font-mono break-all" x-text="simulationFolderPath"></div>
+                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0" x-cloak>
+                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folders</span>
+                                    <div class="mt-2 space-y-2">
+                                        <template x-for="path in simulationFolderPaths" :key="'sim-folder-'+path">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-mono break-all flex-1" x-text="path"></span>
+                                                <button type="button" @click.stop="removeSimulationFolderPath(path)"
+                                                    class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20">
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        </template>
+                                    </div>
                                 </div>
                             </div>
                             <div x-show="simulationFileCount > 0" class="mt-4 p-3 bg-green-100 dark:bg-green-900/50 border border-green-200 dark:border-green-800 text-green-800 dark:text-green-200 text-sm font-medium rounded-lg">
                                 <p><span x-text="simulationFileCount"></span> file(s) detected.</p>
+                                <p class="text-xs opacity-80" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0">
+                                    Folder(s): <span x-text="(simulationFolderPaths || []).length"></span>
+                                </p>
                                 <p class="text-xs opacity-80">Sample inspected: <span x-text="simulationSampleName"></span></p>
+                                <p class="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                    Warning: all files within each folder must have the same structure as the inspected sample; otherwise processing may fail or produce incorrect results.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div x-show="hasAnyData() && parserInfo && (((parserInfo.folder_summaries || []).length > 0) || ((parserInfo.extension_summaries || []).length > 0) || ((parserInfo.extension_profiles || []).length > 0))" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary">folder_open</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Folder and File Inspection</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
+
+                        <div x-show="(parserInfo.folder_summaries || []).length > 0" class="space-y-2">
+                            <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Files per folder</h4>
+                            <div class="space-y-2">
+                                <template x-for="folder in parserInfo.folder_summaries || []" :key="'folder-summary-'+(folder.folder_path || folder.folder_name)">
+                                    <div class="p-2 rounded-lg border border-gray-200 dark:border-[#323b67] text-xs text-gray-600 dark:text-gray-300">
+                                        <div class="font-semibold" x-text="folder.folder_name || folder.folder_path"></div>
+                                        <div class="font-mono break-all opacity-80" x-show="folder.folder_path" x-text="folder.folder_path"></div>
+                                        <div class="mt-1"><span x-text="folder.file_count || 0"></span> file(s)</div>
+                                    </div>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div x-show="(parserInfo.folder_summaries || []).length > 1" class="space-y-2">
+                            <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Folder used for feature extraction</h4>
+                            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                Select exactly one data folder for feature extraction. The other folders are used only to populate parser metadata fields.
+                            </p>
+                            <div class="space-y-2">
+                                <template x-for="folder in parserInfo.folder_summaries || []" :key="'analysis-folder-'+(folder.folder_path || folder.folder_name)">
+                                    <label class="flex items-start gap-2 p-2 rounded-lg border border-gray-200 dark:border-[#323b67] text-xs text-gray-700 dark:text-gray-200 cursor-pointer">
+                                        <input type="radio"
+                                            name="parser-analysis-folder-ui"
+                                            class="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                                            :checked="parserIsFolderSelected(folder)"
+                                            @change="parserToggleFolderSelection(folder)">
+                                        <span class="flex-1">
+                                            <span class="block font-semibold" x-text="folder.folder_name || folder.folder_path"></span>
+                                            <span class="block font-mono break-all opacity-80" x-show="folder.folder_path" x-text="folder.folder_path"></span>
+                                            <span class="block mt-1 opacity-80"><span x-text="folder.file_count || 0"></span> file(s)</span>
+                                        </span>
+                                    </label>
+                                </template>
+                            </div>
+                            <p class="text-xs text-red-600 dark:text-red-400" x-show="parserSelectedFolderCount() !== 1">
+                                Select one folder for feature extraction.
+                            </p>
+                        </div>
+
+                        <div x-show="(parserInfo.folder_profiles || []).length > 0" class="space-y-4">
+                            <template x-for="folderProfile in parserInfo.folder_profiles || []" :key="'folder-profile-'+(folderProfile.folder_path || folderProfile.folder_name)">
+                                <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
+                                    <div class="flex flex-col gap-1">
+                                        <div class="text-sm font-semibold text-[#34495E] dark:text-white" x-text="folderProfile.folder_name || folderProfile.folder_path"></div>
+                                        <div class="text-[11px] font-mono text-gray-500 dark:text-gray-400 break-all" x-show="folderProfile.folder_path" x-text="folderProfile.folder_path"></div>
+                                        <div class="text-xs text-gray-500 dark:text-gray-400"><span x-text="folderProfile.file_count || 0"></span> file(s)</div>
+                                    </div>
+
+                                    <div x-show="(folderProfile.extension_summaries || []).length > 0" class="space-y-2">
+                                        <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Detected file extensions</h4>
+                                        <div class="flex flex-wrap gap-2">
+                                            <template x-for="entry in folderProfile.extension_summaries || []" :key="'ext-summary-'+(folderProfile.folder_name || folderProfile.folder_path)+'-'+entry.extension">
+                                                <span class="px-2 py-1 rounded-lg bg-primary/10 text-primary text-xs border border-primary/20">
+                                                    <span x-text="entry.extension"></span>
+                                                    (<span x-text="entry.count"></span>)
+                                                </span>
+                                            </template>
+                                        </div>
+                                    </div>
+
+                                    <div x-show="(folderProfile.extension_profiles || []).length > 0" class="space-y-3">
+                                        <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">One-file structure sample per extension</h4>
+                                        <template x-for="profile in folderProfile.extension_profiles || []" :key="'ext-profile-'+(folderProfile.folder_name || folderProfile.folder_path)+'-'+profile.extension">
+                                            <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-2">
+                                                <div class="flex items-center justify-between gap-3">
+                                                    <span class="text-xs font-semibold text-primary" x-text="profile.extension"></span>
+                                                    <span class="text-xs text-gray-500 dark:text-gray-400"><span x-text="profile.file_count || 0"></span> file(s)</span>
+                                                </div>
+                                                <p class="text-[11px] text-gray-500 dark:text-gray-400 break-all">Sample inspected: <span class="font-mono" x-text="profile.sample_file"></span></p>
+                                                <div class="overflow-x-auto">
+                                                    <table class="min-w-full text-xs">
+                                                        <thead>
+                                                            <tr class="text-left text-gray-500 dark:text-gray-400">
+                                                                <th class="py-1 pr-3">Field</th>
+                                                                <th class="py-1 pr-3">Origin</th>
+                                                                <th class="py-1 pr-3">Type</th>
+                                                                <th class="py-1 pr-3">Shape</th>
+                                                                <th class="py-1 pr-3">Detail</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <template x-for="item in profile.field_details || []" :key="'field-detail-'+(folderProfile.folder_name || folderProfile.folder_path)+'-'+profile.extension+'-'+item.field">
+                                                                <tr class="border-t border-gray-100 dark:border-[#323b67]">
+                                                                    <td class="py-1 pr-3 font-mono" x-text="item.field"></td>
+                                                                    <td class="py-1 pr-3" x-text="item.origin"></td>
+                                                                    <td class="py-1 pr-3" x-text="item.python_type"></td>
+                                                                    <td class="py-1 pr-3" x-text="item.shape ? JSON.stringify(item.shape) : '-'"></td>
+                                                                    <td class="py-1 pr-3" x-text="item.detail || '-'"></td>
+                                                                </tr>
+                                                            </template>
+                                                        </tbody>
+                                                    </table>
+                                                </div>
+                                            </div>
+                                        </template>
+                                    </div>
+
+                                    <div x-show="(folderProfile.virtual_field_details || []).length > 0" class="space-y-2">
+                                        <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">File-extracted fields</h4>
+                                        <div class="space-y-2">
+                                            <template x-for="entry in folderProfile.virtual_field_details || []" :key="'virtual-field-'+(folderProfile.folder_name || folderProfile.folder_path)+'-'+entry.field">
+                                                <div class="text-xs p-3 rounded border border-amber-200/70 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/20 space-y-2">
+                                                    <div class="font-semibold text-amber-700 dark:text-amber-300 font-mono" x-text="entry.field"></div>
+                                                    <div class="text-amber-700/80 dark:text-amber-300/80" x-text="entry.detail || ''"></div>
+                                                    <div class="text-amber-800/90 dark:text-amber-200/90" x-show="(entry.example_values || []).length > 0">
+                                                        <span class="font-semibold">Examples from selected files:</span>
+                                                        <span x-text="(entry.example_values || []).join(', ')"></span>
+                                                    </div>
+                                                    <div class="space-y-1" x-show="(entry.usage_examples || []).length > 0">
+                                                        <div class="font-semibold text-amber-800 dark:text-amber-200">Example usage</div>
+                                                        <template x-for="(usage, usageIdx) in entry.usage_examples || []" :key="'usage-'+(folderProfile.folder_name || folderProfile.folder_path)+'-'+entry.field+'-'+usageIdx">
+                                                            <div class="text-amber-800/90 dark:text-amber-200/90" x-text="`- ${usage}`"></div>
+                                                        </template>
+                                                    </div>
+                                                </div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div x-show="(parserInfo.folder_profiles || []).length === 0 && (parserInfo.extension_summaries || []).length > 0" class="space-y-2">
+                            <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Detected file extensions</h4>
+                            <div class="flex flex-wrap gap-2">
+                                <template x-for="entry in parserInfo.extension_summaries || []" :key="'ext-summary-'+entry.extension">
+                                    <span class="px-2 py-1 rounded-lg bg-primary/10 text-primary text-xs border border-primary/20">
+                                        <span x-text="entry.extension"></span>
+                                        (<span x-text="entry.count"></span>)
+                                    </span>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div x-show="(parserInfo.folder_profiles || []).length === 0 && (parserInfo.extension_profiles || []).length > 0" class="space-y-3">
+                            <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">One-file structure sample per extension</h4>
+                            <template x-for="profile in parserInfo.extension_profiles || []" :key="'ext-profile-'+profile.extension">
+                                <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-2">
+                                    <div class="flex items-center justify-between gap-3">
+                                        <span class="text-xs font-semibold text-primary" x-text="profile.extension"></span>
+                                        <span class="text-xs text-gray-500 dark:text-gray-400"><span x-text="profile.file_count || 0"></span> file(s)</span>
+                                    </div>
+                                    <p class="text-[11px] text-gray-500 dark:text-gray-400 break-all">Sample inspected: <span class="font-mono" x-text="profile.sample_file"></span></p>
+                                    <div class="overflow-x-auto">
+                                        <table class="min-w-full text-xs">
+                                            <thead>
+                                                <tr class="text-left text-gray-500 dark:text-gray-400">
+                                                    <th class="py-1 pr-3">Field</th>
+                                                    <th class="py-1 pr-3">Origin</th>
+                                                    <th class="py-1 pr-3">Type</th>
+                                                    <th class="py-1 pr-3">Shape</th>
+                                                    <th class="py-1 pr-3">Detail</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <template x-for="item in profile.field_details || []" :key="'field-detail-'+profile.extension+'-'+item.field">
+                                                    <tr class="border-t border-gray-100 dark:border-[#323b67]">
+                                                        <td class="py-1 pr-3 font-mono" x-text="item.field"></td>
+                                                        <td class="py-1 pr-3" x-text="item.origin"></td>
+                                                        <td class="py-1 pr-3" x-text="item.python_type"></td>
+                                                        <td class="py-1 pr-3" x-text="item.shape ? JSON.stringify(item.shape) : '-'"></td>
+                                                        <td class="py-1 pr-3" x-text="item.detail || '-'"></td>
+                                                    </tr>
+                                                </template>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <div x-show="(parserInfo.folder_profiles || []).length === 0" class="space-y-2">
+                            <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">File-extracted fields</h4>
+                            <div class="space-y-2">
+                                <template x-for="entry in parserInfo.virtual_field_details || []" :key="'virtual-field-'+entry.field">
+                                    <div class="text-xs p-3 rounded border border-amber-200/70 dark:border-amber-900/40 bg-amber-50/50 dark:bg-amber-950/20 space-y-2">
+                                        <div class="font-semibold text-amber-700 dark:text-amber-300 font-mono" x-text="entry.field"></div>
+                                        <div class="text-amber-700/80 dark:text-amber-300/80" x-text="entry.detail || ''"></div>
+                                        <div class="text-amber-800/90 dark:text-amber-200/90" x-show="(entry.example_values || []).length > 0">
+                                            <span class="font-semibold">Examples from selected files:</span>
+                                            <span x-text="(entry.example_values || []).join(', ')"></span>
+                                        </div>
+                                        <div class="space-y-1" x-show="(entry.usage_examples || []).length > 0">
+                                            <div class="font-semibold text-amber-800 dark:text-amber-200">Example usage</div>
+                                            <template x-for="(usage, usageIdx) in entry.usage_examples || []" :key="'usage-'+entry.field+'-'+usageIdx">
+                                                <div class="text-amber-800/90 dark:text-amber-200/90" x-text="`- ${usage}`"></div>
+                                            </template>
+                                        </div>
+                                    </div>
+                                </template>
                             </div>
                         </div>
                     </div>
@@ -1620,23 +2142,26 @@
                                 <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
                                 <p class="text-[11px] text-gray-500 dark:text-gray-400">
                                     Menu colors:
-                                    <span style="color: #0f766e;">dataframe fields</span>,
+                                    <span style="color: #0f766e;">data fields</span>,
                                     <span style="color: #1d4ed8; font-weight: 600;">manual entries</span>,
-                                    <span style="color: #b45309; font-weight: 600;">virtual fields</span>.
+                                    <span style="color: #b45309; font-weight: 600;">file-extracted fields</span>.
                                 </p>
 
                                 <div x-show="resolvedDataSourceKind() === 'pipeline' || resolvedDataSourceKind() === 'new-simulation'" class="space-y-4">
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
-                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Column/field where the electrophysiological time-series are stored.</span>
+                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">Select</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-data-'+field">
+                                                <template x-for="field in parserDataLocatorCandidates()" :key="'pipeline-data-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
+                                            <span class="block text-[11px] text-amber-700 dark:text-amber-300 mt-1" x-show="parserUsingFallbackDataFields()">
+                                                No dataframe columns were detected in the inspected sample; showing compatible source fields instead.
+                                            </span>
                                         </label>
                                     </div>
 
@@ -1838,14 +2363,17 @@
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
-                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Column/field where the electrophysiological time-series are stored.</span>
+                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">Select</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'data-'+field">
+                                                <template x-for="field in parserDataLocatorCandidates()" :key="'data-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
+                                            <span class="block text-[11px] text-amber-700 dark:text-amber-300 mt-1" x-show="parserUsingFallbackDataFields()">
+                                                No dataframe columns were detected in the inspected sample; showing compatible source fields instead.
+                                            </span>
                                         </label>
                                     </div>
 
@@ -2604,7 +3132,7 @@
                         </button>
                         <button type="button" @click="chooseServerDirectory()" :disabled="serverDirBrowserLoading"
                             class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10 disabled:opacity-50">
-                            Select this folder
+                            Add this folder
                         </button>
                     </div>
                     <div x-show="serverDirBrowserError" class="text-xs text-red-600 dark:text-red-400" x-text="serverDirBrowserError"></div>

@@ -40,7 +40,7 @@
 {% block content %}
 
 <div class="flex flex-col gap-3 text-center mb-6">
-    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure a Four-Area Simulation</p>
+    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure a Four-Area Model Simulation</p>
     <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-2xl mx-auto">
         Multi-area LIF network model with four coupled cortical areas and inter-area excitatory connections.
     </p>
@@ -127,8 +127,9 @@
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Neuron
                         model</span>
                     <input
-                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-not-allowed"
                         type="text" data-param="model" readonly />
+                    <span class="text-xs text-slate-500 dark:text-slate-400">Fixed by the selected simulation template and cannot be modified.</span>
                 </label>
             </div>
         </section>
@@ -307,9 +308,35 @@
                 Back to simulation options
             </a>
         </div>
-        <div class="flex items-end gap-3">
+        <div class="flex flex-wrap items-end gap-3">
+            <label class="flex flex-col gap-1">
+                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">NumPy seed</span>
+                <div class="flex items-center gap-2">
+                    <label for="sim-use-numpy-seed" class="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                        <input
+                            id="sim-use-numpy-seed"
+                            name="sim_use_numpy_seed"
+                            type="checkbox"
+                            value="1"
+                            class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                        />
+                        Fix seed
+                    </label>
+                    <input
+                        id="sim-numpy-seed"
+                        name="sim_numpy_seed"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value="0"
+                        disabled
+                        class="form-input h-12 w-28 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
+                    />
+                </div>
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">Enable to use a fixed NumPy seed for reproducible randomization.</span>
+            </label>
             <label for="sim-repetitions" class="flex flex-col gap-1">
-                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Repetitions/config</span>
+                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Repetitions</span>
                 <input
                     id="sim-repetitions"
                     name="sim_repetitions"
@@ -317,7 +344,6 @@
                     min="1"
                     step="1"
                     value="1"
-                    disabled
                     class="form-input h-12 w-28 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                 />
             </label>
@@ -337,6 +363,6 @@
     {{ super() }} <!-- import base.html scripts -->
 
     <!-- Simulation-specific JavaScript -->
-    <script src="{{ url_for('static', filename='js/simulation_four_area.js', v='20260305') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulation_four_area.js', v='20260311-2') }}"></script>
 
 {% endblock %} > 

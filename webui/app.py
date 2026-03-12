@@ -13,7 +13,7 @@ import inspect
 import re
 import traceback
 from pathlib import Path
-from collections import deque
+from collections import deque, defaultdict
 from itertools import product
 from tmp_paths import configure_temp_environment, tmp_subdir
 
@@ -96,7 +96,9 @@ executor = ThreadPoolExecutor(max_workers=5)
 # NOTE: This dictionary is volatile and will reset if the server restarts.
 job_status = {}
 job_futures = {}
-MAX_OUTPUT_LINES = 200
+# Maximum number of terminal lines kept in memory for each job.
+# Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
+MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
     ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather"
 }
@@ -467,6 +469,16 @@ def _parse_str(form, key, default):
     return value
 
 
+def _parse_optional_sim_numpy_seed(form):
+    use_fixed_seed = _get_form_value(form, "sim_use_numpy_seed") is not None
+    if not use_fixed_seed:
+        return None
+    seed = _parse_int(form, "sim_numpy_seed", 0)
+    if seed < 0:
+        raise ValueError("NumPy seed must be a non-negative integer.")
+    return int(seed)
+
+
 def _format_value(value):
     return repr(value)
 
@@ -477,12 +489,16 @@ def _append_job_output(job_status, job_id, message):
     line = str(message).strip()
     if not line:
         return
-    current = job_status[job_id].get("output", "")
-    lines = [ln for ln in current.splitlines() if ln.strip()] if current else []
-    lines.append(line)
-    if len(lines) > MAX_OUTPUT_LINES:
-        lines = lines[-MAX_OUTPUT_LINES:]
-    job_status[job_id]["output"] = "\n".join(lines)
+    current = str(job_status[job_id].get("output", "") or "")
+    if current:
+        current = f"{current}\n{line}"
+    else:
+        current = line
+    if MAX_OUTPUT_LINES > 0:
+        lines = current.splitlines()
+        if len(lines) > MAX_OUTPUT_LINES:
+            current = "\n".join(lines[-MAX_OUTPUT_LINES:])
+    job_status[job_id]["output"] = current
 
 
 def _announce_saved_output_folders(job_status, job_id, module_name, *paths):
@@ -840,14 +856,20 @@ def _expand_simulation_forms(model_type, form):
     if run_mode not in {"single", "grid"}:
         raise ValueError("Invalid simulation mode. Use single trial or parameter grid sweep.")
 
-    if run_mode == "single":
-        single_form = dict(form)
-        single_form["sim_repetitions"] = "1"
-        return run_mode, [single_form]
-
     repetitions = _parse_int(form, "sim_repetitions", 1)
     if repetitions < 1:
         raise ValueError("Repetitions per parameter configuration must be >= 1.")
+
+    if run_mode == "single":
+        expanded_forms = []
+        for repeat_index in range(repetitions):
+            trial_form = dict(form)
+            trial_form["sim_run_mode"] = "single"
+            trial_form["sim_repetitions"] = str(repetitions)
+            trial_form["sim_combo_index"] = "0"
+            trial_form["sim_repeat_index"] = str(repeat_index)
+            expanded_forms.append(trial_form)
+        return run_mode, expanded_forms
 
     grid_defaults = _simulation_grid_defaults(model_type)
     ordered_keys = list(grid_defaults.keys())
@@ -1337,6 +1359,215 @@ def _collect_simulation_folder_files(folder_path):
     return matches
 
 
+def _parse_folder_paths_payload(raw_value):
+    raw = str(raw_value or "").strip()
+    if not raw:
+        return []
+    if raw.startswith("[") and raw.endswith("]"):
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+    if "\n" in raw:
+        parts = raw.splitlines()
+    elif "," in raw:
+        parts = raw.split(",")
+    else:
+        parts = [raw]
+    return [str(item).strip() for item in parts if str(item).strip()]
+
+
+def _extract_folder_paths_from_form(form, singular_key, plural_key):
+    candidates = []
+    if plural_key:
+        plural_values = form.getlist(plural_key)
+        for raw in plural_values:
+            candidates.extend(_parse_folder_paths_payload(raw))
+        if not plural_values:
+            candidates.extend(_parse_folder_paths_payload(form.get(plural_key)))
+    if singular_key:
+        singular_value = (form.get(singular_key) or "").strip()
+        if singular_value:
+            candidates.append(singular_value)
+
+    normalized = []
+    seen = set()
+    for raw in candidates:
+        real = os.path.realpath(str(raw or "").strip())
+        if not real or real in seen:
+            continue
+        seen.add(real)
+        normalized.append(real)
+    return normalized
+
+
+def _extract_text_list_from_form(form, key):
+    values = []
+    raw_values = form.getlist(key)
+    for raw in raw_values:
+        values.extend(_parse_folder_paths_payload(raw))
+    if not raw_values:
+        values.extend(_parse_folder_paths_payload(form.get(key)))
+
+    normalized = []
+    seen = set()
+    for raw in values:
+        token = str(raw or "").strip()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        normalized.append(token)
+    return normalized
+
+
+def _extract_analysis_folder_name_tokens_from_form(form, key="parser_analysis_folder_names"):
+    tokens = []
+    for raw in _extract_text_list_from_form(form, key):
+        safe = secure_filename(str(raw or "")).strip("_")
+        token = safe or "selected_folder"
+        if token and token not in tokens:
+            tokens.append(token)
+    return tokens
+
+
+def _resolve_selected_analysis_folder_paths(form, folder_summaries):
+    available_paths = []
+    seen = set()
+    for item in folder_summaries or []:
+        path = str(item.get("folder_path") or "").strip()
+        if not path or path in seen:
+            continue
+        seen.add(path)
+        available_paths.append(path)
+
+    if not available_paths:
+        return []
+
+    selected_paths = _extract_folder_paths_from_form(
+        form,
+        singular_key=None,
+        plural_key="parser_analysis_folder_paths",
+    )
+    if len(selected_paths) > 1:
+        raise ValueError("Select only one folder for feature extraction.")
+
+    selected_path = selected_paths[0] if selected_paths else ""
+    available_set = set(available_paths)
+    unknown = [selected_path] if selected_path and selected_path not in available_set else []
+    if unknown:
+        raise ValueError(
+            "Unknown folders selected for feature extraction: "
+            + ", ".join(unknown[:4])
+            + (", ..." if len(unknown) > 4 else "")
+        )
+
+    if "parser_analysis_folder_paths" in form and len(available_paths) > 1 and not selected_path:
+        raise ValueError("Select one folder for feature extraction.")
+
+    if not selected_path:
+        return [available_paths[0]]
+    return [selected_path]
+
+
+def _validate_uniform_supported_extension_per_folder(entries, label):
+    ext_by_folder = defaultdict(set)
+    folder_labels = {}
+    for row in entries or []:
+        folder_key = str(row.get("folder_path") or row.get("folder_name") or "selected_folder").strip() or "selected_folder"
+        folder_labels[folder_key] = str(row.get("folder_name") or row.get("folder_path") or folder_key).strip() or folder_key
+        ext = str(row.get("extension") or "").strip().lower()
+        if ext:
+            ext_by_folder[folder_key].add(ext)
+
+    for folder_key, ext_set in sorted(ext_by_folder.items(), key=lambda item: str(item[0])):
+        if len(ext_set) <= 1:
+            continue
+        folder_label = folder_labels.get(folder_key, folder_key)
+        ext_list = ", ".join(sorted(ext_set))
+        raise ValueError(
+            f"{label} folder '{folder_label}' contains multiple supported file extensions: {ext_list}. "
+            "Use one file extension per folder."
+        )
+
+
+def _folder_display_name(folder_path, fallback_index=1):
+    base = os.path.basename(os.path.normpath(str(folder_path or "")))
+    token = secure_filename(base).strip("_")
+    if token:
+        return token
+    return f"folder_{int(fallback_index)}"
+
+
+def _prefixed_file_name(file_name, folder_name=None, apply_prefix=False):
+    safe_name = secure_filename(str(file_name or ""))
+    if not safe_name:
+        safe_name = "file"
+    if not apply_prefix:
+        return safe_name
+    folder_token = secure_filename(str(folder_name or "")).strip("_")
+    if not folder_token:
+        return safe_name
+    return f"{folder_token}_{safe_name}"
+
+
+def _collect_supported_folder_file_entries(folder_paths, kind_label):
+    roots = []
+    seen_roots = set()
+    for idx, raw in enumerate(folder_paths or [], start=1):
+        root = os.path.realpath((raw or "").strip())
+        if not root:
+            continue
+        if root in seen_roots:
+            continue
+        if not os.path.isdir(root):
+            raise ValueError(f"{kind_label} folder does not exist: {root}")
+        seen_roots.add(root)
+        roots.append(root)
+
+    if not roots:
+        raise ValueError(f"Provide at least one folder path for {kind_label.lower()} recordings.")
+
+    entries = []
+    folder_summaries = []
+    extension_counts = defaultdict(int)
+    for folder_idx, root in enumerate(roots, start=1):
+        folder_name = _folder_display_name(root, fallback_index=folder_idx)
+        folder_entries = []
+        for current_root, _, files in os.walk(root):
+            for name in files:
+                ext = Path(name).suffix.lower()
+                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                    continue
+                full_path = os.path.join(current_root, name)
+                rel_path = os.path.relpath(full_path, root)
+                row = {
+                    "path": full_path,
+                    "name": str(name),
+                    "extension": ext,
+                    "folder_path": root,
+                    "folder_name": folder_name,
+                    "relative_path": rel_path,
+                }
+                folder_entries.append(row)
+                extension_counts[ext] += 1
+        folder_entries.sort(key=lambda item: item["path"])
+        _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
+        folder_summaries.append({
+            "folder_path": root,
+            "folder_name": folder_name,
+            "file_count": len(folder_entries),
+        })
+        entries.extend(folder_entries)
+
+    entries.sort(key=lambda item: item["path"])
+    if not entries:
+        joined = ", ".join(roots)
+        raise ValueError(f"No supported {kind_label.lower()} files found in selected folder(s): {joined}")
+    return entries, folder_summaries, dict(sorted(extension_counts.items()))
+
+
 def _validate_simulation_file_path(file_path):
     candidate = os.path.realpath((file_path or "").strip())
     if not candidate:
@@ -1762,6 +1993,397 @@ def _pick_field_guess(candidates, patterns):
     return ""
 
 
+def _pick_field_guess_fuzzy(candidates, patterns):
+    direct = _pick_field_guess(candidates, patterns)
+    if direct:
+        return direct
+
+    normalized_patterns = [str(pattern or "").strip().lower() for pattern in patterns if str(pattern or "").strip()]
+    if not normalized_patterns:
+        return ""
+
+    for item in candidates:
+        key = str(item or "")
+        lower_key = key.lower()
+        tokens = [tok for tok in re.split(r"[^a-z0-9]+", lower_key) if tok]
+        for pattern in normalized_patterns:
+            if not pattern:
+                continue
+            if pattern in tokens:
+                return item
+            if lower_key.endswith(f".{pattern}"):
+                return item
+            boundary = rf"(^|[^a-z0-9]){re.escape(pattern)}([^a-z0-9]|$)"
+            if re.search(boundary, lower_key):
+                return item
+            if pattern in lower_key:
+                return item
+    return ""
+
+
+def _summarize_value_for_ui(value):
+    summary = {
+        "python_type": type(value).__name__,
+        "dtype": "",
+        "shape": None,
+        "detail": "",
+    }
+
+    if value is None:
+        summary["python_type"] = "NoneType"
+        summary["detail"] = "No value"
+        return summary
+
+    if isinstance(value, pd.DataFrame):
+        summary["python_type"] = "DataFrame"
+        summary["shape"] = [int(value.shape[0]), int(value.shape[1])]
+        summary["detail"] = f"{value.shape[0]} rows x {value.shape[1]} columns"
+        return summary
+
+    if isinstance(value, pd.Series):
+        summary["python_type"] = "Series"
+        summary["dtype"] = str(value.dtype)
+        summary["shape"] = [int(value.shape[0])]
+        sample = value.dropna()
+        if not sample.empty:
+            inner = _summarize_value_for_ui(sample.iloc[0])
+            if inner.get("python_type"):
+                summary["detail"] = f"sample: {inner['python_type']}"
+                if inner.get("shape") is not None:
+                    summary["detail"] += f", shape={inner['shape']}"
+        else:
+            summary["detail"] = "empty series"
+        return summary
+
+    if isinstance(value, np.ndarray):
+        summary["python_type"] = "ndarray"
+        summary["dtype"] = str(value.dtype)
+        summary["shape"] = [int(dim) for dim in value.shape]
+        summary["detail"] = f"{value.ndim}D array"
+        return summary
+
+    if isinstance(value, dict):
+        keys = [str(k) for k in value.keys()]
+        summary["python_type"] = "dict"
+        summary["shape"] = [len(keys)]
+        preview = ", ".join(keys[:5])
+        if len(keys) > 5:
+            preview += ", ..."
+        summary["detail"] = f"{len(keys)} keys ({preview})" if keys else "empty dict"
+        return summary
+
+    if isinstance(value, (list, tuple)):
+        summary["python_type"] = type(value).__name__
+        summary["shape"] = [len(value)]
+        if value:
+            inner = _summarize_value_for_ui(value[0])
+            summary["detail"] = f"length {len(value)}, first item: {inner['python_type']}"
+            if inner.get("shape") is not None:
+                summary["detail"] += f" shape={inner['shape']}"
+        else:
+            summary["detail"] = "empty sequence"
+        return summary
+
+    if isinstance(value, (str, bytes)):
+        summary["shape"] = [len(value)]
+        summary["detail"] = f"length {len(value)}"
+        return summary
+
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        arr = None
+    if arr is not None and arr.ndim > 0 and arr.size > 1:
+        summary["shape"] = [int(dim) for dim in arr.shape]
+        summary["dtype"] = str(arr.dtype)
+        summary["detail"] = f"array-like {arr.ndim}D"
+        return summary
+
+    return summary
+
+
+def _describe_source_fields_for_ui(source_obj, candidate_fields, source_type):
+    details = []
+    for field in candidate_fields or []:
+        locator = str(field or "").strip()
+        if not locator:
+            continue
+        origin = "dataframe" if source_type == "dataframe" else "field"
+        if source_type == "dataframe" and isinstance(source_obj, pd.DataFrame) and locator in source_obj.columns:
+            value = source_obj[locator]
+        elif locator == "__self__":
+            value = source_obj
+        else:
+            value = _resolve_locator_value(source_obj, locator)
+
+        if value is None and locator != "__self__":
+            details.append({
+                "field": locator,
+                "origin": origin,
+                "python_type": "Unknown",
+                "dtype": "",
+                "shape": None,
+                "detail": "Could not resolve field in the inspected sample.",
+            })
+            continue
+
+        summarized = _summarize_value_for_ui(value)
+        details.append({
+            "field": locator,
+            "origin": origin,
+            "python_type": summarized.get("python_type") or "",
+            "dtype": summarized.get("dtype") or "",
+            "shape": summarized.get("shape"),
+            "detail": summarized.get("detail") or "",
+        })
+    return details
+
+
+def _manual_field_details_for_ui():
+    return [
+        {
+            "field": "__manual_data__",
+            "label": "Data locator selection",
+            "origin": "manual",
+            "python_type": "str",
+            "detail": "Manually select which field/column contains the signal data.",
+        },
+        {
+            "field": "__numeric_fs__",
+            "label": "Numeric sampling frequency",
+            "origin": "manual",
+            "python_type": "float",
+            "detail": "Provide fs directly in Hz when no field contains it.",
+        },
+        {
+            "field": "__manual_ch_names__",
+            "label": "Manual channel names list",
+            "origin": "manual",
+            "python_type": "list[str]",
+            "detail": "Provide comma-separated channel labels.",
+        },
+        {
+            "field": "__autocomplete_ch_names__",
+            "label": "Autocomplete channel names",
+            "origin": "manual",
+            "python_type": "callable",
+            "detail": "Generate ch0..chN from detected data dimensions and axis.",
+        },
+        {
+            "field": "__recording_type_value__",
+            "label": "Recording type value",
+            "origin": "manual",
+            "python_type": "str",
+            "detail": "Set recording type directly (LFP, EEG, MEG, ...).",
+        },
+    ]
+
+
+def _build_virtual_field_details_for_ui(file_names):
+    normalized_names = []
+    seen_names = set()
+    for raw in file_names or []:
+        token = str(raw or "").strip()
+        if not token or token in seen_names:
+            continue
+        seen_names.add(token)
+        normalized_names.append(token)
+
+    file_id_examples = normalized_names[:6]
+    file_id_usage = [
+        "Use `file_ID` as Subject ID locator to assign one subject per file.",
+    ]
+    if file_id_examples:
+        file_id_usage.append(
+            "Example subject IDs from current selection: "
+            + ", ".join(file_id_examples[:4])
+            + ("..." if len(file_id_examples) > 4 else "")
+        )
+
+    details = [{
+        "field": "__file_id__",
+        "label": "file_ID",
+        "origin": "virtual",
+        "python_type": "str",
+        "detail": "Full file name-based identifier generated for each file.",
+        "example_values": file_id_examples,
+        "usage_examples": file_id_usage,
+    }]
+    for item in _build_file_extracted_virtual_fields(file_names):
+        key = str(item.get("key") or "").strip()
+        if not key:
+            continue
+        values = list(item.get("values") or [])
+        preview = ", ".join(values[:5])
+        if len(values) > 5:
+            preview += ", ..."
+        position = _file_extracted_chain_index(key)
+        usage_examples = []
+        if position is not None and position >= 0:
+            usage_examples.append(
+                f"Represents token position {position + 1} extracted from file names."
+            )
+        usage_examples.append(
+            "Use this virtual field as Group/Condition locator when file names encode categories."
+        )
+        if values:
+            usage_examples.append(
+                "Example options in current selection: "
+                + ", ".join(values[:6])
+                + ("..." if len(values) > 6 else "")
+            )
+            if len(values) >= 2:
+                usage_examples.append(
+                    f"Example usage: map `{key}` to `group` (e.g., {values[0]} vs {values[1]})."
+                )
+        details.append({
+            "field": key,
+            "label": str(item.get("label") or key),
+            "origin": "virtual",
+            "python_type": "str",
+            "detail": f"Tokens extracted from file names: {preview}" if preview else "Tokens extracted from file names.",
+            "example_values": values[:8],
+            "usage_examples": usage_examples,
+        })
+    return details
+
+
+def _summarize_listed_file_names(listed_file_names):
+    cleaned = [str(name or "").replace("\\", "/").strip() for name in (listed_file_names or []) if str(name or "").strip()]
+    if not cleaned:
+        return {
+            "folder_summaries": [],
+            "extension_summaries": [],
+            "total_files": 0,
+        }
+
+    folder_counts = defaultdict(int)
+    ext_counts = defaultdict(int)
+    for raw in cleaned:
+        parts = [part for part in raw.split("/") if part not in {"", "."}]
+        folder_name = parts[0] if len(parts) > 1 else "selected_folder"
+        folder_counts[folder_name] += 1
+        ext = Path(parts[-1]).suffix.lower() if parts else Path(raw).suffix.lower()
+        ext_counts[ext or "(no extension)"] += 1
+
+    folder_summaries = [{"folder_name": name, "file_count": int(count)} for name, count in sorted(folder_counts.items())]
+    extension_summaries = [{"extension": ext, "count": int(count)} for ext, count in sorted(ext_counts.items())]
+    return {
+        "folder_summaries": folder_summaries,
+        "extension_summaries": extension_summaries,
+        "total_files": int(len(cleaned)),
+    }
+
+
+def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Selected"):
+    entries = []
+    for raw in listed_file_names or []:
+        token = str(raw or "").replace("\\", "/").strip()
+        if not token:
+            continue
+        parts = [part for part in token.split("/") if part not in {"", "."}]
+        if not parts or any(part == ".." for part in parts):
+            continue
+        folder_name = parts[0] if len(parts) > 1 else "selected_folder"
+        extension = Path(parts[-1]).suffix.lower()
+        if extension not in FEATURES_PARSER_FILE_EXTENSIONS:
+            continue
+        entries.append({
+            "folder_name": folder_name,
+            "folder_path": folder_name,
+            "extension": extension,
+        })
+    _validate_uniform_supported_extension_per_folder(entries, label)
+
+
+def _build_folder_inspection_profiles(folder_entries, folder_summaries):
+    entries_by_folder = defaultdict(list)
+    for row in folder_entries or []:
+        folder_path = str(row.get("folder_path") or "").strip()
+        if not folder_path:
+            continue
+        entries_by_folder[folder_path].append(row)
+
+    folder_profiles = []
+    combined_candidates = []
+    seen_candidates = set()
+    candidate_field_folders = defaultdict(list)
+    extension_counts_global = defaultdict(int)
+    combined_logical_names = []
+
+    for folder_summary in folder_summaries or []:
+        folder_path = str(folder_summary.get("folder_path") or "").strip()
+        folder_name = str(folder_summary.get("folder_name") or folder_path or "folder").strip()
+        rows = sorted(entries_by_folder.get(folder_path, []), key=lambda item: str(item.get("path") or ""))
+        if not rows:
+            continue
+
+        folder_file_names = [str(item.get("logical_name") or item.get("name") or "") for item in rows if str(item.get("logical_name") or item.get("name") or "").strip()]
+        combined_logical_names.extend(folder_file_names)
+
+        by_ext = defaultdict(list)
+        for row in rows:
+            ext = str(row.get("extension") or "").strip().lower() or "(no extension)"
+            by_ext[ext].append(row)
+            extension_counts_global[ext] += 1
+
+        extension_summaries = [
+            {"extension": ext, "count": len(ext_rows)}
+            for ext, ext_rows in sorted(by_ext.items())
+        ]
+
+        extension_profiles = []
+        for ext, ext_rows in sorted(by_ext.items()):
+            sample = ext_rows[0]
+            ext_names = [
+                str(item.get("logical_name") or item.get("name") or "").strip()
+                for item in ext_rows
+                if str(item.get("logical_name") or item.get("name") or "").strip()
+            ]
+            ext_description = _describe_parser_source(sample["path"])
+            ext_description = _attach_file_extracted_virtual_field(ext_description, ext_names)
+            ext_description["virtual_field_details"] = _build_virtual_field_details_for_ui(ext_names)
+            ext_description["manual_field_details"] = _manual_field_details_for_ui()
+            ext_description["extension"] = ext
+            ext_description["sample_file"] = str(sample.get("logical_name") or sample.get("name") or "")
+            ext_description["sample_file_path"] = sample["path"]
+            ext_description["file_count"] = len(ext_rows)
+            ext_description["folder_name"] = folder_name
+            ext_description["folder_path"] = folder_path
+            extension_profiles.append(ext_description)
+
+            for candidate in ext_description.get("candidate_fields") or []:
+                token = str(candidate or "").strip()
+                if not token:
+                    continue
+                if token not in seen_candidates:
+                    seen_candidates.add(token)
+                    combined_candidates.append(token)
+                if folder_name not in candidate_field_folders[token]:
+                    candidate_field_folders[token].append(folder_name)
+
+        folder_profiles.append({
+            "folder_name": folder_name,
+            "folder_path": folder_path,
+            "file_count": len(rows),
+            "extension_summaries": extension_summaries,
+            "extension_profiles": extension_profiles,
+            "virtual_field_details": _build_virtual_field_details_for_ui(folder_file_names),
+        })
+
+    extension_summaries_global = [
+        {"extension": ext, "count": int(count)}
+        for ext, count in sorted(extension_counts_global.items())
+    ]
+    return (
+        folder_profiles,
+        extension_summaries_global,
+        combined_candidates,
+        dict(candidate_field_folders),
+        combined_logical_names,
+    )
+
+
 def _parse_sensor_names(raw_value):
     if raw_value is None:
         return None
@@ -1802,6 +2424,61 @@ def _parse_metadata_field_source(form, source_key, value_key):
         return source
     value = (form.get(value_key) or "").strip()
     return value or None
+
+
+def _collect_dataframe_candidate_fields_from_description(description):
+    if not isinstance(description, dict):
+        return []
+    candidates = [
+        str(item or "").strip()
+        for item in (description.get("candidate_fields") or [])
+        if str(item or "").strip()
+    ]
+    details = description.get("field_details") or []
+    dataframe_fields = set()
+    for item in details:
+        if not isinstance(item, dict):
+            continue
+        origin = str(item.get("origin") or "").strip().lower()
+        if origin != "dataframe":
+            continue
+        token = str(item.get("field") or "").strip()
+        if token:
+            dataframe_fields.add(token)
+    if not dataframe_fields and str(description.get("source_type") or "").strip().lower() == "dataframe":
+        dataframe_fields = set(candidates)
+    return [field for field in candidates if field in dataframe_fields]
+
+
+def _validate_data_locator_against_dataframe_source(data_locator, source_obj, source_label="selected source"):
+    locator = str(data_locator or "").strip()
+    if not locator:
+        raise ValueError("Select a field for Data locator.")
+    if isinstance(source_obj, pd.DataFrame):
+        columns = [str(col) for col in source_obj.columns]
+        if locator not in columns:
+            preview = ", ".join(columns[:12])
+            if len(columns) > 12:
+                preview += ", ..."
+            raise ValueError(
+                f"Data locator '{locator}' is not a dataframe column in {source_label}. "
+                f"Available columns: {preview or '(none)'}."
+            )
+        return
+    if locator == "__self__":
+        return
+    resolved = _resolve_locator_value(source_obj, locator)
+    if resolved is None:
+        raise ValueError(
+            f"Data locator '{locator}' could not be resolved in {source_label}."
+        )
+
+
+def _validate_data_locator_against_source_path(data_locator, source_path, source_label="selected source"):
+    source_obj = _load_features_source(source_path)
+    sample_name = os.path.basename(str(source_path or "").strip()) or "sample"
+    label = f"{source_label} '{sample_name}'"
+    _validate_data_locator_against_dataframe_source(data_locator, source_obj, label)
 
 
 def _estimate_sensor_count(value, axis=None):
@@ -2159,19 +2836,28 @@ def _describe_parser_source(path):
     fs_hint_hz = None
     fs_hint_note = None
 
+    def _build_defaults(candidates):
+        return {
+            "data": _pick_field_guess_fuzzy(candidates, ["data", "signal", "proxy", "lfp", "eeg", "meg", "ecog", "cdm"]),
+            "fs": _pick_field_guess_fuzzy(
+                candidates,
+                ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
+            ),
+            "ch_names": _pick_field_guess_fuzzy(
+                candidates,
+                ["ch_names", "channels", "channel_names", "channel", "sensors", "sensor", "ch"],
+            ),
+            "recording_type": _pick_field_guess(candidates, ["recording_type", "modality", "recording", "type"]),
+            "subject_id": _pick_field_guess(candidates, ["subject_id", "subject", "subj", "participant"]),
+            "group": _pick_field_guess(candidates, ["group", "cohort", "class"]),
+            "species": _pick_field_guess(candidates, ["species", "animal", "organism"]),
+            "condition": _pick_field_guess(candidates, ["condition", "state", "task"]),
+        }
+
     if isinstance(source_obj, pd.DataFrame):
         fs_hint_hz, fs_hint_note = _extract_dataframe_fs_hint(source_obj)
         columns = [str(col) for col in source_obj.columns]
-        defaults = {
-            "data": _pick_field_guess(columns, ["data", "signal", "proxy", "cdm"]),
-            "fs": _pick_field_guess(columns, ["fs", "sfreq", "sampling_rate"]),
-            "ch_names": _pick_field_guess(columns, ["ch_names", "channels", "channel", "sensor"]),
-            "recording_type": _pick_field_guess(columns, ["recording_type", "modality", "recording", "type"]),
-            "subject_id": _pick_field_guess(columns, ["subject_id", "subject", "subj", "participant"]),
-            "group": _pick_field_guess(columns, ["group", "cohort", "class"]),
-            "species": _pick_field_guess(columns, ["species", "animal", "organism"]),
-            "condition": _pick_field_guess(columns, ["condition", "state", "task"]),
-        }
+        defaults = _build_defaults(columns)
         if fs_hint_hz is None and defaults["fs"] and defaults["fs"] in source_obj.columns:
             fs_series = pd.to_numeric(source_obj[defaults["fs"]], errors="coerce").dropna()
             if not fs_series.empty:
@@ -2199,7 +2885,7 @@ def _describe_parser_source(path):
             numeric_cols = [c for c in source_obj.columns if np.issubdtype(source_obj[c].dtype, np.number)]
             sensor_count = len([c for c in numeric_cols if str(c).lower() not in exclude])
 
-        return {
+        payload = {
             "source_type": "dataframe",
             "candidate_fields": columns,
             "defaults": defaults,
@@ -2209,10 +2895,13 @@ def _describe_parser_source(path):
             "fs_hint_hz": fs_hint_hz,
             "fs_hint_note": fs_hint_note,
         }
+        payload["field_details"] = _describe_source_fields_for_ui(source_obj, columns, "dataframe")
+        payload["manual_field_details"] = _manual_field_details_for_ui()
+        return payload
 
     if isinstance(source_obj, np.ndarray):
         sensor_count = _estimate_sensor_count(source_obj)
-        return {
+        payload = {
             "source_type": "ndarray",
             "candidate_fields": ["__self__"],
             "defaults": {
@@ -2231,25 +2920,19 @@ def _describe_parser_source(path):
             "fs_hint_hz": fs_hint_hz,
             "fs_hint_note": fs_hint_note,
         }
+        payload["field_details"] = _describe_source_fields_for_ui(source_obj, ["__self__"], "field")
+        payload["manual_field_details"] = _manual_field_details_for_ui()
+        return payload
 
     candidate_fields = _extract_locator_candidates(source_obj)
-    defaults = {
-        "data": _pick_field_guess(candidate_fields, ["data", "signal", "lfp", "cdm"]),
-        "fs": _pick_field_guess(candidate_fields, ["fs", "sfreq", "sampling_rate"]),
-        "ch_names": _pick_field_guess(candidate_fields, ["ch_names", "channels", "channel_names"]),
-        "recording_type": _pick_field_guess(candidate_fields, ["recording_type", "modality", "recording", "type"]),
-        "subject_id": _pick_field_guess(candidate_fields, ["subject_id", "subject", "subj", "participant"]),
-        "group": _pick_field_guess(candidate_fields, ["group", "cohort", "class"]),
-        "species": _pick_field_guess(candidate_fields, ["species", "animal", "organism"]),
-        "condition": _pick_field_guess(candidate_fields, ["condition", "state", "task"]),
-    }
+    defaults = _build_defaults(candidate_fields)
 
     if isinstance(source_obj, dict):
         top_keys = [str(k) for k in source_obj.keys() if not str(k).startswith("__")]
         data_guess = defaults.get("data")
         resolved_data = _resolve_locator_value(source_obj, data_guess)
         sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
-        return {
+        payload = {
             "source_type": "mapping",
             "candidate_fields": candidate_fields,
             "top_keys": top_keys,
@@ -2260,11 +2943,14 @@ def _describe_parser_source(path):
             "fs_hint_hz": fs_hint_hz,
             "fs_hint_note": fs_hint_note,
         }
+        payload["field_details"] = _describe_source_fields_for_ui(source_obj, candidate_fields, "field")
+        payload["manual_field_details"] = _manual_field_details_for_ui()
+        return payload
 
     data_guess = defaults.get("data")
     resolved_data = _resolve_locator_value(source_obj, data_guess)
     sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
-    return {
+    payload = {
         "source_type": "object",
         "candidate_fields": candidate_fields,
         "defaults": defaults,
@@ -2274,6 +2960,9 @@ def _describe_parser_source(path):
         "fs_hint_hz": fs_hint_hz,
         "fs_hint_note": fs_hint_note,
     }
+    payload["field_details"] = _describe_source_fields_for_ui(source_obj, candidate_fields, "field")
+    payload["manual_field_details"] = _manual_field_details_for_ui()
+    return payload
 
 
 def _build_parse_config_from_form(form):
@@ -2490,6 +3179,11 @@ def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
         )
 
     parse_cfg = _build_parse_config_from_form(form)
+    _validate_data_locator_against_dataframe_source(
+        parse_cfg.fields.data,
+        source_obj,
+        source_label=f"source file '{os.path.basename(str(source_path or '').strip()) or 'sample'}'",
+    )
 
     parser_source = source_obj
     parser_cfg = parse_cfg
@@ -2600,7 +3294,8 @@ def _run_process_with_progress(
 ):
     output_lines = []
     progress_seen = threading.Event()
-    output_buffer = deque(maxlen=MAX_OUTPUT_LINES)
+    output_buffer = deque(maxlen=MAX_OUTPUT_LINES) if MAX_OUTPUT_LINES > 0 else None
+    output_text_holder = [""]
     cancelled = False
 
     if job_id in job_status:
@@ -2608,8 +3303,13 @@ def _run_process_with_progress(
         if preserve_existing_output:
             existing_output = job_status[job_id].get("output", "")
             if existing_output:
-                for existing_line in existing_output.splitlines(keepends=True):
-                    output_buffer.append(existing_line)
+                if output_buffer is not None:
+                    for existing_line in existing_output.splitlines(keepends=True):
+                        output_buffer.append(existing_line)
+                    output_text_holder[0] = "".join(output_buffer)
+                else:
+                    output_text_holder[0] = str(existing_output)
+        job_status[job_id]["output"] = output_text_holder[0]
 
     process = subprocess.Popen(
         cmd,
@@ -2662,9 +3362,13 @@ def _run_process_with_progress(
         for line in iter(process.stdout.readline, ""):
             output_lines.append(line)
             _maybe_update_progress(line)
-            output_buffer.append(line)
+            if output_buffer is not None:
+                output_buffer.append(line)
+                output_text_holder[0] = "".join(output_buffer)
+            else:
+                output_text_holder[0] = f"{output_text_holder[0]}{line}"
             if job_id in job_status:
-                job_status[job_id]["output"] = "".join(output_buffer)
+                job_status[job_id]["output"] = output_text_holder[0]
             if line_callback is not None:
                 line_callback(line)
         process.stdout.close()
@@ -2712,6 +3416,7 @@ def _build_simulation_params(form, defaults):
     tstop = _parse_float(form, "tstop", defaults["tstop"])
     dt = _parse_float(form, "dt", defaults["dt"])
     local_num_threads = _parse_int(form, "local_num_threads", defaults["local_num_threads"])
+    numpy_seed = _parse_optional_sim_numpy_seed(form)
     return "\n".join([
         "# Simulation time",
         f"tstop = {tstop}",
@@ -2721,6 +3426,9 @@ def _build_simulation_params(form, defaults):
         "",
         "# Simulation time step",
         f"dt = {dt}",
+        "",
+        "# Optional fixed NumPy seed used to derive deterministic randomization in simulation scripts",
+        f"numpy_seed = {numpy_seed if numpy_seed is not None else 'None'}",
         "",
     ])
 
@@ -3296,7 +4004,14 @@ def _simulation_computation(job_id, job_status, params):
                 f"{repetitions} repetition(s) each ({total_runs} simulation(s) total).",
             )
         else:
-            _append_job_output(job_status, job_id, "Single trial mode enabled.")
+            if total_runs > 1:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Single trial mode enabled with {total_runs} repetition(s).",
+                )
+            else:
+                _append_job_output(job_status, job_id, "Single trial mode enabled.")
 
         job_status[job_id]["simulation_total"] = total_runs
         job_status[job_id]["simulation_completed"] = 0
@@ -3426,11 +4141,18 @@ def _simulation_computation(job_id, job_status, params):
                 dst = os.path.join(output_dir, name)
                 with open(dst, "wb") as handle:
                     pickle.dump(payload_list, handle)
-            _append_job_output(
-                job_status,
-                job_id,
-                f"Stored grid outputs in {output_dir} ({total_runs} entries per file).",
-            )
+            if is_grid:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Stored grid outputs in {output_dir} ({total_runs} entries per file).",
+                )
+            else:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Stored repeated single-trial outputs in {output_dir} ({total_runs} entries per file).",
+                )
         if grid_metadata:
             try:
                 metadata_path = _write_simulation_grid_metadata(output_dir, grid_metadata)
@@ -4666,39 +5388,97 @@ def stage_kernel_local_folder():
 def features_parser_inspect():
     _remember_path_history_from_form(request.form, "features_parser_inspect")
     existing_data_path = (request.form.get("existing_data_path") or "").strip()
-    empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
+    empirical_folder_paths = _extract_folder_paths_from_form(
+        request.form,
+        singular_key="empirical_folder_path",
+        plural_key="empirical_folder_paths",
+    )
     simulation_file_path = (request.form.get("simulation_file_path") or "").strip()
-    simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
+    simulation_folder_paths = _extract_folder_paths_from_form(
+        request.form,
+        singular_key="simulation_folder_path",
+        plural_key="simulation_folder_paths",
+    )
     listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
     upload = request.files.get("file")
     inspect_path = None
     cleanup_path = None
     name_candidates = list(listed_file_names)
+    file_name = ""
+    folder_summaries = []
+    extension_summaries = []
+    extension_profiles = []
+    folder_profiles = []
+    candidate_field_folders = {}
+    combined_candidates_from_folders = []
+    folder_file_count = 0
 
     try:
+        if listed_file_names:
+            _validate_listed_file_names_by_folder_extension(listed_file_names, label="Selected")
+
         if existing_data_path:
             inspect_path = _validate_feature_existing_path(existing_data_path)
             file_name = os.path.basename(inspect_path)
             if not name_candidates:
                 name_candidates.append(file_name)
-        elif empirical_folder_path:
-            folder_files = _collect_empirical_folder_files(empirical_folder_path)
-            inspect_path = folder_files[0]
-            file_name = os.path.basename(inspect_path)
+        elif empirical_folder_paths:
+            folder_entries, folder_summaries, extension_counts = _collect_supported_folder_file_entries(
+                empirical_folder_paths,
+                "Empirical",
+            )
+            use_prefix = len(folder_summaries) > 1
+            for row in folder_entries:
+                row["logical_name"] = _prefixed_file_name(row["name"], row["folder_name"], apply_prefix=use_prefix)
+            inspect_entry = folder_entries[0]
+            inspect_path = inspect_entry["path"]
+            file_name = inspect_entry["logical_name"]
+            folder_file_count = len(folder_entries)
+            (
+                folder_profiles,
+                extension_summaries,
+                combined_candidates_from_folders,
+                candidate_field_folders,
+                combined_logical_names,
+            ) = _build_folder_inspection_profiles(folder_entries, folder_summaries)
             if not name_candidates:
-                name_candidates = [os.path.basename(path) for path in folder_files]
+                name_candidates = combined_logical_names
+            extension_profiles = [
+                profile
+                for folder_profile in folder_profiles
+                for profile in (folder_profile.get("extension_profiles") or [])
+            ]
         elif simulation_file_path:
             inspect_path = _validate_simulation_file_path(simulation_file_path)
             file_name = os.path.basename(inspect_path)
             if not name_candidates:
                 name_candidates.append(file_name)
-        elif simulation_folder_path:
-            # Backward-compatible support for older form payloads.
-            folder_files = _collect_simulation_folder_files(simulation_folder_path)
-            inspect_path = folder_files[0]
-            file_name = os.path.basename(inspect_path)
+        elif simulation_folder_paths:
+            folder_entries, folder_summaries, extension_counts = _collect_supported_folder_file_entries(
+                simulation_folder_paths,
+                "Simulation outputs",
+            )
+            use_prefix = len(folder_summaries) > 1
+            for row in folder_entries:
+                row["logical_name"] = _prefixed_file_name(row["name"], row["folder_name"], apply_prefix=use_prefix)
+            inspect_entry = folder_entries[0]
+            inspect_path = inspect_entry["path"]
+            file_name = inspect_entry["logical_name"]
+            folder_file_count = len(folder_entries)
+            (
+                folder_profiles,
+                extension_summaries,
+                combined_candidates_from_folders,
+                candidate_field_folders,
+                combined_logical_names,
+            ) = _build_folder_inspection_profiles(folder_entries, folder_summaries)
             if not name_candidates:
-                name_candidates = [os.path.basename(path) for path in folder_files]
+                name_candidates = combined_logical_names
+            extension_profiles = [
+                profile
+                for folder_profile in folder_profiles
+                for profile in (folder_profile.get("extension_profiles") or [])
+            ]
         elif upload and upload.filename:
             file_name = secure_filename(upload.filename)
             if not file_name:
@@ -4717,15 +5497,141 @@ def features_parser_inspect():
         else:
             return jsonify({"error": "Provide an existing pipeline file, a simulation folder path, an empirical folder path, or upload a file to inspect."}), 400
 
-        description = _describe_parser_source(inspect_path)
+        if extension_profiles:
+            combined_candidates = []
+            if combined_candidates_from_folders:
+                combined_candidates = list(combined_candidates_from_folders)
+            else:
+                seen_candidates = set()
+                for profile in extension_profiles:
+                    for candidate in profile.get("candidate_fields") or []:
+                        token = str(candidate or "").strip()
+                        if not token or token in seen_candidates:
+                            continue
+                        seen_candidates.add(token)
+                        combined_candidates.append(token)
+
+            combined_defaults = {
+                "data": _pick_field_guess_fuzzy(combined_candidates, ["data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
+                "fs": _pick_field_guess_fuzzy(
+                    combined_candidates,
+                    ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
+                ),
+                "ch_names": _pick_field_guess_fuzzy(
+                    combined_candidates,
+                    ["ch_names", "channels", "channel_names", "channel", "sensors", "sensor", "ch"],
+                ),
+                "recording_type": _pick_field_guess(combined_candidates, ["recording_type", "modality", "recording", "type"]),
+                "subject_id": _pick_field_guess(combined_candidates, ["subject_id", "subject", "subj", "participant"]),
+                "group": _pick_field_guess(combined_candidates, ["group", "cohort", "class"]),
+                "species": _pick_field_guess(combined_candidates, ["species", "animal", "organism"]),
+                "condition": _pick_field_guess(combined_candidates, ["condition", "state", "task"]),
+            }
+
+            field_detail_map = {}
+            candidate_field_origins = defaultdict(set)
+            for profile in extension_profiles:
+                for item in profile.get("field_details") or []:
+                    field_key = str(item.get("field") or "").strip()
+                    if not field_key or field_key in field_detail_map:
+                        origin_name = str(item.get("origin") or "").strip().lower()
+                        if origin_name:
+                            candidate_field_origins[field_key].add(origin_name)
+                        continue
+                    field_detail_map[field_key] = item
+                    origin_name = str(item.get("origin") or "").strip().lower()
+                    if origin_name:
+                        candidate_field_origins[field_key].add(origin_name)
+            combined_field_details = [field_detail_map[key] for key in combined_candidates if key in field_detail_map]
+            dataframe_candidate_fields = [
+                field_name
+                for field_name in combined_candidates
+                if "dataframe" in candidate_field_origins.get(field_name, set())
+            ]
+
+            fs_hint_hz = None
+            fs_hint_note = None
+            for profile in extension_profiles:
+                profile_fs = profile.get("fs_hint_hz")
+                if profile_fs is not None:
+                    fs_hint_hz = profile_fs
+                    fs_hint_note = profile.get("fs_hint_note")
+                    break
+
+            description = {
+                "source_type": "multi_folder",
+                "candidate_fields": combined_candidates,
+                "defaults": combined_defaults,
+                "summary": (
+                    f"Selected {len(folder_summaries)} folder(s), {folder_file_count} file(s), "
+                    f"{len(extension_profiles)} extension type(s)."
+                ),
+                "field_details": combined_field_details,
+                "manual_field_details": _manual_field_details_for_ui(),
+                "virtual_field_details": _build_virtual_field_details_for_ui(name_candidates),
+                "extension_profiles": extension_profiles,
+                "folder_profiles": folder_profiles,
+                "folder_summaries": folder_summaries,
+                "extension_summaries": extension_summaries,
+                "candidate_field_folders": candidate_field_folders,
+                "candidate_field_origins": {
+                    key: sorted(values)
+                    for key, values in candidate_field_origins.items()
+                },
+                "dataframe_candidate_fields": dataframe_candidate_fields,
+                "folder_file_count": folder_file_count,
+                "fs_hint_hz": fs_hint_hz,
+                "fs_hint_note": fs_hint_note,
+            }
+            if candidate_field_folders and len(folder_summaries) > 1:
+                field_labels = {}
+                for field_name in combined_candidates:
+                    folder_names = [str(name).strip() for name in (candidate_field_folders.get(field_name) or []) if str(name).strip()]
+                    if not folder_names:
+                        continue
+                    suffix = ", ".join(folder_names[:4])
+                    if len(folder_names) > 4:
+                        suffix += ", ..."
+                    field_labels[field_name] = f"{field_name} [folders: {suffix}]"
+                if field_labels:
+                    description["virtual_field_labels"] = field_labels
+        else:
+            description = _describe_parser_source(inspect_path)
+            description["manual_field_details"] = _manual_field_details_for_ui()
+            description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
+            if "candidate_field_origins" not in description:
+                candidate_field_origins = defaultdict(set)
+                for item in description.get("field_details") or []:
+                    field_name = str(item.get("field") or "").strip()
+                    origin_name = str(item.get("origin") or "").strip().lower()
+                    if field_name and origin_name:
+                        candidate_field_origins[field_name].add(origin_name)
+                description["candidate_field_origins"] = {
+                    key: sorted(values)
+                    for key, values in candidate_field_origins.items()
+                }
+
         description = _attach_file_extracted_virtual_field(description, name_candidates)
+        if "dataframe_candidate_fields" not in description:
+            description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
+        if "virtual_field_details" not in description:
+            description["virtual_field_details"] = _build_virtual_field_details_for_ui(name_candidates)
         description["source_name"] = file_name
-        if empirical_folder_path or simulation_folder_path:
-            description["folder_file_count"] = len(folder_files)
-            selected_folder = empirical_folder_path if empirical_folder_path else simulation_folder_path
+        if folder_summaries:
+            description["folder_path"] = folder_summaries[0]["folder_path"]
+        elif empirical_folder_paths or simulation_folder_paths:
+            selected_folder = (empirical_folder_paths or simulation_folder_paths)[0]
             description["folder_path"] = os.path.realpath(selected_folder)
         if simulation_file_path:
             description["selected_file_path"] = os.path.realpath(simulation_file_path)
+
+        listed_summary = _summarize_listed_file_names(listed_file_names)
+        if listed_summary["total_files"] > 0 and not description.get("folder_summaries"):
+            description["folder_summaries"] = listed_summary["folder_summaries"]
+            description["extension_summaries"] = listed_summary["extension_summaries"]
+            description["folder_file_count"] = listed_summary["total_files"]
+            if not description.get("summary"):
+                description["summary"] = f"Selected {listed_summary['total_files']} file(s)."
         return jsonify(description)
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
@@ -7842,20 +8748,37 @@ def start_computation_redirect(computation_type):
                 flash(str(exc), 'error')
                 return redirect(request.referrer or url_for('features'))
         elif data_source_kind == "new-simulation":
-            simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
+            simulation_folder_paths = _extract_folder_paths_from_form(
+                request.form,
+                singular_key="simulation_folder_path",
+                plural_key="simulation_folder_paths",
+            )
             simulation_uploads = [f for f in _ensure_files_parsed().getlist("data_file") if f and f.filename]
             has_upload = len(simulation_uploads) > 0
-            if has_upload and simulation_folder_path:
+            if has_upload and simulation_folder_paths:
                 flash('Use either a local simulation folder upload or a server simulation folder path, not both.', 'error')
                 return redirect(request.referrer or url_for('features'))
-            if simulation_folder_path:
+            if simulation_folder_paths:
                 try:
-                    simulation_paths = _collect_simulation_folder_files(simulation_folder_path)
+                    simulation_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                        simulation_folder_paths,
+                        "Simulation outputs",
+                    )
+                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
+                    selected_set = set(selected_analysis_paths)
+                    selected_entries = [
+                        entry for entry in simulation_entries
+                        if str(entry.get("folder_path") or "") in selected_set
+                    ]
+                    if not selected_entries:
+                        raise ValueError("No files available in the selected analysis folder(s).")
                     app.logger.warning(
-                        "[compute %s] simulation folder mode path=%s files=%d",
+                        "[compute %s] simulation folder mode folders=%d selected_folders=%d files=%d selected_files=%d",
                         job_id,
-                        os.path.realpath(simulation_folder_path) if simulation_folder_path else "",
-                        len(simulation_paths),
+                        len(folder_summaries),
+                        len(selected_analysis_paths),
+                        len(simulation_entries),
+                        len(selected_entries),
                     )
                 except Exception as exc:
                     flash(f"Invalid simulation outputs folder path: {exc}", 'error')
@@ -7880,14 +8803,31 @@ def start_computation_redirect(computation_type):
                 return redirect(request.referrer or url_for('features'))
         elif data_source_kind == "new-empirical":
             if empirical_source_mode == "server-path":
-                empirical_folder_path = (request.form.get("empirical_folder_path") or "").strip()
+                empirical_folder_paths = _extract_folder_paths_from_form(
+                    request.form,
+                    singular_key="empirical_folder_path",
+                    plural_key="empirical_folder_paths",
+                )
                 try:
-                    empirical_paths = _collect_empirical_folder_files(empirical_folder_path)
+                    empirical_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                        empirical_folder_paths,
+                        "Empirical",
+                    )
+                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
+                    selected_set = set(selected_analysis_paths)
+                    selected_entries = [
+                        entry for entry in empirical_entries
+                        if str(entry.get("folder_path") or "") in selected_set
+                    ]
+                    if not selected_entries:
+                        raise ValueError("No files available in the selected analysis folder(s).")
                     app.logger.warning(
-                        "[compute %s] empirical folder mode path=%s files=%d",
+                        "[compute %s] empirical folder mode folders=%d selected_folders=%d files=%d selected_files=%d",
                         job_id,
-                        os.path.realpath(empirical_folder_path) if empirical_folder_path else "",
-                        len(empirical_paths),
+                        len(folder_summaries),
+                        len(selected_analysis_paths),
+                        len(empirical_entries),
+                        len(selected_entries),
                     )
                 except Exception as exc:
                     flash(f"Invalid empirical folder path: {exc}", 'error')
@@ -8190,33 +9130,109 @@ def start_computation_redirect(computation_type):
                 parser_config_obj = parse_cfg
                 empirical_upload_paths = []
 
-                simulation_folder_path = (request.form.get("simulation_folder_path") or "").strip()
-                if simulation_folder_path:
-                    source_paths = _collect_simulation_folder_files(simulation_folder_path)
-                    for source_path in source_paths:
-                        safe_name = os.path.basename(source_path)
-                        ext = Path(safe_name).suffix.lower()
+                simulation_folder_paths = _extract_folder_paths_from_form(
+                    request.form,
+                    singular_key="simulation_folder_path",
+                    plural_key="simulation_folder_paths",
+                )
+                if simulation_folder_paths:
+                    source_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                        simulation_folder_paths,
+                        "Simulation outputs",
+                    )
+                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
+                    selected_path_set = set(selected_analysis_paths)
+                    source_entries = [
+                        entry for entry in source_entries
+                        if str(entry.get("folder_path") or "") in selected_path_set
+                    ]
+                    if not source_entries:
+                        raise ValueError("No files available in the selected analysis folder(s).")
+                    use_prefix = len(folder_summaries) > 1
+                    for entry in source_entries:
+                        logical_name = _prefixed_file_name(
+                            entry["name"],
+                            entry.get("folder_name"),
+                            apply_prefix=use_prefix,
+                        )
                         empirical_upload_paths.append({
-                            "name": safe_name,
-                            "ext": ext,
-                            "path": source_path,
+                            "name": logical_name,
+                            "ext": entry["extension"],
+                            "path": entry["path"],
+                            "folder_name": entry.get("folder_name"),
+                            "folder_path": entry.get("folder_path"),
                         })
                     app.logger.warning(
-                        "[compute %s] using simulation server-path files=%d",
+                        "[compute %s] using simulation server-path folders=%d files=%d",
                         job_id,
+                        len(folder_summaries),
                         len(empirical_upload_paths),
                     )
                 else:
                     uploads = [f for f in _ensure_files_parsed().getlist("data_file") if f and f.filename]
-                    save_started = time.perf_counter()
-                    saved_bytes = 0
-                    for idx, upload in enumerate(uploads):
-                        safe_name = secure_filename(upload.filename)
+                    upload_items = []
+                    local_folder_tokens = []
+                    local_folder_token_set = set()
+                    for upload in uploads:
+                        raw_name = str(upload.filename or "").strip().replace("\\", "/")
+                        parts = [part for part in raw_name.split("/") if part not in {"", "."}]
+                        if not parts or any(part == ".." for part in parts):
+                            continue
+                        top_folder = secure_filename(parts[0]).strip("_") if len(parts) > 1 else ""
+                        folder_token = top_folder or "selected_folder"
+                        safe_name = secure_filename(parts[-1])
                         if not safe_name:
                             continue
+                        upload_items.append((upload, safe_name, top_folder, folder_token))
+                        if folder_token not in local_folder_token_set:
+                            local_folder_token_set.add(folder_token)
+                            local_folder_tokens.append(folder_token)
+
+                    supported_upload_items = [
+                        row for row in upload_items
+                        if Path(str(row[1] or "")).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
+                    ]
+                    _validate_uniform_supported_extension_per_folder(
+                        [
+                            {
+                                "folder_name": row[3],
+                                "folder_path": row[3],
+                                "extension": Path(str(row[1] or "")).suffix.lower(),
+                            }
+                            for row in supported_upload_items
+                        ],
+                        "Simulation outputs",
+                    )
+
+                    selected_analysis_name_tokens = _extract_analysis_folder_name_tokens_from_form(request.form)
+                    if len(selected_analysis_name_tokens) > 1:
+                        raise ValueError("Select only one folder for feature extraction.")
+                    if "parser_analysis_folder_names" in request.form and len(local_folder_tokens) > 1 and not selected_analysis_name_tokens:
+                        raise ValueError("Select one folder for feature extraction.")
+                    selected_token = selected_analysis_name_tokens[0] if selected_analysis_name_tokens else (
+                        local_folder_tokens[0] if local_folder_tokens else None
+                    )
+                    if selected_token and selected_token not in local_folder_token_set:
+                        raise ValueError(
+                            f"Unknown local folder selected for feature extraction: {selected_token}"
+                        )
+                    if selected_token:
+                        upload_items = [row for row in upload_items if row[3] == selected_token]
+                    if not upload_items:
+                        raise ValueError("No files available in the selected analysis folder(s).")
+                    use_prefix = len(local_folder_tokens) > 1
+
+                    save_started = time.perf_counter()
+                    saved_bytes = 0
+                    for idx, (upload, safe_name, top_folder, folder_token) in enumerate(upload_items):
                         ext = Path(safe_name).suffix.lower()
                         if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                             continue
+                        logical_name = _prefixed_file_name(
+                            safe_name,
+                            top_folder,
+                            apply_prefix=use_prefix and bool(top_folder),
+                        )
                         unique_filename = f"features_simulation_file_{idx}_{job_id}_{safe_name}"
                         file_path = os.path.join(module_upload_dir, unique_filename)
                         save_one_started = time.perf_counter()
@@ -8228,16 +9244,17 @@ def start_computation_redirect(computation_type):
                         saved_bytes += file_size
                         file_paths[f"simulation_file_{idx}"] = file_path
                         empirical_upload_paths.append({
-                            "name": safe_name,
+                            "name": logical_name,
                             "ext": ext,
                             "path": file_path,
+                            "folder_name": folder_token,
                         })
-                        if idx == 0 or (idx + 1) % 25 == 0 or (idx + 1) == len(uploads):
+                        if idx == 0 or (idx + 1) % 25 == 0 or (idx + 1) == len(upload_items):
                             app.logger.warning(
                                 "[compute %s] saved simulation file %d/%d (%.2f MB, %.1f ms, cumulative %.2f MB)",
                                 job_id,
                                 idx + 1,
-                                len(uploads),
+                                len(upload_items),
                                 file_size / (1024 * 1024),
                                 save_one_ms,
                                 saved_bytes / (1024 * 1024),
@@ -8252,6 +9269,11 @@ def start_computation_redirect(computation_type):
 
                 if not empirical_upload_paths:
                     raise ValueError("No supported simulation output files were provided.")
+                _validate_data_locator_against_source_path(
+                    parse_cfg.fields.data,
+                    empirical_upload_paths[0]["path"],
+                    source_label="selected analysis sample",
+                )
             except Exception as exc:
                 app.logger.exception("[compute %s] simulation staging failed", job_id)
                 flash(f"Simulation parser configuration failed: {exc}", "error")
@@ -8269,31 +9291,108 @@ def start_computation_redirect(computation_type):
                 parser_config_obj = parse_cfg
                 empirical_upload_paths = []
                 if empirical_source_mode == "server-path":
-                    source_paths = _collect_empirical_folder_files(request.form.get("empirical_folder_path"))
-                    for idx, source_path in enumerate(source_paths):
-                        safe_name = os.path.basename(source_path)
-                        ext = Path(safe_name).suffix.lower()
+                    empirical_folder_paths = _extract_folder_paths_from_form(
+                        request.form,
+                        singular_key="empirical_folder_path",
+                        plural_key="empirical_folder_paths",
+                    )
+                    source_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                        empirical_folder_paths,
+                        "Empirical",
+                    )
+                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
+                    selected_path_set = set(selected_analysis_paths)
+                    source_entries = [
+                        entry for entry in source_entries
+                        if str(entry.get("folder_path") or "") in selected_path_set
+                    ]
+                    if not source_entries:
+                        raise ValueError("No files available in the selected analysis folder(s).")
+                    use_prefix = len(folder_summaries) > 1
+                    for entry in source_entries:
+                        logical_name = _prefixed_file_name(
+                            entry["name"],
+                            entry.get("folder_name"),
+                            apply_prefix=use_prefix,
+                        )
                         empirical_upload_paths.append({
-                            "name": safe_name,
-                            "ext": ext,
-                            "path": source_path,
+                            "name": logical_name,
+                            "ext": entry["extension"],
+                            "path": entry["path"],
+                            "folder_name": entry.get("folder_name"),
+                            "folder_path": entry.get("folder_path"),
                         })
                     app.logger.warning(
-                        "[compute %s] using empirical server-path files=%d",
+                        "[compute %s] using empirical server-path folders=%d files=%d",
                         job_id,
+                        len(folder_summaries),
                         len(empirical_upload_paths),
                     )
                 else:
                     empirical_uploads = [f for f in _ensure_files_parsed().getlist("empirical_files") if f and f.filename]
-                    save_started = time.perf_counter()
-                    saved_bytes = 0
-                    for idx, upload in enumerate(empirical_uploads):
-                        safe_name = secure_filename(upload.filename)
+                    upload_items = []
+                    local_folder_tokens = []
+                    local_folder_token_set = set()
+                    for upload in empirical_uploads:
+                        raw_name = str(upload.filename or "").strip().replace("\\", "/")
+                        parts = [part for part in raw_name.split("/") if part not in {"", "."}]
+                        if not parts or any(part == ".." for part in parts):
+                            continue
+                        top_folder = secure_filename(parts[0]).strip("_") if len(parts) > 1 else ""
+                        folder_token = top_folder or "selected_folder"
+                        safe_name = secure_filename(parts[-1])
                         if not safe_name:
                             continue
+                        upload_items.append((upload, safe_name, top_folder, folder_token))
+                        if folder_token not in local_folder_token_set:
+                            local_folder_token_set.add(folder_token)
+                            local_folder_tokens.append(folder_token)
+
+                    supported_upload_items = [
+                        row for row in upload_items
+                        if Path(str(row[1] or "")).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
+                    ]
+                    _validate_uniform_supported_extension_per_folder(
+                        [
+                            {
+                                "folder_name": row[3],
+                                "folder_path": row[3],
+                                "extension": Path(str(row[1] or "")).suffix.lower(),
+                            }
+                            for row in supported_upload_items
+                        ],
+                        "Empirical",
+                    )
+
+                    selected_analysis_name_tokens = _extract_analysis_folder_name_tokens_from_form(request.form)
+                    if len(selected_analysis_name_tokens) > 1:
+                        raise ValueError("Select only one folder for feature extraction.")
+                    if "parser_analysis_folder_names" in request.form and len(local_folder_tokens) > 1 and not selected_analysis_name_tokens:
+                        raise ValueError("Select one folder for feature extraction.")
+                    selected_token = selected_analysis_name_tokens[0] if selected_analysis_name_tokens else (
+                        local_folder_tokens[0] if local_folder_tokens else None
+                    )
+                    if selected_token and selected_token not in local_folder_token_set:
+                        raise ValueError(
+                            f"Unknown local folder selected for feature extraction: {selected_token}"
+                        )
+                    if selected_token:
+                        upload_items = [row for row in upload_items if row[3] == selected_token]
+                    if not upload_items:
+                        raise ValueError("No files available in the selected analysis folder(s).")
+                    use_prefix = len(local_folder_tokens) > 1
+
+                    save_started = time.perf_counter()
+                    saved_bytes = 0
+                    for idx, (upload, safe_name, top_folder, folder_token) in enumerate(upload_items):
                         ext = Path(safe_name).suffix.lower()
                         if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                             continue
+                        logical_name = _prefixed_file_name(
+                            safe_name,
+                            top_folder,
+                            apply_prefix=use_prefix and bool(top_folder),
+                        )
                         unique_filename = f"features_empirical_file_{idx}_{job_id}_{safe_name}"
                         file_path = os.path.join(module_upload_dir, unique_filename)
                         save_one_started = time.perf_counter()
@@ -8305,16 +9404,17 @@ def start_computation_redirect(computation_type):
                         saved_bytes += file_size
                         file_paths[f"empirical_file_{idx}"] = file_path
                         empirical_upload_paths.append({
-                            "name": safe_name,
+                            "name": logical_name,
                             "ext": ext,
                             "path": file_path,
+                            "folder_name": folder_token,
                         })
-                        if idx == 0 or (idx + 1) % 25 == 0 or (idx + 1) == len(empirical_uploads):
+                        if idx == 0 or (idx + 1) % 25 == 0 or (idx + 1) == len(upload_items):
                             app.logger.warning(
                                 "[compute %s] saved empirical file %d/%d (%.2f MB, %.1f ms, cumulative %.2f MB)",
                                 job_id,
                                 idx + 1,
-                                len(empirical_uploads),
+                                len(upload_items),
                                 file_size / (1024 * 1024),
                                 save_one_ms,
                                 saved_bytes / (1024 * 1024),
@@ -8329,6 +9429,11 @@ def start_computation_redirect(computation_type):
 
                 if not empirical_upload_paths:
                     raise ValueError("No supported empirical files were uploaded.")
+                _validate_data_locator_against_source_path(
+                    parse_cfg.fields.data,
+                    empirical_upload_paths[0]["path"],
+                    source_label="selected analysis sample",
+                )
             except Exception as exc:
                 app.logger.exception("[compute %s] empirical staging failed", job_id)
                 flash(f"Empirical parser configuration failed: {exc}", "error")

@@ -15,21 +15,24 @@ class LIF_network(object):
         # Parameters of the LIF network model
         self.LIF_params = LIF_params
 
-    def create_LIF_network(self, local_num_threads, dt):
+    def create_LIF_network(self, local_num_threads, dt, rng_seed=None):
         """
         Create network nodes and connections.
         """
+
+        if rng_seed is None:
+            rng_seed = int(1+time.localtime().tm_mon *\
+                           time.localtime().tm_mday *\
+                           time.localtime().tm_hour *\
+                           time.localtime().tm_min *\
+                           time.localtime().tm_sec *\
+                           np.random.rand(1)[0])
 
         nest.ResetKernel()
         nest.SetKernelStatus(
             dict(
                 local_num_threads=local_num_threads,
-                rng_seed=int(1+time.localtime().tm_mon *\
-                             time.localtime().tm_mday *\
-                             time.localtime().tm_hour *\
-                             time.localtime().tm_min *\
-                             time.localtime().tm_sec *\
-                             np.random.rand(1)[0]),
+                rng_seed=int(rng_seed),
                 resolution=dt,
                 tics_per_ms=1000 / dt))
 
@@ -159,13 +162,23 @@ if __name__ == "__main__":
     # Simulation time step
     dt = module.dt
 
+    # Optional fixed NumPy seed for reproducible randomization
+    numpy_seed = getattr(module, "numpy_seed", None)
+    rng_seed = None
+    if numpy_seed is not None:
+        numpy_seed = int(numpy_seed)
+        if numpy_seed < 0:
+            raise ValueError("numpy_seed must be a non-negative integer.")
+        np.random.seed(numpy_seed)
+        rng_seed = int(np.random.randint(1, 2**31 - 1))
+
     # Load network parameters
     with open(os.path.join(sys.argv[2],'network.pkl'), 'rb') as f:
         LIF_params = pickle.load(f)
 
     # Create the LIF network model
     network = LIF_network(LIF_params)
-    network.create_LIF_network(local_num_threads, dt)
+    network.create_LIF_network(local_num_threads, dt, rng_seed=rng_seed)
 
     # Simulation
     print('Simulating...\n', end=' ', flush=True)

@@ -43,3 +43,6 @@ wheels/
 
 # Logs
 *.log
+
+# Local scratch examples (keep untracked)
+examples/test/

@@ -536,6 +536,58 @@ def _load_uploaded_source_path(path, name=None, ext=None):
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
+def _structure_signature_for_value(value, depth=0, max_depth=2):
+    if depth > max_depth:
+        return ("depth_limit", type(value).__name__)
+
+    if value is None:
+        return ("none",)
+
+    if isinstance(value, pd.DataFrame):
+        cols = []
+        for col in value.columns.tolist():
+            series = value[col]
+            cols.append((str(col), str(series.dtype)))
+        return ("dataframe", tuple(cols))
+
+    if isinstance(value, pd.Series):
+        return ("series", str(value.dtype))
+
+    if isinstance(value, np.ndarray):
+        return ("ndarray", int(value.ndim), str(value.dtype))
+
+    if isinstance(value, dict):
+        keys = sorted(str(key) for key in value.keys() if not str(key).startswith("__"))
+        items = []
+        for key in keys[:40]:
+            nested = value.get(key)
+            nested_sig = _structure_signature_for_value(nested, depth + 1, max_depth)
+            items.append((key, nested_sig))
+        return ("dict", tuple(items))
+
+    if isinstance(value, (list, tuple)):
+        first_non_none = None
+        for item in value:
+            if item is not None:
+                first_non_none = item
+                break
+        nested_sig = _structure_signature_for_value(first_non_none, depth + 1, max_depth) if first_non_none is not None else None
+        return (type(value).__name__, nested_sig)
+
+    if isinstance(value, (str, bytes, int, float, bool, np.integer, np.floating)):
+        return ("scalar", type(value).__name__)
+
+    if hasattr(value, "__dict__"):
+        attrs = sorted([name for name in vars(value).keys() if not str(name).startswith("_")])[:40]
+        return ("object", type(value).__name__, tuple(attrs))
+
+    return ("other", type(value).__name__)
+
+
+def _build_source_structure_signature(source_obj):
+    return _structure_signature_for_value(source_obj, depth=0, max_depth=2)
+
+
 def _load_module_from_path(path, name="kernel_params"):
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
@@ -1371,10 +1423,12 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
             _append_job_output(job_status, job_id, f"Parsing {total_uploads} input file(s)...")
             parsed_frames = []
+            structure_reference_by_folder = {}
             log_every = max(1, total_uploads // 20)
             for idx, payload in enumerate(empirical_uploads, start=1):
                 name = payload.get("name") or f"file_{idx}"
                 source_path = payload.get("path")
+                ext = str(payload.get("ext") or os.path.splitext(str(name))[1]).lower()
                 size_mb = 0.0
                 if source_path and os.path.exists(source_path):
                     try:
@@ -1391,6 +1445,30 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     payload.get("name"),
                     payload.get("ext"),
                 )
+
+                current_signature = _build_source_structure_signature(source_obj)
+                folder_key = str(
+                    payload.get("folder_path")
+                    or payload.get("folder_name")
+                    or "__ungrouped__"
+                ).strip() or "__ungrouped__"
+                folder_label = str(
+                    payload.get("folder_name")
+                    or payload.get("folder_path")
+                    or folder_key
+                ).strip() or folder_key
+                structure_key = (folder_key, ext)
+                if structure_key not in structure_reference_by_folder:
+                    structure_reference_by_folder[structure_key] = (str(name), current_signature)
+                else:
+                    baseline_name, baseline_signature = structure_reference_by_folder[structure_key]
+                    if current_signature != baseline_signature:
+                        raise ValueError(
+                            f"Input file structure mismatch detected in folder '{folder_label}' "
+                            f"(extension '{ext}'): '{name}' does not match reference file '{baseline_name}'. "
+                            "Ensure files within each folder share the same structure."
+                        )
+
                 parsed = parser.parse(source_obj)
                 if not isinstance(parsed, pd.DataFrame):
                     raise ValueError(f"Parser output for '{name}' is not a dataframe.")
