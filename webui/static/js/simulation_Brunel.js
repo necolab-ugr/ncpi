@@ -34,7 +34,9 @@ document.addEventListener('DOMContentLoaded', function() {
         runModeInputs: document.querySelectorAll('input[name="sim_run_mode"]'),
         buttonLabel: document.getElementById('run-simulation-button-label'),
         gridHelp: document.getElementById('grid-mode-help'),
-        repetitionsInput: document.getElementById('sim-repetitions')
+        repetitionsInput: document.getElementById('sim-repetitions'),
+        useNumpySeedInput: document.getElementById('sim-use-numpy-seed'),
+        numpySeedInput: document.getElementById('sim-numpy-seed')
     };
 
     function ensureInputCanCarryValue(input, value) {
@@ -539,9 +541,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (elements.gridHelp) {
             elements.gridHelp.classList.toggle('hidden', !isGrid);
         }
-        if (elements.repetitionsInput) {
-            elements.repetitionsInput.disabled = !isGrid;
-        }
         document.querySelectorAll('.param-input').forEach(input => {
             const paramName = input.dataset.param || input.name;
             const keepSingle = simulationOnlyParams.has(paramName);
@@ -570,21 +569,43 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    function updateSeedUi() {
+        if (!elements.numpySeedInput) {
+            return;
+        }
+        const useFixedSeed = Boolean(elements.useNumpySeedInput && elements.useNumpySeedInput.checked);
+        elements.numpySeedInput.disabled = !useFixedSeed;
+    }
+
     elements.runModeInputs.forEach(input => {
         input.addEventListener('change', updateModeUi);
     });
+    if (elements.useNumpySeedInput) {
+        elements.useNumpySeedInput.addEventListener('change', updateSeedUi);
+    }
     updateModeUi();
+    updateSeedUi();
 
     if (elements.form) {
         elements.form.addEventListener('submit', (event) => {
             const selected = document.querySelector('input[name="sim_run_mode"]:checked');
             const isGrid = selected && selected.value === 'grid';
 
-            if (isGrid && elements.repetitionsInput) {
+            if (elements.repetitionsInput) {
                 const repetitions = Number(String(elements.repetitionsInput.value ?? '').trim());
                 if (!Number.isInteger(repetitions) || repetitions < 1) {
                     event.preventDefault();
-                    window.alert('Repetitions/config must be a positive integer.');
+                    window.alert('Repetitions must be a positive integer.');
+                    return;
+                }
+            }
+
+            if (elements.useNumpySeedInput && elements.useNumpySeedInput.checked) {
+                const rawSeed = String(elements.numpySeedInput?.value ?? '').trim();
+                const numpySeed = Number(rawSeed);
+                if (!Number.isInteger(numpySeed) || numpySeed < 0) {
+                    event.preventDefault();
+                    window.alert('NumPy seed must be a non-negative integer.');
                     return;
                 }
             }
