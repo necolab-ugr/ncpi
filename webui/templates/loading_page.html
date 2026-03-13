@@ -105,7 +105,7 @@
             Return to Simulation
         </a>
         {% elif computation_type in ['field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'] %}
-        <a x-show="!pending && status === 'finished'" href="{{url_for('features_methods')}}"
+        <a x-show="!pending && status === 'finished'" href="{{url_for('features')}}"
             class="bg-primary text-slate-900 px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Features
         </a>
