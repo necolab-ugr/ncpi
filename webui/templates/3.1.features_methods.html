@@ -569,7 +569,20 @@
             parserUsingFallbackDataFields() {
                 const dataframeCandidates = this.parserDataframeCandidateFields();
                 if (dataframeCandidates.length > 0) return false;
-                return this.parserFallbackDataCandidateFields().length > 0;
+                const sourceType = String(this.parserInfo?.source_type || '').trim().toLowerCase();
+                if (!sourceType) return false;
+                if (sourceType === 'dataframe') {
+                    return this.parserFallbackDataCandidateFields().length > 0;
+                }
+                if (sourceType === 'multi_folder') {
+                    const profiles = Array.isArray(this.parserInfo?.extension_profiles)
+                        ? this.parserInfo.extension_profiles
+                        : [];
+                    const hasDataframeProfile = profiles.some((profile) => String(profile?.source_type || '').trim().toLowerCase() === 'dataframe');
+                    if (!hasDataframeProfile) return false;
+                    return this.parserFallbackDataCandidateFields().length > 0;
+                }
+                return false;
             },
             parserDataLocatorCandidates() {
                 const dataframeCandidates = this.parserDataframeCandidateFields();
