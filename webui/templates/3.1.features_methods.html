@@ -57,13 +57,13 @@
             empiricalUploadSummary: '',
             empiricalListedFileNames: [],
             simulationFileCount: 0,
-	            simulationSampleName: '',
-	            simulationListedFileNames: [],
-	            simulationFolderExtensionError: '',
-	            simulationFolderPaths: [],
-	            simulationLocalFiles: [],
-	            appendSimulationSelection: false,
-	            simulationDropActive: false,
+            simulationSampleName: '',
+            simulationListedFileNames: [],
+            simulationFolderExtensionError: '',
+            simulationFolderPaths: [],
+            simulationLocalFiles: [],
+            appendSimulationSelection: false,
+            simulationDropActive: false,
             serverDirBrowserOpen: false,
             serverDirBrowserTarget: 'empirical',
             serverDirBrowserPath: '',
@@ -490,6 +490,16 @@
                 return key === '__file_id__'
                     || key === '__file_extracted_label__'
                     || key.startsWith('__file_extracted_chain_');
+            },
+            parserIsFileExtractedField(field) {
+                const key = String(field || '').trim();
+                if (!key) return false;
+                return key === '__file_extracted_label__'
+                    || key.startsWith('__file_extracted_chain_');
+            },
+            parserCandidateFieldsWithoutFileExtracted() {
+                const fields = Array.isArray(this.parserInfo?.candidate_fields) ? this.parserInfo.candidate_fields : [];
+                return fields.filter((field) => !this.parserIsFileExtractedField(field));
             },
             parserFieldOptionStyle(field) {
                 return this.parserIsVirtualField(field)
@@ -2157,7 +2167,7 @@
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-fs-source-'+field">
+                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
@@ -2178,7 +2188,7 @@
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-ch-source-'+field">
+                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
@@ -2369,7 +2379,7 @@
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'fs-source-'+field">
+                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
@@ -2390,7 +2400,7 @@
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'ch-source-'+field">
+                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
