@@ -1013,6 +1013,10 @@
                 if (this.parserMetadataSpeciesSource === '__none__' && defaults.species) this.parserMetadataSpeciesSource = defaults.species;
                 if (this.parserMetadataConditionSource === '__none__' && defaults.condition) this.parserMetadataConditionSource = defaults.condition;
                 if (!this.parserChNamesLocator) this.parserChNamesLocator = defaults.ch_names || autoChannels || '';
+                const chLocator = String(this.parserChNamesLocator || '').trim();
+                if (chLocator && this.parserIsFileExtractedField(chLocator)) {
+                    this.parserChNamesLocator = '';
+                }
                 const validAggregate = new Set(this.aggregateOverOptions());
                 this.parserAggregateOverSelected = (this.parserAggregateOverSelected || []).filter((dim) => validAggregate.has(dim));
                 if (this.parserAggregateOverSelected.length === 0) this.parserAggregateOverSelected = ['sensor'];
@@ -1048,6 +1052,18 @@
                     this.parserChNamesSource = this.parserChNamesLocator;
                     this.parserSensorNames = '';
                 } else {
+                    this.parserChNamesSource = '__autocomplete__';
+                    this.parserChNamesLocator = '';
+                }
+
+                const allowedChSources = new Set(this.parserCandidateFieldsWithoutFileExtracted().map((field) => String(field)));
+                const normalizedChSource = String(this.parserChNamesSource || '').trim();
+                if (
+                    !normalizedChSource ||
+                    (normalizedChSource !== '__manual__' &&
+                        normalizedChSource !== '__autocomplete__' &&
+                        !allowedChSources.has(normalizedChSource))
+                ) {
                     this.parserChNamesSource = '__autocomplete__';
                     this.parserChNamesLocator = '';
                 }
@@ -2187,11 +2203,11 @@
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
+                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
                                                 <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
+                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
@@ -2399,11 +2415,11 @@
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
+                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
                                                 <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
-                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
+                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
                                         </label>
                                         <label class="text-sm">
