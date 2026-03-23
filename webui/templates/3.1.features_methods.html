@@ -58,6 +58,7 @@
             empiricalListedFileNames: [],
             simulationFileCount: 0,
             simulationSampleName: '',
+            simulationInspectedSamples: [],
             simulationListedFileNames: [],
             simulationFolderExtensionError: '',
             simulationFolderPaths: [],
@@ -183,6 +184,7 @@
                 this.simulationDropActive = false;
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
+                this.simulationInspectedSamples = [];
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
                 this.simulationListedFileNames = [];
@@ -232,6 +234,7 @@
                 this.simulationFolderPaths = [];
                 this.simulationFileCount = merged.length;
                 this.simulationSampleName = merged.length > 0 ? (merged[0].webkitRelativePath || merged[0].name || '') : '';
+                this.simulationInspectedSamples = [];
                 this.simulationListedFileNames = merged
                     .map((item) => String(item?.webkitRelativePath || item?.name || '').trim())
                     .filter((item) => item.length > 0);
@@ -754,6 +757,7 @@
                     this.simulationFolderPaths = [];
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
+                    this.simulationInspectedSamples = [];
                     this.simulationLocalFiles = [];
                 }
                 this.empiricalFolderPath = '';
@@ -824,6 +828,7 @@
                 this.clearSimulationUploadInput();
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
+                this.simulationInspectedSamples = [];
                 this.simulationLocalFiles = [];
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
@@ -853,6 +858,7 @@
                 this.selectedPipelinePath = '';
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
+                this.simulationInspectedSamples = [];
                 this.simulationLocalFiles = file ? [file] : [];
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
@@ -877,6 +883,7 @@
                     this.parserError = 'Provide a valid simulation outputs folder path.';
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
+                    this.simulationInspectedSamples = [];
                     this.parserInfo = null;
                     return;
                 }
@@ -899,6 +906,20 @@
                     this.applyParserDefaults(payload);
                     this.simulationFileCount = Number(payload.folder_file_count || 0);
                     this.simulationSampleName = payload.source_name || '';
+                    this.simulationInspectedSamples = (Array.isArray(payload.folder_profiles) ? payload.folder_profiles : [])
+                        .map((folderProfile) => {
+                            const folderName = String(folderProfile?.folder_name || folderProfile?.folder_path || '').trim();
+                            const folderPath = String(folderProfile?.folder_path || '').trim();
+                            const extProfiles = Array.isArray(folderProfile?.extension_profiles) ? folderProfile.extension_profiles : [];
+                            const samples = extProfiles
+                                .map((profile) => ({
+                                    extension: String(profile?.extension || '').trim(),
+                                    sample_file: String(profile?.sample_file || '').trim(),
+                                }))
+                                .filter((entry) => entry.sample_file.length > 0);
+                            return { folder_name: folderName, folder_path: folderPath, samples };
+                        })
+                        .filter((entry) => (entry.folder_name || entry.folder_path) && (entry.samples || []).length > 0);
                     const reportedFolders = Array.isArray(payload.folder_summaries)
                         ? payload.folder_summaries.map((item) => String(item?.folder_path || '').trim()).filter((item) => item.length > 0)
                         : [];
@@ -915,6 +936,7 @@
                     }
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
+                    this.simulationInspectedSamples = [];
                 } finally {
                     this.parserLoading = false;
                 }
@@ -1930,7 +1952,22 @@
 	                                        <p class="text-xs opacity-80" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0">
 	                                            Folder(s): <span x-text="(simulationFolderPaths || []).length"></span>
 	                                        </p>
-	                                        <p class="text-xs opacity-80">Sample inspected: <span x-text="simulationSampleName"></span></p>
+	                                        <template x-if="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0">
+                                            <div class="text-xs opacity-80">
+                                                <div>Samples inspected:</div>
+                                                <div class="mt-1 space-y-1">
+                                                    <template x-for="folder in simulationInspectedSamples" :key="'sim-sample-'+(folder.folder_path || folder.folder_name)">
+                                                        <div class="break-all">
+                                                            <div class="font-semibold" x-text="folder.folder_name || folder.folder_path"></div>
+                                                            <template x-for="entry in folder.samples || []" :key="'sim-sample-entry-'+(folder.folder_path || folder.folder_name)+'-'+(entry.extension || entry.sample_file)">
+                                                                <div class="ml-3 text-[11px] font-mono text-gray-600 dark:text-gray-300" x-text="(entry.extension ? (entry.extension + ': ') : '') + entry.sample_file"></div>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <p class="text-xs opacity-80" x-show="!(simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0)">Sample inspected: <span x-text="simulationSampleName"></span></p>
 	                                        <p class="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
 	                                            Warning: all files within each folder must have the same structure as the inspected sample; otherwise processing may fail or produce incorrect results.
 	                                        </p>
