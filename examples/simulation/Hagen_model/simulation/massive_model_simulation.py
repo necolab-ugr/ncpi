@@ -23,7 +23,7 @@ LOCAL_NUM_THREADS = 56
 PLOT_PARAMETER_SAMPLES = False
 PLOT_EACH_SIMULATION = False
 RANDOM_SEED = 0
-STRONG_PEAK_RELATIVE_THRESHOLD = 0.5
+STRONG_PEAK_RELATIVE_THRESHOLD = 0.9
 
 # Choose to either download files and precomputed outputs used in simulations of the
 # reference multicompartment neuron network model (True) or load them from a local path (False)
@@ -254,6 +254,7 @@ def write_runtime_simulation_params(path, base_simulation_params):
         handle.write(f"tstop = {float(base_simulation_params.tstop)!r}\n")
         handle.write(f"local_num_threads = {int(LOCAL_NUM_THREADS)!r}\n")
         handle.write(f"dt = {float(base_simulation_params.dt)!r}\n")
+        handle.write("simulate_in_chunks = False\n")
 
 
 def run_simulation(lif_params, base_simulation_params, output_dir):
@@ -391,6 +392,15 @@ def _normalize_peak_array(peaks):
     return peaks
 
 
+def _sort_peaks_by_frequency(peaks):
+    """Sort peaks by center frequency to keep debug output ordering stable."""
+    peaks = _normalize_peak_array(peaks)
+    if peaks.shape[0] <= 1:
+        return peaks
+    order = np.argsort(peaks[:, 0], kind="mergesort")
+    return peaks[order]
+
+
 def _select_peak_from_all(peaks, select_peak, freq_range):
     """Select one peak from the full peak list using the configured rule."""
     selected_peaks = np.empty((0, 3), dtype=float)
@@ -421,9 +431,49 @@ def _extract_model_peaks(fit_model):
     if fit_model is None:
         return np.empty((0, 3), dtype=float)
     try:
-        return _normalize_peak_array(fit_model.results.params.periodic.params)
+        return _sort_peaks_by_frequency(fit_model.results.params.periodic.params)
     except Exception:
         return np.empty((0, 3), dtype=float)
+
+
+def _plot_specparam_debug_spectrum(ax, freqs, power_spectrum, fit_model, freq_range):
+    """Plot the PSD and fitted model using specparam's native plot helper."""
+    freqs = np.asarray(freqs, dtype=float)
+    power_spectrum = np.asarray(power_spectrum, dtype=float)
+    mask = (
+        np.isfinite(freqs)
+        & np.isfinite(power_spectrum)
+        & (freqs >= float(freq_range[0]))
+        & (freqs <= float(freq_range[1]))
+    )
+    if fit_model is None:
+        if np.any(mask):
+            ax.plot(freqs[mask], power_spectrum[mask], color="k", linewidth=1.2)
+        ax.set_xlim(freq_range)
+        return
+
+    try:
+        fit_model.plot(
+            plot_peaks="shade",
+            ax=ax,
+            freqs=freqs[mask] if np.any(mask) else None,
+            power_spectrum=power_spectrum[mask] if np.any(mask) else None,
+            freq_range=freq_range,
+            plt_log=False,
+            add_legend=True,
+            peak_kwargs={"color": "green"},
+        )
+    except TypeError:
+        plt.sca(ax)
+        fit_model.plot(
+            plot_peaks="shade",
+            freqs=freqs[mask] if np.any(mask) else None,
+            power_spectrum=power_spectrum[mask] if np.any(mask) else None,
+            freq_range=freq_range,
+            plt_log=False,
+            add_legend=True,
+            peak_kwargs={"color": "green"},
+        )
 
 
 def compute_specparam_features(feature_extractor, signal):
@@ -449,7 +499,7 @@ def compute_specparam_features(feature_extractor, signal):
         }
     aperiodic = np.asarray(result.get("aperiodic_params", np.array([np.nan, np.nan])), dtype=float)
     slope = float(aperiodic[1]) if aperiodic.size > 1 else np.nan
-    peaks = _normalize_peak_array(result.get("all_peaks", np.empty((0, 3))))
+    peaks = _sort_peaks_by_frequency(result.get("all_peaks", np.empty((0, 3))))
     selected_peaks = _select_peak_from_all(peaks, select_peak, freq_range)
     if selected_peaks.shape[0] == 1:
         peak_frequency, peak_power, peak_bandwidth = map(float, selected_peaks[0])
@@ -482,7 +532,7 @@ def compute_specparam_features(feature_extractor, signal):
 
 
 def fit_specparam_for_plot(signal, fs):
-    """Fit specparam to a signal for debug plotting."""
+    """Compute a Welch PSD and fit specparam for debug plotting."""
     from specparam import SpectralModel
 
     x = np.asarray(signal, dtype=float).squeeze()
@@ -501,20 +551,21 @@ def fit_specparam_for_plot(signal, fs):
     freqs = freqs[mask]
     power_spectrum = power_spectrum[mask]
     if freqs.size < 5:
-        return freqs, power_spectrum, None
+        return freqs, power_spectrum, None, freq_range
 
     fmin = max(float(freq_range[0]), float(np.min(freqs)))
     fmax = min(float(freq_range[1]), float(np.max(freqs)))
     if fmin >= fmax:
-        return freqs, power_spectrum, None
+        return freqs, power_spectrum, None, freq_range
 
     fm = SpectralModel(**dict(specparam_params["specparam_model"]))
     fm.fit(freqs, power_spectrum, [fmin, fmax])
-    return freqs, power_spectrum, fm
+    return freqs, power_spectrum, fm, freq_range
 
 
 def plot_simulation_debug(
     simulation_index,
+    sampled_params,
     times,
     gids,
     populations,
@@ -533,9 +584,14 @@ def plot_simulation_debug(
     if not PLOT_EACH_SIMULATION:
         return
 
-    fig, axes = plt.subplots(5, 1, figsize=(10, 14), dpi=150, constrained_layout=True)
-
-    raster_ax, rate_ax, cdm_ax, psd_ax, spec_ax = axes
+    fig = plt.figure(figsize=(10, 12), dpi=150, constrained_layout=True)
+    grid = fig.add_gridspec(4, 2)
+    raster_ax = fig.add_subplot(grid[0, :])
+    rate_ax = fig.add_subplot(grid[1, :])
+    cdm_ax = fig.add_subplot(grid[2, 0])
+    psd_ax = fig.add_subplot(grid[2, 1])
+    spec_left_ax = fig.add_subplot(grid[3, 0])
+    spec_right_ax = fig.add_subplot(grid[3, 1])
 
     raster_colors = {"E": "C0", "I": "C1"}
     time_window = [4000.0, 4200.0]
@@ -581,28 +637,19 @@ def plot_simulation_debug(
     cdm_ax.set_xlim(time_window)
 
     fs = 1000.0 / cdm_dt
-    freq_range = _specparam_params(fs)["freq_range"]
     try:
-        freqs, power, fit_model = fit_specparam_for_plot(cdm_total, fs)
+        freqs, power, fit_model, freq_range = fit_specparam_for_plot(cdm_total, fs)
     except Exception:
         freqs, power = ss.welch(cdm_total, fs=fs)
         fit_model = None
-
-    mask = (freqs >= freq_range[0]) & (freqs <= freq_range[1])
-    if fit_model is not None:
-        try:
-            fit_model.plot(plot_peaks="shade", peak_kwargs={"color": "green"}, ax=psd_ax)
-        except TypeError:
-            plt.sca(psd_ax)
-            fit_model.plot(plot_peaks="shade", peak_kwargs={"color": "green"})
-        psd_ax.set_xlim(freq_range)
-    else:
-        psd_ax.semilogy(freqs[mask], power[mask], color="k")
+        freq_range = _specparam_params(fs)["freq_range"]
+    _plot_specparam_debug_spectrum(psd_ax, freqs, power, fit_model, freq_range)
     psd_ax.set_ylabel("Power")
     psd_ax.set_xlabel("Frequency (Hz)")
     psd_ax.set_title("CDM spectrum + specparam fit")
 
-    spec_ax.axis("off")
+    spec_left_ax.axis("off")
+    spec_right_ax.axis("off")
     all_peaks = _extract_model_peaks(fit_model)
     if all_peaks.shape[0] == 0:
         all_peaks = _normalize_peak_array(specparam_result.get("all_peaks", np.empty((0, 3))))
@@ -616,7 +663,12 @@ def plot_simulation_debug(
     else:
         peak_lines.append("Peak list: none")
 
-    spec_text = "\n".join(
+    parameter_lines = [
+        f"{name}: {float(value):.4f}"
+        for name, value in sampled_params.items()
+    ]
+
+    summary_text = "\n".join(
         [
             f"Slope: {specparam_result['slope']:.4f}",
             f"Selected peak frequency: {specparam_result['peak_frequency']:.4f} Hz",
@@ -629,7 +681,14 @@ def plot_simulation_debug(
             *peak_lines,
         ]
     )
-    spec_ax.text(0.02, 0.95, spec_text, va="top", ha="left", fontsize=11)
+    parameter_text = "\n".join(
+        [
+            "Sampled parameters:",
+            *parameter_lines,
+        ]
+    )
+    spec_left_ax.text(0.02, 0.95, summary_text, va="top", ha="left", fontsize=11)
+    spec_right_ax.text(0.02, 0.95, parameter_text, va="top", ha="left", fontsize=11)
 
     plt.show()
     plt.close(fig)
@@ -648,8 +707,10 @@ def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
         reasons.append("I_rate_above_40")
     if firing_rate_e > 20.0:
         reasons.append("E_rate_above_20")
-    if firing_rate_i < 2.0 * firing_rate_e:
-        reasons.append("I_rate_less_than_double_E")
+    if firing_rate_i < 1.5 * firing_rate_e:
+        reasons.append("I_rate_less_than_1p5x_E")
+    if firing_rate_i > 5.0 * firing_rate_e:
+        reasons.append("I_rate_more_than_5x_E")
     if specparam_features["strong_peak_count"] > 2:
         reasons.append("more_than_two_strong_peaks")
     if not specparam_features["fit_valid"]:
@@ -735,7 +796,14 @@ def build_catch22_row(catch22_result):
 
 def build_specparam_row(specparam_result):
     """Build the specparam feature vector for export."""
-    return np.asarray([specparam_result["slope"]], dtype=np.float32)
+    return np.asarray(
+        [
+            specparam_result["slope"],
+            specparam_result["peak_frequency"],
+            specparam_result["peak_power"],
+        ],
+        dtype=np.float32,
+    )
 
 
 def build_cdm_row(cdm_total):
@@ -983,6 +1051,7 @@ def main():
 
             plot_simulation_debug(
                 simulation_index=simulation_index,
+                sampled_params=sampled_params,
                 times=filtered_times,
                 gids=filtered_gids,
                 populations=populations,

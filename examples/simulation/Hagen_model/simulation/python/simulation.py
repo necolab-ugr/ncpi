@@ -118,11 +118,11 @@ class LIF_network(object):
         nest.Simulate(tstop)
 
 
-def _simulate_with_progress(tstop, dt):
+def _simulate_with_progress(tstop, dt, chunk_ms):
     if tstop <= 0:
         return
-    # Use 1-second chunks (aligned to dt) to reduce simulation-loop overhead.
-    step = max(dt, 1000.0)
+    # Use chunks aligned to dt to reduce simulation-loop overhead while keeping progress updates.
+    step = max(dt, float(chunk_ms))
     step = max(dt, round(step / dt) * dt)
     total_segments = int(np.ceil(tstop / step))
     total_segments = max(1, total_segments)
@@ -137,6 +137,23 @@ def _simulate_with_progress(tstop, dt):
         sim_time += this_step
         segment_idx += 1
         print(f"SIM_SEGMENT {segment_idx}/{total_segments}", flush=True)
+
+
+def _resolve_chunking_config(module):
+    """Read optional chunking controls from the simulation params module."""
+    simulate_in_chunks = getattr(module, "simulate_in_chunks", True)
+    chunk_ms = getattr(module, "simulation_chunk_ms", 1000.0)
+
+    simulate_in_chunks = bool(simulate_in_chunks)
+    try:
+        chunk_ms = float(chunk_ms)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("simulation_chunk_ms must be convertible to float.") from exc
+
+    if chunk_ms <= 0:
+        raise ValueError(f"simulation_chunk_ms must be positive, got {chunk_ms}.")
+
+    return simulate_in_chunks, chunk_ms
 
 
 if __name__ == "__main__":
@@ -162,6 +179,8 @@ if __name__ == "__main__":
     # Simulation time step
     dt = module.dt
 
+    simulate_in_chunks, simulation_chunk_ms = _resolve_chunking_config(module)
+
     # Optional fixed NumPy seed for reproducible randomization
     numpy_seed = getattr(module, "numpy_seed", None)
     rng_seed = None
@@ -183,7 +202,10 @@ if __name__ == "__main__":
     # Simulation
     print('Simulating...\n', end=' ', flush=True)
     tac = time.time()
-    _simulate_with_progress(tstop, dt)
+    if simulate_in_chunks:
+        _simulate_with_progress(tstop, dt, simulation_chunk_ms)
+    else:
+        network.simulate(tstop)
     toc = time.time()
     print(f'The simulation took {toc - tac} seconds.\n', end=' ', flush=True)
 
