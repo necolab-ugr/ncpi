@@ -844,6 +844,8 @@ class Analysis:
         axes: Optional[Any] = None,
         show: bool = True,
         colorbar: bool = True,
+        colorbar_label_fontsize: Optional[float] = None,
+        colorbar_tick_fontsize: Optional[float] = None,
         res: int = 64,
         extrapolate: str = "auto",
         image_interp: str = "cubic",
@@ -926,8 +928,14 @@ class Analysis:
         )
 
         # Optional colorbar support (older MNE may not accept it)
+        needs_manual_colorbar = colorbar and "colorbar" not in supported
         if "colorbar" in supported:
             kwargs["colorbar"] = colorbar
+
+        # If we need to add the colorbar manually, defer show so the figure
+        # is not rendered yet when we modify its layout.
+        if needs_manual_colorbar:
+            kwargs["show"] = False
 
         # Value range support differs across versions: either (vmin, vmax) or vlim
         if "vmin" in supported or "vmax" in supported:
@@ -940,8 +948,25 @@ class Analysis:
 
         im, cn = mne_viz.plot_topomap(data, info_use, **kwargs)
 
-        if units is not None and axes is not None:
-            axes.set_title(units)
+        if needs_manual_colorbar:
+            ax_used = axes if axes is not None else im.axes
+            cb = ax_used.figure.colorbar(im, ax=ax_used)
+            if units is not None:
+                cb.set_label(units, fontsize=colorbar_label_fontsize)
+            if colorbar_tick_fontsize is not None:
+                cb.ax.tick_params(labelsize=colorbar_tick_fontsize)
+            if show:
+                import matplotlib.pyplot as plt
+                plt.show()
+        elif colorbar:
+            # MNE native colorbar: find the colorbar axes matplotlib added
+            fig = (axes if axes is not None else im.axes).figure
+            for cb_ax in fig.axes:
+                if cb_ax.get_label() == "<colorbar>":
+                    if units is not None:
+                        cb_ax.set_ylabel(units, fontsize=colorbar_label_fontsize)
+                    if colorbar_tick_fontsize is not None:
+                        cb_ax.tick_params(labelsize=colorbar_tick_fontsize)
 
         return im, cn
 
@@ -964,6 +989,7 @@ class Analysis:
         vmax: Optional[float] = None,
         alpha: float = 0.9,
         title: Optional[str] = None,
+        units: Optional[str] = None,
         show: bool = True,
         ax=None,
     ):
@@ -1110,7 +1136,9 @@ class Analysis:
 
             mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
             mappable.set_array(v_interp)
-            fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+            cb = fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+            if units is not None:
+                cb.set_label(units)
 
             if title:
                 ax.set_title(title)
@@ -1130,8 +1158,9 @@ class Analysis:
             raise ImportError("mne is required for atlas-based MEG surface plotting.")
         mne = tools.dynamic_import("mne")
 
+        import os as _os
         if subjects_dir is None:
-            subjects_dir = mne.datasets.fetch_fsaverage(verbose=False)
+            subjects_dir = _os.path.dirname(mne.datasets.fetch_fsaverage(verbose=False))
 
         labels = mne.read_labels_from_annot(
             subject="fsaverage",
@@ -1157,7 +1186,7 @@ class Analysis:
                 else:
                     raise ValueError(f"Missing value for label '{lab.name}'.")
             values = np.asarray(values, dtype=float)
-        elif isinstance(region_values, Sequence):
+        elif isinstance(region_values, (Sequence, np.ndarray)):
             values = np.asarray(region_values, dtype=float)
         else:
             raise ValueError("region_values must be a mapping or a sequence.")
@@ -1182,8 +1211,8 @@ class Analysis:
             fig = ax.figure
 
         def _plot_hemi(hemi, labels_hemi, vals_hemi):
-            surf_path = os.path.join(subjects_dir, "surf", f"{hemi}.{surface}")
-            if not os.path.exists(surf_path):
+            surf_path = _os.path.join(subjects_dir, "fsaverage", "surf", f"{hemi}.{surface}")
+            if not _os.path.exists(surf_path):
                 raise ValueError(f"Surface file not found: {surf_path}")
             verts, faces = mne.read_surface(surf_path)
 
@@ -1195,17 +1224,17 @@ class Analysis:
             face_vals = np.where(np.isfinite(face_vals), face_vals, vmin)
             face_colors = cmap_obj(norm(face_vals))
 
-            ax.plot_trisurf(
+            surf = ax.plot_trisurf(
                 verts[:, 0],
                 verts[:, 1],
                 verts[:, 2],
                 triangles=faces,
-                facecolors=face_colors,
                 linewidth=0.0,
                 antialiased=False,
                 alpha=alpha,
                 shade=False,
             )
+            surf.set_facecolor(face_colors)
 
         if hemisphere in {"lh", "both"}:
             _plot_hemi("lh", labels_lh, values[: len(labels_lh)])
@@ -1219,7 +1248,9 @@ class Analysis:
 
         mappable = cm.ScalarMappable(norm=norm, cmap=cmap_obj)
         mappable.set_array(values)
-        fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+        cb = fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+        if units is not None:
+            cb.set_label(units)
 
         if title:
             ax.set_title(title)
