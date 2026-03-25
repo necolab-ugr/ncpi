@@ -1532,39 +1532,54 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label):
     entries = []
     folder_summaries = []
     extension_counts = defaultdict(int)
-    for folder_idx, root in enumerate(roots, start=1):
-        folder_name = _folder_display_name(root, fallback_index=folder_idx)
-        folder_entries = []
-        for current_root, _, files in os.walk(root):
+    MAX_DEPTH = 6 # Max depth folder recursive analysis
+
+    for root in roots: # Base depth
+        base_depth = root.count(os.sep)
+        
+        for current_root, dirs, files in os.walk(root): # Recursive analysis with depth control
+            current_depth = current_root.count(os.sep) - base_depth # Obtain relative depth
+            if current_depth >= MAX_DEPTH: # If Max depth is reached, do not deepen
+                dirs[:] = []
+            
+            folder_entries = []
             for name in files:
                 ext = Path(name).suffix.lower()
                 if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                     continue
                 full_path = os.path.join(current_root, name)
-                rel_path = os.path.relpath(full_path, root)
+                folder_path = current_root # folder path is the current subfolder path
+                rel_path = os.path.relpath(current_root, root)
+                if rel_path == '.':
+                    folder_name = os.path.basename(root)  # folder_name is the name relative to the root folder 
+                else:
+                    folder_name = rel_path.replace(os.sep, '/')
                 row = {
                     "path": full_path,
                     "name": str(name),
                     "extension": ext,
-                    "folder_path": root,
+                    "folder_path": folder_path,
                     "folder_name": folder_name,
-                    "relative_path": rel_path,
+                    "relative_path": os.path.relpath(full_path, root),
                 }
                 folder_entries.append(row)
                 extension_counts[ext] += 1
-        folder_entries.sort(key=lambda item: item["path"])
-        _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
-        folder_summaries.append({
-            "folder_path": root,
-            "folder_name": folder_name,
-            "file_count": len(folder_entries),
-        })
-        entries.extend(folder_entries)
 
-    entries.sort(key=lambda item: item["path"])
+            # If the path has supported filed, add them
+            if folder_entries:
+                _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
+                folder_summaries.append({
+                    "folder_path": folder_path,
+                    "folder_name": folder_name,
+                    "file_count": len(folder_entries),
+                })
+                entries.extend(folder_entries)
+
     if not entries:
         joined = ", ".join(roots)
         raise ValueError(f"No supported {kind_label.lower()} files found in selected folder(s): {joined}")
+
+    entries.sort(key=lambda item: item["path"])
     return entries, folder_summaries, dict(sorted(extension_counts.items()))
 
 
