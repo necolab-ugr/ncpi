@@ -989,6 +989,7 @@ class Analysis:
         vmax: Optional[float] = None,
         alpha: float = 0.9,
         title: Optional[str] = None,
+        units: Optional[str] = None,
         show: bool = True,
         ax=None,
     ):
@@ -1135,7 +1136,9 @@ class Analysis:
 
             mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
             mappable.set_array(v_interp)
-            fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+            cb = fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+            if units is not None:
+                cb.set_label(units)
 
             if title:
                 ax.set_title(title)
@@ -1155,8 +1158,9 @@ class Analysis:
             raise ImportError("mne is required for atlas-based MEG surface plotting.")
         mne = tools.dynamic_import("mne")
 
+        import os as _os
         if subjects_dir is None:
-            subjects_dir = mne.datasets.fetch_fsaverage(verbose=False)
+            subjects_dir = _os.path.dirname(mne.datasets.fetch_fsaverage(verbose=False))
 
         labels = mne.read_labels_from_annot(
             subject="fsaverage",
@@ -1182,7 +1186,7 @@ class Analysis:
                 else:
                     raise ValueError(f"Missing value for label '{lab.name}'.")
             values = np.asarray(values, dtype=float)
-        elif isinstance(region_values, Sequence):
+        elif isinstance(region_values, (Sequence, np.ndarray)):
             values = np.asarray(region_values, dtype=float)
         else:
             raise ValueError("region_values must be a mapping or a sequence.")
@@ -1207,8 +1211,8 @@ class Analysis:
             fig = ax.figure
 
         def _plot_hemi(hemi, labels_hemi, vals_hemi):
-            surf_path = os.path.join(subjects_dir, "surf", f"{hemi}.{surface}")
-            if not os.path.exists(surf_path):
+            surf_path = _os.path.join(subjects_dir, "fsaverage", "surf", f"{hemi}.{surface}")
+            if not _os.path.exists(surf_path):
                 raise ValueError(f"Surface file not found: {surf_path}")
             verts, faces = mne.read_surface(surf_path)
 
@@ -1220,17 +1224,17 @@ class Analysis:
             face_vals = np.where(np.isfinite(face_vals), face_vals, vmin)
             face_colors = cmap_obj(norm(face_vals))
 
-            ax.plot_trisurf(
+            surf = ax.plot_trisurf(
                 verts[:, 0],
                 verts[:, 1],
                 verts[:, 2],
                 triangles=faces,
-                facecolors=face_colors,
                 linewidth=0.0,
                 antialiased=False,
                 alpha=alpha,
                 shade=False,
             )
+            surf.set_facecolor(face_colors)
 
         if hemisphere in {"lh", "both"}:
             _plot_hemi("lh", labels_lh, values[: len(labels_lh)])
@@ -1244,7 +1248,9 @@ class Analysis:
 
         mappable = cm.ScalarMappable(norm=norm, cmap=cmap_obj)
         mappable.set_array(values)
-        fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+        cb = fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
+        if units is not None:
+            cb.set_label(units)
 
         if title:
             ax.set_title(title)
