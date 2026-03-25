@@ -2004,6 +2004,11 @@ function featuresPage() {
                                             Add server folder
                                         </button>
                                     </div>
+                                    <div class="mt-4 p-3 border text-sm font-medium rounded-lg bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200">
+                                        <p class="text-xs font-semibold">
+                                            Warning: The content of the selected folder and <strong>all its subfolders</strong> (up to 6 levels) will be analyzed.
+                                        </p>
+                                    </div>
                                     <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
                                         <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
                                         <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
