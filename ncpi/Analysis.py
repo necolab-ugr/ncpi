@@ -844,6 +844,8 @@ class Analysis:
         axes: Optional[Any] = None,
         show: bool = True,
         colorbar: bool = True,
+        colorbar_label_fontsize: Optional[float] = None,
+        colorbar_tick_fontsize: Optional[float] = None,
         res: int = 64,
         extrapolate: str = "auto",
         image_interp: str = "cubic",
@@ -926,8 +928,14 @@ class Analysis:
         )
 
         # Optional colorbar support (older MNE may not accept it)
+        needs_manual_colorbar = colorbar and "colorbar" not in supported
         if "colorbar" in supported:
             kwargs["colorbar"] = colorbar
+
+        # If we need to add the colorbar manually, defer show so the figure
+        # is not rendered yet when we modify its layout.
+        if needs_manual_colorbar:
+            kwargs["show"] = False
 
         # Value range support differs across versions: either (vmin, vmax) or vlim
         if "vmin" in supported or "vmax" in supported:
@@ -940,8 +948,25 @@ class Analysis:
 
         im, cn = mne_viz.plot_topomap(data, info_use, **kwargs)
 
-        if units is not None and axes is not None:
-            axes.set_title(units)
+        if needs_manual_colorbar:
+            ax_used = axes if axes is not None else im.axes
+            cb = ax_used.figure.colorbar(im, ax=ax_used)
+            if units is not None:
+                cb.set_label(units, fontsize=colorbar_label_fontsize)
+            if colorbar_tick_fontsize is not None:
+                cb.ax.tick_params(labelsize=colorbar_tick_fontsize)
+            if show:
+                import matplotlib.pyplot as plt
+                plt.show()
+        elif colorbar:
+            # MNE native colorbar: find the colorbar axes matplotlib added
+            fig = (axes if axes is not None else im.axes).figure
+            for cb_ax in fig.axes:
+                if cb_ax.get_label() == "<colorbar>":
+                    if units is not None:
+                        cb_ax.set_ylabel(units, fontsize=colorbar_label_fontsize)
+                    if colorbar_tick_fontsize is not None:
+                        cb_ax.tick_params(labelsize=colorbar_tick_fontsize)
 
         return im, cn
 
