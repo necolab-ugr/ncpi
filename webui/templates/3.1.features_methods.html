@@ -9,7 +9,7 @@
     window.__featuresInitialTab = {{ request.args.get('tab', '') | tojson }};
 
     
-function featuresPage() {
+    function featuresPage() {
         const runtime = window.__featuresRuntime || {};
         const SERVER_DIRECTORY_HISTORY_KEY = 'features:directory_browser';
         const defaultEmpiricalSourceMode = runtime.default_empirical_source_mode || 'server-path';
@@ -66,18 +66,11 @@ function featuresPage() {
             simulationLocalFiles: [],
             appendSimulationSelection: false,
             simulationDropActive: false,
-            metadataSourceMode: 'upload',
-            metadataDropActive: false,
-            metadataFileName: '',
-            metadataServerPath: '',
-            metadataServerFileName: '',
             serverDirBrowserOpen: false,
             serverDirBrowserTarget: 'empirical',
             serverDirBrowserPath: '',
             serverDirBrowserParent: '',
             serverDirBrowserEntries: [],
-            serverDirBrowserFiles: [],
-            serverDirBrowserSelectedFilePath: '',
             serverDirBrowserLoading: false,
             serverDirBrowserError: '',
             parserDataLocator: '',
@@ -345,23 +338,19 @@ function featuresPage() {
             async loadServerDirectory(path) {
                 this.serverDirBrowserLoading = true;
                 this.serverDirBrowserError = '';
-                this.serverDirBrowserSelectedFilePath = '';
                 try {
                     const params = new URLSearchParams();
                     const targetPath = String(path || '').trim();
                     if (targetPath) params.set('path', targetPath);
                     params.set('history_key', SERVER_DIRECTORY_HISTORY_KEY);
-                    if (this.serverDirBrowserTarget === 'metadata-file') params.set('include_files', '1');
                     const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
                     const payload = await response.json().catch(() => ({}));
                     if (!response.ok) throw new Error(payload.error || 'Failed to list server directories.');
                     this.serverDirBrowserPath = String(payload.path || '');
                     this.serverDirBrowserParent = String(payload.parent || '');
                     this.serverDirBrowserEntries = Array.isArray(payload.dirs) ? payload.dirs : [];
-                    this.serverDirBrowserFiles = Array.isArray(payload.files) ? payload.files : [];
                 } catch (error) {
                     this.serverDirBrowserError = error.message || 'Failed to list server directories.';
-                    this.serverDirBrowserFiles = [];
                 } finally {
                     this.serverDirBrowserLoading = false;
                 }
@@ -373,71 +362,15 @@ function featuresPage() {
                 await this.loadServerDirectory(startPath);
             },
             async openServerDirectoryBrowserFor(target) {
-                this.serverDirBrowserTarget = target === 'simulation' ? 'simulation' : (target === 'metadata-file' ? 'metadata-file' : 'empirical');
+                this.serverDirBrowserTarget = target === 'simulation' ? 'simulation' : 'empirical';
                 this.serverDirBrowserOpen = true;
                 const preferredPath = this.serverDirBrowserTarget === 'simulation'
                     ? String((this.simulationFolderPaths && this.simulationFolderPaths.length > 0
                         ? this.simulationFolderPaths[this.simulationFolderPaths.length - 1]
                         : this.simulationFolderPath) || '').trim()
-                    : (this.serverDirBrowserTarget === 'metadata-file'
-                        ? String(this.metadataServerPath || '').trim()
-                        : String(this.empiricalFolderPath || '').trim());
+                    : String(this.empiricalFolderPath || '').trim();
                 const startPath = preferredPath || '';
                 await this.loadServerDirectory(startPath);
-            },
-            setMetadataSourceMode(mode) {
-                const nextMode = mode === 'upload' ? 'upload' : 'server-path';
-                if (this.metadataSourceMode === nextMode) return;
-                this.metadataSourceMode = nextMode;
-                this.metadataDropActive = false;
-                if (nextMode === 'server-path') {
-                    this.clearMetadataUploadInput();
-                    this.metadataFileName = '';
-                } else {
-                    this.metadataServerPath = '';
-                    this.metadataServerFileName = '';
-                }
-            },
-            clearMetadataUploadInput() {
-                const input = document.getElementById('metadata-file');
-                if (input) input.value = '';
-                delete this.uploads['metadata-file'];
-            },
-            onMetadataUploadSelected(event) {
-                const files = Array.from(event?.target?.files || []);
-                const file = files[0] || null;
-                this.metadataSourceMode = 'upload';
-                this.metadataServerPath = '';
-                this.metadataServerFileName = '';
-                this.metadataFileName = file ? (file.name || '') : '';
-                if (file) {
-                    this.uploads['metadata-file'] = { name: file.name || 'metadata file', uploaded: false };
-                } else {
-                    delete this.uploads['metadata-file'];
-                }
-            },
-            onMetadataDrop(event) {
-                if (this.metadataSourceMode !== 'upload') return;
-                const file = (event?.dataTransfer?.files || [])[0];
-                if (!file) return;
-                const dataTransfer = new DataTransfer();
-                dataTransfer.items.add(file);
-                const input = document.getElementById('metadata-file');
-                if (input) input.files = dataTransfer.files;
-                this.metadataDropActive = false;
-                this.onMetadataUploadSelected({ target: { files: dataTransfer.files } });
-            },
-            async pickMetadataFile() {
-                this.submitError = '';
-                this.parserError = '';
-                await this.openServerDirectoryBrowserFor('metadata-file');
-            },
-            removeMetadataSelection() {
-                this.metadataFileName = '';
-                this.metadataServerPath = '';
-                this.metadataServerFileName = '';
-                this.metadataDropActive = false;
-                this.clearMetadataUploadInput();
             },
             async addSimulationFolderPath(path) {
                 const selectedPath = String(path || '').trim();
@@ -468,21 +401,6 @@ function featuresPage() {
                 return token.includes('contains multiple supported file extensions');
             },
             async chooseServerDirectory() {
-                if (this.serverDirBrowserTarget === 'metadata-file') {
-                    const selectedPath = String(this.serverDirBrowserSelectedFilePath || '').trim();
-                    if (!selectedPath) {
-                        this.serverDirBrowserError = 'No server file selected.';
-                        return;
-                    }
-                    this.closeServerDirectoryBrowser();
-                    this.metadataSourceMode = 'server-path';
-                    this.clearMetadataUploadInput();
-                    this.metadataFileName = '';
-                    this.metadataServerPath = selectedPath;
-                    const normalized = selectedPath.replace(/\\/g, '/');
-                    this.metadataServerFileName = normalized ? normalized.split('/').filter(Boolean).pop() : '';
-                    return;
-                }
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
                 if (!selectedPath) {
                     this.serverDirBrowserError = 'No server directory selected.';
@@ -1952,200 +1870,111 @@ function featuresPage() {
                             </div>
                         </div>
 
-                        <div class="flex flex-col gap-6">
-                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                                <div class="flex items-center gap-2 mb-4">
-                                    <span class="material-symbols-outlined text-primary">add_circle</span>
-                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                                    Inspect a data folder for feature extraction from local upload or server storage.
-                                </p>
+                        <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                            <div class="flex items-center gap-2 mb-4">
+                                <span class="material-symbols-outlined text-primary">add_circle</span>
+                                <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
+                            </div>
+                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                                Inspect a data folder for feature extraction from local upload or server storage.
+                            </p>
 
-                                <input id="data-file" name="data_file" type="file" class="hidden" webkitdirectory directory multiple @change="onSimulationUploadSelected($event)">
-                                <div
-                                    class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
-                                    :class="(simulationDropActive && simulationSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
-                                    @click="if (simulationSourceMode === 'upload') { openSimulationFolderPicker(false); } else { pickSimulationFolder(); }"
-                                    @dragenter.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
-                                    @dragover.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
-                                    @dragleave.prevent="simulationDropActive = false"
-                                    @drop.prevent="onSimulationDrop($event)">
-                                    <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
-                                        <button type="button" @click.stop="setSimulationSourceMode('upload')"
-                                            class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                            :class="simulationSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                            Local folder
-                                        </button>
-                                        <button type="button" @click.stop="setSimulationSourceMode('server-path')"
-                                            class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                            :class="simulationSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                            Server folder
-                                        </button>
-                                    </div>
-                                    <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
-                                    <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'upload'" x-cloak>
-                                        Select an existing local folder
-                                    </p>
-                                    <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'server-path'" x-cloak>
-                                        Select an existing server folder
-                                    </p>
-                                    <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
-                                        <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="openSimulationFolderPicker(false)"
-                                            class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                            Browse local folder
-                                        </button>
-                                        <button type="button" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak @click.stop="openSimulationFolderPicker(true)"
-                                            class="h-9 px-3 rounded-lg border border-primary text-xs font-semibold text-primary hover:bg-primary/10">
-                                            Add another local folder
-                                        </button>
-                                        <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFolder()"
-                                            class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                            Add server folder
-                                        </button>
-                                    </div>
-                                    <div class="mt-4 p-3 border text-sm font-medium rounded-lg bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200">
-                                        <p class="text-xs font-semibold">
-                                            Warning: The content of the selected folder and <strong>all its subfolders</strong> (up to 6 levels) will be analyzed.
-                                        </p>
-                                    </div>
-                                    <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
-                                        <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
-                                        <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
-                                    </div>
-                                    <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0" x-cloak>
-                                        <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folders</span>
-                                        <div class="mt-2 space-y-2">
-                                            <template x-for="path in simulationFolderPaths" :key="'sim-folder-'+path">
-                                                <div class="flex items-center gap-2">
-                                                    <span class="font-mono break-all flex-1" x-text="path"></span>
-                                                    <button type="button" @click.stop="removeSimulationFolderPath(path)"
-                                                        class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20">
-                                                        Remove
-                                                    </button>
-                                                </div>
-                                            </template>
-                                        </div>
-                                    </div>
-                                    <div x-show="simulationFileCount > 0 || simulationFolderExtensionError" class="mt-4 p-3 border text-sm font-medium rounded-lg"
-                                        :class="simulationFolderExtensionError
-                                            ? 'bg-red-100 dark:bg-red-900/50 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
-                                            : 'bg-green-100 dark:bg-green-900/50 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'">
-                                        <template x-if="simulationFolderExtensionError">
-                                            <p class="text-xs font-semibold" x-text="simulationFolderExtensionError"></p>
-                                        </template>
-                                        <template x-if="!simulationFolderExtensionError">
-                                            <div>
-                                                <p><span x-text="simulationFileCount"></span> file(s) detected.</p>
-                                                <p class="text-xs opacity-80" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0">
-                                                    Folder(s): <span x-text="(simulationFolderPaths || []).length"></span>
-                                                </p>
-                                                <template x-if="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0">
-                                                <div class="text-xs opacity-80">
-                                                    <div>Samples inspected:</div>
-                                                    <div class="mt-1 space-y-1">
-                                                        <template x-for="folder in simulationInspectedSamples" :key="'sim-sample-'+(folder.folder_path || folder.folder_name)">
-                                                            <div class="break-all">
-                                                                <div class="font-semibold" x-text="folder.folder_name || folder.folder_path"></div>
-                                                                <template x-for="entry in folder.samples || []" :key="'sim-sample-entry-'+(folder.folder_path || folder.folder_name)+'-'+(entry.extension || entry.sample_file)">
-                                                                    <div class="ml-3 text-[11px] font-mono text-gray-600 dark:text-gray-300" x-text="(entry.extension ? (entry.extension + ': ') : '') + entry.sample_file"></div>
-                                                                </template>
-                                                            </div>
-                                                        </template>
-                                                    </div>
-                                                </div>
-                                            </template>
-                                            <p class="text-xs opacity-80" x-show="!(simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0)">Sample inspected: <span x-text="simulationSampleName"></span></p>
-                                                <p class="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
-                                                    Warning: all files within each folder must have the same structure as the inspected sample; otherwise processing may fail or produce incorrect results.
-                                                </p>
+                            <input id="data-file" name="data_file" type="file" class="hidden" webkitdirectory directory multiple @change="onSimulationUploadSelected($event)">
+                            <div
+                                class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
+                                :class="(simulationDropActive && simulationSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
+                                @click="if (simulationSourceMode === 'upload') { openSimulationFolderPicker(false); } else { pickSimulationFolder(); }"
+                                @dragenter.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
+                                @dragover.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
+                                @dragleave.prevent="simulationDropActive = false"
+                                @drop.prevent="onSimulationDrop($event)">
+                                <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                    <button type="button" @click.stop="setSimulationSourceMode('upload')"
+                                        class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                        :class="simulationSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                        Local folder
+                                    </button>
+                                    <button type="button" @click.stop="setSimulationSourceMode('server-path')"
+                                        class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                        :class="simulationSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                        Server folder
+                                    </button>
+                                </div>
+                                <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
+                                <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'upload'" x-cloak>
+                                    Select an existing local folder
+                                </p>
+                                <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'server-path'" x-cloak>
+                                    Select an existing server folder
+                                </p>
+                                <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                    <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="openSimulationFolderPicker(false)"
+                                        class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                        Browse local folder
+                                    </button>
+                                    <button type="button" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak @click.stop="openSimulationFolderPicker(true)"
+                                        class="h-9 px-3 rounded-lg border border-primary text-xs font-semibold text-primary hover:bg-primary/10">
+                                        Add another local folder
+                                    </button>
+                                    <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFolder()"
+                                        class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                        Add server folder
+                                    </button>
+                                </div>
+                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
+                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
+                                    <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
+                                </div>
+                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0" x-cloak>
+                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folders</span>
+                                    <div class="mt-2 space-y-2">
+                                        <template x-for="path in simulationFolderPaths" :key="'sim-folder-'+path">
+                                            <div class="flex items-center gap-2">
+                                                <span class="font-mono break-all flex-1" x-text="path"></span>
+                                                <button type="button" @click.stop="removeSimulationFolderPath(path)"
+                                                    class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20">
+                                                    Remove
+                                                </button>
                                             </div>
                                         </template>
                                     </div>
                                 </div>
                             </div>
-
-                            <!-- Metadata file upload input -->
-                            <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-
-                                <div class="flex items-center gap-2 mb-4">
-                                    <span class="material-symbols-outlined text-primary">add_circle</span>
-                                    <h3 class="font-bold text-base text-[#34495E] dark:text-white">New metadata file</h3>
-                                </div>
-
-                                <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                                    Choose the metadata file of the uploaded data.
-                                </p>
-
-                                <input type="hidden" name="metadata_source_mode" :value="metadataSourceMode">
-                                <input type="hidden" name="metadata_server_path" :value="metadataServerPath">
-
-                                <input x-ref="metadataFileInput"
-                                        id="metadata-file"
-                                        name="metadata_file"
-                                        type="file"
-                                        class="hidden"
-                                        @change="onMetadataUploadSelected($event)" />
-
-                                <div
-                                    class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
-                                    :class="(metadataDropActive && metadataSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
-                                    @click="if (metadataSourceMode === 'upload') { $refs.metadataFileInput.click(); } else { pickMetadataFile(); }"
-                                    @dragenter.prevent="if (metadataSourceMode === 'upload') metadataDropActive = true"
-                                    @dragover.prevent="if (metadataSourceMode === 'upload') metadataDropActive = true"
-                                    @dragleave.prevent="metadataDropActive = false"
-                                    @drop.prevent="onMetadataDrop($event)">
-
-                                    <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
-                                        <button type="button" @click.stop="setMetadataSourceMode('upload')"
-                                            class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                            :class="metadataSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                            Local file
-                                        </button>
-                                        <button type="button" @click.stop="setMetadataSourceMode('server-path')"
-                                            class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                            :class="metadataSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                            Server file
-                                        </button>
+                            <div x-show="simulationFileCount > 0 || simulationFolderExtensionError" class="mt-4 p-3 border text-sm font-medium rounded-lg"
+                                :class="simulationFolderExtensionError
+                                    ? 'bg-red-100 dark:bg-red-900/50 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                                    : 'bg-green-100 dark:bg-green-900/50 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'">
+                                <template x-if="simulationFolderExtensionError">
+                                    <p class="text-xs font-semibold" x-text="simulationFolderExtensionError"></p>
+                                </template>
+                                <template x-if="!simulationFolderExtensionError">
+                                    <div>
+                                        <p><span x-text="simulationFileCount"></span> file(s) detected.</p>
+                                        <p class="text-xs opacity-80" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0">
+                                            Folder(s): <span x-text="(simulationFolderPaths || []).length"></span>
+                                        </p>
+                                        <template x-if="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0">
+                                            <div class="text-xs opacity-80">
+                                                <div>Samples inspected:</div>
+                                                <div class="mt-1 space-y-1">
+                                                    <template x-for="folder in simulationInspectedSamples" :key="'sim-sample-'+(folder.folder_path || folder.folder_name)">
+                                                        <div class="break-all">
+                                                            <div class="font-semibold" x-text="folder.folder_name || folder.folder_path"></div>
+                                                            <template x-for="entry in folder.samples || []" :key="'sim-sample-entry-'+(folder.folder_path || folder.folder_name)+'-'+(entry.extension || entry.sample_file)">
+                                                                <div class="ml-3 text-[11px] font-mono text-gray-600 dark:text-gray-300" x-text="(entry.extension ? (entry.extension + ': ') : '') + entry.sample_file"></div>
+                                                            </template>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <p class="text-xs opacity-80" x-show="!(simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0)">Sample inspected: <span x-text="simulationSampleName"></span></p>
+                                        <p class="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                            Warning: all files within each folder must have the same structure as the inspected sample; otherwise processing may fail or produce incorrect results.
+                                        </p>
                                     </div>
-
-                                    <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
-                                    <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="metadataSourceMode === 'upload'" x-cloak>
-                                        Select a metadata file from your computer
-                                    </p>
-                                    <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="metadataSourceMode === 'server-path'" x-cloak>
-                                        Select a metadata file from the server
-                                    </p>
-
-                                    <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
-                                        <button type="button" x-show="metadataSourceMode === 'upload'" x-cloak @click.stop="$refs.metadataFileInput.click()"
-                                            class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                            Browse file
-                                        </button>
-                                        <button type="button" x-show="metadataSourceMode === 'server-path'" x-cloak @click.stop="pickMetadataFile()"
-                                            class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                            Browse server file
-                                        </button>
-                                        <button type="button"
-                                            x-show="(metadataSourceMode === 'upload' && metadataFileName) || (metadataSourceMode === 'server-path' && metadataServerPath)" x-cloak
-                                            class="h-9 px-3 rounded-lg border border-red-200 text-xs font-semibold text-red-600 hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20"
-                                            @click.stop="removeMetadataSelection()">
-                                            Remove
-                                        </button>
-                                    </div>
-
-                                    <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="metadataSourceMode === 'upload' && metadataFileName" x-cloak>
-                                        <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected metadata file</span>
-                                        <div class="mt-2 font-mono break-all" x-text="metadataFileName"></div>
-                                    </div>
-
-                                    <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="metadataSourceMode === 'server-path' && metadataServerFileName" x-cloak>
-                                        <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected metadata file</span>
-                                        <div class="mt-2 font-mono break-all" x-text="metadataServerFileName"></div>
-                                    </div>
-                                </div>
+                                </template>
                             </div>
-
                         </div>
                     </div>
 
@@ -3334,7 +3163,7 @@ function featuresPage() {
         <div x-show="serverDirBrowserOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @keydown.escape.window="closeServerDirectoryBrowser()">
             <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl shadow-xl overflow-hidden">
                 <div class="px-4 py-3 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
-                    <h3 class="text-sm font-semibold text-[#34495E] dark:text-white" x-text="serverDirBrowserTarget === 'metadata-file' ? 'Browse server files' : 'Browse server folders'"></h3>
+                    <h3 class="text-sm font-semibold text-[#34495E] dark:text-white">Browse server folders</h3>
                     <button type="button" @click="closeServerDirectoryBrowser()" class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Close</button>
                 </div>
                 <div class="p-4 space-y-3">
@@ -3351,10 +3180,9 @@ function featuresPage() {
                             class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
                             Refresh
                         </button>
-                        <button type="button" @click="chooseServerDirectory()"
-                            :disabled="serverDirBrowserLoading || (serverDirBrowserTarget === 'metadata-file' && !serverDirBrowserSelectedFilePath)"
+                        <button type="button" @click="chooseServerDirectory()" :disabled="serverDirBrowserLoading"
                             class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10 disabled:opacity-50">
-                            <span x-text="serverDirBrowserTarget === 'metadata-file' ? 'Select file' : 'Add this folder'"></span>
+                            Add this folder
                         </button>
                     </div>
                     <div x-show="serverDirBrowserError" class="text-xs text-red-600 dark:text-red-400" x-text="serverDirBrowserError"></div>
@@ -3366,24 +3194,7 @@ function featuresPage() {
                                 <span class="font-mono" x-text="entry.name"></span>
                             </button>
                         </template>
-
-                        <template x-if="serverDirBrowserTarget === 'metadata-file'">
-                            <div>
-                                <template x-for="file in serverDirBrowserFiles" :key="file.path">
-                                    <button type="button"
-                                        @click="serverDirBrowserSelectedFilePath = file.path"
-                                        class="w-full px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]"
-                                        :class="serverDirBrowserSelectedFilePath === file.path ? 'bg-primary/5' : ''">
-                                        <span class="font-mono" x-text="file.name"></span>
-                                    </button>
-                                </template>
-                                <p x-show="!serverDirBrowserLoading && serverDirBrowserFiles.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
-                                    No files found.
-                                </p>
-                            </div>
-                        </template>
-
-                        <p x-show="!serverDirBrowserLoading && serverDirBrowserTarget !== 'metadata-file' && serverDirBrowserEntries.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                        <p x-show="!serverDirBrowserLoading && serverDirBrowserEntries.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                             No subdirectories found.
                         </p>
                     </div>
