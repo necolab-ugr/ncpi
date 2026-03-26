@@ -1552,7 +1552,8 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label):
                 }
                 folder_entries.append(row)
                 extension_counts[ext] += 1
-        folder_entries.sort(key=lambda item: item["path"])
+
+            folder_entries.sort(key=lambda item: item["path"])
         _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
         folder_summaries.append({
             "folder_path": root,
@@ -1562,9 +1563,11 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label):
         entries.extend(folder_entries)
 
     entries.sort(key=lambda item: item["path"])
+
     if not entries:
         joined = ", ".join(roots)
         raise ValueError(f"No supported {kind_label.lower()} files found in selected folder(s): {joined}")
+
     return entries, folder_summaries, dict(sorted(extension_counts.items()))
 
 
