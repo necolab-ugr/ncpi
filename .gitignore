@@ -46,3 +46,9 @@ wheels/
 
 # Local scratch examples (keep untracked)
 examples/test/
+
+# Cavallari NEST extension module
+examples/simulation/Cavallari_model/neuron_model/build/
+examples/simulation/Cavallari_model/neuron_model/install/
+examples/simulation/Cavallari_model/neuron_model/*.o
+examples/simulation/Cavallari_model/neuron_model/*.so
