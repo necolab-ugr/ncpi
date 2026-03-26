@@ -211,7 +211,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat paths
+      - .npy, .json, .mat, .set, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -285,13 +285,21 @@ class EphysDatasetParser:
                 # squeeze_me helps reduce MATLAB scalars/arrays to python scalars/1D arrays
                 return sio.loadmat(path, squeeze_me=True, struct_as_record=False), source_file
 
-            if suffix in (".csv", ".parquet"):
+            if suffix == ".set":
+                _require_mne("EEGLAB .set loading")
+                import mne  # type: ignore
+
+                return mne.io.read_raw_eeglab(str(path), preload=self.config.preload), source_file
+
+            if suffix in (".csv", ".parquet", ".tsv"):
                 if not tools.ensure_module("pandas"):
-                    raise ImportError("pandas is required to load tabular files (.csv/.parquet).")
+                    raise ImportError("pandas is required to load tabular files (.csv/.parquet/.tsv).")
                 import pandas as pd  # type: ignore
 
                 if suffix == ".csv":
                     return pd.read_csv(path), source_file
+                if suffix == ".tsv":
+                    return pd.read_csv(path, sep="\t"), source_file
                 else:
                     return pd.read_parquet(path), source_file
 
