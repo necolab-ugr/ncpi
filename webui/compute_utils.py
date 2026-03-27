@@ -536,6 +536,105 @@ def _load_uploaded_source_path(path, name=None, ext=None):
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
+def _flatten_matlab_ch_names(raw):
+    """Flatten a potentially nested MATLAB channel names array into a flat list of strings.
+
+    MATLAB .mat files often produce deeply nested numpy arrays of dtype=object for cell arrays
+    of strings (e.g., shape (N,1) where each element is array(['name'], dtype='<Ux')).
+    This function handles all such nesting levels and returns a clean list of strings.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        return [raw]
+    arr = np.asarray(raw)
+    flat = arr.flatten()
+    names = []
+    for elem in flat:
+        # Unwrap nested arrays until we reach a scalar
+        while isinstance(elem, np.ndarray):
+            elem = elem.flatten()
+            if elem.size == 0:
+                elem = ""
+                break
+            elem = elem.item() if elem.size == 1 else elem[0]
+        names.append(str(elem).strip())
+    return [n for n in names if n]
+
+
+def _try_resolve_companion_ch_names(ch_locator, upload_items):
+    """Look for a companion file whose filename stem matches ch_locator.
+
+    Search order:
+    1. In upload_items by logical name (covers local-upload mode when channels.mat is in uploads).
+    2. In sibling directories of the first data file (covers server-path mode where
+       channels.mat lives in an adjacent folder like channels/ next to the data folder).
+
+    Returns (list_of_names, set_of_upload_indices_to_skip) or (None, set()).
+    """
+    if not ch_locator or not isinstance(ch_locator, str):
+        return None, set()
+
+    def _load_dict_and_extract(path, name, ext):
+        try:
+            obj = _load_uploaded_source_path(path, name, ext)
+        except Exception:
+            return None
+        if not isinstance(obj, dict):
+            return None
+        key = ch_locator if ch_locator in obj else next(
+            (k for k in obj if isinstance(k, str) and not k.startswith("_") and k.lower() == ch_locator.lower()),
+            None,
+        )
+        if key is None:
+            return None
+        return _flatten_matlab_ch_names(obj[key]) or None
+
+    # Step 1: search upload_items by logical name
+    for idx, payload in enumerate(upload_items):
+        name = str(payload.get("name") or "")
+        stem = os.path.splitext(name)[0].lower()
+        if stem != ch_locator.lower():
+            continue
+        source_path = payload.get("path")
+        ext = str(payload.get("ext") or os.path.splitext(name)[1]).lower()
+        names = _load_dict_and_extract(source_path, name, ext)
+        if names:
+            return names, {idx}
+
+    # Step 2: filesystem search in sibling directories of the first data file.
+    # Only for real (non-temp) paths — i.e., server-path mode.
+    if upload_items:
+        first_path = str(upload_items[0].get("path") or "")
+        if first_path and os.path.isfile(first_path):
+            real_first = os.path.realpath(first_path)
+            real_tmp = os.path.realpath(str(TMP_ROOT))
+            # Skip temp directories to avoid scanning unrelated uploaded files
+            if not real_first.startswith(real_tmp + os.sep):
+                data_dir = os.path.dirname(real_first)
+                parent_dir = os.path.dirname(data_dir)
+                search_dirs = []
+                if parent_dir and parent_dir != data_dir:
+                    try:
+                        for entry in os.scandir(parent_dir):
+                            if entry.is_dir():
+                                search_dirs.append(entry.path)
+                    except Exception:
+                        pass
+                    search_dirs.insert(0, parent_dir)  # also try parent itself
+
+                for search_dir in search_dirs:
+                    for ext_try in [".mat", ".npy", ".pkl", ".json", ".csv"]:
+                        candidate = os.path.join(search_dir, ch_locator + ext_try)
+                        if not os.path.isfile(candidate):
+                            continue
+                        names = _load_dict_and_extract(candidate, ch_locator + ext_try, ext_try)
+                        if names:
+                            return names, set()
+
+    return None, set()
+
+
 def _structure_signature_for_value(value, depth=0, max_depth=2):
     if depth > max_depth:
         return ("depth_limit", type(value).__name__)
@@ -1417,6 +1516,34 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     file_extracted_metadata_fields[str(meta_key)] = str(locator)
 
             empirical_uploads = list(params.get("empirical_upload_paths") or [])
+
+            # Detect companion channel-names file: if ch_names is a string locator and
+            # one of the uploaded files has that exact stem (e.g. "channels.mat"), load
+            # it, extract the names, patch the parse config, and exclude it from data parsing.
+            if (
+                getattr(parse_cfg, "fields", None) is not None
+                and isinstance(getattr(parse_cfg.fields, "ch_names", None), str)
+                and parse_cfg.fields.ch_names not in {"__self__", ""}
+            ):
+                _comp_names, _comp_indices = _try_resolve_companion_ch_names(
+                    parse_cfg.fields.ch_names, empirical_uploads
+                )
+                if _comp_names:
+                    import dataclasses
+                    from ncpi.EphysDatasetParser import CanonicalFields as _CF, ParseConfig as _PC
+                    parse_cfg = dataclasses.replace(
+                        parse_cfg,
+                        fields=dataclasses.replace(parse_cfg.fields, ch_names=_comp_names),
+                    )
+                    parser = EphysDatasetParser(parse_cfg)
+                    empirical_uploads = [
+                        p for i, p in enumerate(empirical_uploads) if i not in _comp_indices
+                    ]
+                    _append_job_output(
+                        job_status, job_id,
+                        f"Loaded {len(_comp_names)} channel name(s) from companion file."
+                    )
+
             total_uploads = len(empirical_uploads)
             if total_uploads == 0:
                 raise ValueError("No empirical uploads were provided.")

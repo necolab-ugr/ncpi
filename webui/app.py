@@ -10034,6 +10034,50 @@ def start_computation_redirect(computation_type):
                         raise ValueError(
                             f"Unknown local folder selected for feature extraction: {selected_token}"
                         )
+
+                    # Before folder filtering, try to resolve companion channel-names file
+                    # from any uploaded subfolder (e.g. channels/channels.mat alongside data/).
+                    if (
+                        getattr(parse_cfg, "fields", None) is not None
+                        and isinstance(getattr(parse_cfg.fields, "ch_names", None), str)
+                        and parse_cfg.fields.ch_names not in {"__self__", ""}
+                    ):
+                        _ch_loc = parse_cfg.fields.ch_names
+                        from compute_utils import _load_uploaded_source_path, _flatten_matlab_ch_names
+                        for _up, _sname, _tf, _ftok in upload_items:
+                            if os.path.splitext(_sname)[0].lower() != _ch_loc.lower():
+                                continue
+                            _ext = Path(_sname).suffix.lower()
+                            if _ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                                continue
+                            _tmp = os.path.join(module_upload_dir, f"companion_{job_id}_{secure_filename(_sname)}")
+                            try:
+                                _up.seek(0)
+                                _up.save(_tmp)
+                                _obj = _load_uploaded_source_path(_tmp, _sname, _ext)
+                                if isinstance(_obj, dict):
+                                    _key = _ch_loc if _ch_loc in _obj else next(
+                                        (k for k in _obj if isinstance(k, str) and not k.startswith("_") and k.lower() == _ch_loc.lower()),
+                                        None,
+                                    )
+                                    if _key:
+                                        _names = _flatten_matlab_ch_names(_obj[_key])
+                                        if _names:
+                                            parse_cfg = _copy_parse_config(
+                                                parse_cfg,
+                                                fields=_copy_canonical_fields(parse_cfg.fields, ch_names=_names),
+                                            )
+                                            parser_config_obj = parse_cfg
+                            except Exception:
+                                pass
+                            finally:
+                                try:
+                                    if os.path.exists(_tmp):
+                                        os.remove(_tmp)
+                                except Exception:
+                                    pass
+                            break
+
                     if selected_token:
                         upload_items = [row for row in upload_items if row[3] == selected_token]
                     if not upload_items:
