@@ -100,8 +100,9 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather"
+    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".tsv"
 }
+FEATURES_MAX_SUBFOLDER_DEPTH = 6
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
 FILE_ID_METADATA_LITERAL = "file_ID"
@@ -1422,6 +1423,53 @@ def _extract_text_list_from_form(form, key):
     return normalized
 
 
+def _extract_data_file_selection_map_from_form(form, key):
+    raw_value = (form.get(key) or "").strip()
+    if not raw_value:
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+
+    selections = {}
+    for raw_folder, raw_value in parsed.items():
+        folder_token = str(raw_folder or "").strip()
+        value_token = str(raw_value or "").replace("\\", "/").strip().lstrip("/")
+        if not folder_token or not value_token:
+            continue
+        folder_path = os.path.realpath(folder_token)
+        if folder_path:
+            selections[folder_path] = value_token
+        selections[folder_token] = value_token
+    return selections
+
+
+def _to_posix_relpath(path):
+    token = str(path or "").replace("\\", "/").strip().lstrip("/")
+    return token or "."
+
+
+def _format_extension_count_map(ext_map):
+    items = []
+    for ext, count in sorted((ext_map or {}).items(), key=lambda item: str(item[0])):
+        items.append(f"{ext}:{int(count)}")
+    return ", ".join(items) if items else "(no files)"
+
+
+def _numeric_wildcard_stem(stem):
+    token = str(stem or "").strip()
+    if not token:
+        return "", None
+    wildcard = re.sub(r"\d+", "*", token)
+    if "*" not in wildcard:
+        return wildcard, None
+    regex_src = "^" + re.escape(wildcard).replace(r"\*", r"\d+") + "$"
+    return wildcard, re.compile(regex_src)
+
+
 def _extract_analysis_folder_name_tokens_from_form(form, key="parser_analysis_folder_names"):
     tokens = []
     for raw in _extract_text_list_from_form(form, key):
@@ -1512,7 +1560,7 @@ def _prefixed_file_name(file_name, folder_name=None, apply_prefix=False):
     return f"{folder_token}_{safe_name}"
 
 
-def _collect_supported_folder_file_entries(folder_paths, kind_label):
+def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_selection_map=None):
     roots = []
     seen_roots = set()
     for idx, raw in enumerate(folder_paths or [], start=1):
@@ -1532,16 +1580,46 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label):
     entries = []
     folder_summaries = []
     extension_counts = defaultdict(int)
+    folder_contexts = []
+    selection_map = data_file_selection_map if isinstance(data_file_selection_map, dict) else {}
+
     for folder_idx, root in enumerate(roots, start=1):
         folder_name = _folder_display_name(root, fallback_index=folder_idx)
         folder_entries = []
+        branch_directories = defaultdict(set)
+        branch_dir_ext_files = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+
         for current_root, _, files in os.walk(root):
+            rel_dir = os.path.relpath(current_root, root)
+            rel_dir_posix = _to_posix_relpath(rel_dir)
+            if rel_dir_posix == ".":
+                dir_depth = 0
+            else:
+                dir_depth = len([token for token in rel_dir_posix.split("/") if token])
+            if dir_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
+                raise ValueError(
+                    f"{kind_label} folder '{folder_name}' exceeds the maximum supported nested depth "
+                    f"({FEATURES_MAX_SUBFOLDER_DEPTH}) at '{current_root}'."
+                )
+            if rel_dir_posix != ".":
+                parts = [token for token in rel_dir_posix.split("/") if token]
+                branch_name = parts[0]
+                branch_rel_dir = "/".join(parts[1:]) if len(parts) > 1 else "."
+                branch_directories[branch_name].add(branch_rel_dir or ".")
+
             for name in files:
                 ext = Path(name).suffix.lower()
                 if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                     continue
                 full_path = os.path.join(current_root, name)
-                rel_path = os.path.relpath(full_path, root)
+                rel_path = _to_posix_relpath(os.path.relpath(full_path, root))
+                rel_parts = [token for token in rel_path.split("/") if token]
+                file_depth = max(0, len(rel_parts) - 1)
+                if file_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' contains a file deeper than the supported "
+                        f"{FEATURES_MAX_SUBFOLDER_DEPTH} nested levels: '{full_path}'."
+                    )
                 row = {
                     "path": full_path,
                     "name": str(name),
@@ -1550,17 +1628,280 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label):
                     "folder_name": folder_name,
                     "relative_path": rel_path,
                 }
+                if len(rel_parts) >= 2:
+                    level1_subfolder = rel_parts[0]
+                    subfolder_relative_path = "/".join(rel_parts[1:])
+                    subfolder_relative_dir = _to_posix_relpath(os.path.dirname(subfolder_relative_path))
+                    row["level1_subfolder"] = level1_subfolder
+                    row["subfolder_relative_path"] = subfolder_relative_path
+                    row["subfolder_relative_dir"] = subfolder_relative_dir
+                    branch_directories[level1_subfolder].add(subfolder_relative_dir or ".")
+                    branch_dir_ext_files[level1_subfolder][subfolder_relative_dir][ext].append(row)
+                else:
+                    row["level1_subfolder"] = ""
+                    row["subfolder_relative_path"] = rel_parts[0] if rel_parts else row["name"]
+                    row["subfolder_relative_dir"] = "."
                 folder_entries.append(row)
                 extension_counts[ext] += 1
 
-            folder_entries.sort(key=lambda item: item["path"])
-        _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
+        folder_entries.sort(key=lambda item: item["path"])
+
+        level1_dirs = sorted(
+            [
+                name
+                for name in os.listdir(root)
+                if os.path.isdir(os.path.join(root, name))
+            ]
+        )
+        nested_branches_with_files = sorted(
+            {
+                str(item.get("level1_subfolder") or "").strip()
+                for item in folder_entries
+                if str(item.get("level1_subfolder") or "").strip()
+            }
+        )
+        has_nested_subfolders = len(nested_branches_with_files) > 0
+        selected_entries = list(folder_entries)
+        selected_sample_entry = folder_entries[0] if folder_entries else None
+        selected_data_file = ""
+        selected_data_pattern = ""
+        selected_data_extension = ""
+        data_file_candidates = []
+        matched_data_files = []
+
+        if has_nested_subfolders:
+            if not level1_dirs:
+                level1_dirs = list(nested_branches_with_files)
+            level1_dirs = sorted([token for token in level1_dirs if token])
+            sample_branch = next(
+                (token for token in level1_dirs if token in nested_branches_with_files),
+                nested_branches_with_files[0],
+            )
+            sample_dirs = set(branch_directories.get(sample_branch, set()))
+            sample_dirs.add(".")
+            for branch in level1_dirs:
+                branch_dirs = set(branch_directories.get(branch, set()))
+                branch_dirs.add(".")
+                missing_dirs = sorted(sample_dirs - branch_dirs)
+                extra_dirs = sorted(branch_dirs - sample_dirs)
+                if missing_dirs:
+                    missing_dir = missing_dirs[0]
+                    sample_files = branch_dir_ext_files.get(sample_branch, {}).get(missing_dir, {})
+                    sample_file_hint = ""
+                    for ext_rows in sample_files.values():
+                        if ext_rows:
+                            sample_file_hint = ext_rows[0]["path"]
+                            break
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' has inconsistent nested structure: "
+                        f"subfolder '{branch}' is missing expected homologous directory '{missing_dir}' "
+                        f"defined by sample subfolder '{sample_branch}'. "
+                        f"Reference file: {sample_file_hint or 'n/a'}."
+                    )
+                if extra_dirs:
+                    extra_dir = extra_dirs[0]
+                    culprit_file = ""
+                    for rows in (branch_dir_ext_files.get(branch, {}).get(extra_dir, {}) or {}).values():
+                        if rows:
+                            culprit_file = str(rows[0].get("path") or "")
+                            break
+                    culprit_hint = culprit_file or os.path.join(
+                        root,
+                        branch,
+                        "" if extra_dir in {"", "."} else extra_dir,
+                    )
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' has inconsistent nested structure: "
+                        f"subfolder '{branch}' contains unexpected extra directory '{extra_dir}' "
+                        f"relative to sample subfolder '{sample_branch}'. "
+                        f"Problematic path: {culprit_hint}."
+                    )
+
+                for rel_dir in sorted(sample_dirs):
+                    sample_counts = {
+                        ext: len(rows)
+                        for ext, rows in (branch_dir_ext_files.get(sample_branch, {}).get(rel_dir, {}) or {}).items()
+                    }
+                    branch_counts = {
+                        ext: len(rows)
+                        for ext, rows in (branch_dir_ext_files.get(branch, {}).get(rel_dir, {}) or {}).items()
+                    }
+                    if sample_counts == branch_counts:
+                        continue
+
+                    culprit_file = ""
+                    extra_exts = sorted(set(branch_counts.keys()) - set(sample_counts.keys()))
+                    missing_exts = sorted(set(sample_counts.keys()) - set(branch_counts.keys()))
+                    if extra_exts:
+                        first_ext = extra_exts[0]
+                        culprit_rows = branch_dir_ext_files.get(branch, {}).get(rel_dir, {}).get(first_ext, [])
+                        culprit_file = culprit_rows[0]["path"] if culprit_rows else ""
+                    elif missing_exts:
+                        first_ext = missing_exts[0]
+                        culprit_rows = branch_dir_ext_files.get(sample_branch, {}).get(rel_dir, {}).get(first_ext, [])
+                        culprit_file = culprit_rows[0]["path"] if culprit_rows else ""
+                    else:
+                        for ext in sorted(sample_counts.keys()):
+                            if sample_counts.get(ext) == branch_counts.get(ext):
+                                continue
+                            culprit_rows = branch_dir_ext_files.get(branch, {}).get(rel_dir, {}).get(ext, [])
+                            culprit_file = culprit_rows[0]["path"] if culprit_rows else ""
+                            if not culprit_file:
+                                culprit_rows = branch_dir_ext_files.get(sample_branch, {}).get(rel_dir, {}).get(ext, [])
+                                culprit_file = culprit_rows[0]["path"] if culprit_rows else ""
+                            break
+
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' has inconsistent file structure at homologous directory "
+                        f"'{rel_dir}' between subfolders '{sample_branch}' and '{branch}'. "
+                        f"Expected [{_format_extension_count_map(sample_counts)}], found [{_format_extension_count_map(branch_counts)}]. "
+                        f"Problematic file example: {culprit_file or 'n/a'}."
+                    )
+
+            sample_branch_entries = sorted(
+                [item for item in folder_entries if str(item.get("level1_subfolder") or "") == sample_branch],
+                key=lambda item: str(item.get("subfolder_relative_path") or ""),
+            )
+            if not sample_branch_entries:
+                raise ValueError(
+                    f"{kind_label} folder '{folder_name}' has nested subfolders but no supported files in "
+                    f"sample subfolder '{sample_branch}'."
+                )
+
+            data_file_candidates = [
+                {
+                    "value": str(item.get("subfolder_relative_path") or ""),
+                    "label": str(item.get("subfolder_relative_path") or ""),
+                    "extension": str(item.get("extension") or ""),
+                    "file_name": str(item.get("name") or ""),
+                }
+                for item in sample_branch_entries
+            ]
+            candidate_map = {row["value"]: row for row in data_file_candidates if row.get("value")}
+            requested_selection = (
+                selection_map.get(root)
+                or selection_map.get(folder_name)
+                or ""
+            )
+            requested_selection = _to_posix_relpath(requested_selection) if requested_selection else ""
+            if requested_selection.startswith(f"{sample_branch}/"):
+                requested_selection = requested_selection[len(sample_branch) + 1:]
+            if requested_selection and requested_selection not in candidate_map:
+                raise ValueError(
+                    f"{kind_label} folder '{folder_name}' received an unknown Data file selection "
+                    f"'{requested_selection}' for sample subfolder '{sample_branch}'."
+                )
+            selected_data_file = requested_selection or sample_branch_entries[0]["subfolder_relative_path"]
+            selected_sample_entry = next(
+                (
+                    item
+                    for item in sample_branch_entries
+                    if str(item.get("subfolder_relative_path") or "") == selected_data_file
+                ),
+                sample_branch_entries[0],
+            )
+            selected_data_file = str(selected_sample_entry.get("subfolder_relative_path") or "")
+            selected_data_extension = str(selected_sample_entry.get("extension") or "")
+            selected_data_name = str(selected_sample_entry.get("name") or "")
+            selected_dir = str(selected_sample_entry.get("subfolder_relative_dir") or ".")
+            wildcard_stem, stem_regex = _numeric_wildcard_stem(Path(selected_data_name).stem)
+            selected_data_pattern = f"{wildcard_stem}{selected_data_extension}" if wildcard_stem else selected_data_name
+
+            matched_entries = []
+            for branch in level1_dirs:
+                branch_rows = [
+                    item for item in folder_entries
+                    if str(item.get("level1_subfolder") or "") == branch
+                    and str(item.get("subfolder_relative_dir") or ".") == selected_dir
+                    and str(item.get("extension") or "").lower() == selected_data_extension.lower()
+                ]
+                if not branch_rows:
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' could not find a homologous Data file in "
+                        f"subfolder '{branch}' at '{selected_dir}' with extension '{selected_data_extension}'. "
+                        f"Reference sample file: {selected_sample_entry.get('path') or selected_data_name}."
+                    )
+                exact_matches = [
+                    item for item in branch_rows
+                    if str(item.get("name") or "") == selected_data_name
+                ]
+                if len(exact_matches) > 1:
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' found multiple exact Data file matches in subfolder "
+                        f"'{branch}' for '{selected_data_name}': "
+                        + ", ".join(str(item.get("path") or "") for item in exact_matches[:4])
+                        + (", ..." if len(exact_matches) > 4 else "")
+                    )
+                if len(exact_matches) == 1:
+                    chosen = exact_matches[0]
+                else:
+                    if stem_regex is None:
+                        raise ValueError(
+                            f"{kind_label} folder '{folder_name}' expected exact Data file name '{selected_data_name}' "
+                            f"in homologous subfolder '{branch}' but none was found. "
+                            f"Available files: {', '.join(str(item.get('path') or item.get('name') or '') for item in branch_rows[:6])}"
+                            + (", ..." if len(branch_rows) > 6 else "")
+                        )
+                    pattern_matches = [
+                        item for item in branch_rows
+                        if stem_regex.match(Path(str(item.get("name") or "")).stem)
+                    ]
+                    if len(pattern_matches) == 0:
+                        raise ValueError(
+                            f"{kind_label} folder '{folder_name}' could not match Data file pattern "
+                            f"'{selected_data_pattern}' inside homologous subfolder '{branch}' "
+                            f"(directory '{selected_dir}'). "
+                            f"Reference sample file: {selected_sample_entry.get('path') or selected_data_name}."
+                        )
+                    if len(pattern_matches) > 1:
+                        raise ValueError(
+                            f"{kind_label} folder '{folder_name}' found multiple Data file candidates in homologous "
+                            f"subfolder '{branch}' for pattern '{selected_data_pattern}' (directory '{selected_dir}'): "
+                            + ", ".join(str(item.get("path") or "") for item in pattern_matches[:4])
+                            + (", ..." if len(pattern_matches) > 4 else "")
+                        )
+                    chosen = pattern_matches[0]
+                matched_entries.append(chosen)
+
+            matched_entries.sort(key=lambda item: str(item.get("path") or ""))
+            selected_entries = matched_entries
+            matched_data_files = [
+                {
+                    "level1_subfolder": str(item.get("level1_subfolder") or ""),
+                    "relative_path": str(item.get("relative_path") or ""),
+                    "subfolder_relative_path": str(item.get("subfolder_relative_path") or ""),
+                    "name": str(item.get("name") or ""),
+                    "path": str(item.get("path") or ""),
+                    "extension": str(item.get("extension") or ""),
+                }
+                for item in matched_entries
+            ]
+            sample_subfolder_path = os.path.join(root, sample_branch)
+        else:
+            _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
+            sample_branch = ""
+            sample_subfolder_path = ""
+
         folder_summaries.append({
             "folder_path": root,
             "folder_name": folder_name,
             "file_count": len(folder_entries),
         })
         entries.extend(folder_entries)
+        folder_contexts.append({
+            "folder_path": root,
+            "folder_name": folder_name,
+            "has_nested_subfolders": bool(has_nested_subfolders),
+            "sample_subfolder_name": sample_branch,
+            "sample_subfolder_path": sample_subfolder_path,
+            "data_file_candidates": data_file_candidates,
+            "selected_data_file": selected_data_file,
+            "selected_data_pattern": selected_data_pattern,
+            "selected_data_extension": selected_data_extension,
+            "matched_data_files": matched_data_files,
+            "selected_entries": selected_entries,
+            "sample_selected_entry": selected_sample_entry,
+        })
 
     entries.sort(key=lambda item: item["path"])
 
@@ -1568,7 +1909,7 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label):
         joined = ", ".join(roots)
         raise ValueError(f"No supported {kind_label.lower()} files found in selected folder(s): {joined}")
 
-    return entries, folder_summaries, dict(sorted(extension_counts.items()))
+    return entries, folder_summaries, dict(sorted(extension_counts.items())), folder_contexts
 
 
 def _validate_simulation_file_path(file_path):
@@ -2287,6 +2628,11 @@ def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Se
         parts = [part for part in token.split("/") if part not in {"", "."}]
         if not parts or any(part == ".." for part in parts):
             continue
+        if len(parts) > 2:
+            raise ValueError(
+                f"{label} local upload contains nested subfolders, which are not supported in local mode. "
+                f"Nested path detected: {token}"
+            )
         folder_name = parts[0] if len(parts) > 1 else "selected_folder"
         extension = Path(parts[-1]).suffix.lower()
         if extension not in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -2385,6 +2731,71 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries):
         dict(candidate_field_folders),
         combined_logical_names,
     )
+
+
+def _aggregate_candidate_metadata_from_file_entries(folder_entries):
+    combined_candidates = []
+    seen_candidates = set()
+    candidate_field_folders = defaultdict(list)
+    candidate_field_origins = defaultdict(set)
+    field_detail_map = {}
+    dataframe_fields = set()
+    inspected_count = 0
+
+    for row in sorted(folder_entries or [], key=lambda item: str(item.get("path") or "")):
+        source_path = str(row.get("path") or "").strip()
+        if not source_path:
+            continue
+        folder_name = str(row.get("folder_name") or row.get("folder_path") or "").strip() or "selected_folder"
+        try:
+            description = _describe_parser_source(source_path)
+        except Exception as exc:
+            raise ValueError(
+                f"Failed to inspect metadata in file '{source_path}': {exc}"
+            )
+        inspected_count += 1
+
+        for token in (description.get("candidate_fields") or []):
+            field_name = str(token or "").strip()
+            if not field_name:
+                continue
+            if field_name not in seen_candidates:
+                seen_candidates.add(field_name)
+                combined_candidates.append(field_name)
+            if folder_name not in candidate_field_folders[field_name]:
+                candidate_field_folders[field_name].append(folder_name)
+
+        for detail in (description.get("field_details") or []):
+            if not isinstance(detail, dict):
+                continue
+            field_name = str(detail.get("field") or "").strip()
+            if not field_name:
+                continue
+            if field_name not in field_detail_map:
+                field_detail_map[field_name] = detail
+            origin = str(detail.get("origin") or "").strip().lower()
+            if origin:
+                candidate_field_origins[field_name].add(origin)
+
+        for token in _collect_dataframe_candidate_fields_from_description(description):
+            field_name = str(token or "").strip()
+            if field_name:
+                dataframe_fields.add(field_name)
+
+    return {
+        "candidate_fields": combined_candidates,
+        "field_details": [field_detail_map[key] for key in combined_candidates if key in field_detail_map],
+        "candidate_field_folders": {
+            key: value
+            for key, value in candidate_field_folders.items()
+        },
+        "candidate_field_origins": {
+            key: sorted(values)
+            for key, values in candidate_field_origins.items()
+        },
+        "dataframe_candidate_fields": [field for field in combined_candidates if field in dataframe_fields],
+        "inspected_file_count": inspected_count,
+    }
 
 
 def _parse_sensor_names(raw_value):
@@ -5450,18 +5861,27 @@ def features_parser_inspect():
         singular_key="simulation_folder_path",
         plural_key="simulation_folder_paths",
     )
+    simulation_data_file_selections = _extract_data_file_selection_map_from_form(
+        request.form,
+        "simulation_data_file_selections",
+    )
+    empirical_data_file_selections = _extract_data_file_selection_map_from_form(
+        request.form,
+        "empirical_data_file_selections",
+    )
     listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
     upload = request.files.get("file")
     inspect_path = None
     cleanup_path = None
     name_candidates = list(listed_file_names)
     file_name = ""
+    folder_entries = []
     folder_summaries = []
     extension_summaries = []
     extension_profiles = []
     folder_profiles = []
+    folder_contexts = []
     candidate_field_folders = {}
-    combined_candidates_from_folders = []
     folder_file_count = 0
 
     try:
@@ -5474,22 +5894,32 @@ def features_parser_inspect():
             if not name_candidates:
                 name_candidates.append(file_name)
         elif empirical_folder_paths:
-            folder_entries, folder_summaries, extension_counts = _collect_supported_folder_file_entries(
+            folder_entries, folder_summaries, extension_counts, folder_contexts = _collect_supported_folder_file_entries(
                 empirical_folder_paths,
                 "Empirical",
+                data_file_selection_map=empirical_data_file_selections,
             )
             use_prefix = len(folder_summaries) > 1
             for row in folder_entries:
                 row["logical_name"] = _prefixed_file_name(row["name"], row["folder_name"], apply_prefix=use_prefix)
-            inspect_entry = folder_entries[0]
+            inspect_entry = next(
+                (
+                    context.get("sample_selected_entry")
+                    for context in folder_contexts
+                    if isinstance(context.get("sample_selected_entry"), dict)
+                ),
+                folder_entries[0] if folder_entries else None,
+            )
+            if inspect_entry is None:
+                raise ValueError("No supported empirical files were found for inspection.")
             inspect_path = inspect_entry["path"]
-            file_name = inspect_entry["logical_name"]
+            file_name = inspect_entry.get("logical_name") or inspect_entry["name"]
             folder_file_count = len(folder_entries)
             (
                 folder_profiles,
                 extension_summaries,
-                combined_candidates_from_folders,
-                candidate_field_folders,
+                _combined_candidates_from_profiles,
+                _candidate_field_folders_from_profiles,
                 combined_logical_names,
             ) = _build_folder_inspection_profiles(folder_entries, folder_summaries)
             if not name_candidates:
@@ -5505,22 +5935,32 @@ def features_parser_inspect():
             if not name_candidates:
                 name_candidates.append(file_name)
         elif simulation_folder_paths:
-            folder_entries, folder_summaries, extension_counts = _collect_supported_folder_file_entries(
+            folder_entries, folder_summaries, extension_counts, folder_contexts = _collect_supported_folder_file_entries(
                 simulation_folder_paths,
                 "Simulation outputs",
+                data_file_selection_map=simulation_data_file_selections,
             )
             use_prefix = len(folder_summaries) > 1
             for row in folder_entries:
                 row["logical_name"] = _prefixed_file_name(row["name"], row["folder_name"], apply_prefix=use_prefix)
-            inspect_entry = folder_entries[0]
+            inspect_entry = next(
+                (
+                    context.get("sample_selected_entry")
+                    for context in folder_contexts
+                    if isinstance(context.get("sample_selected_entry"), dict)
+                ),
+                folder_entries[0] if folder_entries else None,
+            )
+            if inspect_entry is None:
+                raise ValueError("No supported simulation files were found for inspection.")
             inspect_path = inspect_entry["path"]
-            file_name = inspect_entry["logical_name"]
+            file_name = inspect_entry.get("logical_name") or inspect_entry["name"]
             folder_file_count = len(folder_entries)
             (
                 folder_profiles,
                 extension_summaries,
-                combined_candidates_from_folders,
-                candidate_field_folders,
+                _combined_candidates_from_profiles,
+                _candidate_field_folders_from_profiles,
                 combined_logical_names,
             ) = _build_folder_inspection_profiles(folder_entries, folder_summaries)
             if not name_candidates:
@@ -5548,74 +5988,112 @@ def features_parser_inspect():
         else:
             return jsonify({"error": "Provide an existing pipeline file, a simulation folder path, an empirical folder path, or upload a file to inspect."}), 400
 
-        if extension_profiles:
-            combined_candidates = []
-            if combined_candidates_from_folders:
-                combined_candidates = list(combined_candidates_from_folders)
-            else:
-                seen_candidates = set()
-                for profile in extension_profiles:
-                    for candidate in profile.get("candidate_fields") or []:
-                        token = str(candidate or "").strip()
-                        if not token or token in seen_candidates:
-                            continue
-                        seen_candidates.add(token)
-                        combined_candidates.append(token)
+        if folder_entries:
+            selected_description = _describe_parser_source(inspect_path)
+            selected_description["manual_field_details"] = _manual_field_details_for_ui()
+            selected_description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(selected_description)
 
-            combined_defaults = {
-                "data": _pick_field_guess_fuzzy(combined_candidates, ["data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
+            selected_data_candidates = [
+                str(item or "").strip()
+                for item in (selected_description.get("candidate_fields") or [])
+                if str(item or "").strip()
+            ]
+            selected_data_field_details = [
+                item for item in (selected_description.get("field_details") or [])
+                if isinstance(item, dict)
+            ]
+            selected_data_dataframe_fields = _collect_dataframe_candidate_fields_from_description(selected_description)
+
+            metadata_summary = _aggregate_candidate_metadata_from_file_entries(folder_entries)
+            combined_candidates = metadata_summary.get("candidate_fields") or list(selected_data_candidates)
+            combined_field_details = metadata_summary.get("field_details") or list(selected_data_field_details)
+            candidate_field_folders = metadata_summary.get("candidate_field_folders") or {}
+            candidate_field_origins = metadata_summary.get("candidate_field_origins") or {}
+            dataframe_candidate_fields = metadata_summary.get("dataframe_candidate_fields") or []
+
+            combined_defaults = selected_description.get("defaults") or {
+                "data": _pick_field_guess_fuzzy(selected_data_candidates, ["data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
                 "fs": _pick_field_guess_fuzzy(
-                    combined_candidates,
+                    selected_data_candidates,
                     ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
                 ),
                 "ch_names": _pick_field_guess_fuzzy(
-                    combined_candidates,
+                    selected_data_candidates,
                     ["ch_names", "channels", "channel_names", "channel", "sensors", "sensor", "ch"],
                 ),
-                "recording_type": _pick_field_guess(combined_candidates, ["recording_type", "modality", "recording", "type"]),
-                "subject_id": _pick_field_guess(combined_candidates, ["subject_id", "subject", "subj", "participant"]),
-                "group": _pick_field_guess(combined_candidates, ["group", "cohort", "class"]),
-                "species": _pick_field_guess(combined_candidates, ["species", "animal", "organism"]),
-                "condition": _pick_field_guess(combined_candidates, ["condition", "state", "task"]),
+                "recording_type": _pick_field_guess(selected_data_candidates, ["recording_type", "modality", "recording", "type"]),
+                "subject_id": _pick_field_guess(selected_data_candidates, ["subject_id", "subject", "subj", "participant"]),
+                "group": _pick_field_guess(selected_data_candidates, ["group", "cohort", "class"]),
+                "species": _pick_field_guess(selected_data_candidates, ["species", "animal", "organism"]),
+                "condition": _pick_field_guess(selected_data_candidates, ["condition", "state", "task"]),
             }
 
-            field_detail_map = {}
-            candidate_field_origins = defaultdict(set)
-            for profile in extension_profiles:
-                for item in profile.get("field_details") or []:
-                    field_key = str(item.get("field") or "").strip()
-                    if not field_key or field_key in field_detail_map:
-                        origin_name = str(item.get("origin") or "").strip().lower()
-                        if origin_name:
-                            candidate_field_origins[field_key].add(origin_name)
-                        continue
-                    field_detail_map[field_key] = item
-                    origin_name = str(item.get("origin") or "").strip().lower()
-                    if origin_name:
-                        candidate_field_origins[field_key].add(origin_name)
-            combined_field_details = [field_detail_map[key] for key in combined_candidates if key in field_detail_map]
-            dataframe_candidate_fields = [
-                field_name
-                for field_name in combined_candidates
-                if "dataframe" in candidate_field_origins.get(field_name, set())
-            ]
+            context_by_path = {
+                str(item.get("folder_path") or "").strip(): item
+                for item in (folder_contexts or [])
+                if isinstance(item, dict) and str(item.get("folder_path") or "").strip()
+            }
+            folder_structure_profiles = []
+            for context in folder_contexts or []:
+                folder_path = str(context.get("folder_path") or "").strip()
+                if not folder_path:
+                    continue
+                folder_structure_profiles.append({
+                    "folder_path": folder_path,
+                    "folder_name": str(context.get("folder_name") or folder_path),
+                    "has_nested_subfolders": bool(context.get("has_nested_subfolders")),
+                    "sample_subfolder_name": str(context.get("sample_subfolder_name") or ""),
+                    "sample_subfolder_path": str(context.get("sample_subfolder_path") or ""),
+                    "selected_data_file": str(context.get("selected_data_file") or ""),
+                    "selected_data_pattern": str(context.get("selected_data_pattern") or ""),
+                    "selected_data_extension": str(context.get("selected_data_extension") or ""),
+                    "data_file_candidates": list(context.get("data_file_candidates") or []),
+                    "matched_data_files": list(context.get("matched_data_files") or []),
+                    "selected_data_file_count": int(len(context.get("matched_data_files") or [])),
+                })
 
-            fs_hint_hz = None
-            fs_hint_note = None
-            for profile in extension_profiles:
-                profile_fs = profile.get("fs_hint_hz")
-                if profile_fs is not None:
-                    fs_hint_hz = profile_fs
-                    fs_hint_note = profile.get("fs_hint_note")
-                    break
+            for folder_profile in folder_profiles:
+                folder_path = str(folder_profile.get("folder_path") or "").strip()
+                context = context_by_path.get(folder_path)
+                if not context or not context.get("has_nested_subfolders"):
+                    continue
+                folder_profile["has_nested_subfolders"] = True
+                folder_profile["sample_subfolder_name"] = str(context.get("sample_subfolder_name") or "")
+                folder_profile["sample_subfolder_path"] = str(context.get("sample_subfolder_path") or "")
+                folder_profile["selected_data_file"] = str(context.get("selected_data_file") or "")
+                folder_profile["selected_data_pattern"] = str(context.get("selected_data_pattern") or "")
+                folder_profile["matched_data_files"] = list(context.get("matched_data_files") or [])
+
+                sample_entry = context.get("sample_selected_entry")
+                if isinstance(sample_entry, dict) and sample_entry.get("path"):
+                    sample_path = str(sample_entry.get("path") or "")
+                    sample_names = [
+                        str(item.get("name") or "").strip()
+                        for item in (context.get("matched_data_files") or [])
+                        if str(item.get("name") or "").strip()
+                    ]
+                    sample_profile = _describe_parser_source(sample_path)
+                    sample_profile = _attach_file_extracted_virtual_field(sample_profile, sample_names or [str(sample_entry.get("name") or "")])
+                    sample_profile["virtual_field_details"] = _build_virtual_field_details_for_ui(sample_names or [str(sample_entry.get("name") or "")])
+                    sample_profile["manual_field_details"] = _manual_field_details_for_ui()
+                    sample_profile["extension"] = str(sample_entry.get("extension") or "")
+                    sample_profile["sample_file"] = str(sample_entry.get("subfolder_relative_path") or sample_entry.get("relative_path") or sample_entry.get("name") or "")
+                    sample_profile["sample_file_path"] = sample_path
+                    sample_profile["file_count"] = int(len(context.get("matched_data_files") or []))
+                    sample_profile["folder_name"] = str(folder_profile.get("folder_name") or "")
+                    sample_profile["folder_path"] = folder_path
+                    folder_profile["extension_profiles"] = [sample_profile]
+
+            fs_hint_hz = selected_description.get("fs_hint_hz")
+            fs_hint_note = selected_description.get("fs_hint_note")
 
             description = {
                 "source_type": "multi_folder",
                 "candidate_fields": combined_candidates,
                 "defaults": combined_defaults,
                 "summary": (
-                    f"Selected {len(folder_summaries)} folder(s), {folder_file_count} file(s), "
-                    f"{len(extension_profiles)} extension type(s)."
+                    f"Selected {len(folder_summaries)} folder(s), {folder_file_count} file(s). "
+                    f"Metadata inspected in {int(metadata_summary.get('inspected_file_count') or 0)} file(s)."
                 ),
                 "field_details": combined_field_details,
                 "manual_field_details": _manual_field_details_for_ui(),
@@ -5624,12 +6102,19 @@ def features_parser_inspect():
                 "folder_profiles": folder_profiles,
                 "folder_summaries": folder_summaries,
                 "extension_summaries": extension_summaries,
-                "candidate_field_folders": candidate_field_folders,
-                "candidate_field_origins": {
-                    key: sorted(values)
-                    for key, values in candidate_field_origins.items()
+                "folder_structure_profiles": folder_structure_profiles,
+                "data_file_selection_map": {
+                    str(item.get("folder_path") or ""): str(item.get("selected_data_file") or "")
+                    for item in folder_structure_profiles
+                    if str(item.get("has_nested_subfolders") or "").lower() not in {"", "false", "0"}
                 },
+                "candidate_field_folders": candidate_field_folders,
+                "candidate_field_origins": candidate_field_origins,
                 "dataframe_candidate_fields": dataframe_candidate_fields,
+                "data_file_candidate_fields": selected_data_candidates,
+                "data_file_field_details": selected_data_field_details,
+                "data_file_dataframe_candidate_fields": selected_data_dataframe_fields,
+                "data_file_source_type": str(selected_description.get("source_type") or ""),
                 "folder_file_count": folder_file_count,
                 "fs_hint_hz": fs_hint_hz,
                 "fs_hint_note": fs_hint_note,
@@ -5650,6 +6135,17 @@ def features_parser_inspect():
             description = _describe_parser_source(inspect_path)
             description["manual_field_details"] = _manual_field_details_for_ui()
             description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
+            description["data_file_candidate_fields"] = [
+                str(item or "").strip()
+                for item in (description.get("candidate_fields") or [])
+                if str(item or "").strip()
+            ]
+            description["data_file_field_details"] = [
+                item for item in (description.get("field_details") or [])
+                if isinstance(item, dict)
+            ]
+            description["data_file_dataframe_candidate_fields"] = list(description.get("dataframe_candidate_fields") or [])
+            description["data_file_source_type"] = str(description.get("source_type") or "")
             if "candidate_field_origins" not in description:
                 candidate_field_origins = defaultdict(set)
                 for item in description.get("field_details") or []:
@@ -5665,6 +6161,21 @@ def features_parser_inspect():
         description = _attach_file_extracted_virtual_field(description, name_candidates)
         if "dataframe_candidate_fields" not in description:
             description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
+        if "data_file_candidate_fields" not in description:
+            description["data_file_candidate_fields"] = [
+                str(item or "").strip()
+                for item in (description.get("candidate_fields") or [])
+                if str(item or "").strip()
+            ]
+        if "data_file_field_details" not in description:
+            description["data_file_field_details"] = [
+                item for item in (description.get("field_details") or [])
+                if isinstance(item, dict)
+            ]
+        if "data_file_dataframe_candidate_fields" not in description:
+            description["data_file_dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
+        if "data_file_source_type" not in description:
+            description["data_file_source_type"] = str(description.get("source_type") or "")
         if "virtual_field_details" not in description:
             description["virtual_field_details"] = _build_virtual_field_details_for_ui(name_candidates)
         description["source_name"] = file_name
@@ -8828,9 +9339,14 @@ def start_computation_redirect(computation_type):
                 return redirect(request.referrer or url_for('features_methods'))
             if simulation_folder_paths:
                 try:
-                    simulation_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                    simulation_data_file_selections = _extract_data_file_selection_map_from_form(
+                        request.form,
+                        "simulation_data_file_selections",
+                    )
+                    simulation_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         simulation_folder_paths,
                         "Simulation outputs",
+                        data_file_selection_map=simulation_data_file_selections,
                     )
                     selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
                     selected_set = set(selected_analysis_paths)
@@ -8838,6 +9354,14 @@ def start_computation_redirect(computation_type):
                         entry for entry in simulation_entries
                         if str(entry.get("folder_path") or "") in selected_set
                     ]
+                    selected_data_entries = []
+                    for context in folder_contexts:
+                        folder_path = str(context.get("folder_path") or "").strip()
+                        if folder_path not in selected_set:
+                            continue
+                        selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if selected_data_entries:
+                        selected_entries = selected_data_entries
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     app.logger.warning(
@@ -8854,6 +9378,14 @@ def start_computation_redirect(computation_type):
             elif has_upload:
                 supported_uploads = []
                 for upload in simulation_uploads:
+                    raw_name = str(upload.filename or "").replace("\\", "/").strip()
+                    parts = [part for part in raw_name.split("/") if part not in {"", "."}]
+                    if len(parts) > 2:
+                        flash(
+                            f"Local simulation upload supports only flat folders. Nested path detected: {raw_name}",
+                            'error',
+                        )
+                        return redirect(request.referrer or url_for('features_methods'))
                     ext = Path(str(upload.filename or "")).suffix.lower()
                     if ext in FEATURES_PARSER_FILE_EXTENSIONS:
                         supported_uploads.append(upload)
@@ -8877,9 +9409,14 @@ def start_computation_redirect(computation_type):
                     plural_key="empirical_folder_paths",
                 )
                 try:
-                    empirical_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                    empirical_data_file_selections = _extract_data_file_selection_map_from_form(
+                        request.form,
+                        "empirical_data_file_selections",
+                    )
+                    empirical_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         empirical_folder_paths,
                         "Empirical",
+                        data_file_selection_map=empirical_data_file_selections,
                     )
                     selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
                     selected_set = set(selected_analysis_paths)
@@ -8887,6 +9424,14 @@ def start_computation_redirect(computation_type):
                         entry for entry in empirical_entries
                         if str(entry.get("folder_path") or "") in selected_set
                     ]
+                    selected_data_entries = []
+                    for context in folder_contexts:
+                        folder_path = str(context.get("folder_path") or "").strip()
+                        if folder_path not in selected_set:
+                            continue
+                        selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if selected_data_entries:
+                        selected_entries = selected_data_entries
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     app.logger.warning(
@@ -8910,6 +9455,15 @@ def start_computation_redirect(computation_type):
                     )
                     return redirect(request.referrer or url_for('features_methods'))
                 empirical_uploads = [f for f in _ensure_files_parsed().getlist("empirical_files") if f and f.filename]
+                for upload in empirical_uploads:
+                    raw_name = str(upload.filename or "").replace("\\", "/").strip()
+                    parts = [part for part in raw_name.split("/") if part not in {"", "."}]
+                    if len(parts) > 2:
+                        flash(
+                            f"Local empirical upload supports only flat folders. Nested path detected: {raw_name}",
+                            'error',
+                        )
+                        return redirect(request.referrer or url_for('features_methods'))
                 app.logger.warning("[compute %s] empirical upload count=%d", job_id, len(empirical_uploads))
                 if not empirical_uploads:
                     flash('Upload at least one empirical recording file (folder upload is supported).', 'error')
@@ -9204,20 +9758,33 @@ def start_computation_redirect(computation_type):
                     plural_key="simulation_folder_paths",
                 )
                 if simulation_folder_paths:
-                    source_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                    simulation_data_file_selections = _extract_data_file_selection_map_from_form(
+                        request.form,
+                        "simulation_data_file_selections",
+                    )
+                    source_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         simulation_folder_paths,
                         "Simulation outputs",
+                        data_file_selection_map=simulation_data_file_selections,
                     )
                     selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
                     selected_path_set = set(selected_analysis_paths)
-                    source_entries = [
+                    selected_entries = [
                         entry for entry in source_entries
                         if str(entry.get("folder_path") or "") in selected_path_set
                     ]
-                    if not source_entries:
+                    selected_data_entries = []
+                    for context in folder_contexts:
+                        folder_path = str(context.get("folder_path") or "").strip()
+                        if folder_path not in selected_path_set:
+                            continue
+                        selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if selected_data_entries:
+                        selected_entries = selected_data_entries
+                    if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     use_prefix = len(folder_summaries) > 1
-                    for entry in source_entries:
+                    for entry in selected_entries:
                         logical_name = _prefixed_file_name(
                             entry["name"],
                             entry.get("folder_name"),
@@ -9246,6 +9813,11 @@ def start_computation_redirect(computation_type):
                         parts = [part for part in raw_name.split("/") if part not in {"", "."}]
                         if not parts or any(part == ".." for part in parts):
                             continue
+                        if len(parts) > 2:
+                            raise ValueError(
+                                f"Local simulation upload supports only flat folders. "
+                                f"Nested path detected: {raw_name}"
+                            )
                         top_folder = secure_filename(parts[0]).strip("_") if len(parts) > 1 else ""
                         folder_token = top_folder or "selected_folder"
                         safe_name = secure_filename(parts[-1])
@@ -9364,20 +9936,33 @@ def start_computation_redirect(computation_type):
                         singular_key="empirical_folder_path",
                         plural_key="empirical_folder_paths",
                     )
-                    source_entries, folder_summaries, _ = _collect_supported_folder_file_entries(
+                    empirical_data_file_selections = _extract_data_file_selection_map_from_form(
+                        request.form,
+                        "empirical_data_file_selections",
+                    )
+                    source_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         empirical_folder_paths,
                         "Empirical",
+                        data_file_selection_map=empirical_data_file_selections,
                     )
                     selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
                     selected_path_set = set(selected_analysis_paths)
-                    source_entries = [
+                    selected_entries = [
                         entry for entry in source_entries
                         if str(entry.get("folder_path") or "") in selected_path_set
                     ]
-                    if not source_entries:
+                    selected_data_entries = []
+                    for context in folder_contexts:
+                        folder_path = str(context.get("folder_path") or "").strip()
+                        if folder_path not in selected_path_set:
+                            continue
+                        selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if selected_data_entries:
+                        selected_entries = selected_data_entries
+                    if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     use_prefix = len(folder_summaries) > 1
-                    for entry in source_entries:
+                    for entry in selected_entries:
                         logical_name = _prefixed_file_name(
                             entry["name"],
                             entry.get("folder_name"),
@@ -9406,6 +9991,11 @@ def start_computation_redirect(computation_type):
                         parts = [part for part in raw_name.split("/") if part not in {"", "."}]
                         if not parts or any(part == ".." for part in parts):
                             continue
+                        if len(parts) > 2:
+                            raise ValueError(
+                                f"Local empirical upload supports only flat folders. "
+                                f"Nested path detected: {raw_name}"
+                            )
                         top_folder = secure_filename(parts[0]).strip("_") if len(parts) > 1 else ""
                         folder_token = top_folder or "selected_folder"
                         safe_name = secure_filename(parts[-1])
@@ -9444,6 +10034,50 @@ def start_computation_redirect(computation_type):
                         raise ValueError(
                             f"Unknown local folder selected for feature extraction: {selected_token}"
                         )
+
+                    # Before folder filtering, try to resolve companion channel-names file
+                    # from any uploaded subfolder (e.g. channels/channels.mat alongside data/).
+                    if (
+                        getattr(parse_cfg, "fields", None) is not None
+                        and isinstance(getattr(parse_cfg.fields, "ch_names", None), str)
+                        and parse_cfg.fields.ch_names not in {"__self__", ""}
+                    ):
+                        _ch_loc = parse_cfg.fields.ch_names
+                        from compute_utils import _load_uploaded_source_path, _flatten_matlab_ch_names
+                        for _up, _sname, _tf, _ftok in upload_items:
+                            if os.path.splitext(_sname)[0].lower() != _ch_loc.lower():
+                                continue
+                            _ext = Path(_sname).suffix.lower()
+                            if _ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                                continue
+                            _tmp = os.path.join(module_upload_dir, f"companion_{job_id}_{secure_filename(_sname)}")
+                            try:
+                                _up.seek(0)
+                                _up.save(_tmp)
+                                _obj = _load_uploaded_source_path(_tmp, _sname, _ext)
+                                if isinstance(_obj, dict):
+                                    _key = _ch_loc if _ch_loc in _obj else next(
+                                        (k for k in _obj if isinstance(k, str) and not k.startswith("_") and k.lower() == _ch_loc.lower()),
+                                        None,
+                                    )
+                                    if _key:
+                                        _names = _flatten_matlab_ch_names(_obj[_key])
+                                        if _names:
+                                            parse_cfg = _copy_parse_config(
+                                                parse_cfg,
+                                                fields=_copy_canonical_fields(parse_cfg.fields, ch_names=_names),
+                                            )
+                                            parser_config_obj = parse_cfg
+                            except Exception:
+                                pass
+                            finally:
+                                try:
+                                    if os.path.exists(_tmp):
+                                        os.remove(_tmp)
+                                except Exception:
+                                    pass
+                            break
+
                     if selected_token:
                         upload_items = [row for row in upload_items if row[3] == selected_token]
                     if not upload_items:

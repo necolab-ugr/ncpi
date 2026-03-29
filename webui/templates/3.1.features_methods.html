@@ -32,7 +32,7 @@
             }
         }
         const supportedParserFileExtensions = new Set([
-            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather'
+            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather', '.set', '.tsv'
         ]);
         return {
             activeTab: initialActiveTab,
@@ -53,6 +53,7 @@
             parserError: '',
             parserAnalysisFolderPaths: [],
             parserAnalysisFolderNames: [],
+            empiricalDataFileSelections: {},
             empiricalFileCount: 0,
             empiricalSampleName: '',
             empiricalUploadSummary: '',
@@ -63,6 +64,7 @@
             simulationListedFileNames: [],
             simulationFolderExtensionError: '',
             simulationFolderPaths: [],
+            simulationDataFileSelections: {},
             simulationLocalFiles: [],
             appendSimulationSelection: false,
             simulationDropActive: false,
@@ -186,8 +188,10 @@
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
                 this.simulationInspectedSamples = [];
+                this.simulationFolderExtensionError = '';
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
+                this.simulationDataFileSelections = {};
                 this.simulationListedFileNames = [];
                 this.simulationLocalFiles = [];
                 this.appendSimulationSelection = false;
@@ -227,24 +231,46 @@
                 this.simulationLocalFiles = merged;
                 this.submitError = '';
                 this.parserError = '';
+                this.simulationFolderExtensionError = '';
                 this.dataSourceKind = 'new-simulation';
                 this.selectedPipelinePath = '';
                 this.simulationSourceMode = 'upload';
                 this.simulationDropActive = false;
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
+                this.simulationDataFileSelections = {};
                 this.simulationFileCount = merged.length;
                 this.simulationSampleName = merged.length > 0 ? (merged[0].webkitRelativePath || merged[0].name || '') : '';
                 this.simulationInspectedSamples = [];
                 this.simulationListedFileNames = merged
                     .map((item) => String(item?.webkitRelativePath || item?.name || '').trim())
                     .filter((item) => item.length > 0);
+                const nestedEntry = this.simulationListedFileNames.find((entry) => {
+                    const normalized = String(entry || '').replace(/\\/g, '/');
+                    const parts = normalized.split('/').map((part) => String(part || '').trim()).filter((part) => part && part !== '.');
+                    return parts.length > 2;
+                });
+                if (nestedEntry) {
+                    const message = `Local upload supports only flat folders. Nested path detected: ${nestedEntry}`;
+                    this.simulationFolderExtensionError = message;
+                    this.parserError = message;
+                    this.simulationFileCount = 0;
+                    this.simulationSampleName = '';
+                    this.simulationInspectedSamples = [];
+                    this.simulationListedFileNames = [];
+                    this.simulationLocalFiles = [];
+                    this.persistSimulationLocalFiles([]);
+                    delete this.uploads['data-file'];
+                    this.parserInfo = null;
+                    return;
+                }
                 if (merged.length > 0) {
                     this.uploads['data-file'] = { name: `${merged.length} file(s) selected from local folder(s)`, uploaded: false };
                     this.empiricalFolderPath = '';
                     this.empiricalFileCount = 0;
                     this.empiricalSampleName = '';
                     this.empiricalUploadSummary = '';
+                    this.empiricalDataFileSelections = {};
                     this.clearEmpiricalUploadInput();
                     this.resetParserConfig();
                     const inspectCandidate = merged.find((item) => {
@@ -265,6 +291,7 @@
                     this.parserInfo = null;
                     this.simulationListedFileNames = [];
                     this.simulationLocalFiles = [];
+                    this.simulationDataFileSelections = {};
                 }
             },
             onSimulationDrop(event) {
@@ -290,6 +317,7 @@
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.empiricalListedFileNames = [];
+                this.empiricalDataFileSelections = {};
                 if (nextMode === 'server-path') {
                     this.clearEmpiricalUploadInput();
                     this.empiricalFolderPath = '';
@@ -305,6 +333,7 @@
                 this.selectedPipelinePath = '';
                 this.empiricalSourceMode = 'upload';
                 this.empiricalFolderPath = '';
+                this.empiricalDataFileSelections = {};
                 this.empiricalFileCount = files.length;
                 this.empiricalSampleName = files.length > 0 ? files[0].name : '';
                 this.empiricalUploadSummary = files.length > 0 ? `${files.length} file(s) selected from local folder` : '';
@@ -387,6 +416,11 @@
                 const current = Array.isArray(this.simulationFolderPaths) ? [...this.simulationFolderPaths] : [];
                 this.simulationFolderPaths = current.filter((item) => String(item || '').trim() !== removePath);
                 this.simulationFolderPath = this.simulationFolderPaths.length > 0 ? this.simulationFolderPaths[0] : '';
+                if (this.simulationDataFileSelections && typeof this.simulationDataFileSelections === 'object') {
+                    const nextSelections = { ...this.simulationDataFileSelections };
+                    delete nextSelections[removePath];
+                    this.simulationDataFileSelections = nextSelections;
+                }
                 if (this.simulationFolderPaths.length > 0) {
                     await this.inspectSimulationFolderPath();
                     return;
@@ -394,11 +428,98 @@
                 this.simulationFolderExtensionError = '';
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
+                this.simulationDataFileSelections = {};
                 this.parserInfo = null;
             },
             isMultipleFolderExtensionError(message) {
                 const token = String(message || '').toLowerCase();
                 return token.includes('contains multiple supported file extensions');
+            },
+            normalizeDataFileSelectionMap(rawMap, allowedPaths = null) {
+                const out = {};
+                const mapObj = rawMap && typeof rawMap === 'object' ? rawMap : {};
+                const allowedSet = Array.isArray(allowedPaths) && allowedPaths.length > 0
+                    ? new Set(allowedPaths.map((item) => String(item || '').trim()).filter((item) => item.length > 0))
+                    : null;
+                for (const [rawPath, rawSelection] of Object.entries(mapObj)) {
+                    const folderPath = String(rawPath || '').trim();
+                    const selectedFile = String(rawSelection || '').trim();
+                    if (!folderPath || !selectedFile) continue;
+                    if (allowedSet && !allowedSet.has(folderPath)) continue;
+                    out[folderPath] = selectedFile;
+                }
+                return out;
+            },
+            syncDataFileSelectionsFromPayload(payload, mode = 'simulation') {
+                const profiles = Array.isArray(payload?.folder_structure_profiles)
+                    ? payload.folder_structure_profiles
+                    : [];
+                const nestedPaths = profiles
+                    .filter((profile) => !!profile?.has_nested_subfolders)
+                    .map((profile) => String(profile?.folder_path || '').trim())
+                    .filter((path) => path.length > 0);
+                const payloadSelections = this.normalizeDataFileSelectionMap(payload?.data_file_selection_map, nestedPaths);
+                const previousSelections = mode === 'empirical'
+                    ? this.normalizeDataFileSelectionMap(this.empiricalDataFileSelections, nestedPaths)
+                    : this.normalizeDataFileSelectionMap(this.simulationDataFileSelections, nestedPaths);
+                const nextSelections = nestedPaths.length > 0
+                    ? (Object.keys(payloadSelections).length > 0 ? payloadSelections : previousSelections)
+                    : {};
+                if (mode === 'empirical') {
+                    this.empiricalDataFileSelections = nextSelections;
+                } else {
+                    this.simulationDataFileSelections = nextSelections;
+                }
+            },
+            parserFolderStructureProfiles() {
+                return Array.isArray(this.parserInfo?.folder_structure_profiles)
+                    ? this.parserInfo.folder_structure_profiles
+                    : [];
+            },
+            parserFolderStructureByPath(folderPath) {
+                const pathToken = String(folderPath || '').trim();
+                if (!pathToken) return null;
+                return this.parserFolderStructureProfiles().find(
+                    (profile) => String(profile?.folder_path || '').trim() === pathToken
+                ) || null;
+            },
+            parserFolderDataFileCandidates(folderProfile) {
+                const profile = this.parserFolderStructureByPath(folderProfile?.folder_path);
+                return Array.isArray(profile?.data_file_candidates) ? profile.data_file_candidates : [];
+            },
+            parserFolderSelectedDataFile(folderProfile) {
+                const folderPath = String(folderProfile?.folder_path || '').trim();
+                if (!folderPath) return '';
+                const kind = this.resolvedDataSourceKind();
+                const explicit = kind === 'new-empirical'
+                    ? String((this.empiricalDataFileSelections || {})[folderPath] || '').trim()
+                    : String((this.simulationDataFileSelections || {})[folderPath] || '').trim();
+                if (explicit) return explicit;
+                const profile = this.parserFolderStructureByPath(folderPath);
+                return String(profile?.selected_data_file || folderProfile?.selected_data_file || '').trim();
+            },
+            async onFolderDataFileSelection(folderProfile, selectedValue) {
+                const folderPath = String(folderProfile?.folder_path || '').trim();
+                const value = String(selectedValue || '').trim();
+                if (!folderPath || !value) return;
+                const kind = this.resolvedDataSourceKind();
+                if (kind === 'new-empirical') {
+                    const current = String((this.empiricalDataFileSelections || {})[folderPath] || '').trim();
+                    if (current === value) return;
+                    this.empiricalDataFileSelections = {
+                        ...(this.empiricalDataFileSelections || {}),
+                        [folderPath]: value,
+                    };
+                    await this.inspectEmpiricalFolderPath();
+                    return;
+                }
+                const current = String((this.simulationDataFileSelections || {})[folderPath] || '').trim();
+                if (current === value) return;
+                this.simulationDataFileSelections = {
+                    ...(this.simulationDataFileSelections || {}),
+                    [folderPath]: value,
+                };
+                await this.inspectSimulationFolderPath();
             },
             async chooseServerDirectory() {
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
@@ -544,7 +665,30 @@
                 const folder = this.selectedAnalysisFolderSummary();
                 return folder ? String(folder?.folder_name || '').trim() : '';
             },
+            parserDataFileCandidateFields() {
+                const explicit = Array.isArray(this.parserInfo?.data_file_candidate_fields)
+                    ? this.parserInfo.data_file_candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0)
+                    : [];
+                if (explicit.length > 0) return explicit;
+                return Array.isArray(this.parserInfo?.candidate_fields)
+                    ? this.parserInfo.candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0)
+                    : [];
+            },
             parserDataframeCandidateFields() {
+                const dataFileSourceType = String(this.parserInfo?.data_file_source_type || '').trim().toLowerCase();
+                const explicitDataFile = Array.isArray(this.parserInfo?.data_file_dataframe_candidate_fields)
+                    ? this.parserInfo.data_file_dataframe_candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0)
+                    : [];
+                if (explicitDataFile.length > 0) return explicitDataFile;
+                if (dataFileSourceType && dataFileSourceType !== 'dataframe') return [];
+                if (dataFileSourceType === 'dataframe') return this.parserDataFileCandidateFields();
+
                 const explicit = Array.isArray(this.parserInfo?.dataframe_candidate_fields)
                     ? this.parserInfo.dataframe_candidate_fields
                         .map((field) => String(field || '').trim())
@@ -564,26 +708,24 @@
                 }
                 if (fromDetails.length > 0) return fromDetails;
 
-                if (String(this.parserInfo?.source_type || '').trim().toLowerCase() === 'dataframe') {
-                    return Array.isArray(this.parserInfo?.candidate_fields)
-                        ? this.parserInfo.candidate_fields
-                            .map((field) => String(field || '').trim())
-                            .filter((field) => field.length > 0)
-                        : [];
+                const sourceType = String(
+                    this.parserInfo?.data_file_source_type || this.parserInfo?.source_type || ''
+                ).trim().toLowerCase();
+                if (sourceType === 'dataframe') {
+                    return this.parserDataFileCandidateFields();
                 }
                 return [];
             },
             parserFallbackDataCandidateFields() {
-                return Array.isArray(this.parserInfo?.candidate_fields)
-                    ? this.parserInfo.candidate_fields
-                        .map((field) => String(field || '').trim())
-                        .filter((field) => field.length > 0 && !this.parserIsVirtualField(field))
-                    : [];
+                return this.parserDataFileCandidateFields()
+                    .filter((field) => field.length > 0 && !this.parserIsVirtualField(field));
             },
             parserUsingFallbackDataFields() {
                 const dataframeCandidates = this.parserDataframeCandidateFields();
                 if (dataframeCandidates.length > 0) return false;
-                const sourceType = String(this.parserInfo?.source_type || '').trim().toLowerCase();
+                const sourceType = String(
+                    this.parserInfo?.data_file_source_type || this.parserInfo?.source_type || ''
+                ).trim().toLowerCase();
                 if (!sourceType) return false;
                 if (sourceType === 'dataframe') {
                     return this.parserFallbackDataCandidateFields().length > 0;
@@ -756,12 +898,14 @@
                     this.clearSimulationUploadInput();
                     this.simulationFolderPath = '';
                     this.simulationFolderPaths = [];
+                    this.simulationDataFileSelections = {};
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
                     this.simulationInspectedSamples = [];
                     this.simulationLocalFiles = [];
                 }
                 this.empiricalFolderPath = '';
+                this.empiricalDataFileSelections = {};
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.empiricalUploadSummary = '';
@@ -809,6 +953,7 @@
                 this.parserAggregateLabels = '';
                 this.parserAnalysisFolderPaths = [];
                 this.parserAnalysisFolderNames = [];
+                this.simulationFolderExtensionError = '';
             },
             selectPipeline(path) {
                 this.stopUploadWaitPulse();
@@ -824,6 +969,7 @@
                 this.empiricalFolderPath = '';
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
+                this.simulationDataFileSelections = {};
                 this.selectedPipelinePath = path;
                 this.dataSourceKind = 'pipeline';
                 this.clearSimulationUploadInput();
@@ -831,9 +977,11 @@
                 this.simulationSampleName = '';
                 this.simulationInspectedSamples = [];
                 this.simulationLocalFiles = [];
+                this.simulationFolderExtensionError = '';
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.empiricalUploadSummary = '';
+                this.empiricalDataFileSelections = {};
                 this.clearEmpiricalUploadInput();
                 const simInput = document.getElementById('data-file');
                 if (simInput) simInput.value = '';
@@ -855,15 +1003,18 @@
                 this.empiricalFolderPath = '';
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
+                this.simulationDataFileSelections = {};
                 this.dataSourceKind = 'new-simulation';
                 this.selectedPipelinePath = '';
                 this.simulationFileCount = 0;
                 this.simulationSampleName = '';
                 this.simulationInspectedSamples = [];
                 this.simulationLocalFiles = file ? [file] : [];
+                this.simulationFolderExtensionError = '';
                 this.empiricalFileCount = 0;
                 this.empiricalSampleName = '';
                 this.empiricalUploadSummary = '';
+                this.empiricalDataFileSelections = {};
                 this.clearEmpiricalUploadInput();
                 this.resetParserConfig();
                 this.inspectParserSource('', file);
@@ -897,6 +1048,13 @@
                     const formData = new FormData();
                     formData.append('simulation_folder_paths', JSON.stringify(folderPaths));
                     if (folderPaths.length === 1) formData.append('simulation_folder_path', folderPaths[0]);
+                    const simulationSelections = this.normalizeDataFileSelectionMap(
+                        this.simulationDataFileSelections,
+                        folderPaths,
+                    );
+                    if (Object.keys(simulationSelections).length > 0) {
+                        formData.append('simulation_data_file_selections', JSON.stringify(simulationSelections));
+                    }
                     const response = await fetch('{{ url_for('features_parser_inspect') }}', {
                         method: 'POST',
                         body: formData,
@@ -904,6 +1062,7 @@
                     const payload = await response.json();
                     if (!response.ok) throw new Error(payload.error || 'Failed to inspect simulation outputs folder.');
                     this.parserInfo = payload;
+                    this.syncDataFileSelectionsFromPayload(payload, 'simulation');
                     this.applyParserDefaults(payload);
                     this.simulationFileCount = Number(payload.folder_file_count || 0);
                     this.simulationSampleName = payload.source_name || '';
@@ -927,14 +1086,15 @@
                     this.simulationFolderPaths = reportedFolders.length > 0 ? reportedFolders : folderPaths;
                     this.simulationFolderPath = this.simulationFolderPaths.length > 0 ? this.simulationFolderPaths[0] : '';
                     this.simulationListedFileNames = [];
+                    this.simulationFolderExtensionError = '';
                     this.dataSourceKind = 'new-simulation';
                     this.selectedPipelinePath = '';
                 } catch (error) {
                     const message = error.message || 'Failed to inspect simulation outputs folder.';
                     this.parserError = message;
-                    if (this.isMultipleFolderExtensionError(message)) {
-                        this.simulationFolderExtensionError = 'Warning: in this folder there is more than one type of file extension. Please, select a folder that contains files with the same file extension.';
-                    }
+                    this.simulationFolderExtensionError = this.isMultipleFolderExtensionError(message)
+                        ? 'Warning: in this folder there is more than one type of file extension. Please, select a folder that contains files with the same file extension.'
+                        : message;
                     this.simulationFileCount = 0;
                     this.simulationSampleName = '';
                     this.simulationInspectedSamples = [];
@@ -966,6 +1126,13 @@
                     this.empiricalUploadSummary = '';
                     const formData = new FormData();
                     formData.append('empirical_folder_path', folder);
+                    const empiricalSelections = this.normalizeDataFileSelectionMap(
+                        this.empiricalDataFileSelections,
+                        [folder],
+                    );
+                    if (Object.keys(empiricalSelections).length > 0) {
+                        formData.append('empirical_data_file_selections', JSON.stringify(empiricalSelections));
+                    }
                     const response = await fetch('{{ url_for('features_parser_inspect') }}', {
                         method: 'POST',
                         body: formData,
@@ -973,6 +1140,7 @@
                     const payload = await response.json();
                     if (!response.ok) throw new Error(payload.error || 'Failed to inspect empirical folder.');
                     this.parserInfo = payload;
+                    this.syncDataFileSelectionsFromPayload(payload, 'empirical');
                     this.applyParserDefaults(payload);
                     this.empiricalFileCount = Number(payload.folder_file_count || 0);
                     this.empiricalSampleName = payload.source_name || '';
@@ -1015,11 +1183,18 @@
             },
             applyParserDefaults(payload) {
                 this.syncAnalysisFolderSelection(payload);
+                const dataFileCandidates = this.parserDataFileCandidateFields();
                 const defaults = payload?.defaults || {};
                 const dataCandidates = this.parserDataLocatorCandidates();
                 const autoData = this.autoPickCandidateField(['lfp', 'eeg', 'meg', 'ecog', 'signal', 'data'], dataCandidates);
-                const autoFs = this.autoPickCandidateField(['fs', 'sfreq', 'freq', 'frequency', 'sampling_rate', 'sampling_frequency']);
-                const autoChannels = this.autoPickCandidateField(['ch_names', 'channels', 'channel_names', 'channel', 'sensors', 'sensor', 'ch']);
+                const autoFs = this.autoPickCandidateField(
+                    ['fs', 'sfreq', 'freq', 'frequency', 'sampling_rate', 'sampling_frequency'],
+                    dataFileCandidates,
+                );
+                const autoChannels = this.autoPickCandidateField(
+                    ['ch_names', 'channels', 'channel_names', 'channel', 'sensors', 'sensor', 'ch'],
+                    dataFileCandidates,
+                );
                 const defaultData = String(defaults.data || '').trim();
                 const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
                 if (!this.parserDataLocator || !dataCandidates.includes(String(this.parserDataLocator || '').trim())) {
@@ -1837,8 +2012,10 @@
                     <input type="hidden" name="empirical_source_mode" :value="empiricalSourceMode">
                     <input type="hidden" name="empirical_folder_path" :value="empiricalFolderPath">
                     <input type="hidden" name="empirical_folder_paths" :value="JSON.stringify(empiricalFolderPath ? [empiricalFolderPath] : [])">
+                    <input type="hidden" name="empirical_data_file_selections" :value="JSON.stringify(empiricalDataFileSelections || {})">
                     <input type="hidden" name="simulation_folder_path" :value="simulationFolderPath">
                     <input type="hidden" name="simulation_folder_paths" :value="JSON.stringify(simulationFolderPaths || [])">
+                    <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
                     <input type="hidden" name="parser_analysis_folder_paths" :value="JSON.stringify(parserAnalysisFolderPaths || [])">
                     <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
 
@@ -2031,6 +2208,34 @@
                                         <div class="text-sm font-semibold text-[#34495E] dark:text-white" x-text="folderProfile.folder_name || folderProfile.folder_path"></div>
                                         <div class="text-[11px] font-mono text-gray-500 dark:text-gray-400 break-all" x-show="folderProfile.folder_path" x-text="folderProfile.folder_path"></div>
                                         <div class="text-xs text-gray-500 dark:text-gray-400"><span x-text="folderProfile.file_count || 0"></span> file(s)</div>
+                                    </div>
+
+                                    <div x-show="folderProfile.has_nested_subfolders" class="space-y-2 rounded-lg border border-red-200/70 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3">
+                                        <h4 class="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">Nested subfolder structure detected</h4>
+                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90">
+                                            Sample subfolder:
+                                            <span class="font-mono" x-text="folderProfile.sample_subfolder_name || '-'"></span>
+                                        </p>
+                                        <label class="text-xs block">
+                                            <span class="block text-red-800/90 dark:text-red-200/90 mb-1">Data file in sample subfolder</span>
+                                            <select
+                                                class="w-full rounded-lg border-red-200 dark:border-red-900/60 bg-white dark:bg-[#191e33] text-xs"
+                                                :value="parserFolderSelectedDataFile(folderProfile)"
+                                                @change="onFolderDataFileSelection(folderProfile, $event.target.value)">
+                                                <option value="">Select</option>
+                                                <template x-for="candidate in parserFolderDataFileCandidates(folderProfile)" :key="'data-file-candidate-'+(folderProfile.folder_path || folderProfile.folder_name)+'-'+candidate.value">
+                                                    <option :value="candidate.value" x-text="candidate.label || candidate.value"></option>
+                                                </template>
+                                            </select>
+                                        </label>
+                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="folderProfile.selected_data_pattern">
+                                            Homologous matching pattern:
+                                            <span class="font-mono" x-text="folderProfile.selected_data_pattern"></span>
+                                        </p>
+                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="(folderProfile.matched_data_files || []).length > 0">
+                                            Matched data files:
+                                            <span x-text="(folderProfile.matched_data_files || []).length"></span>
+                                        </p>
                                     </div>
 
                                     <div x-show="(folderProfile.extension_summaries || []).length > 0" class="space-y-2">
