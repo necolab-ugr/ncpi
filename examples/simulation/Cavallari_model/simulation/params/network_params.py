@@ -1,18 +1,18 @@
-# Cavallari et al. (2014) conductance-based recurrent network parameters.
+# Cavallari et al. (2014) conductance-based recurrent network parameters
 
 Network_params = {
     "N_exc": 4000,
     "N_inh": 1000,
     "P": 0.2,
     "extent": 1.0,
-    "g_EE": 0.178,
-    "g_IE": 0.233,
-    "g_EI": -2.01,
-    "g_II": -2.70,
-    "g_th_exc_external": 0.234,
-    "g_th_inh_external": 0.317,
-    "g_cc_exc_external": 0.187,
-    "g_cc_inh_external": 0.254,
+    "exc_exc_recurrent": 0.178,
+    "exc_inh_recurrent": 0.233,
+    "inh_exc_recurrent": -2.01,
+    "inh_inh_recurrent": -2.70,
+    "th_exc_external": 0.234,
+    "th_inh_external": 0.317,
+    "cc_exc_external": 0.187,
+    "cc_inh_external": 0.254,
     "v_0": 1.5,
     "A_ext": 0.0,
     "f_ext": 0.0,

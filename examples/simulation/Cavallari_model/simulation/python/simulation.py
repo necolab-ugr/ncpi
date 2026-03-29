@@ -1,11 +1,11 @@
 import os
 import pickle
 import sys
-import nest
 import time
-import numpy as np
 from importlib import util
 from pathlib import Path
+import nest
+import numpy as np
 
 
 MODULE_CANDIDATES = (
@@ -15,15 +15,96 @@ MODULE_CANDIDATES = (
 )
 
 
-class LIF_network(object):
-    """
-    Class to create and simulate a LIF network model.
-    """
+def _node_ids(nodes):
+    return list(nodes.tolist())
 
-    def __init__(self, LIF_params, tstop):
-        # Parameters of the LIF network model
-        self.LIF_params = LIF_params
-        self.tstop = tstop
+
+def _update_dicts(dict1, dict2):
+    merged = dict(dict1)
+    merged.update(dict2)
+    return merged
+
+
+def _default_analysis_params():
+    return {
+        "To_be_measured": ["V_m", "g_ex", "g_in"],
+        "cells_to_analyze": [i for i in range(10)],
+    }
+
+
+class network:
+    """NEST 3.8 reproduction of the original pablomc88's network_1.py flow."""
+
+    def __init__(
+        self,
+        Network_params,
+        Neuron_params,
+        Simulation_params,
+        External_input_params,
+        Analysis_params,
+    ):
+        self.N_exc = Network_params["N_exc"]
+        self.N_inh = Network_params["N_inh"]
+        self.P = Network_params["P"]
+        self.extent = Network_params["extent"]
+        self.exc_exc_recurrent = Network_params["exc_exc_recurrent"]
+        self.exc_inh_recurrent = Network_params["exc_inh_recurrent"]
+        self.inh_inh_recurrent = Network_params["inh_inh_recurrent"]
+        self.inh_exc_recurrent = Network_params["inh_exc_recurrent"]
+        self.th_exc_external = Network_params["th_exc_external"]
+        self.th_inh_external = Network_params["th_inh_external"]
+        self.cc_exc_external = Network_params["cc_exc_external"]
+        self.cc_inh_external = Network_params["cc_inh_external"]
+
+        self.excitatory_cell_params = {
+            "V_th": Neuron_params[0]["V_th"],
+            "V_reset": Neuron_params[0]["V_reset"],
+            "t_ref": Neuron_params[0]["t_ref"],
+            "g_L": Neuron_params[0]["g_L"],
+            "C_m": Neuron_params[0]["C_m"],
+            "E_ex": Neuron_params[0]["E_ex"],
+            "E_in": Neuron_params[0]["E_in"],
+            "E_L": Neuron_params[0]["E_L"],
+            "tau_rise_AMPA": Neuron_params[0]["tau_rise_AMPA"],
+            "tau_decay_AMPA": Neuron_params[0]["tau_decay_AMPA"],
+            "tau_rise_GABA_A": Neuron_params[0]["tau_rise_GABA_A"],
+            "tau_decay_GABA_A": Neuron_params[0]["tau_decay_GABA_A"],
+            "tau_m": Neuron_params[0]["tau_m"],
+            "I_e": Neuron_params[0]["I_e"],
+        }
+        self.inhibitory_cell_params = {
+            "V_th": Neuron_params[1]["V_th"],
+            "V_reset": Neuron_params[1]["V_reset"],
+            "t_ref": Neuron_params[1]["t_ref"],
+            "g_L": Neuron_params[1]["g_L"],
+            "C_m": Neuron_params[1]["C_m"],
+            "E_ex": Neuron_params[1]["E_ex"],
+            "E_in": Neuron_params[1]["E_in"],
+            "E_L": Neuron_params[1]["E_L"],
+            "tau_rise_AMPA": Neuron_params[1]["tau_rise_AMPA"],
+            "tau_decay_AMPA": Neuron_params[1]["tau_decay_AMPA"],
+            "tau_rise_GABA_A": Neuron_params[1]["tau_rise_GABA_A"],
+            "tau_decay_GABA_A": Neuron_params[1]["tau_decay_GABA_A"],
+            "tau_m": Neuron_params[1]["tau_m"],
+            "I_e": Neuron_params[1]["I_e"],
+        }
+
+        self.simtime = Simulation_params["simtime"]
+        self.simstep = Simulation_params["simstep"]
+        self.num_threads = Simulation_params["num_threads"]
+        self.toMemory = Simulation_params["toMemory"]
+
+        self.v_0 = External_input_params["v_0"]
+        self.A_ext = External_input_params["A_ext"]
+        self.f_ext = External_input_params["f_ext"]
+        self.OU_sigma = External_input_params["OU_sigma"]
+        self.OU_tau = External_input_params["OU_tau"]
+
+        self.To_be_measured = Analysis_params["To_be_measured"]
+        self.cells_to_analyze = Analysis_params["cells_to_analyze"]
+
+        self.external_rate_profile = {}
+        self.selected_spike_recorders = {}
 
     def _ensure_custom_model_available(self):
         if "iaf_bw_2003" in nest.node_models:
@@ -31,7 +112,7 @@ class LIF_network(object):
 
         model_root = Path(__file__).resolve().parents[2] / "neuron_model"
         for rel_parts in MODULE_CANDIDATES:
-            if len(rel_parts) == 1 and rel_parts[0] == "cavallari_module":
+            if rel_parts == ("cavallari_module",):
                 try:
                     nest.Install(rel_parts[0])
                 except Exception:
@@ -54,219 +135,388 @@ class LIF_network(object):
             f"Build it first with `{install_script}`."
         )
 
-    def _build_external_rate_profiles(self, dt):
-        network_params = self.LIF_params["network_params"]
-        time_array = np.arange(dt, self.tstop - dt, dt, dtype=float)
-        if time_array.size == 0:
-            empty = np.array([], dtype=float)
-            return empty, empty, empty
+    def _random_positions(self, n_nodes):
+        return [
+            [
+                np.random.uniform(-self.extent / 2.0, self.extent / 2.0),
+                np.random.uniform(-self.extent / 2.0, self.extent / 2.0),
+            ]
+            for _ in range(int(n_nodes))
+        ]
 
-        ou_sigma = float(network_params["OU_sigma"])
-        ou_tau = float(network_params["OU_tau"])
-        ou_x = np.zeros(time_array.size, dtype=float)
-        if ou_tau <= 0:
-            raise ValueError("OU_tau must be positive.")
-
-        ou_sigma_bis = ou_sigma * np.sqrt(2.0 / ou_tau)
-        ou_sqrtdt = np.sqrt(dt)
-        for idx in range(time_array.size - 1):
-            ou_x[idx + 1] = (
-                ou_x[idx]
-                + dt * (-ou_x[idx] / ou_tau)
-                + ou_sigma_bis * ou_sqrtdt * np.random.randn()
-            )
-
-        v_signal = (
-            float(network_params["A_ext"]) * np.sin(2.0 * np.pi * float(network_params["f_ext"]) * time_array / 1000.0)
-            + float(network_params["v_0"])
+    def _create_nodes(self, model, n_nodes):
+        positions = nest.spatial.free(
+            pos=self._random_positions(n_nodes),
+            extent=[self.extent, self.extent],
         )
-        # Keep the original two-stream construction. The cortical-cortical
-        # stream is clipped because Poisson generator rates must be non-negative.
-        thalamic_rate = 800.0 * v_signal
-        cortical_rate = 800.0 * np.clip(ou_x, a_min=0.0, a_max=None)
-        return time_array, thalamic_rate, cortical_rate
+        return nest.Create(model, int(n_nodes), positions=positions)
 
-    def create_LIF_network(self, local_num_threads, dt, rng_seed=None):
-        """
-        Create network nodes and connections.
-        """
-
+    def create_network(self, rng_seed=None):
+        np.random.seed(int(time.time()))
         if rng_seed is None:
-            rng_seed = int(1 + time.localtime().tm_mon *
-                           time.localtime().tm_mday *
-                           time.localtime().tm_hour *
-                           time.localtime().tm_min *
-                           time.localtime().tm_sec *
-                           np.random.rand(1)[0])
+            rng_seed = int((time.time() * 100) % (2 ** 32))
+
+        results_dir = Path(__file__).resolve().parents[1] / "results"
+        results_dir.mkdir(parents=True, exist_ok=True)
 
         nest.ResetKernel()
         nest.SetKernelStatus(
-            dict(
-                local_num_threads=local_num_threads,
-                rng_seed=int(rng_seed),
-                resolution=dt,
-                tics_per_ms=1000 / dt,
-                overwrite_files=True))
+            {
+                "local_num_threads": int(self.num_threads),
+                "resolution": float(self.simstep),
+                "data_path": str(results_dir.resolve()),
+                "rng_seed": int(rng_seed),
+            }
+        )
         self._ensure_custom_model_available()
 
-        # Neurons
-        self.neurons = {}
-        for X, N in zip(self.LIF_params["X"], self.LIF_params["N_X"]):
-            net_params = self.LIF_params["neuron_params"][X]
-            print("Creating population %s\n" % X, end=" ", flush=True)
-            self.neurons[X] = nest.Create(self.LIF_params["model"],
-                                          N, net_params)
+        nest.CopyModel("iaf_bw_2003", "exc_cell", self.excitatory_cell_params)
+        nest.CopyModel("iaf_bw_2003", "inh_cell", self.inhibitory_cell_params)
+        nest.CopyModel("inhomogeneous_poisson_generator", "thalamocortical_input")
+        nest.CopyModel("inhomogeneous_poisson_generator", "cortical_input")
 
-        # External inputs
-        rate_times, thalamic_rate, cortical_rate = self._build_external_rate_profiles(dt)
-        self.thalamic_input = nest.Create("inhomogeneous_poisson_generator", 1)
-        self.cortical_input = nest.Create("inhomogeneous_poisson_generator", 1)
-        nest.SetStatus(
-            self.thalamic_input,
-            dict(
-                rate_times=rate_times,
-                rate_values=thalamic_rate))
-        nest.SetStatus(
-            self.cortical_input,
-            dict(
-                rate_times=rate_times,
-                rate_values=cortical_rate))
+        self.exc = self._create_nodes("exc_cell", self.N_exc)
+        self.inh = self._create_nodes("inh_cell", self.N_inh)
+        self.thalamo = self._create_nodes("thalamocortical_input", 1)
+        self.cort = self._create_nodes("cortical_input", 1)
+        self.parrot_layer_th = self._create_nodes("parrot_neuron", self.N_exc + self.N_inh)
+        self.parrot_layer_cc = self._create_nodes("parrot_neuron", self.N_exc + self.N_inh)
+
+        time_array = np.arange(self.simstep, self.simtime - self.simstep, self.simstep)
+        OU_sigma_bis = self.OU_sigma * np.sqrt(2.0 / self.OU_tau)
+        OU_sqrtdt = np.sqrt(self.simstep)
+        OU_x = np.zeros(len(time_array), dtype=float)
+        for i in range(len(time_array) - 1):
+            OU_x[i + 1] = (
+                OU_x[i]
+                + self.simstep * (-OU_x[i] / self.OU_tau)
+                + OU_sigma_bis * OU_sqrtdt * np.random.randn()
+            )
+
+        v_signal = self.A_ext * np.sin(2.0 * np.pi * self.f_ext * time_array / 1000.0) + self.v_0
+        nest.SetStatus(self.thalamo, {"rate_times": time_array, "rate_values": v_signal})
+        nest.SetStatus(self.cort, {"rate_times": time_array, "rate_values": OU_x})
         self.external_rate_profile = {
-            "thalamic": dict(
-                rate_times=rate_times.copy(),
-                rate_values=thalamic_rate.copy(),
-            ),
-            "cortical": dict(
-                rate_times=rate_times.copy(),
-                rate_values=cortical_rate.copy(),
-            ),
+            "thalamic": {"rate_times": time_array.copy(), "rate_values": v_signal.copy()},
+            "cortical": {"rate_times": time_array.copy(), "rate_values": OU_x.copy()},
         }
 
-        # Spike recorders
-        self.spike_recorders = {}
-        for X in self.LIF_params["X"]:
-            self.spike_recorders[X] = nest.Create("spike_recorder", 1)
+        recurrent_pairs = (
+            (self.exc, self.exc, "exc_cell", "exc_cell", self.exc_exc_recurrent),
+            (self.exc, self.inh, "exc_cell", "inh_cell", self.exc_inh_recurrent),
+            (self.inh, self.inh, "inh_cell", "inh_cell", self.inh_inh_recurrent),
+            (self.inh, self.exc, "inh_cell", "exc_cell", self.inh_exc_recurrent),
+        )
+        for source_nodes, target_nodes, _, _, weight in recurrent_pairs:
+            nest.Connect(
+                source_nodes,
+                target_nodes,
+                {
+                    "rule": "pairwise_bernoulli",
+                    "p": float(self.P),
+                    "allow_autapses": False,
+                    "allow_multapses": False,
+                },
+                {
+                    "synapse_model": "static_synapse",
+                    "weight": float(weight),
+                    "delay": 1.0,
+                },
+            )
 
-        # Connections
-        for i, Y in enumerate(self.LIF_params["X"]):
-            # Recurrent connections
-            for j, X in enumerate(self.LIF_params["X"]):
-                conn_spec = dict(
-                    rule="pairwise_bernoulli",
-                    p=self.LIF_params["C_YX"][i][j],
-                    allow_autapses=False,
-                    allow_multapses=False,
-                )
-                print("Connecting %s with %s \n" % (X, Y), end=" ", flush=True)
-                syn_spec = dict(
-                    synapse_model="static_synapse",
-                    weight=self.LIF_params["g_YX"][i][j],
-                    delay=self.LIF_params["delay_YX"][i][j],
-                )
-
-                nest.Connect(
-                    self.neurons[X],
-                    self.neurons[Y],
-                    conn_spec,
-                    syn_spec)
-
-            # Recorders
-            nest.Connect(self.neurons[Y], self.spike_recorders[Y])
-
-        # External inputs keep the original thalamic/cortical split, but
-        # connect directly to neurons since each target already receives an
-        # independent Poisson train from the generator.
-        network_params = self.LIF_params["network_params"]
+        parrot_conn_spec = {
+            "rule": "fixed_indegree",
+            "indegree": 800,
+            "allow_autapses": False,
+            "allow_multapses": True,
+        }
         nest.Connect(
-            self.thalamic_input,
-            self.neurons["E"],
-            "all_to_all",
-            dict(weight=network_params["g_th_exc_external"]))
+            self.thalamo,
+            self.parrot_layer_th,
+            parrot_conn_spec,
+            {"synapse_model": "static_synapse", "weight": 1.0, "delay": 1.0},
+        )
         nest.Connect(
-            self.cortical_input,
-            self.neurons["E"],
-            "all_to_all",
-            dict(weight=network_params["g_cc_exc_external"]))
-        nest.Connect(
-            self.thalamic_input,
-            self.neurons["I"],
-            "all_to_all",
-            dict(weight=network_params["g_th_inh_external"]))
-        nest.Connect(
-            self.cortical_input,
-            self.neurons["I"],
-            "all_to_all",
-            dict(weight=network_params["g_cc_inh_external"]))
+            self.cort,
+            self.parrot_layer_cc,
+            parrot_conn_spec,
+            {"synapse_model": "static_synapse", "weight": 1.0, "delay": 1.0},
+        )
 
-    def simulate(self, tstop):
-        """Instantiate and run simulation"""
-        nest.Simulate(tstop)
+        parrot_n_th = _node_ids(self.parrot_layer_th)
+        parrot_n_cc = _node_ids(self.parrot_layer_cc)
 
+        i = 0
+        for n in _node_ids(self.exc):
+            nest.Connect(
+                nest.NodeCollection([parrot_n_th[i]]),
+                nest.NodeCollection([n]),
+                "one_to_one",
+                {"synapse_model": "static_synapse", "weight": self.th_exc_external, "delay": 1.0},
+            )
+            nest.Connect(
+                nest.NodeCollection([parrot_n_cc[i]]),
+                nest.NodeCollection([n]),
+                "one_to_one",
+                {"synapse_model": "static_synapse", "weight": self.cc_exc_external, "delay": 1.0},
+            )
+            i += 1
 
-def _simulate_with_progress(tstop, dt, chunk_ms):
-    if tstop <= 0:
-        return
-    # Use chunks aligned to dt to reduce simulation-loop overhead while keeping progress updates.
-    step = max(dt, float(chunk_ms))
-    step = max(dt, round(step / dt) * dt)
-    total_segments = int(np.ceil(tstop / step))
-    total_segments = max(1, total_segments)
-    segment_idx = 0
-    sim_time = 0.0
-    while sim_time < tstop:
-        remaining = tstop - sim_time
-        this_step = step if remaining > step else remaining
-        if this_step <= 0:
-            break
-        nest.Simulate(this_step)
-        sim_time += this_step
-        segment_idx += 1
-        print(f"SIM_SEGMENT {segment_idx}/{total_segments}", flush=True)
+        for n in _node_ids(self.inh):
+            nest.Connect(
+                nest.NodeCollection([parrot_n_th[i]]),
+                nest.NodeCollection([n]),
+                "one_to_one",
+                {"synapse_model": "static_synapse", "weight": self.th_inh_external, "delay": 1.0},
+            )
+            nest.Connect(
+                nest.NodeCollection([parrot_n_cc[i]]),
+                nest.NodeCollection([n]),
+                "one_to_one",
+                {"synapse_model": "static_synapse", "weight": self.cc_inh_external, "delay": 1.0},
+            )
+            i += 1
+
+        record_to = "memory" if self.toMemory else "ascii"
+        if len(self.To_be_measured) > 0:
+            nest.CopyModel(
+                "multimeter",
+                "RecordingNode",
+                {
+                    "interval": float(self.simstep),
+                    "record_from": list(self.To_be_measured),
+                    "record_to": record_to,
+                },
+            )
+        nest.CopyModel(
+            "spike_recorder",
+            "SpikesRecorder",
+            {
+                "record_to": record_to,
+            },
+        )
+
+    def simulate_network(self, interval):
+        if len(self.To_be_measured) > 0:
+            self.subthreshold_recorders = []
+
+            rec_exc = nest.Create("RecordingNode")
+            nest.Connect(rec_exc, self.exc)
+            self.subthreshold_recorders.append(rec_exc)
+
+            rec_inh = nest.Create("RecordingNode")
+            nest.Connect(rec_inh, self.inh)
+            self.subthreshold_recorders.append(rec_inh)
+
+        self.spikes = []
+        self.mult_exc = nest.Create("spike_recorder", 1)
+        self.mult_inh = nest.Create("spike_recorder", 1)
+
+        sp_exc = nest.Create("SpikesRecorder")
+        nest.Connect(self.exc, sp_exc)
+        self.spikes.append(sp_exc)
+        if self.cells_to_analyze:
+            exc_ids = _node_ids(self.exc)
+            selected_exc = [exc_ids[i] for i in self.cells_to_analyze if i < len(exc_ids)]
+            if selected_exc:
+                nest.Connect(nest.NodeCollection(selected_exc), self.mult_exc)
+
+        sp_inh = nest.Create("SpikesRecorder")
+        nest.Connect(self.inh, sp_inh)
+        self.spikes.append(sp_inh)
+        if self.cells_to_analyze:
+            inh_ids = _node_ids(self.inh)
+            selected_inh = [inh_ids[i] for i in self.cells_to_analyze if i < len(inh_ids)]
+            if selected_inh:
+                nest.Connect(nest.NodeCollection(selected_inh), self.mult_inh)
+
+        sp_th = nest.Create("SpikesRecorder")
+        nest.Connect(self.parrot_layer_th, sp_th)
+        self.spikes.append(sp_th)
+
+        sp_cc = nest.Create("SpikesRecorder")
+        nest.Connect(self.parrot_layer_cc, sp_cc)
+        self.spikes.append(sp_cc)
+
+        print("\n--- Simulation ---\n")
+        nest.SetKernelStatus({"print_time": True})
+        nest.Simulate(float(interval))
+
+        n_rec = 2
+        data_v = []
+        for i in range(n_rec):
+            if len(self.To_be_measured) > 0:
+                data_v.append(nest.GetStatus(self.subthreshold_recorders[i], keys="events"))
+            else:
+                data_v.append([])
+
+        data_s = []
+        for i in range(n_rec + 2):
+            data_s.append(nest.GetStatus(self.spikes[i], keys="events"))
+
+        senders_v = []
+        for i in range(n_rec):
+            if len(self.To_be_measured) > 0:
+                senders_v.append(np.asarray(data_v[i][0]["senders"]))
+            else:
+                senders_v.append([])
+
+        senders_s = []
+        for i in range(n_rec + 2):
+            senders_s.append(np.asarray(data_s[i][0]["senders"]))
+
+        pop_ex = _node_ids(self.exc)
+        pop_in = _node_ids(self.inh)
+        pop_parrot_th = _node_ids(self.parrot_layer_th)
+        pop_parrot_cc = _node_ids(self.parrot_layer_cc)
+        pop_thalamo = _node_ids(self.thalamo)
+        pop_cc = _node_ids(self.cort)
+
+        return [
+            self.simtime,
+            data_v,
+            data_s,
+            senders_v,
+            senders_s,
+            pop_ex,
+            pop_in,
+            pop_thalamo,
+            pop_cc,
+            pop_parrot_th,
+            pop_parrot_cc,
+            self.mult_exc,
+            self.mult_inh,
+        ]
 
 
 def _resolve_chunking_config(module):
-    """Read optional chunking controls from the simulation params module."""
-    simulate_in_chunks = getattr(module, "simulate_in_chunks", True)
-    chunk_ms = getattr(module, "simulation_chunk_ms", 1000.0)
-
-    simulate_in_chunks = bool(simulate_in_chunks)
-    try:
-        chunk_ms = float(chunk_ms)
-    except (TypeError, ValueError) as exc:
-        raise TypeError("simulation_chunk_ms must be convertible to float.") from exc
-
+    simulate_in_chunks = bool(getattr(module, "simulate_in_chunks", True))
+    chunk_ms = float(getattr(module, "simulation_chunk_ms", 1000.0))
     if chunk_ms <= 0:
-        raise ValueError(f"simulation_chunk_ms must be positive, got {chunk_ms}.")
-
+        raise ValueError("simulation_chunk_ms must be positive.")
     return simulate_in_chunks, chunk_ms
 
 
-if __name__ == "__main__":
-    # Read the script file path from sys.argv[1]
-    script_path = sys.argv[1]
+def _default_network_payload(lif_params, module):
+    network_params = lif_params["network_params"]
+    neuron_params = [lif_params["neuron_params"]["E"], lif_params["neuron_params"]["I"]]
+    simulation_params = {
+        "simtime": float(module.tstop),
+        "simstep": float(module.dt),
+        "num_threads": int(module.local_num_threads),
+        "toMemory": True,
+    }
+    external_input_params = {
+        "v_0": network_params["v_0"],
+        "A_ext": network_params["A_ext"],
+        "f_ext": network_params["f_ext"],
+        "OU_sigma": network_params["OU_sigma"],
+        "OU_tau": network_params["OU_tau"],
+    }
+    return (
+        network_params,
+        neuron_params,
+        simulation_params,
+        external_input_params,
+        _default_analysis_params(),
+    )
 
-    # Add the directory containing the script to the Python path
-    script_dir = os.path.dirname(script_path)
+
+def _aggregate_exc_state_chunk(events, E_ex, E_in):
+    times = np.asarray(events["times"], dtype=float)
+    if times.size == 0:
+        empty_float = np.array([], dtype=float)
+        empty_int = np.array([], dtype=int)
+        return {
+            "times": empty_float,
+            "AMPA": empty_float,
+            "GABA": empty_float,
+            "Vm": empty_float,
+            "counts": empty_int,
+        }
+
+    V_m = np.asarray(events["V_m"], dtype=float)
+    g_ex = np.asarray(events["g_ex"], dtype=float)
+    g_in = np.asarray(events["g_in"], dtype=float)
+
+    unique_times, inverse = np.unique(times, return_inverse=True)
+    return {
+        "times": unique_times,
+        "AMPA": np.bincount(inverse, weights=-(g_ex * (V_m - E_ex))),
+        "GABA": np.bincount(inverse, weights=-(g_in * (V_m - E_in))),
+        "Vm": np.bincount(inverse, weights=V_m),
+        "counts": np.bincount(inverse).astype(int),
+    }
+
+
+def _append_state_chunks(chunks, payload):
+    if payload["times"].size == 0:
+        return
+    for key in ("times", "AMPA", "GABA", "Vm", "counts"):
+        chunks[key].append(payload[key])
+
+
+def _finalize_state_chunks(chunks, interval):
+    if not chunks["times"]:
+        empty_float = np.array([], dtype=float)
+        empty_int = np.array([], dtype=int)
+        return {
+            "times": empty_float,
+            "AMPA": empty_float,
+            "GABA": empty_float,
+            "Vm": empty_float,
+            "counts": empty_int,
+            "interval": interval,
+            "aggregation": "population_sum",
+        }
+
+    return {
+        "times": np.concatenate(chunks["times"]),
+        "AMPA": np.concatenate(chunks["AMPA"]),
+        "GABA": np.concatenate(chunks["GABA"]),
+        "Vm": np.concatenate(chunks["Vm"]),
+        "counts": np.concatenate(chunks["counts"]),
+        "interval": interval,
+        "aggregation": "population_sum",
+    }
+
+
+def _append_spikes(times_acc, gids_acc, events):
+    event_map = {
+        "E": events[0][0],
+        "I": events[1][0],
+        "TH": events[2][0],
+        "CC": events[3][0],
+    }
+    for key, payload in event_map.items():
+        times_acc[key].append(np.asarray(payload["times"], dtype=float))
+        gids_acc[key].append(np.asarray(payload["senders"], dtype=int))
+
+
+def _finalize_spikes(acc):
+    finalized = {}
+    for key, parts in acc.items():
+        if not parts:
+            finalized[key] = np.array([], dtype=float)
+        else:
+            finalized[key] = np.concatenate(parts)
+    return finalized
+
+
+def _load_module(module_path):
+    script_dir = os.path.dirname(module_path)
     sys.path.append(script_dir)
-
-    # Import the script as a module
-    module_name = os.path.basename(script_path).replace(".py", "")
-    spec = util.spec_from_file_location(module_name, script_path)
+    module_name = os.path.basename(module_path).replace(".py", "")
+    spec = util.spec_from_file_location(module_name, module_path)
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
 
-    # Simulation time
-    tstop = float(module.tstop)
 
-    # Number of threads
-    local_num_threads = int(module.local_num_threads)
-
-    # Simulation time step
-    dt = float(module.dt)
-
+if __name__ == "__main__":
+    module = _load_module(sys.argv[1])
     simulate_in_chunks, simulation_chunk_ms = _resolve_chunking_config(module)
 
-    # Optional fixed NumPy seed for reproducible randomization
     numpy_seed = getattr(module, "numpy_seed", None)
     rng_seed = None
     if numpy_seed is not None:
@@ -276,52 +526,86 @@ if __name__ == "__main__":
         np.random.seed(numpy_seed)
         rng_seed = int(np.random.randint(1, 2**31 - 1))
 
-    # Load network parameters
-    with open(os.path.join(sys.argv[2], "network.pkl"), "rb") as f:
-        LIF_params = pickle.load(f)
+    output_dir = sys.argv[2]
+    with open(os.path.join(output_dir, "network.pkl"), "rb") as f:
+        lif_params = pickle.load(f)
 
-    # Create the LIF network model
-    network = LIF_network(LIF_params, tstop)
-    network.create_LIF_network(local_num_threads, dt, rng_seed=rng_seed)
+    (
+        network_params,
+        neuron_params,
+        simulation_params,
+        external_input_params,
+        analysis_params,
+    ) = _default_network_payload(lif_params, module)
 
-    # Simulation
-    print("Simulating...\n", end=" ", flush=True)
-    tac = time.time()
+    net = network(
+        network_params,
+        neuron_params,
+        simulation_params,
+        external_input_params,
+        analysis_params,
+    )
+    net.create_network(rng_seed=rng_seed)
+
+    total_time = float(module.tstop)
     if simulate_in_chunks:
-        _simulate_with_progress(tstop, dt, simulation_chunk_ms)
+        interval_edges = np.arange(0.0, total_time, float(simulation_chunk_ms))
+        intervals = [min(float(simulation_chunk_ms), total_time - start) for start in interval_edges]
     else:
-        network.simulate(tstop)
+        intervals = [total_time]
+
+    exc_state_chunks = {key: [] for key in ("times", "AMPA", "GABA", "Vm", "counts")}
+    times_acc = {key: [] for key in ("E", "I", "TH", "CC")}
+    gids_acc = {key: [] for key in ("E", "I", "TH", "CC")}
+    population_ids = {}
+
+    E_ex = neuron_params[0]["E_ex"]
+    E_in = neuron_params[0]["E_in"]
+    print("Simulating...\n", end=" ", flush=True)
+    tic = time.time()
+    for segment_idx, interval in enumerate(intervals, start=1):
+        result = net.simulate_network(interval)
+        if not population_ids:
+            population_ids = {
+                "pop_ex": result[5],
+                "pop_in": result[6],
+                "pop_thalamo": result[7],
+                "pop_cc": result[8],
+                "pop_parrot_th": result[9],
+                "pop_parrot_cc": result[10],
+            }
+        _append_spikes(times_acc, gids_acc, result[2])
+        exc_chunk = _aggregate_exc_state_chunk(result[1][0][0], E_ex, E_in)
+        _append_state_chunks(exc_state_chunks, exc_chunk)
+        print(f"SIM_SEGMENT {segment_idx}/{len(intervals)}", flush=True)
+
     toc = time.time()
-    print(f"The simulation took {toc - tac} seconds.\n", end=" ", flush=True)
+    print(f"The simulation took {toc - tic} seconds.\n", end=" ", flush=True)
 
-    # Get spike times
-    times = dict()
-    for i, X in enumerate(network.LIF_params["X"]):
-        times[X] = np.asarray(
-            nest.GetStatus(network.spike_recorders[X])[0]["events"]["times"])
+    times = _finalize_spikes(times_acc)
+    gids = _finalize_spikes(gids_acc)
+    exc_state_payload = _finalize_state_chunks(exc_state_chunks, float(module.dt))
 
-    # Get gids
-    gids = dict()
-    for i, X in enumerate(network.LIF_params["X"]):
-        gids[X] = np.asarray(
-            nest.GetStatus(network.spike_recorders[X])[0]["events"]["senders"])
-
-    # Save spike times
-    with open(os.path.join(sys.argv[2], "times.pkl"), "wb") as f:
+    with open(os.path.join(output_dir, "times.pkl"), "wb") as f:
         pickle.dump(times, f)
-
-    # Save gids
-    with open(os.path.join(sys.argv[2], "gids.pkl"), "wb") as f:
+    with open(os.path.join(output_dir, "gids.pkl"), "wb") as f:
         pickle.dump(gids, f)
-
-    # Save external rate profiles
-    with open(os.path.join(sys.argv[2], "external_rate_profile.pkl"), "wb") as f:
-        pickle.dump(network.external_rate_profile, f)
-
-    # Save tstop
-    with open(os.path.join(sys.argv[2], "tstop.pkl"), "wb") as f:
-        pickle.dump(tstop, f)
-
-    # Save dt
-    with open(os.path.join(sys.argv[2], "dt.pkl"), "wb") as f:
-        pickle.dump(dt, f)
+    with open(os.path.join(output_dir, "exc_state_events.pkl"), "wb") as f:
+        pickle.dump(exc_state_payload, f)
+    with open(os.path.join(output_dir, "recording_metadata.pkl"), "wb") as f:
+        pickle.dump(
+            {
+                "To_be_measured": analysis_params["To_be_measured"],
+                "cells_to_analyze": analysis_params["cells_to_analyze"],
+                "intervals": intervals,
+                "population_ids": population_ids,
+                "spike_streams": ["E", "I", "TH", "CC"],
+            },
+            f,
+        )
+    with open(os.path.join(output_dir, "external_rate_profile.pkl"), "wb") as f:
+        pickle.dump(net.external_rate_profile, f)
+    with open(os.path.join(output_dir, "tstop.pkl"), "wb") as f:
+        pickle.dump(total_time, f)
+    with open(os.path.join(output_dir, "dt.pkl"), "wb") as f:
+        pickle.dump(float(module.dt), f)
