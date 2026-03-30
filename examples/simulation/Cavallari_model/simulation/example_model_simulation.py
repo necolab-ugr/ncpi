@@ -23,7 +23,7 @@ sys.path.append(str(PARAMS_DIR))
 compute_new_sim = True
 
 # Number of repetitions of each simulation.
-trials = 2
+trials = 1
 
 # Configurations of parameters to simulate:
 # [g_EE, g_IE, g_EI, g_II, 
@@ -31,16 +31,16 @@ trials = 2
 # ext_input_scale, v_0]
 
 # Baseline configuration varying only v_0
-# confs = [
-#     [0.178, 0.233, -2.01, -2.70, 2.0, 1.0, 5.0, 5.0, 1.0, 1.5],
-#     [0.178, 0.233, -2.01, -2.70, 2.0, 1.0, 5.0, 5.0, 1.0, 3.0],
-# ]
-
-# Configuration with increased inhibitory conductances
 confs = [
-    [0.178, 0.233, -1.01, -1.35, 2.0, 1.0, 5.0, 5.0, 1.0, 3.0],
+    [0.178, 0.233, -2.01, -2.70, 2.0, 1.0, 5.0, 5.0, 1.0, 1.5],
     [0.178, 0.233, -2.01, -2.70, 2.0, 1.0, 5.0, 5.0, 1.0, 3.0],
 ]
+
+# Configuration with increased inhibitory conductances
+# confs = [
+#     [0.178, 0.233, -1.01, -1.35, 2.0, 1.0, 5.0, 5.0, 1.0, 3.0],
+#     [0.178, 0.233, -2.01, -2.70, 2.0, 1.0, 5.0, 5.0, 1.0, 3.0],
+# ]
 
 CONF_PARAM_LABELS = [
     r"$g_{EE}$",

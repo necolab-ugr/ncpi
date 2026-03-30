@@ -33,7 +33,12 @@ def _default_analysis_params():
 
 
 class network:
-    """NEST 3.8 reproduction of the original pablomc88's network_1.py flow."""
+    """NEST 3.8 reproduction of the original pablomc88 `network_1.py` flow.
+
+    External thalamic and cortical drives are implemented here as direct
+    inhomogeneous Poisson inputs to excitatory and inhibitory populations,
+    with generator rates scaled to replace the original parrot-neuron relay.
+    """
 
     def __init__(
         self,
@@ -179,8 +184,6 @@ class network:
         self.inh = self._create_nodes("inh_cell", self.N_inh)
         self.thalamo = self._create_nodes("thalamocortical_input", 1)
         self.cort = self._create_nodes("cortical_input", 1)
-        self.parrot_layer_th = self._create_nodes("parrot_neuron", self.N_exc + self.N_inh)
-        self.parrot_layer_cc = self._create_nodes("parrot_neuron", self.N_exc + self.N_inh)
 
         time_array = np.arange(self.simstep, self.simtime - self.simstep, self.simstep)
         OU_sigma_bis = self.OU_sigma * np.sqrt(2.0 / self.OU_tau)
@@ -194,11 +197,13 @@ class network:
             )
 
         v_signal = self.A_ext * np.sin(2.0 * np.pi * self.f_ext * time_array / 1000.0) + self.v_0
-        nest.SetStatus(self.thalamo, {"rate_times": time_array, "rate_values": v_signal})
-        nest.SetStatus(self.cort, {"rate_times": time_array, "rate_values": OU_x})
+        th_rate_values = 800.0 * v_signal
+        cc_rate_values = 800.0 * OU_x
+        nest.SetStatus(self.thalamo, {"rate_times": time_array, "rate_values": th_rate_values})
+        nest.SetStatus(self.cort, {"rate_times": time_array, "rate_values": cc_rate_values})
         self.external_rate_profile = {
-            "thalamic": {"rate_times": time_array.copy(), "rate_values": v_signal.copy()},
-            "cortical": {"rate_times": time_array.copy(), "rate_values": OU_x.copy()},
+            "thalamic": {"rate_times": time_array.copy(), "rate_values": th_rate_values.copy()},
+            "cortical": {"rate_times": time_array.copy(), "rate_values": cc_rate_values.copy()},
         }
 
         recurrent_pairs = (
@@ -224,58 +229,30 @@ class network:
                 },
             )
 
-        parrot_conn_spec = {
-            "rule": "fixed_indegree",
-            "indegree": 800,
-            "allow_autapses": False,
-            "allow_multapses": True,
-        }
         nest.Connect(
             self.thalamo,
-            self.parrot_layer_th,
-            parrot_conn_spec,
-            {"synapse_model": "static_synapse", "weight": 1.0, "delay": 1.0},
+            self.exc,
+            "all_to_all",
+            {"synapse_model": "static_synapse", "weight": self.th_exc_external, "delay": 1.0},
+        )
+        nest.Connect(
+            self.thalamo,
+            self.inh,
+            "all_to_all",
+            {"synapse_model": "static_synapse", "weight": self.th_inh_external, "delay": 1.0},
         )
         nest.Connect(
             self.cort,
-            self.parrot_layer_cc,
-            parrot_conn_spec,
-            {"synapse_model": "static_synapse", "weight": 1.0, "delay": 1.0},
+            self.exc,
+            "all_to_all",
+            {"synapse_model": "static_synapse", "weight": self.cc_exc_external, "delay": 1.0},
         )
-
-        parrot_n_th = _node_ids(self.parrot_layer_th)
-        parrot_n_cc = _node_ids(self.parrot_layer_cc)
-
-        i = 0
-        for n in _node_ids(self.exc):
-            nest.Connect(
-                nest.NodeCollection([parrot_n_th[i]]),
-                nest.NodeCollection([n]),
-                "one_to_one",
-                {"synapse_model": "static_synapse", "weight": self.th_exc_external, "delay": 1.0},
-            )
-            nest.Connect(
-                nest.NodeCollection([parrot_n_cc[i]]),
-                nest.NodeCollection([n]),
-                "one_to_one",
-                {"synapse_model": "static_synapse", "weight": self.cc_exc_external, "delay": 1.0},
-            )
-            i += 1
-
-        for n in _node_ids(self.inh):
-            nest.Connect(
-                nest.NodeCollection([parrot_n_th[i]]),
-                nest.NodeCollection([n]),
-                "one_to_one",
-                {"synapse_model": "static_synapse", "weight": self.th_inh_external, "delay": 1.0},
-            )
-            nest.Connect(
-                nest.NodeCollection([parrot_n_cc[i]]),
-                nest.NodeCollection([n]),
-                "one_to_one",
-                {"synapse_model": "static_synapse", "weight": self.cc_inh_external, "delay": 1.0},
-            )
-            i += 1
+        nest.Connect(
+            self.cort,
+            self.inh,
+            "all_to_all",
+            {"synapse_model": "static_synapse", "weight": self.cc_inh_external, "delay": 1.0},
+        )
 
         record_to = "memory" if self.toMemory else "ascii"
         if len(self.To_be_measured) > 0:
@@ -330,14 +307,6 @@ class network:
             if selected_inh:
                 nest.Connect(nest.NodeCollection(selected_inh), self.mult_inh)
 
-        sp_th = nest.Create("SpikesRecorder")
-        nest.Connect(self.parrot_layer_th, sp_th)
-        self.spikes.append(sp_th)
-
-        sp_cc = nest.Create("SpikesRecorder")
-        nest.Connect(self.parrot_layer_cc, sp_cc)
-        self.spikes.append(sp_cc)
-
         print("\n--- Simulation ---\n")
         nest.SetKernelStatus({"print_time": True})
         nest.Simulate(float(interval))
@@ -351,7 +320,7 @@ class network:
                 data_v.append([])
 
         data_s = []
-        for i in range(n_rec + 2):
+        for i in range(n_rec):
             data_s.append(nest.GetStatus(self.spikes[i], keys="events"))
 
         senders_v = []
@@ -362,13 +331,11 @@ class network:
                 senders_v.append([])
 
         senders_s = []
-        for i in range(n_rec + 2):
+        for i in range(n_rec):
             senders_s.append(np.asarray(data_s[i][0]["senders"]))
 
         pop_ex = _node_ids(self.exc)
         pop_in = _node_ids(self.inh)
-        pop_parrot_th = _node_ids(self.parrot_layer_th)
-        pop_parrot_cc = _node_ids(self.parrot_layer_cc)
         pop_thalamo = _node_ids(self.thalamo)
         pop_cc = _node_ids(self.cort)
 
@@ -382,8 +349,6 @@ class network:
             pop_in,
             pop_thalamo,
             pop_cc,
-            pop_parrot_th,
-            pop_parrot_cc,
             self.mult_exc,
             self.mult_inh,
         ]
@@ -485,8 +450,6 @@ def _append_spikes(times_acc, gids_acc, events):
     event_map = {
         "E": events[0][0],
         "I": events[1][0],
-        "TH": events[2][0],
-        "CC": events[3][0],
     }
     for key, payload in event_map.items():
         times_acc[key].append(np.asarray(payload["times"], dtype=float))
@@ -555,8 +518,8 @@ if __name__ == "__main__":
         intervals = [total_time]
 
     exc_state_chunks = {key: [] for key in ("times", "AMPA", "GABA", "Vm", "counts")}
-    times_acc = {key: [] for key in ("E", "I", "TH", "CC")}
-    gids_acc = {key: [] for key in ("E", "I", "TH", "CC")}
+    times_acc = {key: [] for key in ("E", "I")}
+    gids_acc = {key: [] for key in ("E", "I")}
     population_ids = {}
 
     E_ex = neuron_params[0]["E_ex"]
@@ -571,8 +534,6 @@ if __name__ == "__main__":
                 "pop_in": result[6],
                 "pop_thalamo": result[7],
                 "pop_cc": result[8],
-                "pop_parrot_th": result[9],
-                "pop_parrot_cc": result[10],
             }
         _append_spikes(times_acc, gids_acc, result[2])
         exc_chunk = _aggregate_exc_state_chunk(result[1][0][0], E_ex, E_in)
@@ -599,7 +560,7 @@ if __name__ == "__main__":
                 "cells_to_analyze": analysis_params["cells_to_analyze"],
                 "intervals": intervals,
                 "population_ids": population_ids,
-                "spike_streams": ["E", "I", "TH", "CC"],
+                "spike_streams": ["E", "I"],
             },
             f,
         )
