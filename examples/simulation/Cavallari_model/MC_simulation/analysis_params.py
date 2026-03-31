@@ -2,6 +2,7 @@ import neuron
 import numpy as np
 import scipy.stats as st
 from LFPy import NetworkCell
+from ncpi import neuron_utils
 
 """
 The following methods and parameters were downloaded from the following LFPykernels repositories: 
@@ -11,38 +12,6 @@ Copyright (C) 2021 https://github.com/espenhgn
 """
 
 
-def set_active(cell, Vrest):
-    """Insert passive leak, Ih, NaTa_t and SKv3_1 channels as in Hay 2011 model
-
-    Parameters
-    ----------
-    cell: object
-        LFPy.NetworkCell like object
-    Vrest: float
-        Steady state potential (not used)
-    """
-    for sec in cell.template.all:
-        sec.insert('pas')
-        sec.insert('Ih')
-        sec.insert('NaTa_t')
-        sec.insert('SKv3_1')
-        sec.ena = 50
-        sec.ek = -85
-        if sec.name().rfind('soma') >= 0:
-            sec.gNaTa_tbar_NaTa_t = 2.04
-            sec.gSKv3_1bar_SKv3_1 = 0.693
-            sec.g_pas = 0.0000338
-            sec.e_pas = -90
-            sec.gIhbar_Ih = 0.0002
-
-        if sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
-            sec.gNaTa_tbar_NaTa_t = 0.0213
-            sec.gSKv3_1bar_SKv3_1 = 0.000261
-            sec.g_pas = 0.0000589
-            sec.e_pas = -90
-            sec.gIhbar_Ih = 0.0002 * 10
-
-
 class KernelParams:
     # Transient time
     transient = 2000
@@ -50,16 +19,20 @@ class KernelParams:
     # Time lag relative to spike for kernel predictions
     tau = 100
 
-    # Parameters of connectivity and synaptic weights
+    # Parameters adapted from the Cavallari LIF network while keeping
+    # the Hagen multicompartment morphologies and active mechanisms.
     MC_params = {
-        'weight_EE': 0.00015,
-        'weight_IE': 0.000125,
-        'weight_EI': 0.0045,
-        'weight_II': 0.002,
+        'weight_EE': 0.178,
+        'weight_IE': 0.233,
+        'weight_EI': 2.01,
+        'weight_II': 2.70,
         'weight_scaling': 1.0,
         'biophys': 'lin',
         'i_syn': True,
-        'n_ext': [465, 160],
+        'n_ext': [1, 1],
+        'th_exc_external': 0.234,
+        'th_inh_external': 0.317,
+        'v_0': 1.5,
         'g_eff': True,
         'perseg_Vrest': False}
 
@@ -71,7 +44,7 @@ class KernelParams:
         # morphology='BallAndStick.hoc',  # set by main simulation
         templatefile='BallAndSticksTemplate.hoc',
         templatename='BallAndSticksTemplate',
-        custom_fun=[set_active],
+        custom_fun=[neuron_utils.set_active_hay2011],
         custom_fun_args=[dict(Vrest=-65.)],  # [dict(Vrest=Vrest)] set at runtime
         templateargs=None,
         delete_sections=False,
@@ -126,11 +99,11 @@ class KernelParams:
     population_names = ['E', 'I']
     morphologies = ['BallAndSticks_E.hoc', 'BallAndSticks_I.hoc']
     if TESTING:
-        population_sizes = [32, 8]
+        population_sizes = [400, 100]
         connectionProbability = [[1., 1.], [1., 1.]]
     else:
-        population_sizes = [8192, 1024]
-        connectionProbability = [[0.05, 0.05], [0.05, 0.05]]
+        population_sizes = [4000, 1000]
+        connectionProbability = [[0.2, 0.2], [0.2, 0.2]]
 
     # synapse model. All corresponding parameters for weights,
     # connection delays, multapses and layerwise positions are
@@ -142,10 +115,10 @@ class KernelParams:
     synapseModel = neuron.h.Exp2Syn
     # synapse parameters in terms of rise- and decay time constants
     # (tau1, tau2 [ms]) and reversal potential (e [mV])
-    synapseParameters = [[dict(tau1=0.2, tau2=1.8, e=0.),
-                          dict(tau1=0.2, tau2=1.8, e=0.)],
-                         [dict(tau1=0.1, tau2=9.0, e=-80.),
-                          dict(tau1=0.1, tau2=9.0, e=-80.)]]
+    synapseParameters = [[dict(tau1=0.4, tau2=2.0, e=0.),
+                          dict(tau1=0.2, tau2=1.0, e=0.)],
+                         [dict(tau1=0.25, tau2=5.0, e=-80.),
+                          dict(tau1=0.25, tau2=5.0, e=-80.)]]
     # synapse max. conductance (function, mean, st.dev., min.):
     weightFunction = np.random.normal
     # weight_<pre><post> values set by parameters file via main simulation scripts
@@ -214,11 +187,23 @@ class KernelParams:
 
     # Parameters for extrinsic (e.g., cortico-cortical connections) synapses
     # and mean interval (ms)
-    extSynapseParameters = dict(
-        syntype='Exp2Syn',
-        weight=0.0002,
-        tau1=0.2,
-        tau2=1.8,
-        e=0.
-    )
-    netstim_interval = 25.
+    extSynapseParameters = [
+        dict(
+            syntype='Exp2Syn',
+            weight=MC_params['th_exc_external'],
+            tau1=0.4,
+            tau2=2.0,
+            e=0.,
+        ),
+        dict(
+            syntype='Exp2Syn',
+            weight=MC_params['th_inh_external'],
+            tau1=0.2,
+            tau2=1.0,
+            e=0.,
+        ),
+    ]
+    netstim_interval = [
+        1000.0 / (800.0 * MC_params['v_0']),
+        1000.0 / (800.0 * MC_params['v_0']),
+    ]

@@ -320,7 +320,7 @@ def _save_probe_data(probes):
 def _save_recorded_potentials(network):
     _log("Collecting recorded somatic potentials")
     somavs = []
-    decimation = int(round(1 // network.dt))
+    decimation = max(1, int(round(1.0 / float(network.dt))))
     for population_name in KernelParams.population_names:
         local_cell = _local_first_cell(network, population_name)
         if local_cell is None:
@@ -421,7 +421,7 @@ def _plot_outputs(network, spikes, somavs, electrode, current_dipole_moment, csd
     draw_lineplot(
         ax,
         data,
-        dt=network.dt * int(round(1 // network.dt)),
+        dt=network.dt * max(1, int(round(1.0 / float(network.dt)))),
         T=(500, 1000),
         scaling_factor=1.0,
         vlimround=16,
@@ -443,7 +443,7 @@ def _plot_outputs(network, spikes, somavs, electrode, current_dipole_moment, csd
     draw_lineplot(
         ax,
         data,
-        dt=network.dt * int(round(1 // network.dt)),
+        dt=network.dt * max(1, int(round(1.0 / float(network.dt)))),
         T=(500, 1000),
         scaling_factor=1.0,
         vlimround=16,
@@ -457,71 +457,6 @@ def _plot_outputs(network, spikes, somavs, electrode, current_dipole_moment, csd
     ax.set_yticks([])
     ax.set_ylabel('I')
     fig.savefig(OUTPUTPATH / 'soma_potentials.png', bbox_inches='tight')
-    plt.close(fig)
-
-    fig, axes = plt.subplots(1, 3, figsize=(6.4, 4.8))
-    fig.suptitle('extracellular potentials')
-    for i, (ax, name, label) in enumerate(zip(axes, ['E', 'I', 'imem'], ['E', 'I', 'sum'])):
-        draw_lineplot(
-            ax,
-            ss.decimate(electrode.data[name], q=16, zero_phase=True),
-            dt=network.dt * 16,
-            T=(500, 1000),
-            scaling_factor=1.0,
-            vlimround=None,
-            label=label,
-            scalebar=True,
-            unit='mV',
-            ylabels=True if i == 0 else False,
-            color=f'C{i}',
-            ztransform=True,
-        )
-        ax.set_title(label)
-    fig.savefig(OUTPUTPATH / 'extracellular_potential.png', bbox_inches='tight')
-    plt.close(fig)
-
-    fig, axes = plt.subplots(3, 3, figsize=(6.4, 4.8))
-    fig.subplots_adjust(wspace=0.45)
-    fig.suptitle('current-dipole moments')
-    for i, u in enumerate(['x', 'y', 'z']):
-        for j, (name, label) in enumerate(zip(['E', 'I', 'imem'], ['E', 'I', 'sum'])):
-            t = np.arange(current_dipole_moment.data.shape[1]) * network.dt
-            inds = (t >= 500) & (t <= 1000)
-            axes[i, j].plot(
-                t[inds][::16],
-                ss.decimate(current_dipole_moment.data[name][i, inds], q=16, zero_phase=True),
-                f'C{j}',
-            )
-            if j == 0:
-                axes[i, j].set_ylabel(r'$\mathbf{p}\cdot\mathbf{e}_{' + f'{u}' + '}$ (nA$\\mu$m)')
-            if i == 0:
-                axes[i, j].set_title(label)
-            if i != 2:
-                axes[i, j].set_xticklabels([])
-            else:
-                axes[i, j].set_xlabel('t (ms)')
-    fig.savefig(OUTPUTPATH / 'current_dipole_moment.png', bbox_inches='tight')
-    plt.close(fig)
-
-    fig, axes = plt.subplots(1, 3, figsize=(6.4, 4.8))
-    fig.suptitle('CSD')
-    for i, (ax, name, label) in enumerate(zip(axes, ['E', 'I', 'imem'], ['E', 'I', 'sum'])):
-        draw_lineplot(
-            ax,
-            ss.decimate(csd.data[name], q=16, zero_phase=True),
-            dt=network.dt * 16,
-            T=(500, 1000),
-            scaling_factor=1.0,
-            vlimround=None,
-            label=label,
-            scalebar=True,
-            unit='nA/µm$^3$',
-            ylabels=True if i == 0 else False,
-            color=f'C{i}',
-            ztransform=True,
-        )
-        ax.set_title(label)
-    fig.savefig(OUTPUTPATH / 'csd.png', bbox_inches='tight')
     plt.close(fig)
 
     try:
@@ -631,12 +566,14 @@ if __name__ == "__main__":
         )
 
         _log(f"Attaching {n_ext[population_index]} external synapses per local {name} cell")
+        ext_synapse_parameters = KernelParams.extSynapseParameters[population_index]
+        netstim_interval = KernelParams.netstim_interval[population_index]
         for cell in network.populations[name].cells:
             idx = cell.get_rand_idx_area_norm(section='allsec', nidx=n_ext[population_index])
             for syn_idx in idx:
-                syn = Synapse(cell=cell, idx=syn_idx, **KernelParams.extSynapseParameters)
+                syn = Synapse(cell=cell, idx=syn_idx, **ext_synapse_parameters)
                 syn.set_spike_times_w_netstim(
-                    interval=KernelParams.netstim_interval,
+                    interval=netstim_interval,
                     seed=np.random.rand() * 2 ** 32 - 1,
                 )
         _log(f"Finished external synapse setup for population {name}")
