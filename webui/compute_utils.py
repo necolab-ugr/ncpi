@@ -593,7 +593,7 @@ def _try_resolve_companion_ch_names(ch_locator, upload_items):
     # Step 1: search upload_items by logical name
     for idx, payload in enumerate(upload_items):
         name = str(payload.get("name") or "")
-        stem = os.path.splitext(name)[0].lower()
+        stem = os.path.splitext(os.path.basename(name))[0].lower()
         if stem != ch_locator.lower():
             continue
         source_path = payload.get("path")
@@ -602,35 +602,42 @@ def _try_resolve_companion_ch_names(ch_locator, upload_items):
         if names:
             return names, {idx}
 
-    # Step 2: filesystem search in sibling directories of the first data file.
+    # Step 2: upward filesystem search from the data directory.
+    # Walk up the directory tree (up to 5 levels), and at each ancestor level do a
+    # shallow recursive scan (up to depth 2 within that ancestor). This handles cases
+    # where channels.mat is in a sibling branch of the dataset tree.
     # Only for real (non-temp) paths — i.e., server-path mode.
     if upload_items:
         first_path = str(upload_items[0].get("path") or "")
         if first_path and os.path.isfile(first_path):
             real_first = os.path.realpath(first_path)
             real_tmp = os.path.realpath(str(TMP_ROOT))
-            # Skip temp directories to avoid scanning unrelated uploaded files
             if not real_first.startswith(real_tmp + os.sep):
                 data_dir = os.path.dirname(real_first)
-                parent_dir = os.path.dirname(data_dir)
-                search_dirs = []
-                if parent_dir and parent_dir != data_dir:
+                visited_roots = set()
+                search_root = data_dir
+                for _level in range(5):
+                    if search_root in visited_roots:
+                        break
+                    visited_roots.add(search_root)
                     try:
-                        for entry in os.scandir(parent_dir):
-                            if entry.is_dir():
-                                search_dirs.append(entry.path)
+                        for root, dirs, files in os.walk(search_root):
+                            rel = os.path.relpath(root, search_root)
+                            depth = 0 if rel == "." else rel.count(os.sep) + 1
+                            if depth >= 2:
+                                dirs[:] = []  # prune: don't go deeper than depth 2
+                            for ext_try in [".mat", ".npy", ".pkl", ".json", ".csv"]:
+                                if (ch_locator + ext_try) in files:
+                                    candidate = os.path.join(root, ch_locator + ext_try)
+                                    names = _load_dict_and_extract(candidate, ch_locator + ext_try, ext_try)
+                                    if names:
+                                        return names, set()
                     except Exception:
                         pass
-                    search_dirs.insert(0, parent_dir)  # also try parent itself
-
-                for search_dir in search_dirs:
-                    for ext_try in [".mat", ".npy", ".pkl", ".json", ".csv"]:
-                        candidate = os.path.join(search_dir, ch_locator + ext_try)
-                        if not os.path.isfile(candidate):
-                            continue
-                        names = _load_dict_and_extract(candidate, ch_locator + ext_try, ext_try)
-                        if names:
-                            return names, set()
+                    next_root = os.path.dirname(search_root)
+                    if next_root == search_root:
+                        break
+                    search_root = next_root
 
     return None, set()
 

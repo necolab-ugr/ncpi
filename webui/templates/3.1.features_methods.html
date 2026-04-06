@@ -103,6 +103,10 @@
             parserLongTimeCol: '',
             parserLongChannelCol: '',
             parserLongValueCol: '',
+            parserArrayAxesEnabled: false,
+            parserAxisChannels: '0',
+            parserAxisSamples: '1',
+            parserAxisEpochs: '-1',
             parserEnableEpoching: false,
             parserEpochLengthS: '5.0',
             parserEpochStepS: '5.0',
@@ -850,7 +854,7 @@
                 if (this.parserFolderSelectionCount() > 1 && this.parserSelectedFolderCount() !== 1) return false;
 
                 if (kind === 'pipeline') {
-                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
+                    if (!this.epochsDefinedByAxes() && this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
                 }
                 if (kind === 'new-simulation') {
@@ -858,10 +862,13 @@
                     const hasSimulationPath = (folderPaths.length > 0 || String(this.simulationFolderPath || '').trim().length > 0)
                         && this.simulationFileCount > 0;
                     if (!this.isUploaded('data-file') && !hasSimulationPath) return false;
-                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
+                    if (!this.epochsDefinedByAxes() && this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
                     return true;
                 }
                 return false;
+            },
+            epochsDefinedByAxes() {
+                return this.parserArrayAxesEnabled && String(this.parserAxisEpochs) !== '-1';
             },
             selectedDataDescription() {
                 const kind = this.resolvedDataSourceKind();
@@ -943,6 +950,10 @@
                 this.parserLongTimeCol = '';
                 this.parserLongChannelCol = '';
                 this.parserLongValueCol = '';
+                this.parserArrayAxesEnabled = false;
+                this.parserAxisChannels = '0';
+                this.parserAxisSamples = '1';
+                this.parserAxisEpochs = '-1';
                 this.parserEnableEpoching = false;
                 this.parserEpochLengthS = '5.0';
                 this.parserEpochStepS = '5.0';
@@ -2473,6 +2484,54 @@
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
                                             placeholder="e.g. ch0, ch1, ch2">
                                     </label>
+
+                                    <!-- Array dimension mapping (pipeline/simulation) -->
+                                    <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                            <input type="checkbox" x-model="parserArrayAxesEnabled"
+                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                            Specify array dimension mapping
+                                        </label>
+                                        <div x-show="parserArrayAxesEnabled" class="space-y-2">
+                                            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                                Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
+                                            </p>
+                                            <div class="grid grid-cols-3 gap-3">
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
+                                                    <select name="parser_axis_channels" x-model="parserAxisChannels"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                    </select>
+                                                </label>
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Samples axis</span>
+                                                    <select name="parser_axis_samples" x-model="parserAxisSamples"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                    </select>
+                                                </label>
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epochs axis</span>
+                                                    <select name="parser_axis_epochs" x-model="parserAxisEpochs"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <p class="text-[11px] text-amber-700 dark:text-amber-400" x-show="epochsDefinedByAxes()">
+                                                The data already contains epochs — parser-level epoching is disabled.
+                                            </p>
+                                        </div>
+                                    </div>
+
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
@@ -2686,6 +2745,55 @@
                                             placeholder="e.g. ch0, ch1, ch2">
                                     </label>
 
+                                    <!-- Array dimension mapping -->
+                                    <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                            <input type="checkbox" x-model="parserArrayAxesEnabled"
+                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                            Specify array dimension mapping
+                                        </label>
+                                        <input type="hidden" name="parser_array_axes_enabled" :value="parserArrayAxesEnabled ? '1' : '0'">
+                                        <div x-show="parserArrayAxesEnabled" class="space-y-2">
+                                            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                                Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
+                                                Use this when the parser cannot infer the correct orientation automatically.
+                                            </p>
+                                            <div class="grid grid-cols-3 gap-3">
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
+                                                    <select name="parser_axis_channels" x-model="parserAxisChannels"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                    </select>
+                                                </label>
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Samples axis</span>
+                                                    <select name="parser_axis_samples" x-model="parserAxisSamples"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                    </select>
+                                                </label>
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epochs axis</span>
+                                                    <select name="parser_axis_epochs" x-model="parserAxisEpochs"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                    </select>
+                                                </label>
+                                            </div>
+                                            <p class="text-[11px] text-amber-700 dark:text-amber-400" x-show="epochsDefinedByAxes()">
+                                                The data already contains epochs — parser-level epoching is disabled.
+                                            </p>
+                                        </div>
+                                    </div>
+
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
@@ -2770,12 +2878,15 @@
 
                                 </div>
 
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300"
+                                    :class="epochsDefinedByAxes() ? 'opacity-40 cursor-not-allowed' : ''">
                                     <input type="checkbox" x-model="parserEnableEpoching"
+                                        :disabled="epochsDefinedByAxes()"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Enable epoching
+                                    <span x-show="epochsDefinedByAxes()" class="text-[11px] text-amber-600 dark:text-amber-400 font-normal">(disabled — epochs defined by array axis)</span>
                                 </label>
-                                <input type="hidden" name="parser_enable_epoching" :value="parserEnableEpoching ? '1' : '0'">
+                                <input type="hidden" name="parser_enable_epoching" :value="(parserEnableEpoching && !epochsDefinedByAxes()) ? '1' : '0'">
 
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                     <input type="checkbox" x-model="parserEnableAggregate"
@@ -2813,7 +2924,7 @@
                                     </label>
                                 </div>
 
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching && !epochsDefinedByAxes()">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epoch length (s)</span>
                                         <input type="number" step="any" name="parser_epoch_length_s" x-model="parserEpochLengthS"

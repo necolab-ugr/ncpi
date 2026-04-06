@@ -3455,6 +3455,28 @@ def _build_parse_config_from_form(form):
         recording_type = recording_type or "LFP"
         recording_type_value = recording_type_locator if recording_type_locator else recording_type
 
+    # Array axis mapping
+    array_axes_enabled = str(form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
+    array_axes = None
+    if array_axes_enabled:
+        try:
+            axis_channels = int(form.get("parser_axis_channels") or 0)
+            axis_samples = int(form.get("parser_axis_samples") or 1)
+            axis_epochs_raw = form.get("parser_axis_epochs") or "-1"
+            axis_epochs = int(axis_epochs_raw)
+        except (ValueError, TypeError):
+            raise ValueError("Invalid array axis mapping values. Axes must be integers.")
+        all_axes = [axis_channels, axis_samples] + ([axis_epochs] if axis_epochs >= 0 else [])
+        if len(set(all_axes)) != len(all_axes):
+            raise ValueError("Array axis mapping: each dimension can only be assigned to one role.")
+        array_axes = {"channels": axis_channels, "samples": axis_samples}
+        if axis_epochs >= 0:
+            array_axes["epochs"] = axis_epochs
+            # Data is already pre-epoched: disable parser-level epoching
+            epoching_enabled = False
+            epoch_length_s = None
+            epoch_step_s = None
+
     sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
     ch_names_source = (form.get("parser_ch_names_source") or "").strip()
     ch_names_locator = (form.get("parser_ch_names_locator") or "").strip() or None
@@ -3536,6 +3558,7 @@ def _build_parse_config_from_form(form):
             fs=fs_value,
             ch_names=ch_names_value,
             metadata=metadata,
+            array_axes=array_axes,
         )
         return ParseConfig(
             fields=fields,
@@ -3571,6 +3594,7 @@ def _build_parse_config_from_form(form):
         long_time_col=(form.get("parser_long_time_col") or "").strip() or None,
         long_channel_col=(form.get("parser_long_channel_col") or "").strip() or None,
         long_value_col=(form.get("parser_long_value_col") or "").strip() or None,
+        array_axes=array_axes,
     )
     return ParseConfig(
         fields=fields,
