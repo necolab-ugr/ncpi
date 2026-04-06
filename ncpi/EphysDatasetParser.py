@@ -152,6 +152,12 @@ class CanonicalFields:
     long_value_col: Optional[str] = None
     long_time_col: Optional[str] = None
 
+    # Optional: explicit axis mapping for multi-dimensional arrays.
+    # Dict mapping "channels", "samples", and optionally "epochs" to axis indices.
+    # When provided, overrides heuristic axis detection.
+    # Example: {"channels": 0, "samples": 1, "epochs": 2}
+    array_axes: Optional[Mapping[str, int]] = None
+
 
 @dataclass
 class ParseConfig:
@@ -543,6 +549,16 @@ class EphysDatasetParser:
             return [self._row_from_series(meta, labels[0], None, arr, fs, data_domain, freqs, spectral_kind, source_file)]
 
         if arr.ndim == 2:
+            ax = f.array_axes
+            if ax and "channels" in ax and "samples" in ax:
+                # Explicit axis mapping: transpose to (channels, samples)
+                ch_ax = int(ax["channels"])
+                sa_ax = int(ax["samples"])
+                arr2 = arr.transpose(ch_ax, sa_ax)
+                n_ch, n_time = arr2.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                return [self._row_from_series(meta, labels[i], epoch_val, arr2[i, :], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
+
             # Infer orientation:
             # - If ch_names provided, align to whichever axis matches len(ch_names)
             # - Else, assume (channels, time) when first dim is smaller than second dim
@@ -579,6 +595,21 @@ class EphysDatasetParser:
                 return rows
 
         if arr.ndim == 3:
+            ax = f.array_axes
+            if ax and "channels" in ax and "samples" in ax and "epochs" in ax:
+                # Explicit axis mapping: transpose to (epochs, channels, samples)
+                ep_ax = int(ax["epochs"])
+                ch_ax = int(ax["channels"])
+                sa_ax = int(ax["samples"])
+                arr3 = arr.transpose(ep_ax, ch_ax, sa_ax)
+                n_ep, n_ch, n_time = arr3.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                rows = []
+                for e in range(n_ep):
+                    for i, ch in enumerate(labels):
+                        rows.append(self._row_from_series(meta, ch, e, arr3[e, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+
             # heuristics: treat first axis as epochs
             n_ep = arr.shape[0]
             # remaining could be (channels, time) or (time, channels)
@@ -634,12 +665,33 @@ class EphysDatasetParser:
             return [self._row_from_series(meta, ch, None, a, fs, data_domain, freqs, spectral_kind, source_file)]
 
         if a.ndim == 2:
+            ax = f.array_axes
+            if ax and "channels" in ax and "samples" in ax:
+                ch_ax = int(ax["channels"])
+                sa_ax = int(ax["samples"])
+                a2 = a.transpose(ch_ax, sa_ax)
+                n_ch = a2.shape[0]
+                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                return [self._row_from_series(meta, labels2[i], None, a2[i, :], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
             # assume (time, channels) by default for non-MNE numpy
             n_time, n_ch = a.shape
             labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
             return [self._row_from_series(meta, labels2[i], None, a[:, i], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
 
         if a.ndim == 3:
+            ax = f.array_axes
+            if ax and "channels" in ax and "samples" in ax and "epochs" in ax:
+                ep_ax = int(ax["epochs"])
+                ch_ax = int(ax["channels"])
+                sa_ax = int(ax["samples"])
+                a3 = a.transpose(ep_ax, ch_ax, sa_ax)
+                n_ep, n_ch = a3.shape[0], a3.shape[1]
+                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                rows = []
+                for e in range(n_ep):
+                    for i in range(n_ch):
+                        rows.append(self._row_from_series(meta, labels2[i], e, a3[e, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
             # assume (epochs, time, channels)
             n_ep, n_time, n_ch = a.shape
             labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
