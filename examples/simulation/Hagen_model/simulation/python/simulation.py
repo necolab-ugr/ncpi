@@ -156,6 +156,51 @@ def _resolve_chunking_config(module):
     return simulate_in_chunks, chunk_ms
 
 
+def _check_spike_output_size(times, gids, lif_params, tstop, max_mean_population_spike_rate_hz):
+    """Reject simulations with excessive population firing before writing spike pickles."""
+    duration_seconds = float(tstop) / 1000.0
+    if duration_seconds <= 0:
+        raise ValueError(f"tstop must be positive, got {tstop}.")
+
+    population_sizes = dict(zip(lif_params['X'], lif_params['N_X']))
+    spike_counts = {X: int(np.asarray(times[X]).size) for X in lif_params['X']}
+    mean_rates_hz = {
+        X: spike_counts[X] / (duration_seconds * float(population_sizes[X]))
+        for X in lif_params['X']
+    }
+    raw_spike_bytes = sum(
+        np.asarray(times[X]).nbytes + np.asarray(gids[X]).nbytes
+        for X in lif_params['X']
+    )
+
+    print(
+        (
+            f"Spike counts: {spike_counts}; "
+            f"mean population rates Hz: {mean_rates_hz}; "
+            f"raw spike array bytes: {raw_spike_bytes} "
+            f"({raw_spike_bytes / 1024 ** 2:.2f} MiB)."
+        ),
+        flush=True,
+    )
+
+    if max_mean_population_spike_rate_hz is None:
+        return
+
+    max_mean_population_spike_rate_hz = float(max_mean_population_spike_rate_hz)
+    too_high = {
+        X: rate
+        for X, rate in mean_rates_hz.items()
+        if rate > max_mean_population_spike_rate_hz
+    }
+    if too_high:
+        raise RuntimeError(
+            (
+                "Skipping spike pickle output because mean population firing rate "
+                f"exceeds {max_mean_population_spike_rate_hz:.3g} Hz: {too_high}."
+            )
+        )
+
+
 if __name__ == "__main__":
     # Read the script file path from sys.argv[1]
     script_path = sys.argv[1]
@@ -180,6 +225,9 @@ if __name__ == "__main__":
     dt = module.dt
 
     simulate_in_chunks, simulation_chunk_ms = _resolve_chunking_config(module)
+    max_mean_population_spike_rate_hz = getattr(
+        module, "max_mean_population_spike_rate_hz", 50.0
+    )
 
     # Optional fixed NumPy seed for reproducible randomization
     numpy_seed = getattr(module, "numpy_seed", None)
@@ -218,6 +266,18 @@ if __name__ == "__main__":
     gids = dict()
     for i, X in enumerate(network.LIF_params['X']):
         gids[X] = nest.GetStatus(network.spike_recorders[X])[0]['events']['senders']
+
+    try:
+        _check_spike_output_size(
+            times,
+            gids,
+            network.LIF_params,
+            tstop,
+            max_mean_population_spike_rate_hz,
+        )
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr, flush=True)
+        sys.exit(2)
 
     # Save spike times
     with open(os.path.join(sys.argv[2],'times.pkl'), 'wb') as f:

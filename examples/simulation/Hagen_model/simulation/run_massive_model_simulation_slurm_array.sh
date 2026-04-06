@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -p NOParalela
 #SBATCH -J LIF_model_simulations
-#SBATCH -t 96:00:00
-#SBATCH --array=0-79
+#SBATCH -t 120:00:00
+#SBATCH --array=0-74%25
 #SBATCH --cpus-per-task=56
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null

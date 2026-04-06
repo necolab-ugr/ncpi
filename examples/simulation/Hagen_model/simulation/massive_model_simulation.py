@@ -20,6 +20,7 @@ from ncpi import FieldPotential, Features, tools
 TOTAL_SIMULATIONS = 10**6
 SIMULATION_TIMEOUT_SECONDS = 60
 LOCAL_NUM_THREADS = 56
+MAX_MEAN_POPULATION_SPIKE_RATE_HZ = 50.0
 PLOT_PARAMETER_SAMPLES = False
 PLOT_EACH_SIMULATION = False
 RANDOM_SEED = 0
@@ -255,6 +256,9 @@ def write_runtime_simulation_params(path, base_simulation_params):
         handle.write(f"local_num_threads = {int(LOCAL_NUM_THREADS)!r}\n")
         handle.write(f"dt = {float(base_simulation_params.dt)!r}\n")
         handle.write("simulate_in_chunks = False\n")
+        handle.write(
+            f"max_mean_population_spike_rate_hz = {float(MAX_MEAN_POPULATION_SPIKE_RATE_HZ)!r}\n"
+        )
 
 
 def run_simulation(lif_params, base_simulation_params, output_dir):
@@ -277,8 +281,9 @@ def run_simulation(lif_params, base_simulation_params, output_dir):
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "runtime_seconds": time.time() - started}
     except subprocess.CalledProcessError as exc:
+        status = "high_spike_rate" if exc.returncode == 2 else "failed"
         return {
-            "status": "failed",
+            "status": status,
             "runtime_seconds": time.time() - started,
             "returncode": exc.returncode,
         }
