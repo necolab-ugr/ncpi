@@ -73,6 +73,7 @@ LFP data."*
 This folder contains **two types of LIF network models**:
 - **`Hagen_model/`**: single-area LIF network model.
 - **`four_area_cortical_model/`**: multi-area (four-area) LIF network model.
+- **`Cavallari_model/`**: single-area conductance-based LIF network model using a custom NEST neuron extension module.
 
 > **Note:** To run examples that include simulations of the LIF network models (e.g., in `Hagen_model/figures/example_full_pipeline.py`), 
 > the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST 
@@ -156,6 +157,29 @@ response to varying external input values."*
 
 - **`example_model_simulation.py`**  
   Example script demonstrating how to simulate the four-area cortical model.
+
+---
+
+#### Simulation Code (`Cavallari_model/simulation/`)
+
+- **`params/`**  
+  Contains parameter sets used to run simulations of the Cavallari conductance-based model.
+
+- **`python/`**  
+  Contains the main Python scripts to configure the network, run simulations, and perform analysis.
+
+- **`example_model_simulation.py`**  
+  Example script demonstrating how to simulate the Cavallari model.
+
+#### Custom NEST extension (`Cavallari_model/neuron_model/`)
+
+This example depends on the custom `iaf_bw_2003` neuron model, which is not part of standard NEST.
+Build it locally before running the simulation:
+
+```bash
+cd examples/simulation/Cavallari_model/neuron_model
+./install.sh
+```
 
 
 ---
