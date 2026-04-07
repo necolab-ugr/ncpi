@@ -2,15 +2,47 @@ import neuron
 import numpy as np
 import scipy.stats as st
 from LFPy import NetworkCell
-from ncpi import neuron_utils
 
 """
 The following methods and parameters were downloaded from the following LFPykernels repositories: 
 https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network_parameters.py
 https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network_methods.py
+They were adapted to replicate the Cavallari LIF network model while retaining
+the Hagen multicompartment morphologies and active mechanisms.
 Copyright (C) 2021 https://github.com/espenhgn
 """
 
+
+def set_active(cell, Vrest):
+    """Insert passive leak, Ih, NaTa_t and SKv3_1 channels as in Hay 2011 model
+
+    Parameters
+    ----------
+    cell: object
+        LFPy.NetworkCell like object
+    Vrest: float
+        Steady state potential (not used)
+    """
+    for sec in cell.template.all:
+        sec.insert('pas')
+        sec.insert('Ih')
+        sec.insert('NaTa_t')
+        sec.insert('SKv3_1')
+        sec.ena = 50
+        sec.ek = -85
+        if sec.name().rfind('soma') >= 0:
+            sec.gNaTa_tbar_NaTa_t = 2.04
+            sec.gSKv3_1bar_SKv3_1 = 0.693
+            sec.g_pas = 0.0000338
+            sec.e_pas = -90
+            sec.gIhbar_Ih = 0.0002
+
+        if sec.name().rfind('apic') >= 0 or sec.name().rfind('dend') >= 0:
+            sec.gNaTa_tbar_NaTa_t = 0.0213
+            sec.gSKv3_1bar_SKv3_1 = 0.000261
+            sec.g_pas = 0.0000589
+            sec.e_pas = -90
+            sec.gIhbar_Ih = 0.0002 * 10
 
 class KernelParams:
     # Transient time
@@ -26,7 +58,6 @@ class KernelParams:
         'weight_IE': 0.233,
         'weight_EI': 2.01,
         'weight_II': 2.70,
-        'weight_scaling': 1.0,
         'biophys': 'lin',
         'i_syn': True,
         'n_ext': [1, 1],
@@ -44,7 +75,7 @@ class KernelParams:
         # morphology='BallAndStick.hoc',  # set by main simulation
         templatefile='BallAndSticksTemplate.hoc',
         templatename='BallAndSticksTemplate',
-        custom_fun=[neuron_utils.set_active_hay2011],
+        custom_fun=[set_active],
         custom_fun_args=[dict(Vrest=-65.)],  # [dict(Vrest=Vrest)] set at runtime
         templateargs=None,
         delete_sections=False,
@@ -99,7 +130,7 @@ class KernelParams:
     population_names = ['E', 'I']
     morphologies = ['BallAndSticks_E.hoc', 'BallAndSticks_I.hoc']
     if TESTING:
-        population_sizes = [400, 100]
+        population_sizes = [40, 10]
         connectionProbability = [[1., 1.], [1., 1.]]
     else:
         population_sizes = [4000, 1000]
