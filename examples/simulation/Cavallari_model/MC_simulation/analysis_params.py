@@ -53,16 +53,18 @@ class KernelParams:
 
     # Parameters adapted from the Cavallari LIF network while keeping
     # the Hagen multicompartment morphologies and active mechanisms.
+    # LIF conductances are in nS-like units; LFPy/NEURON Exp2Syn weights
+    # are in uS, so copied conductance weights are scaled by 1e-3.
     MC_params = {
-        'weight_EE': 0.178,
-        'weight_IE': 0.233,
-        'weight_EI': 2.01,
-        'weight_II': 2.70,
+        'weight_EE': 0.000178,
+        'weight_IE': 0.000233,
+        'weight_EI': 0.00201,
+        'weight_II': 0.00270,
         'biophys': 'lin',
         'i_syn': True,
         'n_ext': [1, 1],
-        'th_exc_external': 0.234,
-        'th_inh_external': 0.317,
+        'th_exc_external': 0.000234,
+        'th_inh_external': 0.000317,
         'v_0': 1.5,
         'g_eff': True,
         'perseg_Vrest': False}

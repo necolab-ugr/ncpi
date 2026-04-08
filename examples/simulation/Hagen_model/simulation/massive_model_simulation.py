@@ -25,6 +25,7 @@ PLOT_PARAMETER_SAMPLES = False
 PLOT_EACH_SIMULATION = False
 RANDOM_SEED = 0
 STRONG_PEAK_RELATIVE_THRESHOLD = 0.9
+STRONG_PEAK_POWER_THRESHOLD = 0.4
 
 # Choose to either download files and precomputed outputs used in simulations of the
 # reference multicompartment neuron network model (True) or load them from a local path (False)
@@ -226,11 +227,7 @@ def sample_parameters(rng):
             and 2.0 * sampled["J_IE"] <= inhibitory_abs_min
         )
 
-        if (
-            sampled["tau_syn_I"] <= sampled["tau_syn_E"]
-            and excitatory_bounded
-            and sampled["J_IE"] > sampled["J_EE"]
-        ):
+        if excitatory_bounded and sampled["J_IE"] > sampled["J_EE"]:
             return sampled
 
 
@@ -512,6 +509,7 @@ def compute_specparam_features(feature_extractor, signal):
         peak_frequency = np.nan
         peak_power = np.nan
         peak_bandwidth = np.nan
+    strongest_peak_power = np.nan
     if peaks.size:
         peak_powers = peaks[:, 1]
         strongest_peak_power = np.nanmax(peak_powers)
@@ -531,6 +529,7 @@ def compute_specparam_features(feature_extractor, signal):
         "peak_bandwidth": peak_bandwidth,
         "all_peaks": peaks,
         "strong_peak_count": strong_peak_count,
+        "strongest_peak_power": float(strongest_peak_power),
         "fit_valid": bool(result.get("valid", True)),
         "gof_rsquared": float(result.get("metrics", {}).get("gof_rsquared", np.nan)),
     }
@@ -716,7 +715,10 @@ def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
         reasons.append("I_rate_less_than_1p5x_E")
     if firing_rate_i > 5.0 * firing_rate_e:
         reasons.append("I_rate_more_than_5x_E")
-    if specparam_features["strong_peak_count"] > 2:
+    if (
+        specparam_features["strong_peak_count"] > 2
+        and specparam_features["strongest_peak_power"] > STRONG_PEAK_POWER_THRESHOLD
+    ):
         reasons.append("more_than_two_strong_peaks")
     if not specparam_features["fit_valid"]:
         reasons.append("specparam_fit_rejected")

@@ -14,75 +14,106 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal as ss
 import pycatch22
-from ncpi import Features
+from ncpi import FieldPotential, Features, tools
 
 # Global tunable parameters for the simulation batch
-TOTAL_SIMULATIONS = 8000
-SIMULATION_TIMEOUT_SECONDS = 120
+TOTAL_SIMULATIONS = 10**6
+SIMULATION_TIMEOUT_SECONDS = 240
 LOCAL_NUM_THREADS = 56
+MAX_MEAN_POPULATION_SPIKE_RATE_HZ = 50.0
 PLOT_PARAMETER_SAMPLES = False
 PLOT_EACH_SIMULATION = False
 RANDOM_SEED = 0
 STRONG_PEAK_RELATIVE_THRESHOLD = 0.9
+STRONG_PEAK_POWER_THRESHOLD = 0.4
+SIGNAL_METHOD = "proxy"  # Choose either "kernel" for CDM or "proxy".
+TRANSIENT_MS = 500.0
 
+# Choose to either download files and precomputed outputs used in simulations of the
+# reference multicompartment neuron network model (True) or load them from a local path (False)
+zenodo_dw_mult = False
+
+# Zenodo URL that contains the data (used if zenodo_dw_mult is True)
+zenodo_URL_mult = "https://zenodo.org/api/records/15429373"
+
+# Zenodo directory where the MC data is stored (must be an absolute path to correctly load morphologies in NEURON)
+zenodo_dir = os.path.expandvars(os.path.expanduser(
+    os.path.join("$HOME", "multicompartment_neuron_network")
+))
+
+# Directory with Cavallari-adapted MC output simulations
+multi_output_path = os.path.join(zenodo_dir, "output_Cavallari")
+
+# Biophysical mechanisms to include when computing kernels from the multicompartment model.
+MULTI_BIOPHYS = ["set_Ih_linearized_hay2011", "make_cell_uniform"]
+
+# Paths for the simulation and analysis
 SCRIPT_DIR = os.path.dirname(__file__)
 PARAMS_DIR = os.path.join(SCRIPT_DIR, "params")
 PYTHON_DIR = os.path.join(SCRIPT_DIR, "python")
 SIMULATION_SCRIPT = os.path.join(PYTHON_DIR, "simulation.py")
+MC_ANALYSIS_PARAMS = os.path.join(os.path.dirname(SCRIPT_DIR), "MC_simulation", "analysis_params.py")
 DEFAULT_BASE_OUTPUT_ROOT = os.path.join(SCRIPT_DIR, "simulation_output")
 OUTPUT_ROOT = DEFAULT_BASE_OUTPUT_ROOT
 
-# Parameter ranges are centered on the default Cavallari configuration and
-# cover roughly 0.5x-2x of the baseline magnitudes while preserving signs.
-PARAMETER_RANGES = {
-    "g_EE": (0.089, 0.356),
-    "g_IE": (0.1165, 0.466),
-    "g_EI": (-4.02, -1.005),
-    "g_II": (-5.40, -1.35),
-    "tau_syn_AMPA_exc": (1.0, 4.0),
-    "tau_syn_AMPA_inh": (0.5, 2.0),
-    "tau_syn_GABA_exc": (2.5, 10.0),
-    "tau_syn_GABA_inh": (2.5, 10.0),
-    "ext_input_scale": (0.5, 2.0),
-}
+# Parameter ranges are expressed as multipliers of the current Cavallari baseline.
+CONDUCTANCE_SCALE_RANGE = (0.5, 1.5)
+SYNAPTIC_TIME_SCALE_RANGE = (0.5, 2.0)
+EXT_INPUT_SCALE_RANGE = (0.5, 4.0)
 
+CATCH22_NAMES = pycatch22.catch22_all([0])["names"]
 SIM_THETA_PARAMETERS = [
     "g_EE",
     "g_IE",
     "g_EI",
     "g_II",
-    "tau_syn_AMPA_exc",
-    "tau_syn_AMPA_inh",
-    "tau_syn_GABA_exc",
-    "tau_syn_GABA_inh",
+    "tau_syn_AMPA_scale",
+    "tau_syn_GABA_scale",
     "ext_input_scale",
 ]
-SIM_DATA_METHODS = ("proxy", "specparam", "catch22")
-
-CATCH22_NAMES = pycatch22.catch22_all([0])["names"]
+SIM_PLOT_PARAMETERS = [
+    "g_EE",
+    "g_IE",
+    "g_EI",
+    "g_II",
+    "E_tau_decay_AMPA",
+    "E_tau_decay_GABA_A",
+    "I_tau_decay_AMPA",
+    "I_tau_decay_GABA_A",
+    "ext_input_scale",
+]
+SIGNAL_DATA_METHODS = {"kernel": "CDM", "proxy": "proxy"}
+SIM_DATA_METHODS = ("CDM", "proxy", "specparam", "catch22")
 
 
 def _specparam_params(fs: float) -> Dict[str, Any]:
-    fs = float(fs)
+    """Build the specparam parameter dict."""
+    try:
+        fs = float(fs)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("`fs` must be convertible to float.") from exc
+
     if fs <= 0:
         raise ValueError(f"`fs` must be positive, got {fs}.")
 
-    specparam_setup = {
+    specparam_setup_emp = {
         "peak_threshold": 1.0,
         "min_peak_height": 0.0,
         "max_n_peaks": 5,
         "peak_width_limits": (10.0, 50.0),
     }
+
     return {
         "fs": fs,
         "freq_range": (5.0, 200.0),
-        "specparam_model": dict(specparam_setup),
+        "specparam_model": dict(specparam_setup_emp),
         "metric_thresholds": {"gof_rsquared": 0.9},
         "metric_policy": "reject",
     }
 
 
 def load_module(module_path, module_name):
+    """Load a Python module from a file path."""
     spec = util.spec_from_file_location(module_name, module_path)
     module = util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -90,15 +121,34 @@ def load_module(module_path, module_name):
 
 
 def parse_args():
+    """Parse command-line arguments for the batch runner."""
     parser = argparse.ArgumentParser(
         description=(
-            "Run the Cavallari massive model simulation either as a standalone "
-            "job or as one batch in a SLURM array."
+            "Run the Cavallari massive model simulation either as a standalone job "
+            "or as one batch in a SLURM array."
         )
     )
-    parser.add_argument("--batch-id", type=int, default=None)
-    parser.add_argument("--num-batches", type=int, default=None)
-    parser.add_argument("--output-root", type=str, default=None)
+    parser.add_argument(
+        "--batch-id",
+        type=int,
+        default=None,
+        help="Zero-based batch index. Defaults to SLURM_ARRAY_TASK_ID or 0.",
+    )
+    parser.add_argument(
+        "--num-batches",
+        type=int,
+        default=None,
+        help="Total number of batches. Defaults to SLURM_ARRAY_TASK_COUNT or 1.",
+    )
+    parser.add_argument(
+        "--output-root",
+        type=str,
+        default=None,
+        help=(
+            "Directory where batch outputs should be stored. "
+            f"Defaults to {DEFAULT_BASE_OUTPUT_ROOT}."
+        ),
+    )
     args = parser.parse_args()
 
     if args.batch_id is None:
@@ -117,24 +167,36 @@ def parse_args():
         raise ValueError(
             f"`batch_id` must be smaller than `num_batches`; got {args.batch_id} and {args.num_batches}."
         )
+    if SIGNAL_METHOD not in SIGNAL_DATA_METHODS:
+        raise ValueError(
+            f"`SIGNAL_METHOD` must be one of {tuple(SIGNAL_DATA_METHODS.keys())}, got {SIGNAL_METHOD!r}."
+        )
+
     return args
 
 
 def resolve_base_output_root(cli_output_root=None):
+    """Resolve the base output directory from CLI or defaults."""
     output_root = cli_output_root or DEFAULT_BASE_OUTPUT_ROOT
     return os.path.abspath(os.path.expanduser(os.path.expandvars(output_root)))
 
 
 def configure_output_directories(batch_id, num_batches, base_output_root=None):
+    """Set the global output directory for the current batch."""
     global OUTPUT_ROOT
+
     resolved_base_output_root = resolve_base_output_root(base_output_root)
+
     if num_batches == 1:
         OUTPUT_ROOT = resolved_base_output_root
     else:
-        OUTPUT_ROOT = os.path.join(resolved_base_output_root, f"batch_{batch_id:04d}")
+        OUTPUT_ROOT = os.path.join(
+            resolved_base_output_root, f"batch_{batch_id:04d}"
+        )
 
 
 def select_batch_parameter_sets(sampled_parameter_sets, batch_id, num_batches):
+    """Split sampled parameters across batches and return this batch."""
     batch_indices = np.array_split(np.arange(len(sampled_parameter_sets), dtype=int), num_batches)
     return [
         (int(global_index), sampled_parameter_sets[int(global_index)])
@@ -142,31 +204,88 @@ def select_batch_parameter_sets(sampled_parameter_sets, batch_id, num_batches):
     ]
 
 
-def ensure_output_directories():
+def active_data_methods(signal_method):
+    """Return the export methods used by the selected signal workflow."""
+    return (SIGNAL_DATA_METHODS[signal_method], "specparam", "catch22")
+
+
+def ensure_output_directories(signal_method):
+    """Create the output folders used by this simulation run."""
     os.makedirs(OUTPUT_ROOT, exist_ok=True)
-    for method in SIM_DATA_METHODS:
+    for method in active_data_methods(signal_method):
         os.makedirs(os.path.join(OUTPUT_ROOT, "data", method), exist_ok=True)
 
 
-def sample_parameters(rng):
+def download_multicompartment_data():
+    """Download the multicompartment reference data when enabled."""
+    if not zenodo_dw_mult:
+        return
+
+    print("\n--- Downloading data.")
+    start_time = time.time()
+    tools.download_zenodo_record(zenodo_URL_mult, download_dir=zenodo_dir)
+    end_time = time.time()
+    print(f"All files downloaded in {(end_time - start_time) / 60:.2f} minutes.")
+
+
+def _scaled_range(value, scale_range):
+    """Build a sorted range after multiplying by a scale interval."""
+    low = float(value) * float(scale_range[0])
+    high = float(value) * float(scale_range[1])
+    return (min(low, high), max(low, high))
+
+
+def parameter_ranges(base_network_params, base_neuron_params):
+    """Return the actual sampled value ranges for plotting and summaries."""
+    return {
+        "g_EE": _scaled_range(base_network_params["exc_exc_recurrent"], CONDUCTANCE_SCALE_RANGE),
+        "g_IE": _scaled_range(base_network_params["exc_inh_recurrent"], CONDUCTANCE_SCALE_RANGE),
+        "g_EI": _scaled_range(base_network_params["inh_exc_recurrent"], CONDUCTANCE_SCALE_RANGE),
+        "g_II": _scaled_range(base_network_params["inh_inh_recurrent"], CONDUCTANCE_SCALE_RANGE),
+        "tau_syn_AMPA_scale": SYNAPTIC_TIME_SCALE_RANGE,
+        "tau_syn_GABA_scale": SYNAPTIC_TIME_SCALE_RANGE,
+        "ext_input_scale": EXT_INPUT_SCALE_RANGE,
+    }
+
+
+def sample_parameters(rng, base_network_params, base_neuron_params):
+    """Sample one parameter set from the configured Cavallari ranges."""
     while True:
-        sampled = {
-            name: float(rng.uniform(low, high))
-            for name, (low, high) in PARAMETER_RANGES.items()
-        }
-        inhibitory_dominant = (
-            abs(sampled["g_EI"]) > sampled["g_EE"]
-            and abs(sampled["g_II"]) > sampled["g_IE"]
+        sampled = {}
+        for name, key in (
+            ("g_EE", "exc_exc_recurrent"),
+            ("g_IE", "exc_inh_recurrent"),
+            ("g_EI", "inh_exc_recurrent"),
+            ("g_II", "inh_inh_recurrent"),
+        ):
+            scale = float(rng.uniform(*CONDUCTANCE_SCALE_RANGE))
+            sampled[name] = float(base_network_params[key]) * scale
+
+        sampled["tau_syn_AMPA_scale"] = float(rng.uniform(*SYNAPTIC_TIME_SCALE_RANGE))
+        sampled["tau_syn_GABA_scale"] = float(rng.uniform(*SYNAPTIC_TIME_SCALE_RANGE))
+        sampled["ext_input_scale"] = float(rng.uniform(*EXT_INPUT_SCALE_RANGE))
+
+        gaba_slower_than_ampa = all(
+            neuron_params["tau_decay_GABA_A"] * sampled["tau_syn_GABA_scale"]
+            >= neuron_params["tau_decay_AMPA"] * sampled["tau_syn_AMPA_scale"]
+            for neuron_params in base_neuron_params
         )
-        slower_inhibition = (
-            sampled["tau_syn_GABA_exc"] >= sampled["tau_syn_AMPA_exc"]
-            and sampled["tau_syn_GABA_inh"] >= sampled["tau_syn_AMPA_inh"]
+        inhibitory_abs_min = min(abs(sampled["g_EI"]), abs(sampled["g_II"]))
+        excitatory_bounded = (
+            2.0 * sampled["g_EE"] <= inhibitory_abs_min
+            and 2.0 * sampled["g_IE"] <= inhibitory_abs_min
         )
-        if inhibitory_dominant and slower_inhibition:
+
+        if (
+            gaba_slower_than_ampa
+            and excitatory_bounded
+            and sampled["g_IE"] > sampled["g_EE"]
+        ):
             return sampled
 
 
 def build_lif_parameters(base_network_params, base_neuron_params, sampled_params):
+    """Build Cavallari LIF network parameters for one sampled configuration."""
     network_params = copy.deepcopy(base_network_params)
     neuron_params = copy.deepcopy(base_neuron_params)
 
@@ -177,10 +296,10 @@ def build_lif_parameters(base_network_params, base_neuron_params, sampled_params
     network_params["th_exc_external"] *= sampled_params["ext_input_scale"]
     network_params["th_inh_external"] *= sampled_params["ext_input_scale"]
 
-    neuron_params[0]["tau_decay_AMPA"] = sampled_params["tau_syn_AMPA_exc"]
-    neuron_params[1]["tau_decay_AMPA"] = sampled_params["tau_syn_AMPA_inh"]
-    neuron_params[0]["tau_decay_GABA_A"] = sampled_params["tau_syn_GABA_exc"]
-    neuron_params[1]["tau_decay_GABA_A"] = sampled_params["tau_syn_GABA_inh"]
+    neuron_params[0]["tau_decay_AMPA"] *= sampled_params["tau_syn_AMPA_scale"]
+    neuron_params[1]["tau_decay_AMPA"] *= sampled_params["tau_syn_AMPA_scale"]
+    neuron_params[0]["tau_decay_GABA_A"] *= sampled_params["tau_syn_GABA_scale"]
+    neuron_params[1]["tau_decay_GABA_A"] *= sampled_params["tau_syn_GABA_scale"]
 
     return {
         "X": ["E", "I"],
@@ -194,15 +313,42 @@ def build_lif_parameters(base_network_params, base_neuron_params, sampled_params
     }
 
 
+def build_plot_parameter_values(sampled_params, base_neuron_params):
+    """Build derived parameter values to show in diagnostic plots."""
+    values = {name: float(sampled_params[name]) for name in SIM_THETA_PARAMETERS}
+    values["E_tau_decay_AMPA"] = (
+        float(base_neuron_params[0]["tau_decay_AMPA"])
+        * float(sampled_params["tau_syn_AMPA_scale"])
+    )
+    values["E_tau_decay_GABA_A"] = (
+        float(base_neuron_params[0]["tau_decay_GABA_A"])
+        * float(sampled_params["tau_syn_GABA_scale"])
+    )
+    values["I_tau_decay_AMPA"] = (
+        float(base_neuron_params[1]["tau_decay_AMPA"])
+        * float(sampled_params["tau_syn_AMPA_scale"])
+    )
+    values["I_tau_decay_GABA_A"] = (
+        float(base_neuron_params[1]["tau_decay_GABA_A"])
+        * float(sampled_params["tau_syn_GABA_scale"])
+    )
+    return values
+
+
 def write_runtime_simulation_params(path, base_simulation_params):
+    """Write runtime simulation parameters to a temporary Python file."""
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(f"tstop = {float(base_simulation_params.tstop)!r}\n")
         handle.write(f"local_num_threads = {int(LOCAL_NUM_THREADS)!r}\n")
         handle.write(f"dt = {float(base_simulation_params.dt)!r}\n")
         handle.write("simulate_in_chunks = False\n")
+        handle.write(
+            f"max_mean_population_spike_rate_hz = {float(MAX_MEAN_POPULATION_SPIKE_RATE_HZ)!r}\n"
+        )
 
 
 def run_simulation(lif_params, base_simulation_params, output_dir):
+    """Run one simulation and report its runtime status."""
     with open(os.path.join(output_dir, "network.pkl"), "wb") as handle:
         pickle.dump(lif_params, handle)
 
@@ -221,17 +367,24 @@ def run_simulation(lif_params, base_simulation_params, output_dir):
     except subprocess.TimeoutExpired:
         return {"status": "timeout", "runtime_seconds": time.time() - started}
     except subprocess.CalledProcessError as exc:
+        status = "high_spike_rate" if exc.returncode == 2 else "failed"
         return {
-            "status": "failed",
+            "status": status,
             "runtime_seconds": time.time() - started,
             "returncode": exc.returncode,
         }
+
     return {"status": "completed", "runtime_seconds": time.time() - started}
 
 
-def load_simulation_outputs(output_dir):
+def load_simulation_outputs(output_dir, signal_method):
+    """Load the core output files produced by a simulation."""
     outputs = {}
-    for filename in ("times.pkl", "gids.pkl", "tstop.pkl", "dt.pkl", "network.pkl", "exc_state_events.pkl"):
+    filenames = ["times.pkl", "gids.pkl", "tstop.pkl", "dt.pkl", "network.pkl"]
+    if signal_method == "proxy":
+        filenames.append("exc_state_events.pkl")
+
+    for filename in filenames:
         path = os.path.join(output_dir, filename)
         with open(path, "rb") as handle:
             outputs[filename[:-4]] = pickle.load(handle)
@@ -239,6 +392,7 @@ def load_simulation_outputs(output_dir):
 
 
 def apply_transient_filter(times, gids, transient):
+    """Discard spikes that occur before the transient period ends."""
     filtered_times = {}
     filtered_gids = {}
     for population in times:
@@ -249,27 +403,191 @@ def apply_transient_filter(times, gids, transient):
 
 
 def mean_firing_rate_hz(spike_times, population_size, transient, tstop):
+    """Compute the mean firing rate in Hz after the transient."""
     duration_ms = float(tstop) - float(transient)
     if duration_ms <= 0:
         return np.nan
     return float(np.asarray(spike_times).size) * 1000.0 / (duration_ms * population_size)
 
 
+def format_elapsed_time(total_seconds):
+    """Convert elapsed seconds to hours and days."""
+    total_seconds = float(total_seconds)
+    return total_seconds / 3600.0, total_seconds / 86400.0
+
+
 def get_spike_rate(times, transient, dt, tstop):
+    """Bin spike times into a simple rate histogram."""
     bins = np.arange(transient, tstop + dt, dt)
     hist, _ = np.histogram(times, bins=bins)
     return bins[:-1], hist.astype(float)
 
 
-def compute_proxy_from_exc_state(exc_state_events, sim_step):
+class KernelParamsAdapter:
+    """Adapter matching the Cavallari example's kernel-parameter access pattern."""
+
+    def __init__(self, kernel_params):
+        self._kernel_params = kernel_params
+
+    def __getattr__(self, name):
+        return getattr(self._kernel_params, name)
+
+    @staticmethod
+    def _current_post_index():
+        try:
+            frame = sys._getframe().f_back
+        except ValueError:
+            frame = None
+        while frame is not None:
+            if frame.f_code.co_name == "create_kernel" and "j" in frame.f_locals:
+                return frame.f_locals["j"]
+            frame = frame.f_back
+        return None
+
+    @property
+    def extSynapseParameters(self):
+        ext_params = self._kernel_params.extSynapseParameters
+        post_idx = self._current_post_index()
+        if post_idx is not None and isinstance(ext_params, (list, tuple)):
+            return ext_params[post_idx]
+        return ext_params
+
+    @property
+    def netstim_interval(self):
+        interval = self._kernel_params.netstim_interval
+        post_idx = self._current_post_index()
+        if post_idx is not None and isinstance(interval, (list, tuple, np.ndarray)):
+            return float(np.asarray(interval, dtype=float)[post_idx])
+        if isinstance(interval, (list, tuple)):
+            return np.asarray(interval, dtype=float)
+        return interval
+
+
+def load_kernel_params():
+    """Load Cavallari-adapted MC analysis parameters."""
+    module = load_module(MC_ANALYSIS_PARAMS, "cavallari_mc_analysis_params_massive")
+    return KernelParamsAdapter(module.KernelParams)
+
+
+def compute_kernel(potential, kernel_params, dt, tstop):
+    """Compute the field-potential kernel used for CDM reconstruction."""
+    print("Computing the kernel...")
+    return potential.create_kernel(
+        zenodo_dir,
+        kernel_params,
+        MULTI_BIOPHYS,
+        dt,
+        tstop,
+        output_sim_path=multi_output_path,
+        electrodeParameters=None,
+        CDM=True,
+    )
+
+
+def is_cdm_components(signal_data):
+    return isinstance(signal_data, dict) and all(key in signal_data for key in ("EE", "EI", "IE", "II"))
+
+
+def wrap_cdm_components(cdm_components, transient, dt, populations, decimation_factor=10):
+    component_order = [f"{pre}{post}" for pre in populations for post in populations]
+    signal = np.sum(
+        np.vstack([np.asarray(cdm_components[key], dtype=float) for key in component_order]),
+        axis=0,
+    )
+    return {
+        "signal": signal,
+        "times": float(transient) + np.arange(signal.size) * float(dt) * float(decimation_factor),
+        "components": cdm_components,
+        "decimation_factor": decimation_factor,
+        "source": "kernel",
+    }
+
+
+def compute_cdm(potential, kernels, spike_times, dt, tstop, transient, populations):
+    """Compute CDM components and their summed signal."""
+    cdm_signals = potential.compute_cdm_lfp_from_kernels(
+        kernels,
+        spike_times=spike_times,
+        dt=dt,
+        tstop=tstop,
+        transient=transient,
+        probe="KernelApproxCurrentDipoleMoment",
+        component=2,
+        mode="same",
+        scale=dt / 1000.0,
+    )
+
+    cdm_components = {}
+    for pre in populations:
+        for post in populations:
+            key = f"{pre}{post}"
+            source_key = f"{post}:{pre}"
+            cdm_components[key] = np.asarray(
+                ss.decimate(cdm_signals[source_key], q=10, zero_phase=True)
+            )
+
+    return wrap_cdm_components(cdm_components, transient, dt, populations)
+
+
+def get_proxy_signal(proxy_data):
+    if isinstance(proxy_data, dict) and "signal" in proxy_data:
+        return np.asarray(proxy_data["signal"], dtype=float)
+    if isinstance(proxy_data, dict) and "components" in proxy_data:
+        return get_proxy_signal(proxy_data["components"])
+    if is_cdm_components(proxy_data):
+        return np.sum(
+            np.vstack([np.asarray(proxy_data[key], dtype=float) for key in ("EE", "EI", "IE", "II")]),
+            axis=0,
+        )
+    return np.asarray(proxy_data, dtype=float)
+
+
+def get_feature_signal(signal_method, signal_data):
+    if signal_method == "kernel" and isinstance(signal_data, dict) and "components" in signal_data:
+        return get_proxy_signal(signal_data["components"])
+    return get_proxy_signal(signal_data)
+
+
+def get_proxy_times(proxy_data):
+    if isinstance(proxy_data, dict) and "times" in proxy_data:
+        return np.asarray(proxy_data["times"], dtype=float)
+    raise KeyError("Signal payload does not contain an explicit time axis.")
+
+
+def trim_signal_to_transient(signal_data, transient):
+    """Discard signal samples before the configured transient time."""
+    if not isinstance(signal_data, dict) or "signal" not in signal_data or "times" not in signal_data:
+        return signal_data
+    signal = get_proxy_signal(signal_data)
+    times = get_proxy_times(signal_data)
+    keep = times >= float(transient)
+    trimmed = dict(signal_data)
+    trimmed["signal"] = signal[keep]
+    trimmed["times"] = times[keep]
+    return trimmed
+
+
+def _extract_exc_currents(exc_state_events):
+    """Extract the population-summed excitatory AMPA/GABA currents."""
     times = np.asarray(exc_state_events["times"], dtype=float)
+    if {"AMPA", "GABA", "Vm"}.issubset(exc_state_events):
+        return (
+            times,
+            np.asarray(exc_state_events["AMPA"], dtype=float),
+            np.asarray(exc_state_events["GABA"], dtype=float),
+            np.asarray(exc_state_events["Vm"], dtype=float),
+        )
+    raise KeyError("Expected aggregated excitatory-state payload with AMPA/GABA/Vm entries.")
+
+
+def compute_proxy(exc_state_events, sim_step):
+    """Compute the Cavallari LFP proxy exactly as in example_model_simulation."""
+    times, ampa_current, gaba_current, _ = _extract_exc_currents(exc_state_events)
     if times.size == 0:
         raise ValueError("No excitatory-state samples are available for proxy computation.")
 
-    signal = np.abs(np.asarray(exc_state_events["AMPA"], dtype=float))
-    signal += np.abs(np.asarray(exc_state_events["GABA"], dtype=float))
-
-    start_time_pos = int(500.0 / float(sim_step))
+    signal = np.abs(ampa_current) + np.abs(gaba_current)
+    start_time_pos = int(TRANSIENT_MS / float(sim_step))
     if start_time_pos >= signal.size:
         raise ValueError("Proxy normalization window starts after the end of the signal.")
 
@@ -287,8 +605,9 @@ def compute_proxy_from_exc_state(exc_state_events, sim_step):
 
 
 def decimate_proxy(proxy_data, decimation_factor=10):
-    signal = np.asarray(proxy_data["signal"], dtype=float)
-    times = np.asarray(proxy_data["times"], dtype=float)
+    """Decimate the proxy as in the Cavallari example."""
+    signal = get_proxy_signal(proxy_data)
+    times = get_proxy_times(proxy_data)
     if signal.size == 0:
         raise ValueError("Cannot decimate an empty proxy signal.")
     if decimation_factor <= 1:
@@ -309,7 +628,35 @@ def decimate_proxy(proxy_data, decimation_factor=10):
     }
 
 
+def compute_signal_data(signal_method, potential, kernel_cache, outputs, filtered_times, transient, populations):
+    """Compute the selected signal workflow for one simulation."""
+    if signal_method == "kernel":
+        signal_data = compute_cdm(
+            potential,
+            kernel_cache,
+            filtered_times,
+            outputs["dt"],
+            outputs["tstop"],
+            transient,
+            populations,
+        )
+        signal = get_feature_signal(signal_method, signal_data)
+        times = get_proxy_times(signal_data)
+        signal_dt = float(outputs["dt"]) * float(signal_data.get("decimation_factor", 1))
+        return signal_data, signal, times, signal_dt
+
+    proxy_data = trim_signal_to_transient(
+        decimate_proxy(compute_proxy(outputs["exc_state_events"], outputs["dt"])),
+        transient,
+    )
+    signal = get_feature_signal(signal_method, proxy_data)
+    times = get_proxy_times(proxy_data)
+    signal_dt = float(outputs["dt"]) * float(proxy_data.get("decimation_factor", 1))
+    return proxy_data, signal, times, signal_dt
+
+
 def compute_catch22_features(feature_extractor, signal):
+    """Compute normalized catch22 features from a signal."""
     x = np.asarray(signal, dtype=float).squeeze()
     sigma = float(np.std(x))
     if not np.isfinite(sigma) or sigma == 0.0:
@@ -320,6 +667,7 @@ def compute_catch22_features(feature_extractor, signal):
 
 
 def _normalize_peak_array(peaks):
+    """Normalize peak output to a consistent `(n, 3)` array."""
     peaks = np.asarray(peaks, dtype=float)
     if peaks.ndim == 1 and peaks.size == 3:
         return peaks.reshape(1, 3)
@@ -329,6 +677,7 @@ def _normalize_peak_array(peaks):
 
 
 def _sort_peaks_by_frequency(peaks):
+    """Sort peaks by center frequency to keep debug output ordering stable."""
     peaks = _normalize_peak_array(peaks)
     if peaks.shape[0] <= 1:
         return peaks
@@ -337,6 +686,7 @@ def _sort_peaks_by_frequency(peaks):
 
 
 def _select_peak_from_all(peaks, select_peak, freq_range):
+    """Select one peak from the full peak list using the configured rule."""
     selected_peaks = np.empty((0, 3), dtype=float)
     if peaks.shape[0] == 0 or select_peak == "all":
         return selected_peaks
@@ -361,6 +711,7 @@ def _select_peak_from_all(peaks, select_peak, freq_range):
 
 
 def _extract_model_peaks(fit_model):
+    """Extract the peak table from a fitted specparam model."""
     if fit_model is None:
         return np.empty((0, 3), dtype=float)
     try:
@@ -370,6 +721,7 @@ def _extract_model_peaks(fit_model):
 
 
 def _plot_specparam_debug_spectrum(ax, freqs, power_spectrum, fit_model, freq_range):
+    """Plot the PSD and fitted model using specparam's native plot helper."""
     freqs = np.asarray(freqs, dtype=float)
     power_spectrum = np.asarray(power_spectrum, dtype=float)
     mask = (
@@ -409,6 +761,7 @@ def _plot_specparam_debug_spectrum(ax, freqs, power_spectrum, fit_model, freq_ra
 
 
 def compute_specparam_features(feature_extractor, signal):
+    """Compute specparam summary features and peak counts for a signal."""
     select_peak = feature_extractor.params.get("select_peak", "max_pw")
     freq_range = feature_extractor.params.get("freq_range", (5.0, 200.0))
     try:
@@ -428,7 +781,6 @@ def compute_specparam_features(feature_extractor, signal):
             "metrics": {"gof_rsquared": np.nan},
             "valid": False,
         }
-
     aperiodic = np.asarray(result.get("aperiodic_params", np.array([np.nan, np.nan])), dtype=float)
     slope = float(aperiodic[1]) if aperiodic.size > 1 else np.nan
     peaks = _sort_peaks_by_frequency(result.get("all_peaks", np.empty((0, 3))))
@@ -439,7 +791,7 @@ def compute_specparam_features(feature_extractor, signal):
         peak_frequency = np.nan
         peak_power = np.nan
         peak_bandwidth = np.nan
-
+    strongest_peak_power = np.nan
     if peaks.size:
         peak_powers = peaks[:, 1]
         strongest_peak_power = np.nanmax(peak_powers)
@@ -451,7 +803,6 @@ def compute_specparam_features(feature_extractor, signal):
             strong_peak_count = 0
     else:
         strong_peak_count = 0
-
     return {
         "slope": slope,
         "n_peaks": int(result.get("n_peaks", peaks.shape[0])),
@@ -460,12 +811,14 @@ def compute_specparam_features(feature_extractor, signal):
         "peak_bandwidth": peak_bandwidth,
         "all_peaks": peaks,
         "strong_peak_count": strong_peak_count,
+        "strongest_peak_power": float(strongest_peak_power),
         "fit_valid": bool(result.get("valid", True)),
         "gof_rsquared": float(result.get("metrics", {}).get("gof_rsquared", np.nan)),
     }
 
 
 def fit_specparam_for_plot(signal, fs):
+    """Compute a Welch PSD and fit specparam for debug plotting."""
     from specparam import SpectralModel
 
     x = np.asarray(signal, dtype=float).squeeze()
@@ -496,38 +849,16 @@ def fit_specparam_for_plot(signal, fs):
     return freqs, power_spectrum, fm, freq_range
 
 
-def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
-    reasons = []
-    if not np.isfinite(firing_rate_e) or not np.isfinite(firing_rate_i):
-        reasons.append("non_finite_firing_rate")
-    if not np.isfinite(specparam_features["slope"]):
-        reasons.append("non_finite_slope")
-    elif specparam_features["slope"] < 0.0:
-        reasons.append("negative_slope")
-    if firing_rate_i > 40.0:
-        reasons.append("I_rate_above_40")
-    if firing_rate_e > 20.0:
-        reasons.append("E_rate_above_20")
-    if firing_rate_i <= firing_rate_e:
-        reasons.append("I_rate_not_above_E")
-    if firing_rate_i >= 10.0 * firing_rate_e:
-        reasons.append("I_rate_not_below_10x_E")
-    if specparam_features["strong_peak_count"] > 2:
-        reasons.append("more_than_two_strong_peaks")
-    if not specparam_features["fit_valid"]:
-        reasons.append("specparam_fit_rejected")
-    return len(reasons) == 0, reasons
-
-
 def plot_simulation_debug(
     simulation_index,
-    sampled_params,
+    plot_params,
     times,
     gids,
     populations,
-    proxy_total,
-    proxy_time,
-    proxy_dt,
+    signal_total,
+    signal_time,
+    signal_dt,
+    signal_label,
     transient,
     tstop,
     firing_rate_e,
@@ -536,6 +867,7 @@ def plot_simulation_debug(
     is_valid,
     invalid_reasons=None,
 ):
+    """Plot debug views for one simulation and annotate extracted features."""
     if not PLOT_EACH_SIMULATION:
         return
 
@@ -543,7 +875,7 @@ def plot_simulation_debug(
     grid = fig.add_gridspec(4, 2)
     raster_ax = fig.add_subplot(grid[0, :])
     rate_ax = fig.add_subplot(grid[1, :])
-    cdm_ax = fig.add_subplot(grid[2, 0])
+    signal_ax = fig.add_subplot(grid[2, 0])
     psd_ax = fig.add_subplot(grid[2, 1])
     spec_left_ax = fig.add_subplot(grid[3, 0])
     spec_right_ax = fig.add_subplot(grid[3, 1])
@@ -573,7 +905,7 @@ def plot_simulation_debug(
     raster_ax.legend(loc="upper right")
 
     for population in populations:
-        bins, spike_rate = get_spike_rate(times[population], transient, proxy_dt / 10.0, tstop)
+        bins, spike_rate = get_spike_rate(times[population], transient, signal_dt / 10.0, tstop)
         mask = (bins >= time_window[0]) & (bins <= time_window[1])
         rate_ax.plot(
             bins[mask],
@@ -585,23 +917,23 @@ def plot_simulation_debug(
     rate_ax.set_xlim(time_window)
     rate_ax.legend(loc="upper right")
 
-    proxy_mask = (proxy_time >= time_window[0]) & (proxy_time <= time_window[1])
-    cdm_ax.plot(proxy_time[proxy_mask], proxy_total[proxy_mask], color="k", linewidth=0.9)
-    cdm_ax.set_ylabel("Proxy")
-    cdm_ax.set_xlabel("Time (ms)")
-    cdm_ax.set_xlim(time_window)
+    signal_mask = (signal_time >= time_window[0]) & (signal_time <= time_window[1])
+    signal_ax.plot(signal_time[signal_mask], signal_total[signal_mask], color="k", linewidth=0.9)
+    signal_ax.set_ylabel(signal_label)
+    signal_ax.set_xlabel("Time (ms)")
+    signal_ax.set_xlim(time_window)
 
-    fs = 1000.0 / proxy_dt
+    fs = 1000.0 / signal_dt
     try:
-        freqs, power, fit_model, freq_range = fit_specparam_for_plot(proxy_total, fs)
+        freqs, power, fit_model, freq_range = fit_specparam_for_plot(signal_total, fs)
     except Exception:
-        freqs, power = ss.welch(proxy_total, fs=fs)
+        freqs, power = ss.welch(signal_total, fs=fs)
         fit_model = None
         freq_range = _specparam_params(fs)["freq_range"]
     _plot_specparam_debug_spectrum(psd_ax, freqs, power, fit_model, freq_range)
     psd_ax.set_ylabel("Power")
     psd_ax.set_xlabel("Frequency (Hz)")
-    psd_ax.set_title("Proxy spectrum + specparam fit")
+    psd_ax.set_title(f"{signal_label} spectrum + specparam fit")
 
     spec_left_ax.axis("off")
     spec_right_ax.axis("off")
@@ -618,10 +950,7 @@ def plot_simulation_debug(
     else:
         peak_lines.append("Peak list: none")
 
-    parameter_lines = [
-        f"{name}: {float(value):.4f}"
-        for name, value in sampled_params.items()
-    ]
+    parameter_lines = [f"{name}: {float(plot_params[name]):.4f}" for name in SIM_PLOT_PARAMETERS]
 
     summary_text = "\n".join(
         [
@@ -649,20 +978,199 @@ def plot_simulation_debug(
     plt.close(fig)
 
 
-def format_elapsed_time(total_seconds):
-    total_seconds = float(total_seconds)
-    return total_seconds / 3600.0, total_seconds / 86400.0
+def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
+    """Evaluate whether a simulation passes the acceptance rules."""
+    reasons = []
+    if not np.isfinite(firing_rate_e) or not np.isfinite(firing_rate_i):
+        reasons.append("non_finite_firing_rate")
+    if not np.isfinite(specparam_features["slope"]):
+        reasons.append("non_finite_slope")
+    elif specparam_features["slope"] < 0.0:
+        reasons.append("negative_slope")
+    if firing_rate_i > 40.0:
+        reasons.append("I_rate_above_40")
+    if firing_rate_e > 20.0:
+        reasons.append("E_rate_above_20")
+    if firing_rate_i < 1.5 * firing_rate_e:
+        reasons.append("I_rate_less_than_1p5x_E")
+    if firing_rate_i > 10.0 * firing_rate_e:
+        reasons.append("I_rate_more_than_10x_E")
+    if (
+        specparam_features["strong_peak_count"] > 2
+        and specparam_features["strongest_peak_power"] > STRONG_PEAK_POWER_THRESHOLD
+    ):
+        reasons.append("more_than_two_strong_peaks")
+    if not specparam_features["fit_valid"]:
+        reasons.append("specparam_fit_rejected")
+    return len(reasons) == 0, reasons
 
 
-def plot_parameter_samples(sampled_parameter_sets):
+def flatten_summary_row(
+    sample_index,
+    simulation_index,
+    batch_id,
+    sampled_params,
+    runtime_info,
+    signal_method,
+    firing_rate_e=None,
+    firing_rate_i=None,
+    catch22_features=None,
+    specparam_features=None,
+    valid=None,
+    valid_reasons=None,
+):
+    """Flatten simulation results into a CSV-friendly row."""
+    row = {
+        "sample_index": sample_index,
+        "simulation_index": simulation_index,
+        "batch_id": batch_id,
+        "signal_method": signal_method,
+        "status": runtime_info["status"],
+        "runtime_seconds": runtime_info.get("runtime_seconds", np.nan),
+        "valid": valid,
+        "valid_reasons": ";".join(valid_reasons or []),
+        "firing_rate_E_hz": firing_rate_e,
+        "firing_rate_I_hz": firing_rate_i,
+    }
+    row.update(sampled_params)
+    if catch22_features is not None:
+        row.update({f"catch22_{name}": value for name, value in catch22_features.items()})
+    if specparam_features is not None:
+        row.update(
+            {
+                "specparam_slope": specparam_features["slope"],
+                "specparam_peak_frequency": specparam_features["peak_frequency"],
+                "specparam_peak_power": specparam_features["peak_power"],
+                "specparam_strong_peak_count": specparam_features["strong_peak_count"],
+                "specparam_fit_valid": specparam_features["fit_valid"],
+                "specparam_gof_rsquared": specparam_features["gof_rsquared"],
+            }
+        )
+    return row
+
+
+def save_csv(rows, path):
+    """Write a list of dictionaries to CSV."""
+    if not rows:
+        return
+    fieldnames = sorted({key for row in rows for key in row.keys()})
+    with open(path, "w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row)
+
+
+def save_pickle(payload, path):
+    """Serialize an object to a pickle file."""
+    with open(path, "wb") as handle:
+        pickle.dump(payload, handle)
+
+
+def build_theta_row(sampled_params):
+    """Build the theta vector for one accepted sample."""
+    return np.asarray(
+        [sampled_params[name] for name in SIM_THETA_PARAMETERS],
+        dtype=np.float32,
+    )
+
+
+def build_catch22_row(catch22_result):
+    """Build the catch22 feature vector for export."""
+    return np.asarray(
+        [catch22_result[name] for name in CATCH22_NAMES],
+        dtype=np.float32,
+    )
+
+
+def build_specparam_row(specparam_result):
+    """Build the specparam feature vector for export."""
+    return np.asarray(
+        [
+            specparam_result["slope"],
+            specparam_result["peak_frequency"],
+            specparam_result["peak_power"],
+        ],
+        dtype=np.float32,
+    )
+
+
+def build_cdm_row(cdm_total):
+    """Build the normalized CDM trace used for export, as in Hagen."""
+    cdm_total = np.asarray(cdm_total, dtype=float).squeeze()
+    if cdm_total.ndim != 1 or cdm_total.size <= 500:
+        return None
+
+    trimmed = cdm_total[500:]
+    sigma = float(np.std(trimmed))
+    if not np.isfinite(sigma) or sigma <= 1e-10:
+        return None
+
+    normalized = (trimmed - np.mean(trimmed)) / sigma
+    return np.asarray(normalized, dtype=np.float32)
+
+
+def build_proxy_row(proxy_data):
+    """Build the Cavallari proxy trace used for export."""
+    signal = np.asarray(proxy_data["signal"], dtype=float).squeeze()
+    if signal.ndim != 1 or signal.size == 0:
+        return None
+    return signal.astype(np.float32)
+
+
+def build_signal_row(signal_method, signal_data, signal):
+    """Build the exported trace row for the selected signal method."""
+    if signal_method == "kernel":
+        return build_cdm_row(signal)
+    return build_proxy_row(signal_data)
+
+
+def initialize_sim_data_exports(signal_method):
+    """Initialize in-memory export containers for accepted samples."""
+    return {
+        method: {"theta": [], "X": []}
+        for method in active_data_methods(signal_method)
+    }
+
+
+def append_sim_data_export(exports, method, theta_row, x_row):
+    """Append one feature row to the export buffers."""
+    if x_row is None:
+        return
+    exports[method]["theta"].append(np.asarray(theta_row, dtype=np.float32))
+    exports[method]["X"].append(np.asarray(x_row, dtype=np.float32))
+
+
+def save_sim_data_exports(exports):
+    """Save accumulated simulation datasets to disk."""
+    for method, payload in exports.items():
+        if not payload["theta"] or not payload["X"]:
+            continue
+
+        theta = {
+            "parameters": list(SIM_THETA_PARAMETERS),
+            "data": np.stack(payload["theta"]).astype(np.float32),
+        }
+        X = np.stack(payload["X"]).astype(np.float32)
+        method_dir = os.path.join(OUTPUT_ROOT, "data", method)
+        save_pickle(theta, os.path.join(method_dir, "sim_theta"))
+        save_pickle(X, os.path.join(method_dir, "sim_X"))
+
+
+def plot_parameter_samples(sampled_parameter_sets, base_neuron_params):
+    """Plot the sampled parameter combinations for this batch."""
     if not PLOT_PARAMETER_SAMPLES or not sampled_parameter_sets:
         return
 
     print("\nPlotting sampled parameter combinations before running simulations.", flush=True)
 
-    parameter_names = list(PARAMETER_RANGES.keys())
+    parameter_names = list(SIM_PLOT_PARAMETERS)
+    plot_parameter_sets = [
+        build_plot_parameter_values(params, base_neuron_params)
+        for params in sampled_parameter_sets
+    ]
     sampled_values = np.array(
-        [[params[name] for name in parameter_names] for params in sampled_parameter_sets],
+        [[params[name] for name in parameter_names] for params in plot_parameter_sets],
         dtype=float,
     )
 
@@ -707,119 +1215,15 @@ def plot_parameter_samples(sampled_parameter_sets):
     plt.close(fig)
 
 
-def flatten_summary_row(
-    sample_index,
-    simulation_index,
-    batch_id,
-    sampled_params,
-    runtime_info,
-    firing_rate_e=None,
-    firing_rate_i=None,
-    catch22_features=None,
-    specparam_features=None,
-    valid=None,
-    valid_reasons=None,
-):
-    row = {
-        "sample_index": sample_index,
-        "simulation_index": simulation_index,
-        "batch_id": batch_id,
-        "status": runtime_info["status"],
-        "runtime_seconds": runtime_info.get("runtime_seconds", np.nan),
-        "valid": valid,
-        "valid_reasons": ";".join(valid_reasons or []),
-        "firing_rate_E_hz": firing_rate_e,
-        "firing_rate_I_hz": firing_rate_i,
-    }
-    row.update(sampled_params)
-    if catch22_features is not None:
-        row.update({f"catch22_{name}": value for name, value in catch22_features.items()})
-    if specparam_features is not None:
-        row.update(
-            {
-                "specparam_slope": specparam_features["slope"],
-                "specparam_peak_frequency": specparam_features["peak_frequency"],
-                "specparam_peak_power": specparam_features["peak_power"],
-                "specparam_strong_peak_count": specparam_features["strong_peak_count"],
-                "specparam_fit_valid": specparam_features["fit_valid"],
-                "specparam_gof_rsquared": specparam_features["gof_rsquared"],
-            }
-        )
-    return row
-
-
-def save_csv(rows, path):
-    if not rows:
-        return
-    fieldnames = sorted({key for row in rows for key in row.keys()})
-    with open(path, "w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow(row)
-
-
-def save_pickle(payload, path):
-    with open(path, "wb") as handle:
-        pickle.dump(payload, handle)
-
-
-def build_theta_row(sampled_params):
-    return np.asarray([sampled_params[name] for name in SIM_THETA_PARAMETERS], dtype=np.float32)
-
-
-def build_catch22_row(catch22_result):
-    return np.asarray([catch22_result[name] for name in CATCH22_NAMES], dtype=np.float32)
-
-
-def build_specparam_row(specparam_result):
-    return np.asarray(
-        [
-            specparam_result["slope"],
-            specparam_result["peak_frequency"],
-            specparam_result["peak_power"],
-        ],
-        dtype=np.float32,
-    )
-
-
-def build_proxy_row(proxy_data):
-    signal = np.asarray(proxy_data["signal"], dtype=float).squeeze()
-    if signal.ndim != 1 or signal.size == 0:
-        return None
-    return signal.astype(np.float32)
-
-
-def initialize_sim_data_exports():
-    return {method: {"theta": [], "X": []} for method in SIM_DATA_METHODS}
-
-
-def append_sim_data_export(exports, method, theta_row, x_row):
-    if x_row is None:
-        return
-    exports[method]["theta"].append(np.asarray(theta_row, dtype=np.float32))
-    exports[method]["X"].append(np.asarray(x_row, dtype=np.float32))
-
-
-def save_sim_data_exports(exports):
-    for method, payload in exports.items():
-        if not payload["theta"] or not payload["X"]:
-            continue
-        theta = {
-            "parameters": list(SIM_THETA_PARAMETERS),
-            "data": np.stack(payload["theta"]).astype(np.float32),
-        }
-        X = np.stack(payload["X"]).astype(np.float32)
-        method_dir = os.path.join(OUTPUT_ROOT, "data", method)
-        save_pickle(theta, os.path.join(method_dir, "sim_theta"))
-        save_pickle(X, os.path.join(method_dir, "sim_X"))
-
-
 def main():
+    """Run the full massive-model simulation batch workflow."""
     args = parse_args()
     configure_output_directories(args.batch_id, args.num_batches, args.output_root)
-    ensure_output_directories()
+    ensure_output_directories(SIGNAL_METHOD)
     print(f"Using output root: {OUTPUT_ROOT}", flush=True)
+
+    if SIGNAL_METHOD == "kernel":
+        download_multicompartment_data()
 
     rng = np.random.default_rng(RANDOM_SEED)
 
@@ -831,11 +1235,20 @@ def main():
         os.path.join(PARAMS_DIR, "simulation_params.py"),
         "cavallari_simulation_params_massive",
     )
+    _ = parameter_ranges(network_params.Network_params, network_params.Neuron_params)
 
     population_sizes = {
         "E": int(network_params.Network_params["N_exc"]),
         "I": int(network_params.Network_params["N_inh"]),
     }
+    populations = ["E", "I"]
+
+    kernel_params = None
+    potential = None
+    kernel_cache = None
+    if SIGNAL_METHOD == "kernel":
+        kernel_params = load_kernel_params()
+        potential = FieldPotential()
 
     catch22_features = Features(method="catch22", params={"normalize": True})
     signal_fs = 1000.0 / (10.0 * float(simulation_params.dt))
@@ -843,12 +1256,18 @@ def main():
 
     all_simulation_rows = []
     valid_detail_rows = []
-    sim_data_exports = initialize_sim_data_exports()
-    sampled_parameter_sets = [sample_parameters(rng) for _ in range(TOTAL_SIMULATIONS)]
+    sim_data_exports = initialize_sim_data_exports(SIGNAL_METHOD)
+    sampled_parameter_sets = [
+        sample_parameters(rng, network_params.Network_params, network_params.Neuron_params)
+        for _ in range(TOTAL_SIMULATIONS)
+    ]
     batch_parameter_sets = select_batch_parameter_sets(
         sampled_parameter_sets, args.batch_id, args.num_batches
     )
-    plot_parameter_samples([params for _, params in batch_parameter_sets])
+    plot_parameter_samples(
+        [params for _, params in batch_parameter_sets],
+        network_params.Neuron_params,
+    )
     batch_start_time = time.time()
 
     print(
@@ -878,7 +1297,10 @@ def main():
             f"valid so far {len(valid_detail_rows)} ######"
         )
         banner_border = "#" * len(banner_message)
-        print(f"\n{banner_border}\n{banner_message}\n{banner_border}", flush=True)
+        print(
+            f"\n{banner_border}\n{banner_message}\n{banner_border}",
+            flush=True,
+        )
 
         runtime_info = run_simulation(lif_params, simulation_params, temp_output_dir)
         if runtime_info["status"] != "completed":
@@ -889,6 +1311,7 @@ def main():
                     batch_id=args.batch_id,
                     sampled_params=sampled_params,
                     runtime_info=runtime_info,
+                    signal_method=SIGNAL_METHOD,
                     valid=False,
                     valid_reasons=[runtime_info["status"]],
                 )
@@ -897,8 +1320,9 @@ def main():
             continue
 
         try:
-            outputs = load_simulation_outputs(temp_output_dir)
-            transient = min(500.0, max(0.0, float(outputs["tstop"]) - float(outputs["dt"])))
+            outputs = load_simulation_outputs(temp_output_dir, SIGNAL_METHOD)
+            transient = TRANSIENT_MS
+
             filtered_times, filtered_gids = apply_transient_filter(
                 outputs["times"], outputs["gids"], transient
             )
@@ -910,15 +1334,25 @@ def main():
                 filtered_times["I"], population_sizes["I"], transient, outputs["tstop"]
             )
 
-            proxy_data = decimate_proxy(
-                compute_proxy_from_exc_state(outputs["exc_state_events"], outputs["dt"])
-            )
-            proxy_signal = np.asarray(proxy_data["signal"], dtype=float)
-            proxy_time = np.asarray(proxy_data["times"], dtype=float)
-            proxy_dt = float(outputs["dt"]) * float(proxy_data.get("decimation_factor", 1))
+            if SIGNAL_METHOD == "kernel" and kernel_cache is None:
+                # The Cavallari example uses fixed kernel settings, so the kernel can be
+                # reused across samples with the same dt/tstop configuration.
+                kernel_cache = compute_kernel(
+                    potential, kernel_params, outputs["dt"], outputs["tstop"]
+                )
 
-            catch22_result = compute_catch22_features(catch22_features, proxy_signal)
-            specparam_result = compute_specparam_features(specparam_features, proxy_signal)
+            signal_data, signal, signal_time, signal_dt = compute_signal_data(
+                SIGNAL_METHOD,
+                potential,
+                kernel_cache,
+                outputs,
+                filtered_times,
+                transient,
+                populations,
+            )
+
+            catch22_result = compute_catch22_features(catch22_features, signal)
+            specparam_result = compute_specparam_features(specparam_features, signal)
             is_valid, invalid_reasons = evaluate_validity(
                 firing_rate_e, firing_rate_i, specparam_result
             )
@@ -930,6 +1364,7 @@ def main():
                 batch_id=args.batch_id,
                 sampled_params=sampled_params,
                 runtime_info=runtime_info,
+                signal_method=SIGNAL_METHOD,
                 firing_rate_e=firing_rate_e,
                 firing_rate_i=firing_rate_i,
                 catch22_features=catch22_result,
@@ -939,15 +1374,20 @@ def main():
             )
             all_simulation_rows.append(summary_row)
 
+            signal_data_method = SIGNAL_DATA_METHODS[SIGNAL_METHOD]
             plot_simulation_debug(
                 simulation_index=simulation_index,
-                sampled_params=sampled_params,
+                plot_params=build_plot_parameter_values(
+                    sampled_params,
+                    network_params.Neuron_params,
+                ),
                 times=filtered_times,
                 gids=filtered_gids,
-                populations=["E", "I"],
-                proxy_total=proxy_signal,
-                proxy_time=proxy_time,
-                proxy_dt=proxy_dt,
+                populations=populations,
+                signal_total=signal,
+                signal_time=signal_time,
+                signal_dt=signal_dt,
+                signal_label=signal_data_method,
                 transient=transient,
                 tstop=outputs["tstop"],
                 firing_rate_e=firing_rate_e,
@@ -961,9 +1401,9 @@ def main():
                 theta_row = build_theta_row(sampled_params)
                 append_sim_data_export(
                     sim_data_exports,
-                    "proxy",
+                    signal_data_method,
                     theta_row,
-                    build_proxy_row(proxy_data),
+                    build_signal_row(SIGNAL_METHOD, signal_data, signal),
                 )
                 append_sim_data_export(
                     sim_data_exports,
@@ -982,8 +1422,8 @@ def main():
                         "sample_index": sample_index,
                         "simulation_index": simulation_index,
                         "batch_id": args.batch_id,
+                        "signal_method": SIGNAL_METHOD,
                         "parameters": sampled_params,
-                        "v_0": 1.5,
                         "firing_rates_hz": {"E": firing_rate_e, "I": firing_rate_i},
                         "spike_counts": {
                             "E": int(filtered_times["E"].size),
@@ -997,7 +1437,7 @@ def main():
                         },
                         "data_dirs": {
                             method: os.path.join(OUTPUT_ROOT, "data", method)
-                            for method in SIM_DATA_METHODS
+                            for method in active_data_methods(SIGNAL_METHOD)
                         },
                     }
                 )

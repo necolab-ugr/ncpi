@@ -9,6 +9,7 @@ import numpy as np
 
 
 MODULE_CANDIDATES = (
+    # Try the installed module name first, then common local build artifacts.
     ("cavallari_module",),
     ("build", "libcavallari_module.so"),
     ("build", "src", "cavallari_module.so"),
@@ -16,28 +17,29 @@ MODULE_CANDIDATES = (
 
 
 def _node_ids(nodes):
+    """Return plain integer node ids from a NEST NodeCollection."""
     return list(nodes.tolist())
 
 
-def _update_dicts(dict1, dict2):
-    merged = dict(dict1)
-    merged.update(dict2)
-    return merged
-
-
 def _default_analysis_params():
+    """Default state variables recorded from the full E/I populations."""
     return {
         "To_be_measured": ["V_m", "g_ex", "g_in"],
-        "cells_to_analyze": [i for i in range(10)],
     }
 
 
 class network:
-    """NEST 3.8 reproduction of the original pablomc88 `network_1.py` flow.
+    """Reproduce the original pablomc88 `network_1.py` workflow with NEST 3.8.
 
-    External thalamic and cortical drives are implemented here as direct
-    inhomogeneous Poisson inputs to excitatory and inhibitory populations,
-    with generator rates scaled to replace the original parrot-neuron relay.
+    The `network_1.py` reference was taken from
+    https://github.com/pablomc88/EEG_proxy_from_network_point_neurons.
+
+    This model preserves the original population-level setup while adapting the
+    external input pathway for current NEST APIs. Thalamic and cortical drives
+    are implemented as inhomogeneous Poisson generators connected directly to
+    the excitatory and inhibitory populations. Generator rates are scaled to
+    preserve the effective drive previously delivered through parrot-neuron
+    relays.
     """
 
     def __init__(
@@ -48,6 +50,7 @@ class network:
         External_input_params,
         Analysis_params,
     ):
+        """Initialize the network from parameter dictionaries."""
         self.N_exc = Network_params["N_exc"]
         self.N_inh = Network_params["N_inh"]
         self.P = Network_params["P"]
@@ -106,12 +109,11 @@ class network:
         self.OU_tau = External_input_params["OU_tau"]
 
         self.To_be_measured = Analysis_params["To_be_measured"]
-        self.cells_to_analyze = Analysis_params["cells_to_analyze"]
 
         self.external_rate_profile = {}
-        self.selected_spike_recorders = {}
 
     def _ensure_custom_model_available(self):
+        """Install or locate the custom Cavallari NEST neuron model."""
         if "iaf_bw_2003" in nest.node_models:
             return
 
@@ -141,6 +143,7 @@ class network:
         )
 
     def _random_positions(self, n_nodes):
+        """Sample uniformly distributed 2D positions within the network extent."""
         return [
             [
                 np.random.uniform(-self.extent / 2.0, self.extent / 2.0),
@@ -150,6 +153,7 @@ class network:
         ]
 
     def _create_nodes(self, model, n_nodes):
+        """Create positioned NEST nodes for a population or input generator."""
         positions = nest.spatial.free(
             pos=self._random_positions(n_nodes),
             extent=[self.extent, self.extent],
@@ -157,9 +161,17 @@ class network:
         return nest.Create(model, int(n_nodes), positions=positions)
 
     def create_network(self, rng_seed=None):
-        np.random.seed(int(time.time()))
+        """Initialize NEST, create populations, inputs, synapses, and recorders."""
         if rng_seed is None:
-            rng_seed = int((time.time() * 100) % (2 ** 32))
+            rng_seed = int(
+                1
+                + time.localtime().tm_mon
+                * time.localtime().tm_mday
+                * time.localtime().tm_hour
+                * time.localtime().tm_min
+                * time.localtime().tm_sec
+                * np.random.rand(1)[0]
+            )
 
         results_dir = Path(__file__).resolve().parents[1] / "results"
         results_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +181,7 @@ class network:
             {
                 "local_num_threads": int(self.num_threads),
                 "resolution": float(self.simstep),
+                "tics_per_ms": 1000 / float(self.simstep),
                 "data_path": str(results_dir.resolve()),
                 "rng_seed": int(rng_seed),
             }
@@ -273,10 +286,8 @@ class network:
             },
         )
 
-    def simulate_network(self, interval):
+        self.subthreshold_recorders = []
         if len(self.To_be_measured) > 0:
-            self.subthreshold_recorders = []
-
             rec_exc = nest.Create("RecordingNode")
             nest.Connect(rec_exc, self.exc)
             self.subthreshold_recorders.append(rec_exc)
@@ -286,83 +297,106 @@ class network:
             self.subthreshold_recorders.append(rec_inh)
 
         self.spikes = []
-        self.mult_exc = nest.Create("spike_recorder", 1)
-        self.mult_inh = nest.Create("spike_recorder", 1)
 
         sp_exc = nest.Create("SpikesRecorder")
         nest.Connect(self.exc, sp_exc)
         self.spikes.append(sp_exc)
-        if self.cells_to_analyze:
-            exc_ids = _node_ids(self.exc)
-            selected_exc = [exc_ids[i] for i in self.cells_to_analyze if i < len(exc_ids)]
-            if selected_exc:
-                nest.Connect(nest.NodeCollection(selected_exc), self.mult_exc)
 
         sp_inh = nest.Create("SpikesRecorder")
         nest.Connect(self.inh, sp_inh)
         self.spikes.append(sp_inh)
-        if self.cells_to_analyze:
-            inh_ids = _node_ids(self.inh)
-            selected_inh = [inh_ids[i] for i in self.cells_to_analyze if i < len(inh_ids)]
-            if selected_inh:
-                nest.Connect(nest.NodeCollection(selected_inh), self.mult_inh)
 
-        print("\n--- Simulation ---\n")
-        nest.SetKernelStatus({"print_time": True})
-        nest.Simulate(float(interval))
+    def simulate(self, tstop):
+        """Instantiate and run simulation"""
+        nest.Simulate(tstop)
 
-        n_rec = 2
-        data_v = []
-        for i in range(n_rec):
-            if len(self.To_be_measured) > 0:
-                data_v.append(nest.GetStatus(self.subthreshold_recorders[i], keys="events"))
-            else:
-                data_v.append([])
 
-        data_s = []
-        for i in range(n_rec):
-            data_s.append(nest.GetStatus(self.spikes[i], keys="events"))
-
-        senders_v = []
-        for i in range(n_rec):
-            if len(self.To_be_measured) > 0:
-                senders_v.append(np.asarray(data_v[i][0]["senders"]))
-            else:
-                senders_v.append([])
-
-        senders_s = []
-        for i in range(n_rec):
-            senders_s.append(np.asarray(data_s[i][0]["senders"]))
-
-        pop_ex = _node_ids(self.exc)
-        pop_in = _node_ids(self.inh)
-        pop_thalamo = _node_ids(self.thalamo)
-        pop_cc = _node_ids(self.cort)
-
-        return [
-            self.simtime,
-            data_v,
-            data_s,
-            senders_v,
-            senders_s,
-            pop_ex,
-            pop_in,
-            pop_thalamo,
-            pop_cc,
-            self.mult_exc,
-            self.mult_inh,
-        ]
+def _simulate_with_progress(tstop, dt, chunk_ms):
+    """Run NEST in dt-aligned chunks and print segment progress."""
+    if tstop <= 0:
+        return
+    # Use chunks aligned to dt to reduce simulation-loop overhead while keeping progress updates.
+    step = max(dt, float(chunk_ms))
+    step = max(dt, round(step / dt) * dt)
+    total_segments = int(np.ceil(tstop / step))
+    total_segments = max(1, total_segments)
+    segment_idx = 0
+    sim_time = 0.0
+    while sim_time < tstop:
+        remaining = tstop - sim_time
+        this_step = step if remaining > step else remaining
+        if this_step <= 0:
+            break
+        nest.Simulate(this_step)
+        sim_time += this_step
+        segment_idx += 1
+        print(f"SIM_SEGMENT {segment_idx}/{total_segments}", flush=True)
 
 
 def _resolve_chunking_config(module):
-    simulate_in_chunks = bool(getattr(module, "simulate_in_chunks", True))
-    chunk_ms = float(getattr(module, "simulation_chunk_ms", 1000.0))
+    """Read optional chunking controls from the simulation params module."""
+    simulate_in_chunks = getattr(module, "simulate_in_chunks", True)
+    chunk_ms = getattr(module, "simulation_chunk_ms", 1000.0)
+
+    simulate_in_chunks = bool(simulate_in_chunks)
+    try:
+        chunk_ms = float(chunk_ms)
+    except (TypeError, ValueError) as exc:
+        raise TypeError("simulation_chunk_ms must be convertible to float.") from exc
+
     if chunk_ms <= 0:
-        raise ValueError("simulation_chunk_ms must be positive.")
+        raise ValueError(f"simulation_chunk_ms must be positive, got {chunk_ms}.")
+
     return simulate_in_chunks, chunk_ms
 
 
+def _check_spike_output_size(times, gids, lif_params, tstop, max_mean_population_spike_rate_hz):
+    """Reject simulations with excessive population firing before writing spike pickles."""
+    duration_seconds = float(tstop) / 1000.0
+    if duration_seconds <= 0:
+        raise ValueError(f"tstop must be positive, got {tstop}.")
+
+    population_sizes = dict(zip(lif_params["X"], lif_params["N_X"]))
+    spike_counts = {X: int(np.asarray(times[X]).size) for X in lif_params["X"]}
+    mean_rates_hz = {
+        X: spike_counts[X] / (duration_seconds * float(population_sizes[X]))
+        for X in lif_params["X"]
+    }
+    raw_spike_bytes = sum(
+        np.asarray(times[X]).nbytes + np.asarray(gids[X]).nbytes
+        for X in lif_params["X"]
+    )
+
+    print(
+        (
+            f"Spike counts: {spike_counts}; "
+            f"mean population rates Hz: {mean_rates_hz}; "
+            f"raw spike array bytes: {raw_spike_bytes} "
+            f"({raw_spike_bytes / 1024 ** 2:.2f} MiB)."
+        ),
+        flush=True,
+    )
+
+    if max_mean_population_spike_rate_hz is None:
+        return
+
+    max_mean_population_spike_rate_hz = float(max_mean_population_spike_rate_hz)
+    too_high = {
+        X: rate
+        for X, rate in mean_rates_hz.items()
+        if rate > max_mean_population_spike_rate_hz
+    }
+    if too_high:
+        raise RuntimeError(
+            (
+                "Skipping spike pickle output because mean population firing rate "
+                f"exceeds {max_mean_population_spike_rate_hz:.3g} Hz: {too_high}."
+            )
+        )
+
+
 def _default_network_payload(lif_params, module):
+    """Build Cavallari network constructor inputs from stored LIF parameters."""
     network_params = lif_params["network_params"]
     neuron_params = [lif_params["neuron_params"]["E"], lif_params["neuron_params"]["I"]]
     simulation_params = {
@@ -387,7 +421,8 @@ def _default_network_payload(lif_params, module):
     )
 
 
-def _aggregate_exc_state_chunk(events, E_ex, E_in):
+def _aggregate_state_chunk(events, E_ex, E_in):
+    """Aggregate recorded state events into population-summed currents by time."""
     times = np.asarray(events["times"], dtype=float)
     if times.size == 0:
         empty_float = np.array([], dtype=float)
@@ -415,6 +450,7 @@ def _aggregate_exc_state_chunk(events, E_ex, E_in):
 
 
 def _append_state_chunks(chunks, payload):
+    """Append a non-empty aggregated state payload to chunk accumulators."""
     if payload["times"].size == 0:
         return
     for key in ("times", "AMPA", "GABA", "Vm", "counts"):
@@ -422,6 +458,7 @@ def _append_state_chunks(chunks, payload):
 
 
 def _finalize_state_chunks(chunks, interval):
+    """Concatenate aggregated state chunks and attach recording metadata."""
     if not chunks["times"]:
         empty_float = np.array([], dtype=float)
         empty_int = np.array([], dtype=int)
@@ -446,17 +483,8 @@ def _finalize_state_chunks(chunks, interval):
     }
 
 
-def _append_spikes(times_acc, gids_acc, events):
-    event_map = {
-        "E": events[0][0],
-        "I": events[1][0],
-    }
-    for key, payload in event_map.items():
-        times_acc[key].append(np.asarray(payload["times"], dtype=float))
-        gids_acc[key].append(np.asarray(payload["senders"], dtype=int))
-
-
 def _finalize_spikes(acc):
+    """Concatenate per-population spike arrays from one or more chunks."""
     finalized = {}
     for key, parts in acc.items():
         if not parts:
@@ -467,6 +495,7 @@ def _finalize_spikes(acc):
 
 
 def _load_module(module_path):
+    """Load a Python simulation-parameter file as a module."""
     script_dir = os.path.dirname(module_path)
     sys.path.append(script_dir)
     module_name = os.path.basename(module_path).replace(".py", "")
@@ -477,9 +506,14 @@ def _load_module(module_path):
 
 
 if __name__ == "__main__":
+    # Load run-time parameters from the simulation params file.
     module = _load_module(sys.argv[1])
     simulate_in_chunks, simulation_chunk_ms = _resolve_chunking_config(module)
+    max_mean_population_spike_rate_hz = getattr(
+        module, "max_mean_population_spike_rate_hz", 50.0
+    )
 
+    # Optionally seed NumPy and derive the NEST RNG seed from it.
     numpy_seed = getattr(module, "numpy_seed", None)
     rng_seed = None
     if numpy_seed is not None:
@@ -489,10 +523,12 @@ if __name__ == "__main__":
         np.random.seed(numpy_seed)
         rng_seed = int(np.random.randint(1, 2**31 - 1))
 
+    # Load the sampled or configured network parameters.
     output_dir = sys.argv[2]
     with open(os.path.join(output_dir, "network.pkl"), "rb") as f:
         lif_params = pickle.load(f)
 
+    # Convert the stored payload into the constructor format used here.
     (
         network_params,
         neuron_params,
@@ -501,6 +537,7 @@ if __name__ == "__main__":
         analysis_params,
     ) = _default_network_payload(lif_params, module)
 
+    # Create populations, inputs, recurrent synapses, and recorders.
     net = network(
         network_params,
         neuron_params,
@@ -510,43 +547,86 @@ if __name__ == "__main__":
     )
     net.create_network(rng_seed=rng_seed)
 
+    # Store the planned simulation intervals for reproducibility metadata.
     total_time = float(module.tstop)
     if simulate_in_chunks:
-        interval_edges = np.arange(0.0, total_time, float(simulation_chunk_ms))
-        intervals = [min(float(simulation_chunk_ms), total_time - start) for start in interval_edges]
+        step = max(float(module.dt), float(simulation_chunk_ms))
+        step = max(float(module.dt), round(step / float(module.dt)) * float(module.dt))
+        interval_edges = np.arange(0.0, total_time, step)
+        intervals = [min(step, total_time - start) for start in interval_edges]
     else:
         intervals = [total_time]
 
-    exc_state_chunks = {key: [] for key in ("times", "AMPA", "GABA", "Vm", "counts")}
-    times_acc = {key: [] for key in ("E", "I")}
-    gids_acc = {key: [] for key in ("E", "I")}
-    population_ids = {}
-
-    E_ex = neuron_params[0]["E_ex"]
-    E_in = neuron_params[0]["E_in"]
+    # Run the simulation, optionally with progress updates.
     print("Simulating...\n", end=" ", flush=True)
     tic = time.time()
-    for segment_idx, interval in enumerate(intervals, start=1):
-        result = net.simulate_network(interval)
-        if not population_ids:
-            population_ids = {
-                "pop_ex": result[5],
-                "pop_in": result[6],
-                "pop_thalamo": result[7],
-                "pop_cc": result[8],
-            }
-        _append_spikes(times_acc, gids_acc, result[2])
-        exc_chunk = _aggregate_exc_state_chunk(result[1][0][0], E_ex, E_in)
-        _append_state_chunks(exc_state_chunks, exc_chunk)
-        print(f"SIM_SEGMENT {segment_idx}/{len(intervals)}", flush=True)
-
+    if simulate_in_chunks:
+        _simulate_with_progress(total_time, float(module.dt), simulation_chunk_ms)
+    else:
+        net.simulate(total_time)
     toc = time.time()
     print(f"The simulation took {toc - tic} seconds.\n", end=" ", flush=True)
 
-    times = _finalize_spikes(times_acc)
-    gids = _finalize_spikes(gids_acc)
+    # Collect state recorder events after simulation.
+    data_v = []
+    for i in range(2):
+        if len(net.To_be_measured) > 0:
+            data_v.append(nest.GetStatus(net.subthreshold_recorders[i], keys="events"))
+        else:
+            data_v.append([])
+
+    # Collect spike recorder events after simulation.
+    data_s = []
+    for i in range(2):
+        data_s.append(nest.GetStatus(net.spikes[i], keys="events"))
+
+    # Format spike times and gids by population.
+    times = _finalize_spikes(
+        {
+            "E": [np.asarray(data_s[0][0]["times"], dtype=float)],
+            "I": [np.asarray(data_s[1][0]["times"], dtype=float)],
+        }
+    )
+    gids = _finalize_spikes(
+        {
+            "E": [np.asarray(data_s[0][0]["senders"], dtype=int)],
+            "I": [np.asarray(data_s[1][0]["senders"], dtype=int)],
+        }
+    )
+
+    # Preserve population ids needed by downstream analysis.
+    population_ids = {
+        "pop_ex": _node_ids(net.exc),
+        "pop_in": _node_ids(net.inh),
+        "pop_thalamo": _node_ids(net.thalamo),
+        "pop_cc": _node_ids(net.cort),
+    }
+
+    # Aggregate excitatory state variables into the proxy input payload.
+    E_ex = neuron_params[0]["E_ex"]
+    E_in = neuron_params[0]["E_in"]
+    exc_state_chunks = {key: [] for key in ("times", "AMPA", "GABA", "Vm", "counts")}
+    if len(net.To_be_measured) > 0:
+        exc_chunk = _aggregate_state_chunk(data_v[0][0], E_ex, E_in)
+    else:
+        exc_chunk = _aggregate_state_chunk({"times": []}, E_ex, E_in)
+    _append_state_chunks(exc_state_chunks, exc_chunk)
     exc_state_payload = _finalize_state_chunks(exc_state_chunks, float(module.dt))
 
+    # Abort before writing large spike files if firing rates are unexpectedly high.
+    try:
+        _check_spike_output_size(
+            times,
+            gids,
+            lif_params,
+            total_time,
+            max_mean_population_spike_rate_hz,
+        )
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr, flush=True)
+        sys.exit(2)
+
+    # Save simulation outputs for downstream proxy computation and diagnostics.
     with open(os.path.join(output_dir, "times.pkl"), "wb") as f:
         pickle.dump(times, f)
     with open(os.path.join(output_dir, "gids.pkl"), "wb") as f:
@@ -557,7 +637,6 @@ if __name__ == "__main__":
         pickle.dump(
             {
                 "To_be_measured": analysis_params["To_be_measured"],
-                "cells_to_analyze": analysis_params["cells_to_analyze"],
                 "intervals": intervals,
                 "population_ids": population_ids,
                 "spike_streams": ["E", "I"],
