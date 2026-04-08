@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 BATCH_DIR_PATTERN = re.compile(r"batch_(\d{4,})$")
 SIM_DATA_METHODS = ("CDM", "specparam", "catch22")
-DEFAULT_SCRATCH_ROOT = "/SCRATCH/TIC117/pablomc/LIF_model_simulations"
+DEFAULT_SCRATCH_ROOT = "/SCRATCH/TIC117/pablomc/Hagen_model_simulations"
 DEFAULT_INPUT_ROOT = os.path.join(DEFAULT_SCRATCH_ROOT, "simulation_output")
 DEFAULT_OUTPUT_DIR = os.path.join(DEFAULT_INPUT_ROOT, "merged")
 DEFAULT_VALID_SAMPLES_PLOT = "valid_parameter_samples.png"

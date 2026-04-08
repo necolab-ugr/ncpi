@@ -16,16 +16,42 @@ import scipy.signal as ss
 import pycatch22
 from ncpi import FieldPotential, Features, tools
 
-# Global tunable parameters for the simulation batch
+# --- Batch/run controls ---
+# Total parameter sets.
 TOTAL_SIMULATIONS = 10**6
+# Timeout for one point-neuron simulation.
 SIMULATION_TIMEOUT_SECONDS = 60
+# Threads for the simulation subprocess.
 LOCAL_NUM_THREADS = 56
+# Abort before writing huge spike pickles.
 MAX_MEAN_POPULATION_SPIKE_RATE_HZ = 50.0
+# Use a fixed integer for reproducible sampling.
+RANDOM_SEED = 0
+
+# --- Debug plotting ---
 PLOT_PARAMETER_SAMPLES = False
 PLOT_EACH_SIMULATION = False
-RANDOM_SEED = 0
+
+# --- Spectral validity gates ---
 STRONG_PEAK_RELATIVE_THRESHOLD = 0.9
 STRONG_PEAK_POWER_THRESHOLD = 0.4
+
+# --- Pairwise spike-train correlation gates ---
+SPIKE_TRAIN_SAMPLE_NEURONS = 1000
+SPIKE_TRAIN_CORRELATION_BIN_MS = 10.0
+# Minimum non-constant binned spike trains.
+MIN_PAIRWISE_CORRELATION_USABLE_NEURONS = 50
+PAIRWISE_CORRELATION_MEAN_ABS_MAX = 0.2
+PAIRWISE_CORRELATION_ABS_P95_MAX = 0.5
+
+# --- Interspike-interval gates ---
+ISI_SAMPLE_NEURONS = 1000
+# Minimum neurons with >=2 post-transient spikes.
+MIN_ISI_USABLE_NEURONS = 50
+# Median across-neuron mean ISI bounds, ms.
+ISI_MEDIAN_MEAN_MS_LIMITS = (2.0, 5000.0)
+# Median ISI coefficient-of-variation bounds.
+ISI_MEDIAN_CV_LIMITS = (0.5, 3.0)
 
 # Choose to either download files and precomputed outputs used in simulations of the
 # reference multicompartment neuron network model (True) or load them from a local path (False)
@@ -39,7 +65,7 @@ zenodo_dir = os.path.expandvars(os.path.expanduser(
     os.path.join("$HOME", "multicompartment_neuron_network")
 ))
 
-# Directory with some MC output simulations
+# Directory with MC output simulations
 multi_output_path = os.path.join(
     zenodo_dir, "output", "adb947bfb931a5a8d09ad078a6d256b0"
 )
@@ -317,6 +343,242 @@ def mean_firing_rate_hz(spike_times, population_size, transient, tstop):
     return float(np.asarray(spike_times).size) * 1000.0 / (duration_ms * population_size)
 
 
+def build_population_neuron_ids(populations, population_sizes):
+    """Return inferred NEST neuron ids for the simulated populations."""
+    neuron_ids = {}
+    next_gid = 1
+    for population in populations:
+        size = int(population_sizes[population])
+        neuron_ids[population] = np.arange(next_gid, next_gid + size, dtype=int)
+        next_gid += size
+    return neuron_ids
+
+
+def _sample_neuron_ids(rng, candidate_ids, sample_size):
+    """Sample neuron ids without replacement from a candidate pool."""
+    candidate_ids = np.asarray(candidate_ids, dtype=int)
+    if candidate_ids.size == 0:
+        return candidate_ids
+    sample_size = min(int(sample_size), candidate_ids.size)
+    return np.asarray(rng.choice(candidate_ids, size=sample_size, replace=False), dtype=int)
+
+
+def _spikes_for_sample(times, gids, populations, sampled_ids):
+    """Return sampled spike rows and times for selected neuron ids."""
+    sampled_ids = np.asarray(sampled_ids, dtype=int)
+    if sampled_ids.size == 0:
+        return np.array([], dtype=int), np.array([], dtype=float)
+
+    max_gid = int(np.max(sampled_ids))
+    lookup = np.full(max_gid + 1, -1, dtype=int)
+    lookup[sampled_ids] = np.arange(sampled_ids.size, dtype=int)
+
+    row_parts = []
+    time_parts = []
+    for population in populations:
+        population_gids = np.asarray(gids[population], dtype=int)
+        if population_gids.size == 0:
+            continue
+        population_times = np.asarray(times[population], dtype=float)
+        in_bounds = (population_gids >= 0) & (population_gids <= max_gid)
+        if not np.any(in_bounds):
+            continue
+
+        bounded_gids = population_gids[in_bounds]
+        rows = lookup[bounded_gids]
+        keep = rows >= 0
+        if np.any(keep):
+            row_parts.append(rows[keep])
+            time_parts.append(population_times[in_bounds][keep])
+
+    if not row_parts:
+        return np.array([], dtype=int), np.array([], dtype=float)
+    return np.concatenate(row_parts), np.concatenate(time_parts)
+
+
+def compute_pairwise_correlation_summary(
+    times,
+    gids,
+    populations,
+    sampled_ids,
+    transient,
+    tstop,
+):
+    """Compute binned spike-train pairwise correlations for sampled neurons."""
+    sampled_ids = np.asarray(sampled_ids, dtype=int)
+    summary = {
+        "sampled_neurons": int(sampled_ids.size),
+        "usable_neurons": 0,
+        "pair_count": 0,
+        "bin_ms": float(SPIKE_TRAIN_CORRELATION_BIN_MS),
+        "mean": np.nan,
+        "mean_abs": np.nan,
+        "median": np.nan,
+        "abs_p95": np.nan,
+        "min": np.nan,
+        "max": np.nan,
+    }
+    if sampled_ids.size < 2:
+        return summary
+
+    bin_edges = np.arange(
+        float(transient),
+        float(tstop) + float(SPIKE_TRAIN_CORRELATION_BIN_MS),
+        float(SPIKE_TRAIN_CORRELATION_BIN_MS),
+    )
+    if bin_edges.size < 2:
+        return summary
+
+    n_bins = bin_edges.size - 1
+    counts = np.zeros((sampled_ids.size, n_bins), dtype=np.float32)
+    rows, spike_times = _spikes_for_sample(times, gids, populations, sampled_ids)
+    if rows.size:
+        columns = np.searchsorted(bin_edges, spike_times, side="right") - 1
+        keep = (
+            (spike_times >= float(transient))
+            & (spike_times < float(tstop))
+            & (columns >= 0)
+            & (columns < n_bins)
+        )
+        if np.any(keep):
+            np.add.at(counts, (rows[keep], columns[keep]), 1.0)
+
+    active = np.var(counts, axis=1) > 0.0
+    usable = counts[active]
+    summary["usable_neurons"] = int(usable.shape[0])
+    if usable.shape[0] < 2:
+        return summary
+
+    corr_matrix = np.corrcoef(usable)
+    pair_indices = np.triu_indices_from(corr_matrix, k=1)
+    correlations = np.asarray(corr_matrix[pair_indices], dtype=float)
+    correlations = correlations[np.isfinite(correlations)]
+    summary["pair_count"] = int(correlations.size)
+    if correlations.size == 0:
+        return summary
+
+    summary.update(
+        {
+            "mean": float(np.mean(correlations)),
+            "mean_abs": float(np.mean(np.abs(correlations))),
+            "median": float(np.median(correlations)),
+            "abs_p95": float(np.percentile(np.abs(correlations), 95.0)),
+            "min": float(np.min(correlations)),
+            "max": float(np.max(correlations)),
+        }
+    )
+    return summary
+
+
+def compute_isi_summary(times, gids, populations, sampled_ids, transient, tstop):
+    """Compute per-neuron interspike-interval summaries for sampled neurons."""
+    sampled_ids = np.asarray(sampled_ids, dtype=int)
+    summary = {
+        "sampled_neurons": int(sampled_ids.size),
+        "usable_neurons": 0,
+        "cv_usable_neurons": 0,
+        "total_intervals": 0,
+        "median_mean_ms": np.nan,
+        "p05_mean_ms": np.nan,
+        "p95_mean_ms": np.nan,
+        "median_cv": np.nan,
+        "mean_cv": np.nan,
+    }
+    if sampled_ids.size == 0:
+        return summary
+
+    rows, spike_times = _spikes_for_sample(times, gids, populations, sampled_ids)
+    if rows.size == 0:
+        return summary
+
+    keep = (
+        np.isfinite(spike_times)
+        & (spike_times >= float(transient))
+        & (spike_times < float(tstop))
+    )
+    rows = rows[keep]
+    spike_times = spike_times[keep]
+    if rows.size == 0:
+        return summary
+
+    order = np.lexsort((spike_times, rows))
+    rows = rows[order]
+    spike_times = spike_times[order]
+    boundaries = np.flatnonzero(np.diff(rows)) + 1
+    starts = np.r_[0, boundaries]
+    stops = np.r_[boundaries, rows.size]
+
+    mean_isis = []
+    cvs = []
+    total_intervals = 0
+    for start, stop in zip(starts, stops):
+        if stop - start < 2:
+            continue
+        intervals = np.diff(spike_times[start:stop])
+        intervals = intervals[np.isfinite(intervals) & (intervals > 0.0)]
+        if intervals.size == 0:
+            continue
+        total_intervals += int(intervals.size)
+        mean_isi = float(np.mean(intervals))
+        mean_isis.append(mean_isi)
+        if intervals.size > 1 and mean_isi > 0.0:
+            cvs.append(float(np.std(intervals, ddof=1) / mean_isi))
+
+    if not mean_isis:
+        return summary
+
+    mean_isis = np.asarray(mean_isis, dtype=float)
+    summary.update(
+        {
+            "usable_neurons": int(mean_isis.size),
+            "cv_usable_neurons": int(len(cvs)),
+            "total_intervals": int(total_intervals),
+            "median_mean_ms": float(np.median(mean_isis)),
+            "p05_mean_ms": float(np.percentile(mean_isis, 5.0)),
+            "p95_mean_ms": float(np.percentile(mean_isis, 95.0)),
+        }
+    )
+    if cvs:
+        cvs = np.asarray(cvs, dtype=float)
+        summary["median_cv"] = float(np.median(cvs))
+        summary["mean_cv"] = float(np.mean(cvs))
+    return summary
+
+
+def compute_spike_train_qc(times, gids, populations, population_neuron_ids, transient, tstop, rng):
+    """Compute random-neuron spike-train correlation and ISI QC summaries."""
+    all_neuron_ids = np.concatenate(
+        [np.asarray(population_neuron_ids[population], dtype=int) for population in populations]
+    )
+    correlation_ids = _sample_neuron_ids(
+        rng,
+        all_neuron_ids,
+        SPIKE_TRAIN_SAMPLE_NEURONS,
+    )
+    remaining_ids = np.setdiff1d(all_neuron_ids, correlation_ids, assume_unique=False)
+    isi_pool = remaining_ids if remaining_ids.size > 0 else all_neuron_ids
+    isi_ids = _sample_neuron_ids(rng, isi_pool, ISI_SAMPLE_NEURONS)
+
+    return {
+        "pairwise_correlation": compute_pairwise_correlation_summary(
+            times,
+            gids,
+            populations,
+            correlation_ids,
+            transient,
+            tstop,
+        ),
+        "isi": compute_isi_summary(
+            times,
+            gids,
+            populations,
+            isi_ids,
+            transient,
+            tstop,
+        ),
+    }
+
+
 def format_elapsed_time(total_seconds):
     """Convert elapsed seconds to hours and days."""
     total_seconds = float(total_seconds)
@@ -567,6 +829,28 @@ def fit_specparam_for_plot(signal, fs):
     return freqs, power_spectrum, fm, freq_range
 
 
+def format_spike_train_qc_lines(spike_train_qc):
+    """Build compact debug-text lines for spike-train QC metrics."""
+    if spike_train_qc is None:
+        return ["Spike-train QC: not computed"]
+
+    pairwise = spike_train_qc["pairwise_correlation"]
+    isi = spike_train_qc["isi"]
+    return [
+        (
+            "Pairwise corr: "
+            f"usable={pairwise['usable_neurons']}/{pairwise['sampled_neurons']}, "
+            f"mean_abs={pairwise['mean_abs']:.4f}, abs_p95={pairwise['abs_p95']:.4f}"
+        ),
+        (
+            "ISI: "
+            f"usable={isi['usable_neurons']}/{isi['sampled_neurons']}, "
+            f"median_mean={isi['median_mean_ms']:.4f} ms, "
+            f"median_cv={isi['median_cv']:.4f}"
+        ),
+    ]
+
+
 def plot_simulation_debug(
     simulation_index,
     sampled_params,
@@ -581,6 +865,7 @@ def plot_simulation_debug(
     firing_rate_e,
     firing_rate_i,
     specparam_result,
+    spike_train_qc,
     is_valid,
     invalid_reasons=None,
 ):
@@ -682,6 +967,7 @@ def plot_simulation_debug(
             f"Mean firing rate I: {firing_rate_i:.4f} Hz",
             f"Peaks >= {int(100 * STRONG_PEAK_RELATIVE_THRESHOLD)}% of strongest: {specparam_result['strong_peak_count']}",
             f"Specparam fit valid: {specparam_result['fit_valid']}",
+            *format_spike_train_qc_lines(spike_train_qc),
             *peak_lines,
         ]
     )
@@ -698,7 +984,7 @@ def plot_simulation_debug(
     plt.close(fig)
 
 
-def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
+def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features, spike_train_qc=None):
     """Evaluate whether a simulation passes the acceptance rules."""
     reasons = []
     if not np.isfinite(firing_rate_e) or not np.isfinite(firing_rate_i):
@@ -713,8 +999,8 @@ def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
         reasons.append("E_rate_above_20")
     if firing_rate_i < 1.5 * firing_rate_e:
         reasons.append("I_rate_less_than_1p5x_E")
-    if firing_rate_i > 5.0 * firing_rate_e:
-        reasons.append("I_rate_more_than_5x_E")
+    if firing_rate_i > 10.0 * firing_rate_e:
+        reasons.append("I_rate_more_than_10x_E")
     if (
         specparam_features["strong_peak_count"] > 2
         and specparam_features["strongest_peak_power"] > STRONG_PEAK_POWER_THRESHOLD
@@ -722,6 +1008,34 @@ def evaluate_validity(firing_rate_e, firing_rate_i, specparam_features):
         reasons.append("more_than_two_strong_peaks")
     if not specparam_features["fit_valid"]:
         reasons.append("specparam_fit_rejected")
+    if spike_train_qc is None:
+        reasons.append("missing_spike_train_qc")
+    else:
+        pairwise = spike_train_qc["pairwise_correlation"]
+        if pairwise["usable_neurons"] < MIN_PAIRWISE_CORRELATION_USABLE_NEURONS:
+            reasons.append("pairwise_correlation_too_few_neurons")
+        elif not np.isfinite(pairwise["mean_abs"]) or not np.isfinite(pairwise["abs_p95"]):
+            reasons.append("non_finite_pairwise_correlation")
+        else:
+            if pairwise["mean_abs"] > PAIRWISE_CORRELATION_MEAN_ABS_MAX:
+                reasons.append("pairwise_correlation_mean_abs_above_0p2")
+            if pairwise["abs_p95"] > PAIRWISE_CORRELATION_ABS_P95_MAX:
+                reasons.append("pairwise_correlation_abs_p95_above_0p5")
+
+        isi = spike_train_qc["isi"]
+        if isi["usable_neurons"] < MIN_ISI_USABLE_NEURONS:
+            reasons.append("isi_too_few_neurons")
+        elif not np.isfinite(isi["median_mean_ms"]):
+            reasons.append("non_finite_isi")
+        else:
+            isi_low, isi_high = ISI_MEDIAN_MEAN_MS_LIMITS
+            if isi["median_mean_ms"] < isi_low or isi["median_mean_ms"] > isi_high:
+                reasons.append("isi_median_mean_out_of_range")
+            cv_low, cv_high = ISI_MEDIAN_CV_LIMITS
+            if np.isfinite(isi["median_cv"]) and (
+                isi["median_cv"] < cv_low or isi["median_cv"] > cv_high
+            ):
+                reasons.append("isi_median_cv_out_of_range")
     return len(reasons) == 0, reasons
 
 
@@ -735,6 +1049,7 @@ def flatten_summary_row(
     firing_rate_i=None,
     catch22_features=None,
     specparam_features=None,
+    spike_train_qc=None,
     valid=None,
     valid_reasons=None,
 ):
@@ -762,6 +1077,32 @@ def flatten_summary_row(
                 "specparam_strong_peak_count": specparam_features["strong_peak_count"],
                 "specparam_fit_valid": specparam_features["fit_valid"],
                 "specparam_gof_rsquared": specparam_features["gof_rsquared"],
+            }
+        )
+    if spike_train_qc is not None:
+        pairwise = spike_train_qc["pairwise_correlation"]
+        isi = spike_train_qc["isi"]
+        row.update(
+            {
+                "pairwise_corr_sampled_neurons": pairwise["sampled_neurons"],
+                "pairwise_corr_usable_neurons": pairwise["usable_neurons"],
+                "pairwise_corr_pair_count": pairwise["pair_count"],
+                "pairwise_corr_bin_ms": pairwise["bin_ms"],
+                "pairwise_corr_mean": pairwise["mean"],
+                "pairwise_corr_mean_abs": pairwise["mean_abs"],
+                "pairwise_corr_median": pairwise["median"],
+                "pairwise_corr_abs_p95": pairwise["abs_p95"],
+                "pairwise_corr_min": pairwise["min"],
+                "pairwise_corr_max": pairwise["max"],
+                "isi_sampled_neurons": isi["sampled_neurons"],
+                "isi_usable_neurons": isi["usable_neurons"],
+                "isi_cv_usable_neurons": isi["cv_usable_neurons"],
+                "isi_total_intervals": isi["total_intervals"],
+                "isi_median_mean_ms": isi["median_mean_ms"],
+                "isi_p05_mean_ms": isi["p05_mean_ms"],
+                "isi_p95_mean_ms": isi["p95_mean_ms"],
+                "isi_median_cv": isi["median_cv"],
+                "isi_mean_cv": isi["mean_cv"],
             }
         )
     return row
@@ -942,6 +1283,7 @@ def main():
     population_sizes = {
         pop: int(size) for pop, size in zip(populations, network_params.LIF_params["N_X"])
     }
+    population_neuron_ids = build_population_neuron_ids(populations, population_sizes)
 
     potential = FieldPotential()
     kernel_cache = None
@@ -1036,8 +1378,17 @@ def main():
 
             catch22_result = compute_catch22_features(catch22_features, cdm_total)
             specparam_result = compute_specparam_features(specparam_features, cdm_total)
+            spike_train_qc = compute_spike_train_qc(
+                filtered_times,
+                filtered_gids,
+                populations,
+                population_neuron_ids,
+                transient,
+                outputs["tstop"],
+                rng,
+            )
             is_valid, invalid_reasons = evaluate_validity(
-                firing_rate_e, firing_rate_i, specparam_result
+                firing_rate_e, firing_rate_i, specparam_result, spike_train_qc
             )
 
             sample_index = len(valid_detail_rows) if is_valid else None
@@ -1051,6 +1402,7 @@ def main():
                 firing_rate_i=firing_rate_i,
                 catch22_features=catch22_result,
                 specparam_features=specparam_result,
+                spike_train_qc=spike_train_qc,
                 valid=is_valid,
                 valid_reasons=invalid_reasons,
             )
@@ -1070,6 +1422,7 @@ def main():
                 firing_rate_e=firing_rate_e,
                 firing_rate_i=firing_rate_i,
                 specparam_result=specparam_result,
+                spike_train_qc=spike_train_qc,
                 is_valid=is_valid,
                 invalid_reasons=invalid_reasons,
             )
@@ -1111,6 +1464,7 @@ def main():
                             "peak_frequency": specparam_result["peak_frequency"],
                             "peak_power": specparam_result["peak_power"],
                         },
+                        "spike_train_qc": spike_train_qc,
                         "data_dirs": {
                             method: os.path.join(OUTPUT_ROOT, "data", method)
                             for method in SIM_DATA_METHODS

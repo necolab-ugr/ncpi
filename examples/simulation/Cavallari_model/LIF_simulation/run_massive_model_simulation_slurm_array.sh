@@ -2,7 +2,7 @@
 #SBATCH -p NOParalela
 #SBATCH -J Cavallari_model_simulations
 #SBATCH -t 120:00:00
-#SBATCH --array=0-74%25
+#SBATCH --array=0-79%40
 #SBATCH --cpus-per-task=56
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null

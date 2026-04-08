@@ -63,8 +63,8 @@ class KernelParams:
         'biophys': 'lin',
         'i_syn': True,
         'n_ext': [1, 1],
-        'th_exc_external': 0.000234,
-        'th_inh_external': 0.000317,
+        'th_exc_external': 0.00234,
+        'th_inh_external': 0.00317,
         'v_0': 1.5,
         'g_eff': True,
         'perseg_Vrest': False}

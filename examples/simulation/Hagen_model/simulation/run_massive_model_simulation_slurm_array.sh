@@ -1,13 +1,13 @@
 #!/bin/bash
 #SBATCH -p NOParalela
-#SBATCH -J LIF_model_simulations
+#SBATCH -J Hagen_model_simulations
 #SBATCH -t 120:00:00
-#SBATCH --array=0-74%25
+#SBATCH --array=0-79%40
 #SBATCH --cpus-per-task=56
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
-SCRATCH_ROOT="/SCRATCH/TIC117/pablomc/LIF_model_simulations"
+SCRATCH_ROOT="/SCRATCH/TIC117/pablomc/Hagen_model_simulations"
 
 # --- move to your project directory ---
 cd /LUSTRE/home/TIC117/pablomc/ncpi/examples/simulation/Hagen_model/simulation || exit 1

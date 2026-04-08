@@ -146,6 +146,28 @@ def methods_present_in_details(valid_details: Sequence[dict]) -> Tuple[str, ...]
     return SIM_DATA_METHODS
 
 
+def validate_single_signal_method(
+    all_rows: Sequence[Dict[str, object]],
+    valid_details: Sequence[dict],
+) -> None:
+    signal_methods = []
+    for row in all_rows:
+        method = row.get("signal_method")
+        if method not in (None, "", "None") and method not in signal_methods:
+            signal_methods.append(method)
+    for detail in valid_details:
+        method = detail.get("signal_method")
+        if method not in (None, "", "None") and method not in signal_methods:
+            signal_methods.append(method)
+
+    if len(signal_methods) > 1:
+        raise ValueError(
+            "Refusing to merge Cavallari batches with different signal methods: "
+            f"{', '.join(map(str, signal_methods))}. "
+            "Run separate merges for proxy and kernel outputs."
+        )
+
+
 def remap_valid_sample_indices(
     all_rows: List[Dict[str, object]],
     valid_rows: List[Dict[str, object]],
@@ -323,6 +345,8 @@ def main():
         merged_all_rows.extend(all_rows)
         merged_valid_rows.extend(valid_rows)
         merged_valid_details.extend(valid_details)
+
+    validate_single_signal_method(merged_all_rows, merged_valid_details)
 
     remap_valid_sample_indices(
         merged_all_rows,
