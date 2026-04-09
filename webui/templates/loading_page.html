@@ -76,6 +76,42 @@
         </div>
     </div>
     {% endif %}
+
+    <!-- DataFrame preview (shown when finished and preview data is available) -->
+    <div x-show="status === 'finished' && (previewColumns.length > 0 || previewError)"
+         class="w-full mt-6 space-y-2">
+        <div class="flex items-center justify-between text-xs text-text-light-secondary dark:text-[#929bc9]">
+            <span class="font-semibold lowercase tracking-wide">result preview</span>
+            <span x-show="previewTotalRows !== null"
+                  class="text-[11px]"
+                  x-text="`showing up to 20 of ${previewTotalRows} rows · ${previewTotalCols} columns`"></span>
+        </div>
+        <div x-show="previewError" class="text-xs text-red-500 dark:text-red-400" x-text="previewError"></div>
+        <div x-show="previewColumns.length > 0"
+             class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+            <table class="min-w-full text-xs font-mono">
+                <thead class="bg-slate-100 dark:bg-slate-800 sticky top-0">
+                    <tr>
+                        <template x-for="col in previewColumns" :key="'th-'+col">
+                            <th class="px-3 py-1.5 text-left text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap border-b border-slate-200 dark:border-slate-700"
+                                x-text="col"></th>
+                        </template>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="(row, ri) in previewRows" :key="'tr-'+ri">
+                        <tr :class="ri % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800/50'">
+                            <template x-for="(cell, ci) in row" :key="'td-'+ri+'-'+ci">
+                                <td class="px-3 py-1 text-slate-700 dark:text-slate-300 whitespace-nowrap max-w-[200px] truncate border-b border-slate-100 dark:border-slate-800"
+                                    x-text="cell"></td>
+                            </template>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="flex justify-end gap-4 mt-10 pt-6">
         <button x-show="!pending && status === 'in_progress'"
             :disabled="cancelling || cancelRequested"
@@ -159,7 +195,7 @@ document.addEventListener('alpine:init', () => {
         elapsedTime: '00:00',
         hasBeenClicked : false,
         status: 'in_progress',
-        error: null, 
+        error: null,
         output: "",
         cancelRequested: false,
         cancelling: false,
@@ -171,6 +207,11 @@ document.addEventListener('alpine:init', () => {
         meegTrialIndex: 0,
         meegSensorsTotal: 0,
         meegSensorsCompleted: 0,
+        previewColumns: [],
+        previewRows: [],
+        previewTotalRows: null,
+        previewTotalCols: null,
+        previewError: null,
         
         init() {
             this.startTime = Date.now();
@@ -239,7 +280,7 @@ document.addEventListener('alpine:init', () => {
                         this.error = null;
                         this.cancelling = false;
                         this.progress = 100; // Finalize display
-                        console.log('Computation finished. Save results button active.');
+                        this.fetchPreview();
                         // Polling stops automatically here as it doesn't set a new timeout
 
                     } else if (data.status === 'cancelled') {
@@ -275,6 +316,23 @@ document.addEventListener('alpine:init', () => {
             const encodedJobId = encodeURIComponent(this.jobId || '');
             const encodedType = encodeURIComponent(this.computationType || '');
             window.location.href = `/download_results/${encodedJobId}?computation_type=${encodedType}`;
+        },
+        async fetchPreview() {
+            if (!this.jobId) return;
+            try {
+                const resp = await fetch(`/preview_results/${encodeURIComponent(this.jobId)}`, {
+                    cache: 'no-store',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                });
+                const data = await resp.json();
+                if (data.error) { this.previewError = data.error; return; }
+                this.previewColumns = data.columns || [];
+                this.previewRows = data.rows || [];
+                this.previewTotalRows = data.total_rows;
+                this.previewTotalCols = data.total_cols;
+            } catch (e) {
+                this.previewError = e && e.message ? e.message : 'Could not load preview.';
+            }
         },
         async cancelComputation() {
             if (this.pending || !this.jobId || this.status !== 'in_progress' || this.cancelling || this.cancelRequested) {

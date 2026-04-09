@@ -533,6 +533,13 @@ def _load_uploaded_source_path(path, name=None, ext=None):
             raise ValueError(f"scipy is required to parse .mat files: {exc}")
         return sio.loadmat(safe_path, squeeze_me=True, struct_as_record=False)
 
+    if ext == ".set":
+        try:
+            import mne
+        except Exception as exc:
+            raise ValueError(f"mne is required to parse .set files: {exc}")
+        return mne.io.read_raw_eeglab(safe_path, preload=True)
+
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 

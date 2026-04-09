@@ -54,6 +54,7 @@
             parserAnalysisFolderPaths: [],
             parserAnalysisFolderNames: [],
             empiricalDataFileSelections: {},
+            empiricalSubfolderSelections: {},
             empiricalFileCount: 0,
             empiricalSampleName: '',
             empiricalUploadSummary: '',
@@ -490,6 +491,59 @@
             parserFolderDataFileCandidates(folderProfile) {
                 const profile = this.parserFolderStructureByPath(folderProfile?.folder_path);
                 return Array.isArray(profile?.data_file_candidates) ? profile.data_file_candidates : [];
+            },
+            parserFolderAllSubfolders(folderPathOrProfile) {
+                // Accept either a folder path string or a folderProfile object directly
+                if (folderPathOrProfile && typeof folderPathOrProfile === 'object') {
+                    if (Array.isArray(folderPathOrProfile.all_subfolders)) {
+                        return folderPathOrProfile.all_subfolders;
+                    }
+                }
+                const pathToken = String(folderPathOrProfile || '').trim();
+                const fromStructure = this.parserFolderStructureByPath(pathToken);
+                if (fromStructure && Array.isArray(fromStructure.all_subfolders)) return fromStructure.all_subfolders;
+                // Fallback: search folder_profiles directly
+                const fp = (this.parserInfo?.folder_profiles || []).find(
+                    p => String(p?.folder_path || '').trim() === pathToken
+                );
+                return Array.isArray(fp?.all_subfolders) ? fp.all_subfolders : [];
+            },
+            isSubfolderIncluded(folderPath, subfolderName) {
+                const sel = (this.empiricalSubfolderSelections || {})[folderPath];
+                return !sel || sel.includes(subfolderName);
+            },
+            toggleSubfolderInclusion(folderPath, subfolderName) {
+                const allSubs = this.parserFolderAllSubfolders(folderPath).map(s => s.name);
+                const current = (this.empiricalSubfolderSelections || {})[folderPath];
+                let next;
+                if (!current || current.length === 0) {
+                    next = allSubs.filter(n => n !== subfolderName);
+                } else {
+                    next = current.includes(subfolderName)
+                        ? current.filter(n => n !== subfolderName)
+                        : [...current, subfolderName];
+                    if (next.length === allSubs.length) next = null;
+                }
+                this.empiricalSubfolderSelections = { ...(this.empiricalSubfolderSelections || {}), [folderPath]: next };
+            },
+            buildSubfolderSelectionsPayload() {
+                const result = {};
+                for (const [fp, sel] of Object.entries(this.empiricalSubfolderSelections || {})) {
+                    if (Array.isArray(sel)) result[fp] = sel;
+                }
+                return result;
+            },
+            includedSubfolderCount(folderPath) {
+                const all = this.parserFolderAllSubfolders(folderPath);
+                const sel = (this.empiricalSubfolderSelections || {})[folderPath];
+                return sel ? sel.length : all.length;
+            },
+            effectiveMatchedCount(folderProfile) {
+                const folderPath = String(folderProfile?.folder_path || '').trim();
+                const sel = (this.empiricalSubfolderSelections || {})[folderPath];
+                const files = folderProfile?.matched_data_files || [];
+                if (!sel) return files.length;
+                return files.filter(f => sel.includes(String(f.level1_subfolder || '').trim())).length;
             },
             parserFolderSelectedDataFile(folderProfile) {
                 const folderPath = String(folderProfile?.folder_path || '').trim();
@@ -1131,6 +1185,7 @@
                 }
                 this.parserLoading = true;
                 this.parserInfo = null;
+                this.empiricalSubfolderSelections = {};
                 try {
                     this.empiricalSourceMode = 'server-path';
                     this.clearEmpiricalUploadInput();
@@ -2024,6 +2079,7 @@
                     <input type="hidden" name="empirical_folder_path" :value="empiricalFolderPath">
                     <input type="hidden" name="empirical_folder_paths" :value="JSON.stringify(empiricalFolderPath ? [empiricalFolderPath] : [])">
                     <input type="hidden" name="empirical_data_file_selections" :value="JSON.stringify(empiricalDataFileSelections || {})">
+                    <input type="hidden" name="empirical_subfolder_selections" :value="JSON.stringify(buildSubfolderSelectionsPayload())">
                     <input type="hidden" name="simulation_folder_path" :value="simulationFolderPath">
                     <input type="hidden" name="simulation_folder_paths" :value="JSON.stringify(simulationFolderPaths || [])">
                     <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
@@ -2166,7 +2222,8 @@
                         </div>
                     </div>
 
-                    <div x-show="hasAnyData() && parserInfo && (((parserInfo.folder_summaries || []).length > 0) || ((parserInfo.extension_summaries || []).length > 0) || ((parserInfo.extension_profiles || []).length > 0))" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
+                    <template x-if="hasAnyData() && parserInfo && (((parserInfo.folder_summaries || []).length > 0) || ((parserInfo.extension_summaries || []).length > 0) || ((parserInfo.extension_profiles || []).length > 0))">
+                    <div class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
                         <div class="flex items-center gap-2">
                             <span class="material-symbols-outlined text-primary">folder_open</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Folder and File Inspection</h3>
@@ -2213,6 +2270,9 @@
                         </div>
 
                         <div x-show="(parserInfo.folder_profiles || []).length > 0" class="space-y-4">
+                            <!-- [DEBUG] -->
+                            <pre class="text-[10px] bg-gray-900 text-green-300 p-2 rounded overflow-x-auto max-h-40"
+                                 x-text="JSON.stringify((parserInfo.folder_profiles||[]).map(p=>({name:p.folder_name,has_nested:p.has_nested_subfolders,all_subfolders:p.all_subfolders})), null, 2)"></pre>
                             <template x-for="folderProfile in parserInfo.folder_profiles || []" :key="'folder-profile-'+(folderProfile.folder_path || folderProfile.folder_name)">
                                 <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
                                     <div class="flex flex-col gap-1">
@@ -2245,7 +2305,54 @@
                                         </p>
                                         <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="(folderProfile.matched_data_files || []).length > 0">
                                             Matched data files:
-                                            <span x-text="(folderProfile.matched_data_files || []).length"></span>
+                                            <span x-text="effectiveMatchedCount(folderProfile)"></span>
+                                        </p>
+                                    </div>
+
+                                    <!-- Subfolder inclusion filter -->
+                                    <div x-show="folderProfile.has_nested_subfolders && parserFolderAllSubfolders(folderProfile).length > 0"
+                                         class="space-y-2 rounded-lg border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 p-3">
+                                        <div x-show="(folderProfile.structure_warnings || []).length > 0" class="space-y-1">
+                                            <template x-for="(warn, wi) in folderProfile.structure_warnings || []" :key="'sw-'+wi">
+                                                <p class="text-[11px] text-amber-800 dark:text-amber-300" x-text="warn"></p>
+                                            </template>
+                                        </div>
+                                        <div class="flex items-center justify-between gap-2">
+                                            <h4 class="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide">Subfolder filter</h4>
+                                            <span class="text-[11px] text-amber-700 dark:text-amber-400"
+                                                  x-text="includedSubfolderCount(folderProfile.folder_path) + ' / ' + parserFolderAllSubfolders(folderProfile).length + ' included'">
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button type="button"
+                                                    class="text-[11px] text-amber-700 dark:text-amber-400 underline hover:no-underline"
+                                                    @click="empiricalSubfolderSelections = { ...(empiricalSubfolderSelections || {}), [folderProfile.folder_path]: null }">
+                                                Select all
+                                            </button>
+                                            <span class="text-[10px] text-amber-500">·</span>
+                                            <button type="button"
+                                                    class="text-[11px] text-amber-700 dark:text-amber-400 underline hover:no-underline"
+                                                    @click="empiricalSubfolderSelections = { ...(empiricalSubfolderSelections || {}), [folderProfile.folder_path]: [] }">
+                                                Deselect all
+                                            </button>
+                                        </div>
+                                        <div class="space-y-1 max-h-48 overflow-y-auto pr-1">
+                                            <template x-for="sub in parserFolderAllSubfolders(folderProfile)"
+                                                      :key="'sub-filter-' + (folderProfile.folder_path || '') + '-' + sub.name">
+                                                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-amber-100/50 dark:hover:bg-amber-900/20 cursor-pointer select-none">
+                                                    <input type="checkbox"
+                                                           class="h-3.5 w-3.5 rounded border-amber-300 text-primary focus:ring-primary"
+                                                           :checked="isSubfolderIncluded(folderProfile.folder_path, sub.name)"
+                                                           @change="toggleSubfolderInclusion(folderProfile.folder_path, sub.name)">
+                                                    <span class="flex-1 text-xs font-mono text-amber-900 dark:text-amber-200" x-text="sub.name"></span>
+                                                    <span class="text-[10px] text-amber-700/70 dark:text-amber-400/70"
+                                                          x-text="sub.file_count + ' file' + (sub.file_count !== 1 ? 's' : '')"></span>
+                                                </label>
+                                            </template>
+                                        </div>
+                                        <p class="text-[11px] text-red-600 dark:text-red-400 font-medium"
+                                           x-show="includedSubfolderCount(folderProfile.folder_path) === 0">
+                                            At least one subfolder must be included.
                                         </p>
                                     </div>
 
@@ -2394,6 +2501,7 @@
                             </div>
                         </div>
                     </div>
+                    </template>
 
                     <div x-show="hasAnyData()" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
                         <div class="flex items-center gap-2 mb-3">

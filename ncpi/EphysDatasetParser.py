@@ -542,6 +542,13 @@ class EphysDatasetParser:
         # - 2D: (time, channels) or (channels, time)
         # - 3D: (epochs, channels, time) or (epochs, time, channels)
         arr = np.asarray(data)
+        if arr.dtype == object and arr.ndim == 1 and arr.size > 0:
+            try:
+                inner = np.asarray(arr[0])
+                if inner.ndim == 2:
+                    arr = np.stack([np.asarray(a) for a in arr], axis=0)
+            except Exception:
+                pass
 
         if arr.ndim == 1:
             # single channel
@@ -733,13 +740,16 @@ class EphysDatasetParser:
                     warnings.warn("max_seconds crop could not be applied to this Raw object.")
 
         data = self._resolve(raw, f.data)
-        if callable(data):
+        if data is None:
+            # MNE Raw: auto-extract signal array when no locator is configured
+            data = raw.get_data()
+        elif callable(data):
             data = data()
 
         arr = np.asarray(data)  # expected (n_channels, n_times)
 
         fs = self._resolve(raw, f.fs)
-        fs = float(fs) if fs is not None else float(getattr(raw.info, "sfreq", raw.info.get("sfreq")))
+        fs = float(fs) if fs is not None else float(getattr(raw.info, "sfreq", 0))
 
         ch_names = self._resolve(raw, f.ch_names)
         if isinstance(ch_names, (list, tuple)):
