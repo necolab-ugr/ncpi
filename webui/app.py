@@ -2273,13 +2273,19 @@ def _safe_eval_numeric_expression(expr):
     return _eval(tree)
 
 
-def _extract_locator_candidates(obj, max_depth=3, max_items=120):
+def _extract_locator_candidates(obj, max_depth=6, max_items=120):
     candidates = []
     seen = set()
     visited = set()
 
     def _is_terminal(value):
-        return isinstance(value, (str, bytes, int, float, bool, np.ndarray))
+        # Scalars and strings: terminal
+        if isinstance(value, (str, bytes, int, float, bool)):
+            return True
+        # NumPy Arrays: only if not object-type
+        if isinstance(value, np.ndarray) and value.dtype != np.object_ and value.dtype.names is None:
+            return True
+        return False
 
     def _append(path):
         if path and path not in seen and len(candidates) < max_items:
@@ -2305,12 +2311,56 @@ def _extract_locator_candidates(obj, max_depth=3, max_items=120):
                     _walk(nested, path, depth + 1)
             return
 
+        # NumPy Arrays object-type
+        if isinstance(value, np.ndarray) and value.dtype == np.object_:
+            if value.size == 0:
+                return
+            # Take the first element as a sample
+            first_item = value.flat[0]
+            # If the first item is a structure (structured array or mat_struct), explore its fields with the same prefix (without index)
+            if hasattr(first_item, 'dtype') and first_item.dtype.names:
+                # Structured array: explore its fields
+                for field_name in first_item.dtype.names:
+                    field_path = f"{prefix}.{field_name}" if prefix else field_name
+                    _append(field_path)
+                    field_value = first_item[field_name]
+                    if not _is_terminal(field_value):
+                        _walk(field_value, field_path, depth + 1)
+            elif hasattr(first_item, '_fieldnames'):  # mat_struct
+                for field_name in first_item._fieldnames:
+                    field_path = f"{prefix}.{field_name}" if prefix else field_name
+                    _append(field_path)
+                    field_value = getattr(first_item, field_name)
+                    if not _is_terminal(field_value):
+                        _walk(field_value, field_path, depth + 1)
+            else:
+                _append(prefix)
+            return
+
+        # Structured arrays
+        if isinstance(value, np.ndarray) and value.dtype.names:
+            if value.size == 0:
+                return
+            # Take first element as a sample (assume homogeneous structure)
+            first_elem = value.flat[0]
+            for field_name in value.dtype.names:
+                field_path = f"{prefix}.{field_name}" if prefix else field_name
+                _append(field_path)
+                field_value = first_elem[field_name]
+                if not _is_terminal(field_value):
+                    _walk(field_value, field_path, depth + 1)
+            return
+
         if isinstance(value, (list, tuple)):
             if not value:
                 return
-            sample = value[0]
-            if not _is_terminal(sample):
-                _walk(sample, prefix, depth + 1)
+            # Explore all elements, not just the first one
+            for idx, item in enumerate(value):
+                # Generate path with index, eg: "cfg.filtering[0]"
+                indexed_path = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
+                _append(indexed_path)
+                if not _is_terminal(item):
+                    _walk(item, indexed_path, depth + 1)
             return
 
         if hasattr(value, "__dict__"):
@@ -2363,6 +2413,20 @@ def _pick_field_guess_fuzzy(candidates, patterns):
             if pattern in lower_key:
                 return item
     return ""
+
+def _expand_mat_struct(value, prefix=""):
+    """Recursivamente extrae campos de un mat_struct o cell array."""
+    fields = []
+    if hasattr(value, '_fieldnames') and hasattr(value, '__dict__'):
+        for field in value._fieldnames:
+            full = f"{prefix}.{field}" if prefix else field
+            fields.append(full)
+            nested = getattr(value, field)
+            if hasattr(nested, '_fieldnames'):
+                fields.extend(_expand_mat_struct(nested, full))
+            elif isinstance(nested, (list, tuple)) and nested and hasattr(nested[0], '_fieldnames'):
+                fields.extend(_expand_mat_struct(nested[0], f"{full}[0]"))
+    return fields
 
 
 def _summarize_value_for_ui(value):
@@ -2431,6 +2495,19 @@ def _summarize_value_for_ui(value):
     if isinstance(value, (str, bytes)):
         summary["shape"] = [len(value)]
         summary["detail"] = f"length {len(value)}"
+        return summary
+
+    if hasattr(value, '_fieldnames') and hasattr(value, '__dict__'):
+        subfields = _expand_mat_struct(value)
+        summary["python_type"] = "mat_struct"
+        summary["shape"] = [len(subfields)]
+        if subfields:
+            preview = ", ".join(subfields[:10])
+            if len(subfields) > 10:
+                preview += ", ..."
+            summary["detail"] = f"mat_struct with fields: {preview}"
+        else:
+            summary["detail"] = "mat_struct (no fields)"
         return summary
 
     try:
