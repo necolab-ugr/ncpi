@@ -160,7 +160,7 @@ class network:
         )
         return nest.Create(model, int(n_nodes), positions=positions)
 
-    def create_network(self, rng_seed=None):
+    def create_network(self, rng_seed=None, results_dir=None):
         """Initialize NEST, create populations, inputs, synapses, and recorders."""
         if rng_seed is None:
             rng_seed = int(
@@ -173,7 +173,10 @@ class network:
                 * np.random.rand(1)[0]
             )
 
-        results_dir = Path(__file__).resolve().parents[1] / "results"
+        if results_dir is None:
+            results_dir = Path(__file__).resolve().parents[1] / "results"
+        else:
+            results_dir = Path(results_dir)
         results_dir.mkdir(parents=True, exist_ok=True)
 
         nest.ResetKernel()
@@ -545,7 +548,8 @@ if __name__ == "__main__":
         external_input_params,
         analysis_params,
     )
-    net.create_network(rng_seed=rng_seed)
+    nest_results_dir = os.path.join(output_dir, "nest_output")
+    net.create_network(rng_seed=rng_seed, results_dir=nest_results_dir)
 
     # Store the planned simulation intervals for reproducibility metadata.
     total_time = float(module.tstop)

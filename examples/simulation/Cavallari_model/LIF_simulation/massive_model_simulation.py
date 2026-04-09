@@ -83,7 +83,8 @@ PARAMS_DIR = os.path.join(SCRIPT_DIR, "params")
 PYTHON_DIR = os.path.join(SCRIPT_DIR, "python")
 SIMULATION_SCRIPT = os.path.join(PYTHON_DIR, "simulation.py")
 MC_ANALYSIS_PARAMS = os.path.join(os.path.dirname(SCRIPT_DIR), "MC_simulation", "analysis_params.py")
-DEFAULT_BASE_OUTPUT_ROOT = os.path.join(SCRIPT_DIR, "simulation_output")
+DEFAULT_SCRATCH_ROOT = "/SCRATCH/TIC117/pablomc/Cavallari_model_simulations"
+DEFAULT_BASE_OUTPUT_ROOT = os.path.join(DEFAULT_SCRATCH_ROOT, "simulation_output")
 OUTPUT_ROOT = DEFAULT_BASE_OUTPUT_ROOT
 
 # Parameter ranges are expressed as multipliers of the current Cavallari baseline.
