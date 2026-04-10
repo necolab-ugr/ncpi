@@ -1,16 +1,16 @@
 #!/bin/bash
 #SBATCH -p NOParalela
-#SBATCH -J Hagen_model_simulations
+#SBATCH -J Cavallari_model_simulations
 #SBATCH -t 120:00:00
 #SBATCH --array=0-79%40
 #SBATCH --cpus-per-task=56
 #SBATCH --output=/dev/null
 #SBATCH --error=/dev/null
 
-SCRATCH_ROOT="/SCRATCH/TIC117/pablomc/Hagen_model_simulations"
+SCRATCH_ROOT="/SCRATCH/TIC117/pablomc/Cavallari_model_simulations"
 
 # --- move to your project directory ---
-cd /LUSTRE/home/TIC117/pablomc/ncpi/examples/simulation/Hagen_model/simulation || exit 1
+cd /LUSTRE/home/TIC117/pablomc/ncpi/examples/simulation/Cavallari_model/LIF_simulation || exit 1
 
 # --- activate environment ---
 source ~/.bashrc

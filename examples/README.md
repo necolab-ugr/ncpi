@@ -70,10 +70,10 @@ LFP data."*
 
 ### 🔵 `simulation/`
 
-This folder contains **two types of LIF network models**:
+This folder contains example network simulation workflows for both LIF and multicompartment models:
 - **`Hagen_model/`**: single-area LIF network model.
 - **`four_area_cortical_model/`**: multi-area (four-area) LIF network model.
-- **`Cavallari_model/`**: single-area conductance-based LIF network model using a custom NEST neuron extension module.
+- **`Cavallari_model/`**: single-area conductance-based LIF network model using a custom NEST neuron extension module, plus a multicompartment NEURON/LFPy network simulation.
 
 > **Note:** To run examples that include simulations of the LIF network models (e.g., in `Hagen_model/figures/example_full_pipeline.py`), 
 > the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST 
@@ -160,7 +160,7 @@ response to varying external input values."*
 
 ---
 
-#### Simulation Code (`Cavallari_model/simulation/`)
+#### Simulation Code (`Cavallari_model/LIF_simulation/`)
 
 - **`params/`**  
   Contains parameter sets used to run simulations of the Cavallari conductance-based model.
@@ -170,6 +170,14 @@ response to varying external input values."*
 
 - **`example_model_simulation.py`**  
   Example script demonstrating how to simulate the Cavallari model.
+
+#### Simulation Code (`Cavallari_model/MC_simulation/`)
+
+- **`analysis_params.py`**  
+  Defines the multicompartment Hagen-style network parameters used by the direct MC simulation.
+
+- **`example_model_simulation.py`**  
+  Runs a single multicompartment network simulation using the Zenodo-hosted morphologies and NEURON mechanisms.
 
 #### Custom NEST extension (`Cavallari_model/neuron_model/`)
 

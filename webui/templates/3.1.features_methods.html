@@ -20,7 +20,7 @@
         const startOnCompute = initialEntry === 'compute' || ['load-data', 'select-method', 'configure-method'].includes(initialTab);
         let initialActiveTab = 'entry';
         let initialEntryChoice = '';
-        if (startOnLoadPrecomputed) {
+        if (startOnLoadPrecomputed){
             initialEntryChoice = 'load';
             initialActiveTab = 'load-precomputed';
         } else if (startOnCompute) {
@@ -49,11 +49,13 @@
             empiricalFolderPath: '',
             simulationFolderPath: '',
             parserInfo: null,
+            _baseParserInfo: null,
             parserLoading: false,
             parserError: '',
             parserAnalysisFolderPaths: [],
             parserAnalysisFolderNames: [],
             empiricalDataFileSelections: {},
+            empiricalSubfolderSelections: {},
             empiricalFileCount: 0,
             empiricalSampleName: '',
             empiricalUploadSummary: '',
@@ -68,6 +70,21 @@
             simulationLocalFiles: [],
             appendSimulationSelection: false,
             simulationDropActive: false,
+            additionalFileSourceMode: 'upload',
+            additionalLocalFiles: [],
+            additionalServerFilePaths: [],
+            metadataLoading: false,
+            metadataError: '',
+            metadataInfo: null,
+            additionalFileLinkField: '',
+            additionalFileDropActive: false,
+            serverFileBrowserOpen: false,
+            serverFileBrowserPath: '',
+            serverFileBrowserParent: '',
+            serverFileBrowserDirs: [],
+            serverFileBrowserFiles: [],
+            serverFileBrowserLoading: false,
+            serverFileBrowserError: '',
             serverDirBrowserOpen: false,
             serverDirBrowserTarget: 'empirical',
             serverDirBrowserPath: '',
@@ -491,6 +508,59 @@
                 const profile = this.parserFolderStructureByPath(folderProfile?.folder_path);
                 return Array.isArray(profile?.data_file_candidates) ? profile.data_file_candidates : [];
             },
+            parserFolderAllSubfolders(folderPathOrProfile) {
+                // Accept either a folder path string or a folderProfile object directly
+                if (folderPathOrProfile && typeof folderPathOrProfile === 'object') {
+                    if (Array.isArray(folderPathOrProfile.all_subfolders)) {
+                        return folderPathOrProfile.all_subfolders;
+                    }
+                }
+                const pathToken = String(folderPathOrProfile || '').trim();
+                const fromStructure = this.parserFolderStructureByPath(pathToken);
+                if (fromStructure && Array.isArray(fromStructure.all_subfolders)) return fromStructure.all_subfolders;
+                // Fallback: search folder_profiles directly
+                const fp = (this.parserInfo?.folder_profiles || []).find(
+                    p => String(p?.folder_path || '').trim() === pathToken
+                );
+                return Array.isArray(fp?.all_subfolders) ? fp.all_subfolders : [];
+            },
+            isSubfolderIncluded(folderPath, subfolderName) {
+                const sel = (this.empiricalSubfolderSelections || {})[folderPath];
+                return !sel || sel.includes(subfolderName);
+            },
+            toggleSubfolderInclusion(folderPath, subfolderName) {
+                const allSubs = this.parserFolderAllSubfolders(folderPath).map(s => s.name);
+                const current = (this.empiricalSubfolderSelections || {})[folderPath];
+                let next;
+                if (!current || current.length === 0) {
+                    next = allSubs.filter(n => n !== subfolderName);
+                } else {
+                    next = current.includes(subfolderName)
+                        ? current.filter(n => n !== subfolderName)
+                        : [...current, subfolderName];
+                    if (next.length === allSubs.length) next = null;
+                }
+                this.empiricalSubfolderSelections = { ...(this.empiricalSubfolderSelections || {}), [folderPath]: next };
+            },
+            buildSubfolderSelectionsPayload() {
+                const result = {};
+                for (const [fp, sel] of Object.entries(this.empiricalSubfolderSelections || {})) {
+                    if (Array.isArray(sel)) result[fp] = sel;
+                }
+                return result;
+            },
+            includedSubfolderCount(folderPath) {
+                const all = this.parserFolderAllSubfolders(folderPath);
+                const sel = (this.empiricalSubfolderSelections || {})[folderPath];
+                return sel ? sel.length : all.length;
+            },
+            effectiveMatchedCount(folderProfile) {
+                const folderPath = String(folderProfile?.folder_path || '').trim();
+                const sel = (this.empiricalSubfolderSelections || {})[folderPath];
+                const files = folderProfile?.matched_data_files || [];
+                if (!sel) return files.length;
+                return files.filter(f => sel.includes(String(f.level1_subfolder || '').trim())).length;
+            },
             parserFolderSelectedDataFile(folderProfile) {
                 const folderPath = String(folderProfile?.folder_path || '').trim();
                 if (!folderPath) return '';
@@ -540,11 +610,113 @@
                     await this.inspectEmpiricalFolderPath();
                 }
             },
+            async onAdditionalFileInputChange(event) {
+                const files = Array.from(event?.target?.files || []);
+                if (!files.length) return;
+                
+                const existing = this.additionalLocalFiles.map(f => f.name);
+                const toAdd = files.filter(f => !existing.includes(f.name));
+                
+                this.additionalLocalFiles = [...this.additionalLocalFiles, ...toAdd];
+                event.target.value = '';
+
+                if (toAdd.length > 0) {
+                    const unsupported = toAdd.filter(f => {
+                        const idx = f.name.lastIndexOf('.');
+                        return idx < 0 || !supportedParserFileExtensions.has(f.name.slice(idx).toLowerCase());
+                    });
+                    if (unsupported.length > 0) {
+                        this.metadataError = `Unsupported file extension: ${unsupported.map(f => f.name).join(', ')}`;
+                    } else {
+                        await this.inspectAllAdditionalFiles();
+                    }
+                }
+            },
+            setAdditionalFileSourceMode(mode) {
+                if (this.additionalFileSourceMode === mode) return;
+                this.additionalFileSourceMode = mode;
+                this.additionalFileDropActive = false;
+            },
+            openAdditionalLocalFilePicker() {
+                const el = document.getElementById('additional-file-input');
+                if (el) el.click();
+            },
+            async onAdditionalFileDrop(event) {
+                if (this.additionalFileSourceMode !== 'upload') return;
+                this.additionalFileDropActive = false;
+                const files = Array.from(event?.dataTransfer?.files || []);
+                if (!files.length) return;
+                const existing = this.additionalLocalFiles.map(f => f.name);
+                const toAdd = files.filter(f => !existing.includes(f.name));
+                this.additionalLocalFiles = [...this.additionalLocalFiles, ...toAdd];
+                if (toAdd.length > 0) {
+                    const unsupported = toAdd.filter(f => {
+                        const idx = f.name.lastIndexOf('.');
+                        return idx < 0 || !supportedParserFileExtensions.has(f.name.slice(idx).toLowerCase());
+                    });
+                    if (unsupported.length > 0) {
+                        this.metadataError = `Unsupported file extension: ${unsupported.map(f => f.name).join(', ')}`;
+                    } else {
+                        await this.inspectAllAdditionalFiles();
+                    }
+                }
+            },
+            async removeAdditionalLocalFile(index) {
+                this.additionalLocalFiles = this.additionalLocalFiles.filter((_, i) => i !== index);
+                await this.inspectAllAdditionalFiles();
+            },
+            async removeAdditionalServerFilePath(path) {
+                this.additionalServerFilePaths = this.additionalServerFilePaths.filter(p => p !== path);
+                await this.inspectAllAdditionalFiles();
+            },
+            async openServerFileBrowser() {
+                this.serverFileBrowserError = '';
+                this.serverFileBrowserOpen = true;
+                const startPath = this.additionalServerFilePaths.length > 0
+                    ? this.additionalServerFilePaths[this.additionalServerFilePaths.length - 1].replace(/[^/\\]*$/, '').replace(/[/\\]$/, '')
+                    : '';
+                await this.loadServerFileBrowser(startPath);
+            },
+            async loadServerFileBrowser(path) {
+                this.serverFileBrowserLoading = true;
+                this.serverFileBrowserError = '';
+                try {
+                    const params = new URLSearchParams();
+                    const targetPath = String(path || '').trim();
+                    if (targetPath) params.set('path', targetPath);
+                    params.set('include_files', '1');
+                    const response = await fetch(`{{ url_for('features_browse_dirs') }}?${params.toString()}`, { method: 'GET' });
+                    const payload = await response.json().catch(() => ({}));
+                    if (!response.ok) throw new Error(payload.error || 'Failed to list server files.');
+                    this.serverFileBrowserPath = String(payload.path || '');
+                    this.serverFileBrowserParent = String(payload.parent || '');
+                    this.serverFileBrowserDirs = Array.isArray(payload.dirs) ? payload.dirs : [];
+                    this.serverFileBrowserFiles = Array.isArray(payload.files) ? payload.files : [];
+                } catch (error) {
+                    this.serverFileBrowserError = error.message || 'Failed to list server files.';
+                } finally {
+                    this.serverFileBrowserLoading = false;
+                }
+            },
+            async selectServerFile(filePath) {
+                const path = String(filePath || '').trim();
+                if (!path) return;
+                if (!this.additionalServerFilePaths.includes(path)) {
+                    this.additionalServerFilePaths = [...this.additionalServerFilePaths, path];
+                }
+                this.serverFileBrowserOpen = false;
+                await this.inspectAllAdditionalFiles();
+            },
+            closeServerFileBrowser() {
+                this.serverFileBrowserOpen = false;
+            },
             resolvedDataSourceKind() {
                 if (this.selectedPipelinePath) return 'pipeline';
                 if (this.dataSourceKind === 'new-simulation' && (this.simulationFileCount > 0 || this.isUploaded('data-file'))) return 'new-simulation';
                 if (this.simulationFileCount > 0) return 'new-simulation';
                 if (this.isUploaded('data-file')) return 'new-simulation';
+                // Additional files can stand alone as a data source
+                if ((this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) && this.parserInfo) return 'new-simulation';
                 return '';
             },
             activeNewDataMode() {
@@ -944,6 +1116,7 @@
                 this.parserGroupLocator = '';
                 this.parserSpeciesLocator = '';
                 this.parserConditionLocator = '';
+                this.additionalFileLinkField = '';
                 this.parserFsLocator = '';
                 this.parserChNamesLocator = '';
                 this.parserTableLayout = '';
@@ -1030,6 +1203,33 @@
                 this.resetParserConfig();
                 this.inspectParserSource('', file);
             },
+
+            mergeParserInfos(base, additional) {
+                if (!base) return additional;
+                if (!additional) return base;
+                const existingFields = new Set(base.candidate_fields || []);
+                const newFields = (additional.candidate_fields || []).filter(f => !existingFields.has(f));
+                const existingDetailNames = new Set((base.field_details || []).map(d => d && d.field));
+                const newDetails = (additional.field_details || []).filter(d => d && d.field && !existingDetailNames.has(d.field));
+                return {
+                    ...base,
+                    candidate_fields: [...(base.candidate_fields || []), ...newFields],
+                    field_details: [...(base.field_details || []), ...newDetails],
+                    extension_profiles: [
+                        ...(base.extension_profiles || []),
+                        ...(additional.extension_profiles || []),
+                    ],
+                    extension_summaries: [
+                        ...(base.extension_summaries || []),
+                        ...(additional.extension_summaries || []),
+                    ],
+                    folder_summaries: [
+                        ...(base.folder_summaries || []),
+                        ...(additional.folder_summaries || []),
+                    ],
+                };
+            },
+
             async pickSimulationFolder() {
                 this.submitError = '';
                 this.parserError = '';
@@ -1073,6 +1273,7 @@
                     const payload = await response.json();
                     if (!response.ok) throw new Error(payload.error || 'Failed to inspect simulation outputs folder.');
                     this.parserInfo = payload;
+                    this._baseParserInfo = payload;
                     this.syncDataFileSelectionsFromPayload(payload, 'simulation');
                     this.applyParserDefaults(payload);
                     this.simulationFileCount = Number(payload.folder_file_count || 0);
@@ -1099,6 +1300,10 @@
                     this.simulationListedFileNames = [];
                     this.simulationFolderExtensionError = '';
                     this.dataSourceKind = 'new-simulation';
+                    if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) {
+                        await this.inspectAllAdditionalFiles();
+                    }
+
                     this.selectedPipelinePath = '';
                 } catch (error) {
                     const message = error.message || 'Failed to inspect simulation outputs folder.';
@@ -1131,6 +1336,7 @@
                 }
                 this.parserLoading = true;
                 this.parserInfo = null;
+                this.empiricalSubfolderSelections = {};
                 try {
                     this.empiricalSourceMode = 'server-path';
                     this.clearEmpiricalUploadInput();
@@ -1151,11 +1357,16 @@
                     const payload = await response.json();
                     if (!response.ok) throw new Error(payload.error || 'Failed to inspect empirical folder.');
                     this.parserInfo = payload;
+                    this._baseParserInfo = payload
                     this.syncDataFileSelectionsFromPayload(payload, 'empirical');
                     this.applyParserDefaults(payload);
                     this.empiricalFileCount = Number(payload.folder_file_count || 0);
                     this.empiricalSampleName = payload.source_name || '';
                     this.dataSourceKind = 'new-empirical';
+                    if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) {
+                        await this.inspectAllAdditionalFiles();
+                    }
+
                 } catch (error) {
                     this.parserError = error.message || 'Failed to inspect empirical folder.';
                     this.empiricalFileCount = 0;
@@ -1344,13 +1555,86 @@
                     const payload = await response.json();
                     if (!response.ok) throw new Error(payload.error || 'Failed to inspect data source.');
                     this.parserInfo = payload;
+                    this._baseParserInfo = payload;
                     this.applyParserDefaults(payload);
+                    // Re-merge additional files if any are already selected
+                    if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0){
+                        await this.inspectAllAdditionalFiles();
+                    }
                 } catch (error) {
                     this.parserError = error.message || 'Failed to inspect data source.';
                 } finally {
                     this.parserLoading = false;
                 }
             },
+            async inspectMetadataSource(file) {
+                this.metadataLoading = true;
+                this.metadataError = '';
+                this.metadataInfo = null;
+
+                const formData = new FormData();
+                if (file) formData.append('file', file);
+
+                try {
+                    const response = await fetch("{{ url_for('features_parser_inspect') }}", {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    
+                    const payload = await response.json();
+                    console.log("REVISIÓN DE PAYLOAD:", payload);
+                    
+                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect metadata source.');
+                    
+                    this.metadataInfo = payload;
+                    console.log("Metadatos analizados con éxito:", this.metadataInfo);
+
+                } catch (error) {
+                    this.metadataError = error.message || 'Failed to inspect metadata source.';
+                    console.error("Error en metadatos:", this.metadataError);
+                } finally {
+                    this.metadataLoading = false;
+                }
+            },
+
+            async inspectAllAdditionalFiles() {
+                const allFiles = [...(this.additionalLocalFiles || [])];
+                const allServerPaths = [...(this.additionalServerFilePaths || [])];
+                if (allFiles.length === 0 && allServerPaths.length === 0) {
+                    this.metadataInfo = null;
+                    this.metadataError = '';
+                    this.parserInfo = this._baseParserInfo || null;
+                    return;
+                }
+                this.metadataLoading = true;
+                this.metadataError = '';
+                const formData = new FormData();
+                for (const f of allFiles) formData.append('file', f);
+                for (const p of allServerPaths) formData.append('metadata_server_path', p);
+                try {
+                    console.log('[additionalFiles] Sending', allFiles.length, 'file(s),', allServerPaths.length, 'server path(s)');
+                    const response = await fetch("{{ url_for('features_parser_inspect') }}", {
+                        method: 'POST',
+                        body: formData,
+                    });
+                    const payload = await response.json();
+                    console.log('[additionalFiles] Response status:', response.status, payload);
+                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect files.');
+                    this.metadataInfo = payload;
+                    if (this._baseParserInfo) {
+                        this.parserInfo = this.mergeParserInfos(this._baseParserInfo, payload);
+                    } else {
+                        this.parserInfo = payload;
+                        this.dataSourceKind = 'new-simulation';
+                    }
+                } catch (error) {
+                    console.error('[additionalFiles] Error:', error);
+                    this.metadataError = error.message || 'Failed to inspect additional files.';
+                } finally {
+                    this.metadataLoading = false;
+                }
+            },
+
             hasUploadPayload() {
                 const kind = this.resolvedDataSourceKind();
                 if (kind === 'new-simulation') {
@@ -1529,6 +1813,13 @@
 
                 try {
                     const formData = new FormData(form);
+                    // Append additional files so the backend can use them for metadata lookup
+                    for (const f of this.additionalLocalFiles || []) {
+                        formData.append('additional_metadata_file', f);
+                    }
+                    for (const p of this.additionalServerFilePaths || []) {
+                        formData.append('additional_metadata_server_path', p);
+                    }
                     xhr.send(formData);
                 } catch (_err) {
                     this.stopUploadWaitPulse();
@@ -2024,149 +2315,233 @@
                     <input type="hidden" name="empirical_folder_path" :value="empiricalFolderPath">
                     <input type="hidden" name="empirical_folder_paths" :value="JSON.stringify(empiricalFolderPath ? [empiricalFolderPath] : [])">
                     <input type="hidden" name="empirical_data_file_selections" :value="JSON.stringify(empiricalDataFileSelections || {})">
+                    <input type="hidden" name="empirical_subfolder_selections" :value="JSON.stringify(buildSubfolderSelectionsPayload())">
                     <input type="hidden" name="simulation_folder_path" :value="simulationFolderPath">
                     <input type="hidden" name="simulation_folder_paths" :value="JSON.stringify(simulationFolderPaths || [])">
                     <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
                     <input type="hidden" name="parser_analysis_folder_paths" :value="JSON.stringify(parserAnalysisFolderPaths || [])">
                     <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
+                
 
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                            <div class="flex items-center gap-2 mb-4">
-                                <span class="material-symbols-outlined text-primary">history</span>
-                                <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue simulation pipeline</h3>
-                            </div>
-                            <div class="space-y-2">
-                                <template x-if="pipelineFiles.length === 0">
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">No field potential outputs detected yet.</p>
-                                </template>
-                                <template x-for="entry in pipelineFiles" :key="entry.path">
-                                    <button type="button" @click="selectPipeline(entry.path)"
-                                        class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group"
-                                        :class="{ 'border-primary bg-primary/5': selectedPipelinePath === entry.path }">
-                                        <span class="truncate flex items-center gap-2">
-                                            <span class="material-symbols-outlined text-sm opacity-60">analytics</span>
-                                            <span class="truncate" x-text="entry.name"></span>
-                                        </span>
-                                        <span class="material-symbols-outlined text-lg text-primary"
-                                            :class="selectedPipelinePath === entry.path ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'">check_circle</span>
-                                    </button>
-                                </template>
-                            </div>
-                            <div x-show="selectedPipelinePath" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
-                                <p x-text="pipelineFiles.find((item) => item.path === selectedPipelinePath)?.source || ''"></p>
-                            </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                        <div class="flex items-center gap-2 mb-4">
+                            <span class="material-symbols-outlined text-primary">history</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue simulation pipeline</h3>
                         </div>
-
-                        <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                            <div class="flex items-center gap-2 mb-4">
-                                <span class="material-symbols-outlined text-primary">add_circle</span>
-                                <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
-                            </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                                Inspect a data folder for feature extraction from local upload or server storage.
-                            </p>
-
-                            <input id="data-file" name="data_file" type="file" class="hidden" webkitdirectory directory multiple @change="onSimulationUploadSelected($event)">
-                            <div
-                                class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
-                                :class="(simulationDropActive && simulationSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
-                                @click="if (simulationSourceMode === 'upload') { openSimulationFolderPicker(false); } else { pickSimulationFolder(); }"
-                                @dragenter.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
-                                @dragover.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
-                                @dragleave.prevent="simulationDropActive = false"
-                                @drop.prevent="onSimulationDrop($event)">
-                                <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
-                                    <button type="button" @click.stop="setSimulationSourceMode('upload')"
-                                        class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                        :class="simulationSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                        Local folder
-                                    </button>
-                                    <button type="button" @click.stop="setSimulationSourceMode('server-path')"
-                                        class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                        :class="simulationSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
-                                        Server folder
-                                    </button>
-                                </div>
-                                <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
-                                <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'upload'" x-cloak>
-                                    Select an existing local folder
-                                </p>
-                                <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'server-path'" x-cloak>
-                                    Select an existing server folder
-                                </p>
-                                <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
-                                    <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="openSimulationFolderPicker(false)"
-                                        class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                        Browse local folder
-                                    </button>
-                                    <button type="button" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak @click.stop="openSimulationFolderPicker(true)"
-                                        class="h-9 px-3 rounded-lg border border-primary text-xs font-semibold text-primary hover:bg-primary/10">
-                                        Add another local folder
-                                    </button>
-                                    <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFolder()"
-                                        class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                        Add server folder
-                                    </button>
-                                </div>
-                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
-                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
-                                    <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
-                                </div>
-                                <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0" x-cloak>
-                                    <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folders</span>
-                                    <div class="mt-2 space-y-2">
-                                        <template x-for="path in simulationFolderPaths" :key="'sim-folder-'+path">
-                                            <div class="flex items-center gap-2">
-                                                <span class="font-mono break-all flex-1" x-text="path"></span>
-                                                <button type="button" @click.stop="removeSimulationFolderPath(path)"
-                                                    class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20">
-                                                    Remove
-                                                </button>
-                                            </div>
-                                        </template>
-                                    </div>
-                                </div>
-                            </div>
-                            <div x-show="simulationFileCount > 0 || simulationFolderExtensionError" class="mt-4 p-3 border text-sm font-medium rounded-lg"
-                                :class="simulationFolderExtensionError
-                                    ? 'bg-red-100 dark:bg-red-900/50 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
-                                    : 'bg-green-100 dark:bg-green-900/50 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'">
-                                <template x-if="simulationFolderExtensionError">
-                                    <p class="text-xs font-semibold" x-text="simulationFolderExtensionError"></p>
-                                </template>
-                                <template x-if="!simulationFolderExtensionError">
-                                    <div>
-                                        <p><span x-text="simulationFileCount"></span> file(s) detected.</p>
-                                        <p class="text-xs opacity-80" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0">
-                                            Folder(s): <span x-text="(simulationFolderPaths || []).length"></span>
-                                        </p>
-                                        <template x-if="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0">
-                                            <div class="text-xs opacity-80">
-                                                <div>Samples inspected:</div>
-                                                <div class="mt-1 space-y-1">
-                                                    <template x-for="folder in simulationInspectedSamples" :key="'sim-sample-'+(folder.folder_path || folder.folder_name)">
-                                                        <div class="break-all">
-                                                            <div class="font-semibold" x-text="folder.folder_name || folder.folder_path"></div>
-                                                            <template x-for="entry in folder.samples || []" :key="'sim-sample-entry-'+(folder.folder_path || folder.folder_name)+'-'+(entry.extension || entry.sample_file)">
-                                                                <div class="ml-3 text-[11px] font-mono text-gray-600 dark:text-gray-300" x-text="(entry.extension ? (entry.extension + ': ') : '') + entry.sample_file"></div>
-                                                            </template>
-                                                        </div>
-                                                    </template>
-                                                </div>
-                                            </div>
-                                        </template>
-                                        <p class="text-xs opacity-80" x-show="!(simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0)">Sample inspected: <span x-text="simulationSampleName"></span></p>
-                                        <p class="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
-                                            Warning: all files within each folder must have the same structure as the inspected sample; otherwise processing may fail or produce incorrect results.
-                                        </p>
-                                    </div>
-                                </template>
-                            </div>
+                        <div class="space-y-2">
+                            <template x-if="pipelineFiles.length === 0">
+                                <p class="text-xs text-gray-500 dark:text-gray-400">No field potential outputs detected yet.</p>
+                            </template>
+                            <template x-for="entry in pipelineFiles" :key="entry.path">
+                                <button type="button" @click="selectPipeline(entry.path)"
+                                    class="w-full flex items-center justify-between p-3 text-sm border border-gray-100 dark:border-white/10 rounded-lg hover:bg-primary/5 hover:border-primary/30 transition-all text-left group"
+                                    :class="{ 'border-primary bg-primary/5': selectedPipelinePath === entry.path }">
+                                    <span class="truncate flex items-center gap-2">
+                                        <span class="material-symbols-outlined text-sm opacity-60">analytics</span>
+                                        <span class="truncate" x-text="entry.name"></span>
+                                    </span>
+                                    <span class="material-symbols-outlined text-lg text-primary"
+                                        :class="selectedPipelinePath === entry.path ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'">check_circle</span>
+                                </button>
+                            </template>
+                        </div>
+                        <div x-show="selectedPipelinePath" class="mt-3 text-xs text-gray-500 dark:text-gray-400">
+                            <p x-text="pipelineFiles.find((item) => item.path === selectedPipelinePath)?.source || ''"></p>
                         </div>
                     </div>
 
-                    <div x-show="hasAnyData() && parserInfo && (((parserInfo.folder_summaries || []).length > 0) || ((parserInfo.extension_summaries || []).length > 0) || ((parserInfo.extension_profiles || []).length > 0))" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
+                    <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                        <div class="flex items-center gap-2 mb-4">
+                            <span class="material-symbols-outlined text-primary">add_circle</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                            Inspect a data folder for feature extraction from local upload or server storage.
+                        </p>
+
+                        <input id="data-file" name="data_file" type="file" class="hidden" webkitdirectory directory multiple @change="onSimulationUploadSelected($event)">
+                        <input id="additional-file-input" type="file" class="hidden" multiple @change="onAdditionalFileInputChange($event)">
+                        <input type="hidden" name="metadata_info_json" :value="JSON.stringify(metadataInfo || {})" />
+                        <div
+                            class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
+                            :class="(simulationDropActive && simulationSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
+                            @click="if (simulationSourceMode === 'upload') { openSimulationFolderPicker(false); } else { pickSimulationFolder(); }"
+                            @dragenter.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
+                            @dragover.prevent="if (simulationSourceMode === 'upload') simulationDropActive = true"
+                            @dragleave.prevent="simulationDropActive = false"
+                            @drop.prevent="onSimulationDrop($event)">
+                            <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" @click.stop="setSimulationSourceMode('upload')"
+                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                    :class="simulationSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    Local folder
+                                </button>
+                                <button type="button" @click.stop="setSimulationSourceMode('server-path')"
+                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                    :class="simulationSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    Server folder
+                                </button>
+                            </div>
+                            <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
+                            <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'upload'" x-cloak>
+                                Select an existing local folder
+                            </p>
+                            <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'server-path'" x-cloak>
+                                Select an existing server folder
+                            </p>
+                            <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="openSimulationFolderPicker(false)"
+                                    class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                    Browse local folder
+                                </button>
+                                <button type="button" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak @click.stop="openSimulationFolderPicker(true)"
+                                    class="h-9 px-3 rounded-lg border border-primary text-xs font-semibold text-primary hover:bg-primary/10">
+                                    Add another local folder
+                                </button>
+                                <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFolder()"
+                                    class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                    Add server folder
+                                </button>
+                            </div>
+                            <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
+                                <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
+                            </div>
+                            <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0" x-cloak>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folders</span>
+                                <div class="mt-2 space-y-2">
+                                    <template x-for="path in simulationFolderPaths" :key="'sim-folder-'+path">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono break-all flex-1" x-text="path"></span>
+                                            <button type="button" @click.stop="removeSimulationFolderPath(path)"
+                                                class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20">
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                        <div x-show="simulationFileCount > 0 || simulationFolderExtensionError" class="mt-4 p-3 border text-sm font-medium rounded-lg"
+                            :class="simulationFolderExtensionError
+                                ? 'bg-red-100 dark:bg-red-900/50 border-red-200 dark:border-red-800 text-red-800 dark:text-red-200'
+                                : 'bg-green-100 dark:bg-green-900/50 border-green-200 dark:border-green-800 text-green-800 dark:text-green-200'">
+                            <template x-if="simulationFolderExtensionError">
+                                <p class="text-xs font-semibold" x-text="simulationFolderExtensionError"></p>
+                            </template>
+                            <template x-if="!simulationFolderExtensionError">
+                                <div>
+                                    <p><span x-text="simulationFileCount"></span> file(s) detected.</p>
+                                    <p class="text-xs opacity-80" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0">
+                                        Folder(s): <span x-text="(simulationFolderPaths || []).length"></span>
+                                    </p>
+                                    <template x-if="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0">
+                                        <div class="text-xs opacity-80">
+                                            <div>Samples inspected:</div>
+                                            <div class="mt-1 space-y-1">
+                                                <template x-for="folder in simulationInspectedSamples" :key="'sim-sample-'+(folder.folder_path || folder.folder_name)">
+                                                    <div class="break-all">
+                                                        <div class="font-semibold" x-text="folder.folder_name || folder.folder_path"></div>
+                                                        <template x-for="entry in folder.samples || []" :key="'sim-sample-entry-'+(folder.folder_path || folder.folder_name)+'-'+(entry.extension || entry.sample_file)">
+                                                            <div class="ml-3 text-[11px] font-mono text-gray-600 dark:text-gray-300" x-text="(entry.extension ? (entry.extension + ': ') : '') + entry.sample_file"></div>
+                                                        </template>
+                                                    </div>
+                                                </template>
+                                            </div>
+                                        </div>
+                                    </template>
+                                    <p class="text-xs opacity-80" x-show="!(simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 1 && (simulationInspectedSamples || []).length > 0)">Sample inspected: <span x-text="simulationSampleName"></span></p>
+                                    <p class="mt-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                        Warning: all files within each folder must have the same structure as the inspected sample; otherwise processing may fail or produce incorrect results.
+                                    </p>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <div class="md:col-span-2 flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-3">
+                        <div class="mt-1 flex items-center gap-2 mb-4">
+                            <span class="material-symbols-outlined text-primary">attach_file</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Additional files</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                            Attach individual files from local upload or server storage.
+                        </p>
+
+                        <div
+                            class="drop-zone flex-1 flex flex-col items-center justify-center py-2 px-6 border-2 border-gray-300 dark:border-[#323b67] rounded-xl transition-all group"
+                            :class="(additionalFileDropActive && additionalFileSourceMode === 'upload') ? 'simulation-accent-border bg-primary/5' : 'hover:border-primary/50 hover:bg-primary/5'"
+                            @click="if (additionalFileSourceMode === 'upload') { openAdditionalLocalFilePicker(); }"
+                            @dragenter.prevent="if (additionalFileSourceMode === 'upload') additionalFileDropActive = true"
+                            @dragover.prevent="if (additionalFileSourceMode === 'upload') additionalFileDropActive = true"
+                            @dragleave.prevent="additionalFileDropActive = false"
+                            @drop.prevent="onAdditionalFileDrop($event)">
+                            <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" @click.stop="setAdditionalFileSourceMode('upload')"
+                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                    :class="additionalFileSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    Local files
+                                </button>
+                                <button type="button" @click.stop="setAdditionalFileSourceMode('server-path')"
+                                    class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
+                                    :class="additionalFileSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    Server files
+                                </button>
+                            </div>
+                            <span class="material-symbols-outlined text-4xl text-gray-300 dark:text-gray-500 group-hover:text-primary mb-3">upload_file</span>
+                            <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="additionalFileSourceMode === 'upload'" x-cloak>
+                                Select individual local files
+                            </p>
+                            <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="additionalFileSourceMode === 'server-path'" x-cloak>
+                                Select individual server files
+                            </p>
+                            <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" x-show="additionalFileSourceMode === 'upload'" x-cloak @click.stop="openAdditionalLocalFilePicker()"
+                                    class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                    Browse local files
+                                </button>
+                                <button type="button" x-show="additionalFileSourceMode === 'server-path'" x-cloak @click.stop="openServerFileBrowser()"
+                                    class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                    Browse server files
+                                </button>
+                            </div>
+                            <div class="mt-4 text-xs text-gray-500 dark:text-gray-400 w-full" x-show="additionalFileSourceMode === 'upload' && additionalLocalFiles.length > 0" x-cloak>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local files</span>
+                                <div class="mt-2 space-y-2">
+                                    <template x-for="(file, idx) in additionalLocalFiles" :key="'add-local-'+idx">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono break-all flex-1" x-text="file.name"></span>
+                                            <button type="button" @click.stop="removeAdditionalLocalFile(idx)"
+                                                class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-300 dark:hover:bg-red-900/20">
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                            <div class="mt-4 text-xs text-gray-500 dark:text-gray-400 w-full" x-show="additionalFileSourceMode === 'server-path' && (additionalServerFilePaths || []).length > 0" x-cloak>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server files</span>
+                                <div class="mt-2 space-y-2">
+                                    <template x-for="path in additionalServerFilePaths" :key="'add-srv-'+path">
+                                        <div class="flex items-center gap-2">
+                                            <span class="font-mono break-all flex-1" x-text="path"></span>
+                                            <button type="button" @click.stop="removeAdditionalServerFilePath(path)"
+                                                class="h-7 px-2 rounded border border-red-200 text-red-600 text-[11px] hover:bg-red-50 dark:border-red-800 dark:text-red-900/20 dark:hover:bg-red-900/20">
+                                                Remove
+                                            </button>
+                                        </div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                        <div x-show="metadataLoading" x-cloak class="mt-3 text-xs text-blue-600 dark:text-blue-400">Inspecting file(s)...</div>
+                        <div x-show="metadataError" x-cloak class="mt-3 text-xs text-red-600 dark:text-red-400" x-text="metadataError"></div>
+                    </div>
+                </div>
+
+                    <template x-if="hasAnyData() && parserInfo && (((parserInfo.folder_summaries || []).length > 0) || ((parserInfo.extension_summaries || []).length > 0) || ((parserInfo.extension_profiles || []).length > 0))">
+                    <div class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
                         <div class="flex items-center gap-2">
                             <span class="material-symbols-outlined text-primary">folder_open</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Folder and File Inspection</h3>
@@ -2213,6 +2588,9 @@
                         </div>
 
                         <div x-show="(parserInfo.folder_profiles || []).length > 0" class="space-y-4">
+                            <!-- [DEBUG] -->
+                            <pre class="text-[10px] bg-gray-900 text-green-300 p-2 rounded overflow-x-auto max-h-40"
+                                 x-text="JSON.stringify((parserInfo.folder_profiles||[]).map(p=>({name:p.folder_name,has_nested:p.has_nested_subfolders,all_subfolders:p.all_subfolders})), null, 2)"></pre>
                             <template x-for="folderProfile in parserInfo.folder_profiles || []" :key="'folder-profile-'+(folderProfile.folder_path || folderProfile.folder_name)">
                                 <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
                                     <div class="flex flex-col gap-1">
@@ -2245,7 +2623,54 @@
                                         </p>
                                         <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="(folderProfile.matched_data_files || []).length > 0">
                                             Matched data files:
-                                            <span x-text="(folderProfile.matched_data_files || []).length"></span>
+                                            <span x-text="effectiveMatchedCount(folderProfile)"></span>
+                                        </p>
+                                    </div>
+
+                                    <!-- Subfolder inclusion filter -->
+                                    <div x-show="folderProfile.has_nested_subfolders && parserFolderAllSubfolders(folderProfile).length > 0"
+                                         class="space-y-2 rounded-lg border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 p-3">
+                                        <div x-show="(folderProfile.structure_warnings || []).length > 0" class="space-y-1">
+                                            <template x-for="(warn, wi) in folderProfile.structure_warnings || []" :key="'sw-'+wi">
+                                                <p class="text-[11px] text-amber-800 dark:text-amber-300" x-text="warn"></p>
+                                            </template>
+                                        </div>
+                                        <div class="flex items-center justify-between gap-2">
+                                            <h4 class="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide">Subfolder filter</h4>
+                                            <span class="text-[11px] text-amber-700 dark:text-amber-400"
+                                                  x-text="includedSubfolderCount(folderProfile.folder_path) + ' / ' + parserFolderAllSubfolders(folderProfile).length + ' included'">
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center gap-2">
+                                            <button type="button"
+                                                    class="text-[11px] text-amber-700 dark:text-amber-400 underline hover:no-underline"
+                                                    @click="empiricalSubfolderSelections = { ...(empiricalSubfolderSelections || {}), [folderProfile.folder_path]: null }">
+                                                Select all
+                                            </button>
+                                            <span class="text-[10px] text-amber-500">·</span>
+                                            <button type="button"
+                                                    class="text-[11px] text-amber-700 dark:text-amber-400 underline hover:no-underline"
+                                                    @click="empiricalSubfolderSelections = { ...(empiricalSubfolderSelections || {}), [folderProfile.folder_path]: [] }">
+                                                Deselect all
+                                            </button>
+                                        </div>
+                                        <div class="space-y-1 max-h-48 overflow-y-auto pr-1">
+                                            <template x-for="sub in parserFolderAllSubfolders(folderProfile)"
+                                                      :key="'sub-filter-' + (folderProfile.folder_path || '') + '-' + sub.name">
+                                                <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-amber-100/50 dark:hover:bg-amber-900/20 cursor-pointer select-none">
+                                                    <input type="checkbox"
+                                                           class="h-3.5 w-3.5 rounded border-amber-300 text-primary focus:ring-primary"
+                                                           :checked="isSubfolderIncluded(folderProfile.folder_path, sub.name)"
+                                                           @change="toggleSubfolderInclusion(folderProfile.folder_path, sub.name)">
+                                                    <span class="flex-1 text-xs font-mono text-amber-900 dark:text-amber-200" x-text="sub.name"></span>
+                                                    <span class="text-[10px] text-amber-700/70 dark:text-amber-400/70"
+                                                          x-text="sub.file_count + ' file' + (sub.file_count !== 1 ? 's' : '')"></span>
+                                                </label>
+                                            </template>
+                                        </div>
+                                        <p class="text-[11px] text-red-600 dark:text-red-400 font-medium"
+                                           x-show="includedSubfolderCount(folderProfile.folder_path) === 0">
+                                            At least one subfolder must be included.
                                         </p>
                                     </div>
 
@@ -2394,6 +2819,39 @@
                             </div>
                         </div>
                     </div>
+                    </template>
+
+                   <template x-if="metadataInfo && Object.keys(metadataInfo).length > 0">
+                        <div class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
+                            <div class="flex items-center gap-2">
+                                <span class="material-symbols-outlined text-primary">label</span>
+                                <h3 class="font-bold text-base text-[#34495E] dark:text-white">Metadata Inspection</h3>
+                            </div>
+                            
+                            <p class="text-xs text-gray-500 dark:text-gray-400" x-text="metadataInfo.summary || 'Metadata file successfully analyzed.'"></p>
+
+                            <div x-show="(metadataInfo.field_details || metadataInfo.candidate_fields || []).length > 0" class="space-y-2">
+                                <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Detected Columns / Fields</h4>
+                                <div class="flex flex-wrap gap-2">
+                                    <template x-for="field in (metadataInfo.field_details || metadataInfo.candidate_fields || [])" :key="'meta-field-'+(field.field || field)">
+                                        <span class="px-2 py-1 rounded-lg bg-primary/10 text-primary text-xs border border-primary/20">
+                                            <span x-text="field.field || field"></span>
+                                            <span x-show="field.python_type" class="opacity-70 text-[10px] ml-1" x-text="'(' + field.python_type + ')'"></span>
+                                        </span>
+                                    </template>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-wrap gap-4 mt-2">
+                                <div class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-[#191e33] px-3 py-1.5 rounded border border-gray-200 dark:border-[#323b67]">
+                                    <span class="font-semibold">Source: </span> <span x-text="metadataInfo.source_name || 'Uploaded file'"></span>
+                                </div>
+                                <div x-show="metadataInfo.folder_file_count" class="text-xs text-gray-600 dark:text-gray-300 bg-gray-50 dark:bg-[#191e33] px-3 py-1.5 rounded border border-gray-200 dark:border-[#323b67]">
+                                    <span class="font-semibold">Files processed: </span> <span x-text="metadataInfo.folder_file_count"></span>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
 
                     <div x-show="hasAnyData()" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
                         <div class="flex items-center gap-2 mb-3">
@@ -2876,6 +3334,36 @@
                                         Apply z-score normalization
                                     </label>
 
+                                </div>
+
+                                <!-- Additional Files Mapping — shown when additional files have been inspected -->
+                                <div x-show="metadataInfo && (metadataInfo.candidate_fields || []).length > 0"
+                                     x-cloak
+                                     class="rounded-lg border border-indigo-200 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 space-y-3">
+                                    <div class="flex items-center gap-2">
+                                        <span class="material-symbols-outlined text-sm text-indigo-600 dark:text-indigo-400">link</span>
+                                        <h4 class="text-xs font-semibold text-indigo-800 dark:text-indigo-300 uppercase tracking-wide">Additional Files Mapping</h4>
+                                    </div>
+                                    <p class="text-xs text-indigo-700/80 dark:text-indigo-300/80">
+                                        Select the column in the additional file that contains the same subject identifiers as the Subject ID source above.
+                                        The app will use it to look up group, condition, and other metadata for each subject.
+                                    </p>
+                                    <label class="text-sm block">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Link field in additional file</span>
+                                        <select name="additional_file_link_field" x-model="additionalFileLinkField"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            <option value="">— None (do not link) —</option>
+                                            <template x-for="field in (metadataInfo.candidate_fields || [])" :key="'add-link-'+field">
+                                                <option :value="field" x-text="field"></option>
+                                            </template>
+                                        </select>
+                                    </label>
+                                    <div x-show="additionalFileLinkField" x-cloak class="text-xs text-indigo-700/70 dark:text-indigo-300/70">
+                                        Subjects matched by: <span class="font-mono font-semibold" x-text="additionalFileLinkField"></span>
+                                        &rarr; Select group, condition, species, etc. from the additional file's columns in the dropdowns above.
+                                    </div>
+                                    <input type="hidden" name="additional_file_candidate_fields"
+                                        :value="JSON.stringify(metadataInfo ? (metadataInfo.candidate_fields || []) : [])">
                                 </div>
 
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300"
@@ -3512,6 +4000,52 @@
                         </template>
                         <p x-show="!serverDirBrowserLoading && serverDirBrowserEntries.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                             No subdirectories found.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div x-show="serverFileBrowserOpen" x-cloak class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" @keydown.escape.window="closeServerFileBrowser()">
+            <div class="w-full max-w-2xl bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl shadow-xl overflow-hidden">
+                <div class="px-4 py-3 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-[#34495E] dark:text-white">Browse server files</h3>
+                    <button type="button" @click="closeServerFileBrowser()" class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Close</button>
+                </div>
+                <div class="p-4 space-y-3">
+                    <p class="text-xs text-gray-500 dark:text-gray-400 break-all">
+                        Current folder:
+                        <span class="font-mono" x-text="serverFileBrowserPath || '/'"></span>
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" @click="loadServerFileBrowser(serverFileBrowserParent)" :disabled="!serverFileBrowserParent || serverFileBrowserLoading"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
+                            Up
+                        </button>
+                        <button type="button" @click="loadServerFileBrowser(serverFileBrowserPath)" :disabled="serverFileBrowserLoading"
+                            class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
+                            Refresh
+                        </button>
+                    </div>
+                    <div x-show="serverFileBrowserError" class="text-xs text-red-600 dark:text-red-400" x-text="serverFileBrowserError"></div>
+                    <div x-show="serverFileBrowserLoading" class="text-xs text-gray-500 dark:text-gray-400">Loading server files...</div>
+                    <div class="max-h-80 overflow-y-auto border border-gray-200 dark:border-[#323b67] rounded-lg divide-y divide-gray-100 dark:divide-[#323b67]">
+                        <template x-for="dir in serverFileBrowserDirs" :key="'sfb-dir-'+dir.path">
+                            <button type="button" @click="loadServerFileBrowser(dir.path)"
+                                class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                <span class="material-symbols-outlined text-base text-gray-400">folder</span>
+                                <span class="font-mono" x-text="dir.name"></span>
+                            </button>
+                        </template>
+                        <template x-for="file in serverFileBrowserFiles" :key="'sfb-file-'+file.path">
+                            <button type="button" @click="selectServerFile(file.path)"
+                                class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-primary hover:bg-primary/5 dark:hover:bg-primary/10 font-medium">
+                                <span class="material-symbols-outlined text-base">description</span>
+                                <span class="font-mono" x-text="file.name"></span>
+                            </button>
+                        </template>
+                        <p x-show="!serverFileBrowserLoading && serverFileBrowserDirs.length === 0 && serverFileBrowserFiles.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
+                            No entries found.
                         </p>
                     </div>
                 </div>

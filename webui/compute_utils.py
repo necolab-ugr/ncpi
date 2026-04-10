@@ -295,7 +295,9 @@ def _extract_filename_text_chains(file_name):
     stem = os.path.splitext(os.path.basename(str(file_name or "")))[0]
     if not stem:
         return []
-    return [tok for tok in re.findall(r"[A-Za-z]+", stem) if tok]
+    # Keep runtime parsing aligned with webui/app.py inspection logic:
+    # preserve numeric tokens and chain order from underscore-separated names.
+    return [tok.strip() for tok in stem.split("_") if tok.strip()]
 
 
 def _file_extracted_chain_index(locator):
@@ -470,6 +472,8 @@ def _load_uploaded_source_bytes(name, ext, content):
 
     if ext == ".csv":
         return pd.read_csv(io.BytesIO(raw))
+    if ext == ".tsv":
+        return pd.read_csv(io.BytesIO(raw), sep="\t")
 
     if ext == ".parquet":
         return pd.read_parquet(io.BytesIO(raw))
@@ -516,6 +520,8 @@ def _load_uploaded_source_path(path, name=None, ext=None):
 
     if ext == ".csv":
         return pd.read_csv(safe_path)
+    if ext == ".tsv":
+        return pd.read_csv(safe_path, sep="\t")
 
     if ext == ".parquet":
         return pd.read_parquet(safe_path)
@@ -532,6 +538,13 @@ def _load_uploaded_source_path(path, name=None, ext=None):
         except Exception as exc:
             raise ValueError(f"scipy is required to parse .mat files: {exc}")
         return sio.loadmat(safe_path, squeeze_me=True, struct_as_record=False)
+
+    if ext == ".set":
+        try:
+            import mne
+        except Exception as exc:
+            raise ValueError(f"mne is required to parse .set files: {exc}")
+        return mne.io.read_raw_eeglab(safe_path, preload=True)
 
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
@@ -1489,6 +1502,184 @@ def _build_feature_method_params(method, params, df):
 #############################################################
 
 
+def _apply_additional_file_metadata(
+    df,
+    additional_metadata_paths,
+    link_field,
+    job_status,
+    job_id,
+    metadata_locators=None,
+):
+    """Join canonical metadata from an additional tabular file into df.
+
+    Matches df["subject_id"] to additional_df[link_field], then overwrites
+    group, condition, species, recording_type (and any other canonical metadata
+    columns present in the additional file) in df for each matched subject.
+    """
+    try:
+        from ncpi.EphysDatasetParser import DEFAULT_COLUMNS
+
+        if "subject_id" not in df.columns:
+            _append_job_output(
+                job_status,
+                job_id,
+                "subject_id column not present in parsed data — subject mapping skipped.",
+            )
+            return df
+
+        def _is_missing(value):
+            return value is None or (isinstance(value, float) and np.isnan(value)) or pd.isna(value)
+
+        def _key_variants(value):
+            if _is_missing(value):
+                return []
+            out = []
+            seen = set()
+
+            def _add(token):
+                marker = repr(token)
+                if marker in seen:
+                    return
+                seen.add(marker)
+                out.append(token)
+
+            _add(value)
+            text = str(value).strip()
+            if not text:
+                return out
+            _add(text)
+
+            if re.fullmatch(r"[+-]?\d+(?:\.0+)?", text):
+                try:
+                    intval = int(float(text))
+                    _add(intval)
+                    _add(str(intval))
+                except Exception:
+                    pass
+
+            if re.fullmatch(r"\d+", text):
+                _add(text.lstrip("0") or "0")
+
+            return out
+
+        # Canonical columns to fill (skip data signals, time/freq axes, and the link itself).
+        _signal_cols = {
+            "data", "fs", "source_file", "epoch", "sensor",
+            "t0", "t1", "f0", "f1", "data_domain", "spectral_kind",
+        }
+
+        loaded_frames = []
+        for entry in additional_metadata_paths:
+            add_df = _load_uploaded_source_path(entry["path"], entry["name"], None)
+            if not isinstance(add_df, pd.DataFrame):
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Additional metadata file '{entry.get('name', 'unknown')}' is not tabular — skipped.",
+                )
+                continue
+            if link_field not in add_df.columns:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Link field '{link_field}' not found in '{entry.get('name', 'unknown')}' — skipped.",
+                )
+                continue
+            loaded_frames.append(add_df)
+
+        if not loaded_frames:
+            _append_job_output(
+                job_status,
+                job_id,
+                "No valid additional metadata files available for mapping.",
+            )
+            return df
+
+        metadata_locators = dict(metadata_locators or {})
+
+        # Decide how each canonical metadata column should be sourced from
+        # additional files: prefer explicit locator selected by the user
+        # (e.g. group <- "correct"), then fallback to same-name canonical column.
+        target_to_source = {}
+        for target_col in DEFAULT_COLUMNS:
+            target_name = str(target_col)
+            if target_name in _signal_cols or target_name in {"subject_id"}:
+                continue
+
+            locator = metadata_locators.get(target_name)
+            locator_name = str(locator).strip() if isinstance(locator, str) else ""
+            source_candidates = []
+            if (
+                locator_name
+                and locator_name not in {FILE_ID_METADATA_LITERAL}
+                and not locator_name.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX)
+            ):
+                source_candidates.append(locator_name)
+            source_candidates.append(target_name)
+
+            for source_name in source_candidates:
+                if any(source_name in add_df.columns for add_df in loaded_frames):
+                    target_to_source[target_name] = source_name
+                    break
+
+        if not target_to_source:
+            _append_job_output(
+                job_status,
+                job_id,
+                "No mappable metadata columns found in additional file(s).",
+            )
+            return df
+
+        # Build resilient lookup from every additional file; merge non-null values per subject.
+        lookup = {}
+        for add_df in loaded_frames:
+            use_cols = [link_field] + [
+                src for src in target_to_source.values() if src in add_df.columns
+            ]
+            for row in add_df[use_cols].to_dict(orient="records"):
+                for key in _key_variants(row.get(link_field)):
+                    bucket = lookup.setdefault(key, {})
+                    for target_col, source_col in target_to_source.items():
+                        if source_col not in row:
+                            continue
+                        value = row.get(source_col)
+                        if _is_missing(value):
+                            continue
+                        if target_col not in bucket or _is_missing(bucket.get(target_col)):
+                            bucket[target_col] = value
+
+        def _lookup_col(sid, col_name):
+            for key in _key_variants(sid):
+                value = lookup.get(key, {}).get(col_name)
+                if not _is_missing(value):
+                    return value
+            return np.nan
+
+        # Complement existing dataframe values without erasing unmatched rows.
+        for col in sorted(target_to_source.keys()):
+            mapped = df["subject_id"].map(lambda sid, c=col: _lookup_col(sid, c))
+            if col in df.columns:
+                df[col] = mapped.where(mapped.notna(), df[col])
+            else:
+                df[col] = mapped
+
+        _append_job_output(
+            job_status,
+            job_id,
+            "Additional file metadata mapped to dataframe for: "
+            + ", ".join(
+                f"{target}<-{source}" if target != source else target
+                for target, source in sorted(target_to_source.items())
+            )
+            + ".",
+        )
+        return df
+    except Exception as exc:
+        _append_job_output(job_status, job_id,
+                           f"Warning: additional file metadata mapping failed: {exc}")
+        return df
+
+
 def features_computation(job_id, job_status, params, temp_uploaded_files):
     output_df_path = None
     try:
@@ -1621,6 +1812,24 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
             df = pd.concat(parsed_frames, ignore_index=True)
             _append_job_output(job_status, job_id, f"Merged empirical parsed dataframe shape: {df.shape}.")
+
+            # Apply additional file metadata lookup (subject-level cross-reference)
+            _add_meta_paths = params.get("additional_metadata_paths")
+            _add_link_field = params.get("additional_file_link_field", "")
+            if _add_meta_paths and _add_link_field and "subject_id" in df.columns:
+                _meta_locators = (
+                    dict(parse_cfg.fields.metadata or {})
+                    if getattr(parse_cfg, "fields", None) is not None
+                    else {}
+                )
+                df = _apply_additional_file_metadata(
+                    df,
+                    _add_meta_paths,
+                    _add_link_field,
+                    job_status,
+                    job_id,
+                    metadata_locators=_meta_locators,
+                )
         else:
             input_path = params.get("file_paths", {}).get("data_file")
             if not input_path:

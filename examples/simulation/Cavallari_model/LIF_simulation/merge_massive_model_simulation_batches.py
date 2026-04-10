@@ -13,8 +13,8 @@ import matplotlib.pyplot as plt
 
 
 BATCH_DIR_PATTERN = re.compile(r"batch_(\d{4,})$")
-SIM_DATA_METHODS = ("CDM", "specparam", "catch22")
-DEFAULT_SCRATCH_ROOT = "/SCRATCH/TIC117/pablomc/Hagen_model_simulations"
+SIM_DATA_METHODS = ("CDM", "proxy", "specparam", "catch22")
+DEFAULT_SCRATCH_ROOT = "/SCRATCH/TIC117/pablomc/Cavallari_model_simulations"
 DEFAULT_INPUT_ROOT = os.path.join(DEFAULT_SCRATCH_ROOT, "simulation_output")
 DEFAULT_OUTPUT_DIR = os.path.join(DEFAULT_INPUT_ROOT, "merged")
 DEFAULT_VALID_SAMPLES_PLOT = "valid_parameter_samples.png"
@@ -135,6 +135,39 @@ def normalize_batch_id(value, fallback_batch_id: int) -> int:
     return int(value)
 
 
+def methods_present_in_details(valid_details: Sequence[dict]) -> Tuple[str, ...]:
+    methods = []
+    for detail in valid_details:
+        for method in detail.get("data_dirs", {}):
+            if method in SIM_DATA_METHODS and method not in methods:
+                methods.append(method)
+    if methods:
+        return tuple(methods)
+    return SIM_DATA_METHODS
+
+
+def validate_single_signal_method(
+    all_rows: Sequence[Dict[str, object]],
+    valid_details: Sequence[dict],
+) -> None:
+    signal_methods = []
+    for row in all_rows:
+        method = row.get("signal_method")
+        if method not in (None, "", "None") and method not in signal_methods:
+            signal_methods.append(method)
+    for detail in valid_details:
+        method = detail.get("signal_method")
+        if method not in (None, "", "None") and method not in signal_methods:
+            signal_methods.append(method)
+
+    if len(signal_methods) > 1:
+        raise ValueError(
+            "Refusing to merge Cavallari batches with different signal methods: "
+            f"{', '.join(map(str, signal_methods))}. "
+            "Run separate merges for proxy and kernel outputs."
+        )
+
+
 def remap_valid_sample_indices(
     all_rows: List[Dict[str, object]],
     valid_rows: List[Dict[str, object]],
@@ -142,6 +175,7 @@ def remap_valid_sample_indices(
     merged_output_dir: str,
 ) -> None:
     index_map: Dict[Tuple[int, int], int] = {}
+    present_methods = methods_present_in_details(valid_details)
 
     for global_index, detail in enumerate(valid_details):
         batch_id = normalize_batch_id(detail.get("batch_id"), -1)
@@ -152,7 +186,7 @@ def remap_valid_sample_indices(
         detail["sample_index"] = global_index
         detail["data_dirs"] = {
             method: os.path.join(merged_output_dir, "data", method)
-            for method in SIM_DATA_METHODS
+            for method in present_methods
         }
         index_map[(batch_id, old_sample_index)] = global_index
 
@@ -311,6 +345,8 @@ def main():
         merged_all_rows.extend(all_rows)
         merged_valid_rows.extend(valid_rows)
         merged_valid_details.extend(valid_details)
+
+    validate_single_signal_method(merged_all_rows, merged_valid_details)
 
     remap_valid_sample_indices(
         merged_all_rows,

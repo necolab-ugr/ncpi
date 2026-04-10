@@ -88,7 +88,7 @@ app = Flask(__name__)
 
 # Set secret key for sessions (necessary to show alert messages)
 app.secret_key = '602e6444-80b2-431c-b26c-b6cda2ac9c09'
-
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 # In-memory thread pool
 executor = ThreadPoolExecutor(max_workers=5) 
 
@@ -1447,6 +1447,35 @@ def _extract_data_file_selection_map_from_form(form, key):
     return selections
 
 
+def _extract_subfolder_filter_map_from_form(form, key):
+    """Parse {folder_path: [included_subfolder, ...]} from a form field JSON string.
+
+    Returns {} if absent or malformed.
+    A null/missing entry for a folder means 'include all subfolders' (no filter).
+    An explicit list means only those subfolders are included.
+    """
+    raw = (form.get(key) or "").strip()
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    result = {}
+    for raw_folder, raw_list in parsed.items():
+        token = str(raw_folder or "").strip()
+        if not token:
+            continue
+        included = [str(s).strip() for s in (raw_list or []) if str(s).strip()]
+        real_path = os.path.realpath(token)
+        if real_path:
+            result[real_path] = included
+        result[token] = included
+    return result
+
+
 def _to_posix_relpath(path):
     token = str(path or "").replace("\\", "/").strip().lstrip("/")
     return token or "."
@@ -1661,6 +1690,17 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
             }
         )
         has_nested_subfolders = len(nested_branches_with_files) > 0
+        subfolder_file_counts = {}
+        for _branch in nested_branches_with_files:
+            subfolder_file_counts[_branch] = sum(
+                len(rows)
+                for dir_ext_files in branch_dir_ext_files.get(_branch, {}).values()
+                for rows in dir_ext_files.values()
+            )
+        all_subfolders = [
+            {"name": _branch, "file_count": subfolder_file_counts.get(_branch, 0)}
+            for _branch in nested_branches_with_files
+        ]
         selected_entries = list(folder_entries)
         selected_sample_entry = folder_entries[0] if folder_entries else None
         selected_data_file = ""
@@ -1668,13 +1708,25 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
         selected_data_extension = ""
         data_file_candidates = []
         matched_data_files = []
+        structure_warnings = []
 
         if has_nested_subfolders:
             if not level1_dirs:
                 level1_dirs = list(nested_branches_with_files)
             level1_dirs = sorted([token for token in level1_dirs if token])
+            # Pick the sample branch whose internal directory structure is shared by
+            # the most other branches (majority vote), so outlier folders like
+            # 'derivatives/' don't hijack the reference structure.
+            _dir_sigs = {
+                b: frozenset(branch_directories.get(b, set()))
+                for b in level1_dirs if b in nested_branches_with_files
+            }
+            _sig_counts: dict = {}
+            for _sig in _dir_sigs.values():
+                _sig_counts[_sig] = _sig_counts.get(_sig, 0) + 1
+            _best_sig = max(_sig_counts, key=lambda s: _sig_counts[s]) if _sig_counts else None
             sample_branch = next(
-                (token for token in level1_dirs if token in nested_branches_with_files),
+                (b for b in level1_dirs if _dir_sigs.get(b) == _best_sig),
                 nested_branches_with_files[0],
             )
             sample_dirs = set(branch_directories.get(sample_branch, set()))
@@ -1692,12 +1744,12 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                         if ext_rows:
                             sample_file_hint = ext_rows[0]["path"]
                             break
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' has inconsistent nested structure: "
-                        f"subfolder '{branch}' is missing expected homologous directory '{missing_dir}' "
-                        f"defined by sample subfolder '{sample_branch}'. "
-                        f"Reference file: {sample_file_hint or 'n/a'}."
+                    structure_warnings.append(
+                        f"Subfolder '{branch}' is missing expected directory '{missing_dir}' "
+                        f"(present in sample subfolder '{sample_branch}'). "
+                        f"Consider excluding '{branch}' using the subfolder filter below."
                     )
+                    break
                 if extra_dirs:
                     extra_dir = extra_dirs[0]
                     culprit_file = ""
@@ -1705,17 +1757,12 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                         if rows:
                             culprit_file = str(rows[0].get("path") or "")
                             break
-                    culprit_hint = culprit_file or os.path.join(
-                        root,
-                        branch,
-                        "" if extra_dir in {"", "."} else extra_dir,
+                    structure_warnings.append(
+                        f"Subfolder '{branch}' contains unexpected directory '{extra_dir}' "
+                        f"not present in sample subfolder '{sample_branch}'. "
+                        f"Consider excluding '{branch}' using the subfolder filter below."
                     )
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' has inconsistent nested structure: "
-                        f"subfolder '{branch}' contains unexpected extra directory '{extra_dir}' "
-                        f"relative to sample subfolder '{sample_branch}'. "
-                        f"Problematic path: {culprit_hint}."
-                    )
+                    break
 
                 for rel_dir in sorted(sample_dirs):
                     sample_counts = {
@@ -1751,21 +1798,20 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                                 culprit_file = culprit_rows[0]["path"] if culprit_rows else ""
                             break
 
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' has inconsistent file structure at homologous directory "
-                        f"'{rel_dir}' between subfolders '{sample_branch}' and '{branch}'. "
-                        f"Expected [{_format_extension_count_map(sample_counts)}], found [{_format_extension_count_map(branch_counts)}]. "
-                        f"Problematic file example: {culprit_file or 'n/a'}."
+                    structure_warnings.append(
+                        f"Subfolder '{branch}' has inconsistent file counts at directory '{rel_dir}' "
+                        f"compared to sample subfolder '{sample_branch}'. "
+                        f"Consider excluding '{branch}' using the subfolder filter below."
                     )
+                    break
 
             sample_branch_entries = sorted(
                 [item for item in folder_entries if str(item.get("level1_subfolder") or "") == sample_branch],
                 key=lambda item: str(item.get("subfolder_relative_path") or ""),
             )
             if not sample_branch_entries:
-                raise ValueError(
-                    f"{kind_label} folder '{folder_name}' has nested subfolders but no supported files in "
-                    f"sample subfolder '{sample_branch}'."
+                structure_warnings.append(
+                    f"Sample subfolder '{sample_branch}' has no supported files — inspection may be incomplete."
                 )
 
             data_file_candidates = [
@@ -1816,50 +1862,45 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                     and str(item.get("extension") or "").lower() == selected_data_extension.lower()
                 ]
                 if not branch_rows:
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' could not find a homologous Data file in "
-                        f"subfolder '{branch}' at '{selected_dir}' with extension '{selected_data_extension}'. "
-                        f"Reference sample file: {selected_sample_entry.get('path') or selected_data_name}."
+                    structure_warnings.append(
+                        f"Subfolder '{branch}' has no data file at '{selected_dir}' with extension "
+                        f"'{selected_data_extension}'. Consider excluding it using the subfolder filter below."
                     )
+                    continue
                 exact_matches = [
                     item for item in branch_rows
                     if str(item.get("name") or "") == selected_data_name
                 ]
                 if len(exact_matches) > 1:
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' found multiple exact Data file matches in subfolder "
-                        f"'{branch}' for '{selected_data_name}': "
-                        + ", ".join(str(item.get("path") or "") for item in exact_matches[:4])
-                        + (", ..." if len(exact_matches) > 4 else "")
+                    structure_warnings.append(
+                        f"Subfolder '{branch}' has multiple files named '{selected_data_name}' — skipped."
                     )
+                    continue
                 if len(exact_matches) == 1:
                     chosen = exact_matches[0]
                 else:
                     if stem_regex is None:
-                        raise ValueError(
-                            f"{kind_label} folder '{folder_name}' expected exact Data file name '{selected_data_name}' "
-                            f"in homologous subfolder '{branch}' but none was found. "
-                            f"Available files: {', '.join(str(item.get('path') or item.get('name') or '') for item in branch_rows[:6])}"
-                            + (", ..." if len(branch_rows) > 6 else "")
+                        structure_warnings.append(
+                            f"Subfolder '{branch}' is missing expected file '{selected_data_name}'. "
+                            f"Consider excluding it using the subfolder filter below."
                         )
+                        continue
                     pattern_matches = [
                         item for item in branch_rows
                         if stem_regex.match(Path(str(item.get("name") or "")).stem)
                     ]
                     if len(pattern_matches) == 0:
-                        raise ValueError(
-                            f"{kind_label} folder '{folder_name}' could not match Data file pattern "
-                            f"'{selected_data_pattern}' inside homologous subfolder '{branch}' "
-                            f"(directory '{selected_dir}'). "
-                            f"Reference sample file: {selected_sample_entry.get('path') or selected_data_name}."
+                        structure_warnings.append(
+                            f"Subfolder '{branch}' has no file matching pattern '{selected_data_pattern}' "
+                            f"at '{selected_dir}'. Consider excluding it using the subfolder filter below."
                         )
+                        continue
                     if len(pattern_matches) > 1:
-                        raise ValueError(
-                            f"{kind_label} folder '{folder_name}' found multiple Data file candidates in homologous "
-                            f"subfolder '{branch}' for pattern '{selected_data_pattern}' (directory '{selected_dir}'): "
-                            + ", ".join(str(item.get("path") or "") for item in pattern_matches[:4])
-                            + (", ..." if len(pattern_matches) > 4 else "")
+                        structure_warnings.append(
+                            f"Subfolder '{branch}' has multiple files matching pattern '{selected_data_pattern}' "
+                            f"at '{selected_dir}' — skipped."
                         )
+                        continue
                     chosen = pattern_matches[0]
                 matched_entries.append(chosen)
 
@@ -1901,6 +1942,8 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
             "matched_data_files": matched_data_files,
             "selected_entries": selected_entries,
             "sample_selected_entry": selected_sample_entry,
+            "all_subfolders": all_subfolders,
+            "structure_warnings": structure_warnings,
         })
 
     entries.sort(key=lambda item: item["path"])
@@ -1933,7 +1976,7 @@ def _extract_filename_text_chains(file_name):
     stem = Path(str(file_name or "")).stem
     if not stem:
         return []
-    return [tok for tok in re.findall(r"[A-Za-z]+", stem) if tok]
+    return [tok for tok in stem.split("_") if tok.strip()]
 
 
 def _build_file_extracted_virtual_fields(file_names):
@@ -2273,13 +2316,19 @@ def _safe_eval_numeric_expression(expr):
     return _eval(tree)
 
 
-def _extract_locator_candidates(obj, max_depth=3, max_items=120):
+def _extract_locator_candidates(obj, max_depth=6, max_items=120):
     candidates = []
     seen = set()
     visited = set()
 
     def _is_terminal(value):
-        return isinstance(value, (str, bytes, int, float, bool, np.ndarray))
+        # Scalars and strings: terminal
+        if isinstance(value, (str, bytes, int, float, bool)):
+            return True
+        # NumPy Arrays: only if not object-type
+        if isinstance(value, np.ndarray) and value.dtype != np.object_ and value.dtype.names is None:
+            return True
+        return False
 
     def _append(path):
         if path and path not in seen and len(candidates) < max_items:
@@ -2305,12 +2354,56 @@ def _extract_locator_candidates(obj, max_depth=3, max_items=120):
                     _walk(nested, path, depth + 1)
             return
 
+        # NumPy Arrays object-type
+        if isinstance(value, np.ndarray) and value.dtype == np.object_:
+            if value.size == 0:
+                return
+            # Take the first element as a sample
+            first_item = value.flat[0]
+            # If the first item is a structure (structured array or mat_struct), explore its fields with the same prefix (without index)
+            if hasattr(first_item, 'dtype') and first_item.dtype.names:
+                # Structured array: explore its fields
+                for field_name in first_item.dtype.names:
+                    field_path = f"{prefix}.{field_name}" if prefix else field_name
+                    _append(field_path)
+                    field_value = first_item[field_name]
+                    if not _is_terminal(field_value):
+                        _walk(field_value, field_path, depth + 1)
+            elif hasattr(first_item, '_fieldnames'):  # mat_struct
+                for field_name in first_item._fieldnames:
+                    field_path = f"{prefix}.{field_name}" if prefix else field_name
+                    _append(field_path)
+                    field_value = getattr(first_item, field_name)
+                    if not _is_terminal(field_value):
+                        _walk(field_value, field_path, depth + 1)
+            else:
+                _append(prefix)
+            return
+
+        # Structured arrays
+        if isinstance(value, np.ndarray) and value.dtype.names:
+            if value.size == 0:
+                return
+            # Take first element as a sample (assume homogeneous structure)
+            first_elem = value.flat[0]
+            for field_name in value.dtype.names:
+                field_path = f"{prefix}.{field_name}" if prefix else field_name
+                _append(field_path)
+                field_value = first_elem[field_name]
+                if not _is_terminal(field_value):
+                    _walk(field_value, field_path, depth + 1)
+            return
+
         if isinstance(value, (list, tuple)):
             if not value:
                 return
-            sample = value[0]
-            if not _is_terminal(sample):
-                _walk(sample, prefix, depth + 1)
+            # Explore all elements, not just the first one
+            for idx, item in enumerate(value):
+                # Generate path with index, eg: "cfg.filtering[0]"
+                indexed_path = f"{prefix}[{idx}]" if prefix else f"[{idx}]"
+                _append(indexed_path)
+                if not _is_terminal(item):
+                    _walk(item, indexed_path, depth + 1)
             return
 
         if hasattr(value, "__dict__"):
@@ -2364,6 +2457,20 @@ def _pick_field_guess_fuzzy(candidates, patterns):
                 return item
     return ""
 
+def _expand_mat_struct(value, prefix=""):
+    """Recursivamente extrae campos de un mat_struct o cell array."""
+    fields = []
+    if hasattr(value, '_fieldnames') and hasattr(value, '__dict__'):
+        for field in value._fieldnames:
+            full = f"{prefix}.{field}" if prefix else field
+            fields.append(full)
+            nested = getattr(value, field)
+            if hasattr(nested, '_fieldnames'):
+                fields.extend(_expand_mat_struct(nested, full))
+            elif isinstance(nested, (list, tuple)) and nested and hasattr(nested[0], '_fieldnames'):
+                fields.extend(_expand_mat_struct(nested[0], f"{full}[0]"))
+    return fields
+
 
 def _summarize_value_for_ui(value):
     summary = {
@@ -2404,6 +2511,15 @@ def _summarize_value_for_ui(value):
         summary["dtype"] = str(value.dtype)
         summary["shape"] = [int(dim) for dim in value.shape]
         summary["detail"] = f"{value.ndim}D array"
+
+        if value.dtype == object and value.size > 0:
+            try:
+                inner_arr = np.asarray(value.flat[0])
+                if inner_arr.ndim > 0:
+                    full_shape = list(value.shape) + list(inner_arr.shape)
+                    summary["detail"] += f" of arrays -> effective shape {full_shape}"
+            except Exception:
+                pass
         return summary
 
     if isinstance(value, dict):
@@ -2431,6 +2547,19 @@ def _summarize_value_for_ui(value):
     if isinstance(value, (str, bytes)):
         summary["shape"] = [len(value)]
         summary["detail"] = f"length {len(value)}"
+        return summary
+
+    if hasattr(value, '_fieldnames') and hasattr(value, '__dict__'):
+        subfields = _expand_mat_struct(value)
+        summary["python_type"] = "mat_struct"
+        summary["shape"] = [len(subfields)]
+        if subfields:
+            preview = ", ".join(subfields[:10])
+            if len(subfields) > 10:
+                preview += ", ..."
+            summary["detail"] = f"mat_struct with fields: {preview}"
+        else:
+            summary["detail"] = "mat_struct (no fields)"
         return summary
 
     try:
@@ -3046,6 +3175,8 @@ def _load_uploaded_source_in_memory(upload):
 
     if ext == ".csv":
         return pd.read_csv(io.BytesIO(raw))
+    if ext == ".tsv":
+        return pd.read_csv(io.BytesIO(raw), sep="\t")
 
     if ext == ".parquet":
         return pd.read_parquet(io.BytesIO(raw))
@@ -3335,6 +3466,50 @@ def _describe_parser_source(path):
             "fs_hint_note": fs_hint_note,
         }
         payload["field_details"] = _describe_source_fields_for_ui(source_obj, ["__self__"], "field")
+        payload["manual_field_details"] = _manual_field_details_for_ui()
+        return payload
+
+    # MNE Raw / Epochs objects (duck-typed to avoid hard MNE import)
+    if hasattr(source_obj, "get_data") and hasattr(source_obj, "ch_names") and hasattr(source_obj, "info"):
+        try:
+            n_ch = len(source_obj.ch_names)
+        except Exception:
+            n_ch = "?"
+        try:
+            sfreq = float(getattr(source_obj.info, "sfreq", 0))
+        except Exception:
+            sfreq = None
+        mne_candidates = [
+            "get_data",
+            "ch_names",
+            "info.sfreq",
+            "info.subject_info",
+            "info.description",
+        ]
+        mne_defaults = {
+            "data": "get_data",
+            "fs": "info.sfreq",
+            "ch_names": "ch_names",
+            "recording_type": "",
+            "subject_id": "",
+            "group": "",
+            "species": "",
+            "condition": "",
+        }
+        summary_parts = [f"MNE {type(source_obj).__name__}", f"{n_ch} channels"]
+        if sfreq:
+            summary_parts.append(f"{sfreq:g} Hz")
+        payload = {
+            "source_type": "mne_raw",
+            "candidate_fields": mne_candidates,
+            "defaults": mne_defaults,
+            "summary": " · ".join(summary_parts) + ".",
+            "sensor_count_estimate": n_ch if isinstance(n_ch, int) else None,
+            "multi_sensor_detected": isinstance(n_ch, int) and n_ch > 1,
+            "fs_hint_hz": sfreq,
+            "fs_hint_note": f"Sampling rate from MNE info: {sfreq:g} Hz." if sfreq else None,
+        }
+        payload["field_details"] = _describe_source_fields_for_ui(source_obj, mne_candidates, "field")
         payload["manual_field_details"] = _manual_field_details_for_ui()
         return payload
 
@@ -5894,9 +6069,10 @@ def features_parser_inspect():
         "empirical_data_file_selections",
     )
     listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
-    upload = request.files.get("file")
+    uploads = [f for f in request.files.getlist("file") if f and f.filename]
+    _metadata_server_paths_raw = [p.strip() for p in request.form.getlist("metadata_server_path") if p.strip()]
     inspect_path = None
-    cleanup_path = None
+    cleanup_paths = []
     name_candidates = list(listed_file_names)
     file_name = ""
     folder_entries = []
@@ -5994,21 +6170,43 @@ def features_parser_inspect():
                 for folder_profile in folder_profiles
                 for profile in (folder_profile.get("extension_profiles") or [])
             ]
-        elif upload and upload.filename:
-            file_name = secure_filename(upload.filename)
-            if not file_name:
-                return jsonify({"error": "Invalid file name."}), 400
-            if not name_candidates:
-                name_candidates.append(file_name)
-            ext = Path(file_name).suffix.lower()
-            if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
-                return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
+        elif uploads or _metadata_server_paths_raw:
             inspect_root = FEATURES_INSPECTION_DIR
             os.makedirs(inspect_root, exist_ok=True)
-            temp_name = f"{uuid.uuid4()}_{file_name}"
-            inspect_path = os.path.join(inspect_root, temp_name)
-            upload.save(inspect_path)
-            cleanup_path = inspect_path
+            metadata_server_paths = _metadata_server_paths_raw
+            upload_entries = []
+            for upl in uploads:
+                upl_name = secure_filename(upl.filename)
+                if not upl_name:
+                    return jsonify({"error": "Invalid file name."}), 400
+                ext = Path(upl_name).suffix.lower()
+                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                    return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
+                temp_name = f"{uuid.uuid4()}_{upl_name}"
+                temp_path = os.path.join(inspect_root, temp_name)
+                upl.save(temp_path)
+                cleanup_paths.append(temp_path)
+                name_candidates.append(upl_name)
+                upload_entries.append({"path": temp_path, "name": upl_name, "folder_name": upl_name})
+            for srv_path in metadata_server_paths:
+                real_path = os.path.realpath(srv_path)
+                if not os.path.isfile(real_path):
+                    return jsonify({"error": f"Server file not found: {srv_path}"}), 400
+                srv_name = os.path.basename(real_path)
+                ext = Path(srv_name).suffix.lower()
+                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                    return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
+                name_candidates.append(srv_name)
+                upload_entries.append({"path": real_path, "name": srv_name, "folder_name": srv_name})
+            if not upload_entries:
+                return jsonify({"error": "No valid files provided for inspection."}), 400
+            inspect_path = upload_entries[0]["path"]
+            file_name = upload_entries[0]["name"]
+            if len(upload_entries) > 1:
+                folder_entries = upload_entries
+                folder_file_count = len(upload_entries)
+                file_name = f"{len(upload_entries)} files"
+
         else:
             return jsonify({"error": "Provide an existing pipeline file, a simulation folder path, an empirical folder path, or upload a file to inspect."}), 400
 
@@ -6074,6 +6272,8 @@ def features_parser_inspect():
                     "data_file_candidates": list(context.get("data_file_candidates") or []),
                     "matched_data_files": list(context.get("matched_data_files") or []),
                     "selected_data_file_count": int(len(context.get("matched_data_files") or [])),
+                    "all_subfolders": list(context.get("all_subfolders") or []),
+                    "structure_warnings": list(context.get("structure_warnings") or []),
                 })
 
             for folder_profile in folder_profiles:
@@ -6087,6 +6287,8 @@ def features_parser_inspect():
                 folder_profile["selected_data_file"] = str(context.get("selected_data_file") or "")
                 folder_profile["selected_data_pattern"] = str(context.get("selected_data_pattern") or "")
                 folder_profile["matched_data_files"] = list(context.get("matched_data_files") or [])
+                folder_profile["all_subfolders"] = list(context.get("all_subfolders") or [])
+                folder_profile["structure_warnings"] = list(context.get("structure_warnings") or [])
 
                 sample_entry = context.get("sample_selected_entry")
                 if isinstance(sample_entry, dict) and sample_entry.get("path"):
@@ -6155,6 +6357,15 @@ def features_parser_inspect():
                     field_labels[field_name] = f"{field_name} [folders: {suffix}]"
                 if field_labels:
                     description["virtual_field_labels"] = field_labels
+            
+            # Override summary for the multi-upload metadata case
+            if not folder_summaries and folder_entries:
+                description["summary"] = (
+                    f"{len(folder_entries)} file(s) inspected. "
+                    f"Combined fields detected: {len(combined_candidates)}."
+                )
+                description["source_type"] = "uploaded_files"
+
         else:
             description = _describe_parser_source(inspect_path)
             description["manual_field_details"] = _manual_field_details_for_ui()
@@ -6181,7 +6392,27 @@ def features_parser_inspect():
                     key: sorted(values)
                     for key, values in candidate_field_origins.items()
                 }
+            
+            # Build extension_profiles so the response renders in "Folder and File Inspection"
+            _ext_key = Path(str(file_name)).suffix.lower()
+            _ext_profile = {
+                "extension": _ext_key,
+                "source_type": description.get("source_type", ""),
+                "candidate_fields": list(description.get("candidate_fields") or []),
+                "field_details": [d for d in (description.get("field_details") or []) if isinstance(d, dict)],
+                "summary": description.get("summary", ""),
+                "sample_file": file_name,
+                "file_count": 1,
+                "folder_name": file_name,
+                "folder_path": "",
+                "virtual_field_details": list(description.get("virtual_field_details") or []),
+            }
+            description["extension_profiles"] = [_ext_profile]
+            description["extension_summaries"] = [{"extension": _ext_key, "count": 1}]
+            if not description.get("folder_summaries"):
+                description["folder_summaries"] = [{"folder_name": file_name, "folder_path": "", "file_count": 1}]
 
+            
         description = _attach_file_extracted_virtual_field(description, name_candidates)
         if "dataframe_candidate_fields" not in description:
             description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
@@ -6222,11 +6453,12 @@ def features_parser_inspect():
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
     finally:
-        if cleanup_path and os.path.exists(cleanup_path):
-            try:
-                os.remove(cleanup_path)
-            except OSError:
-                pass
+        for _cpath in cleanup_paths:
+            if _cpath and os.path.exists(_cpath):
+                try:
+                    os.remove(_cpath)
+                except OSError:
+                    pass
 
 
 @app.route("/features/load_precomputed", methods=["POST"])
@@ -9367,6 +9599,10 @@ def start_computation_redirect(computation_type):
                         request.form,
                         "simulation_data_file_selections",
                     )
+                    simulation_subfolder_filter_map = _extract_subfolder_filter_map_from_form(
+                        request.form,
+                        "simulation_subfolder_selections",
+                    )
                     simulation_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         simulation_folder_paths,
                         "Simulation outputs",
@@ -9384,6 +9620,18 @@ def start_computation_redirect(computation_type):
                         if folder_path not in selected_set:
                             continue
                         selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if simulation_subfolder_filter_map and selected_data_entries:
+                        _filtered = []
+                        for _entry in selected_data_entries:
+                            _fp = str(_entry.get("folder_path") or "").strip()
+                            _included = simulation_subfolder_filter_map.get(_fp, [])
+                            if not _included:
+                                _filtered.append(_entry)
+                                continue
+                            _sub = str(_entry.get("level1_subfolder") or "").strip()
+                            if not _sub or _sub in _included:
+                                _filtered.append(_entry)
+                        selected_data_entries = _filtered
                     if selected_data_entries:
                         selected_entries = selected_data_entries
                     if not selected_entries:
@@ -9437,6 +9685,10 @@ def start_computation_redirect(computation_type):
                         request.form,
                         "empirical_data_file_selections",
                     )
+                    empirical_subfolder_filter_map_pre = _extract_subfolder_filter_map_from_form(
+                        request.form,
+                        "empirical_subfolder_selections",
+                    )
                     empirical_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         empirical_folder_paths,
                         "Empirical",
@@ -9454,6 +9706,18 @@ def start_computation_redirect(computation_type):
                         if folder_path not in selected_set:
                             continue
                         selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if empirical_subfolder_filter_map_pre and selected_data_entries:
+                        _filtered = []
+                        for _entry in selected_data_entries:
+                            _fp = str(_entry.get("folder_path") or "").strip()
+                            _included = empirical_subfolder_filter_map_pre.get(_fp, [])
+                            if not _included:
+                                _filtered.append(_entry)
+                                continue
+                            _sub = str(_entry.get("level1_subfolder") or "").strip()
+                            if not _sub or _sub in _included:
+                                _filtered.append(_entry)
+                        selected_data_entries = _filtered
                     if selected_data_entries:
                         selected_entries = selected_data_entries
                     if not selected_entries:
@@ -9964,6 +10228,10 @@ def start_computation_redirect(computation_type):
                         request.form,
                         "empirical_data_file_selections",
                     )
+                    empirical_subfolder_filter_map = _extract_subfolder_filter_map_from_form(
+                        request.form,
+                        "empirical_subfolder_selections",
+                    )
                     source_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         empirical_folder_paths,
                         "Empirical",
@@ -9981,6 +10249,18 @@ def start_computation_redirect(computation_type):
                         if folder_path not in selected_path_set:
                             continue
                         selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if empirical_subfolder_filter_map and selected_data_entries:
+                        _filtered = []
+                        for _entry in selected_data_entries:
+                            _fp = str(_entry.get("folder_path") or "").strip()
+                            _included = empirical_subfolder_filter_map.get(_fp, [])
+                            if not _included:
+                                _filtered.append(_entry)
+                                continue
+                            _sub = str(_entry.get("level1_subfolder") or "").strip()
+                            if not _sub or _sub in _included:
+                                _filtered.append(_entry)
+                        selected_data_entries = _filtered
                     if selected_data_entries:
                         selected_entries = selected_data_entries
                     if not selected_entries:
@@ -10367,6 +10647,28 @@ def start_computation_redirect(computation_type):
     if parser_config_obj is not None:
         data["parser_config_obj"] = parser_config_obj
 
+    # Handle additional metadata files for subject-level cross-referencing
+    if computation_type == "features":
+        _add_meta_uploads = [f for f in request.files.getlist("additional_metadata_file") if f and f.filename]
+        _add_meta_server_paths = [p.strip() for p in request.form.getlist("additional_metadata_server_path") if p.strip()]
+        _add_file_link_field = (request.form.get("additional_file_link_field") or "").strip()
+        if _add_file_link_field and (_add_meta_uploads or _add_meta_server_paths):
+            _additional_metadata_paths = []
+            for _upl in _add_meta_uploads:
+                _upl_name = secure_filename(_upl.filename)
+                _ext_check = Path(_upl_name).suffix.lower()
+                if _ext_check in FEATURES_PARSER_FILE_EXTENSIONS:
+                    _tmp_path = os.path.join(module_upload_dir, f"{job_id}_addmeta_{_upl_name}")
+                    _upl.save(_tmp_path)
+                    _additional_metadata_paths.append({"path": _tmp_path, "name": _upl_name})
+            for _srv in _add_meta_server_paths:
+                _real = os.path.realpath(_srv)
+                if os.path.isfile(_real):
+                    _additional_metadata_paths.append({"path": _real, "name": os.path.basename(_real)})
+            if _additional_metadata_paths:
+                data["additional_metadata_paths"] = _additional_metadata_paths
+                data["additional_file_link_field"] = _add_file_link_field
+
     # Store initial status
     job_status[job_id] = {
         "status": "in_progress",
@@ -10534,6 +10836,40 @@ def get_status(job_id):
     })
 
 
+@app.route("/preview_results/<job_id>")
+def preview_results(job_id):
+    """Returns the first rows of the result DataFrame as JSON for in-UI preview."""
+    status = job_status.get(job_id)
+    if not status or status.get("status") != "finished" or not status.get("results"):
+        return jsonify({"error": "Results not available"}), 404
+    try:
+        path = status["results"]
+        ext = os.path.splitext(str(path))[1].lower()
+        if ext in {".pkl", ".pickle"}:
+            df = pd.read_pickle(path)
+        elif ext == ".parquet":
+            df = pd.read_parquet(path)
+        elif ext == ".csv":
+            df = pd.read_csv(path)
+        else:
+            df = pd.read_pickle(path)
+        if not isinstance(df, pd.DataFrame):
+            return jsonify({"error": "Result is not a DataFrame"}), 400
+        # Drop array-valued columns that can't be serialized
+        array_cols = [c for c in df.columns if df[c].dtype == object and len(df) > 0
+                      and hasattr(df[c].iloc[0], '__len__') and not isinstance(df[c].iloc[0], str)]
+        preview = df.drop(columns=array_cols, errors="ignore").head(20)
+        return jsonify({
+            "columns": list(preview.columns),
+            "rows": preview.astype(str).values.tolist(),
+            "total_rows": len(df),
+            "total_cols": len(df.columns),
+            "dropped_cols": array_cols,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
 @app.route("/download_results/<job_id>")
 def download_results(job_id):
     """Handles the download of the final Pandas DataFrame."""
@@ -10628,3 +10964,6 @@ def download_results(job_id):
         as_attachment=True,
         download_name=f'{computation_type}_results_{job_id}_output.pkl'
     )
+
+if __name__ == '__main__':
+    app.run(debug=True)

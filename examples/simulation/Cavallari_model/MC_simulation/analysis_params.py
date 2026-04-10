@@ -7,6 +7,8 @@ from LFPy import NetworkCell
 The following methods and parameters were downloaded from the following LFPykernels repositories: 
 https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network_parameters.py
 https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network_methods.py
+They were adapted to replicate the Cavallari LIF network model while retaining
+the Hagen multicompartment morphologies and active mechanisms.
 Copyright (C) 2021 https://github.com/espenhgn
 """
 
@@ -49,16 +51,21 @@ class KernelParams:
     # Time lag relative to spike for kernel predictions
     tau = 100
 
-    # Parameters of connectivity and synaptic weights
+    # Parameters adapted from the Cavallari LIF network while keeping
+    # the Hagen multicompartment morphologies and active mechanisms.
+    # LIF conductances are in nS-like units; LFPy/NEURON Exp2Syn weights
+    # are in uS, so copied conductance weights are scaled by 1e-3.
     MC_params = {
-        'weight_EE': 0.00015,
-        'weight_IE': 0.000125,
-        'weight_EI': 0.0045,
-        'weight_II': 0.002,
-        'weight_scaling': 1.0,
+        'weight_EE': 0.000178,
+        'weight_IE': 0.000233,
+        'weight_EI': 0.00201,
+        'weight_II': 0.00270,
         'biophys': 'lin',
         'i_syn': True,
-        'n_ext': [465, 160],
+        'n_ext': [1, 1],
+        'th_exc_external': 0.00234,
+        'th_inh_external': 0.00317,
+        'v_0': 1.5,
         'g_eff': True,
         'perseg_Vrest': False}
 
@@ -125,11 +132,11 @@ class KernelParams:
     population_names = ['E', 'I']
     morphologies = ['BallAndSticks_E.hoc', 'BallAndSticks_I.hoc']
     if TESTING:
-        population_sizes = [32, 8]
+        population_sizes = [40, 10]
         connectionProbability = [[1., 1.], [1., 1.]]
     else:
-        population_sizes = [8192, 1024]
-        connectionProbability = [[0.05, 0.05], [0.05, 0.05]]
+        population_sizes = [4000, 1000]
+        connectionProbability = [[0.2, 0.2], [0.2, 0.2]]
 
     # synapse model. All corresponding parameters for weights,
     # connection delays, multapses and layerwise positions are
@@ -141,10 +148,10 @@ class KernelParams:
     synapseModel = neuron.h.Exp2Syn
     # synapse parameters in terms of rise- and decay time constants
     # (tau1, tau2 [ms]) and reversal potential (e [mV])
-    synapseParameters = [[dict(tau1=0.2, tau2=1.8, e=0.),
-                          dict(tau1=0.2, tau2=1.8, e=0.)],
-                         [dict(tau1=0.1, tau2=9.0, e=-80.),
-                          dict(tau1=0.1, tau2=9.0, e=-80.)]]
+    synapseParameters = [[dict(tau1=0.4, tau2=2.0, e=0.),
+                          dict(tau1=0.2, tau2=1.0, e=0.)],
+                         [dict(tau1=0.25, tau2=5.0, e=-80.),
+                          dict(tau1=0.25, tau2=5.0, e=-80.)]]
     # synapse max. conductance (function, mean, st.dev., min.):
     weightFunction = np.random.normal
     # weight_<pre><post> values set by parameters file via main simulation scripts
@@ -213,11 +220,23 @@ class KernelParams:
 
     # Parameters for extrinsic (e.g., cortico-cortical connections) synapses
     # and mean interval (ms)
-    extSynapseParameters = dict(
-        syntype='Exp2Syn',
-        weight=0.0002,
-        tau1=0.2,
-        tau2=1.8,
-        e=0.
-    )
-    netstim_interval = 25.
+    extSynapseParameters = [
+        dict(
+            syntype='Exp2Syn',
+            weight=MC_params['th_exc_external'],
+            tau1=0.4,
+            tau2=2.0,
+            e=0.,
+        ),
+        dict(
+            syntype='Exp2Syn',
+            weight=MC_params['th_inh_external'],
+            tau1=0.2,
+            tau2=1.0,
+            e=0.,
+        ),
+    ]
+    netstim_interval = [
+        1000.0 / (800.0 * MC_params['v_0']),
+        1000.0 / (800.0 * MC_params['v_0']),
+    ]
