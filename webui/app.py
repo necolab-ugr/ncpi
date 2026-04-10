@@ -88,7 +88,7 @@ app = Flask(__name__)
 
 # Set secret key for sessions (necessary to show alert messages)
 app.secret_key = '602e6444-80b2-431c-b26c-b6cda2ac9c09'
-
+app.config['TEMPLATES_AUTO_RELOAD'] = True
 # In-memory thread pool
 executor = ThreadPoolExecutor(max_workers=5) 
 
@@ -3175,6 +3175,8 @@ def _load_uploaded_source_in_memory(upload):
 
     if ext == ".csv":
         return pd.read_csv(io.BytesIO(raw))
+    if ext == ".tsv":
+        return pd.read_csv(io.BytesIO(raw), sep="\t")
 
     if ext == ".parquet":
         return pd.read_parquet(io.BytesIO(raw))
@@ -6067,9 +6069,10 @@ def features_parser_inspect():
         "empirical_data_file_selections",
     )
     listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
-    upload = request.files.get("file")
+    uploads = [f for f in request.files.getlist("file") if f and f.filename]
+    _metadata_server_paths_raw = [p.strip() for p in request.form.getlist("metadata_server_path") if p.strip()]
     inspect_path = None
-    cleanup_path = None
+    cleanup_paths = []
     name_candidates = list(listed_file_names)
     file_name = ""
     folder_entries = []
@@ -6167,21 +6170,43 @@ def features_parser_inspect():
                 for folder_profile in folder_profiles
                 for profile in (folder_profile.get("extension_profiles") or [])
             ]
-        elif upload and upload.filename:
-            file_name = secure_filename(upload.filename)
-            if not file_name:
-                return jsonify({"error": "Invalid file name."}), 400
-            if not name_candidates:
-                name_candidates.append(file_name)
-            ext = Path(file_name).suffix.lower()
-            if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
-                return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
+        elif uploads or _metadata_server_paths_raw:
             inspect_root = FEATURES_INSPECTION_DIR
             os.makedirs(inspect_root, exist_ok=True)
-            temp_name = f"{uuid.uuid4()}_{file_name}"
-            inspect_path = os.path.join(inspect_root, temp_name)
-            upload.save(inspect_path)
-            cleanup_path = inspect_path
+            metadata_server_paths = _metadata_server_paths_raw
+            upload_entries = []
+            for upl in uploads:
+                upl_name = secure_filename(upl.filename)
+                if not upl_name:
+                    return jsonify({"error": "Invalid file name."}), 400
+                ext = Path(upl_name).suffix.lower()
+                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                    return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
+                temp_name = f"{uuid.uuid4()}_{upl_name}"
+                temp_path = os.path.join(inspect_root, temp_name)
+                upl.save(temp_path)
+                cleanup_paths.append(temp_path)
+                name_candidates.append(upl_name)
+                upload_entries.append({"path": temp_path, "name": upl_name, "folder_name": upl_name})
+            for srv_path in metadata_server_paths:
+                real_path = os.path.realpath(srv_path)
+                if not os.path.isfile(real_path):
+                    return jsonify({"error": f"Server file not found: {srv_path}"}), 400
+                srv_name = os.path.basename(real_path)
+                ext = Path(srv_name).suffix.lower()
+                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                    return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
+                name_candidates.append(srv_name)
+                upload_entries.append({"path": real_path, "name": srv_name, "folder_name": srv_name})
+            if not upload_entries:
+                return jsonify({"error": "No valid files provided for inspection."}), 400
+            inspect_path = upload_entries[0]["path"]
+            file_name = upload_entries[0]["name"]
+            if len(upload_entries) > 1:
+                folder_entries = upload_entries
+                folder_file_count = len(upload_entries)
+                file_name = f"{len(upload_entries)} files"
+
         else:
             return jsonify({"error": "Provide an existing pipeline file, a simulation folder path, an empirical folder path, or upload a file to inspect."}), 400
 
@@ -6332,6 +6357,15 @@ def features_parser_inspect():
                     field_labels[field_name] = f"{field_name} [folders: {suffix}]"
                 if field_labels:
                     description["virtual_field_labels"] = field_labels
+            
+            # Override summary for the multi-upload metadata case
+            if not folder_summaries and folder_entries:
+                description["summary"] = (
+                    f"{len(folder_entries)} file(s) inspected. "
+                    f"Combined fields detected: {len(combined_candidates)}."
+                )
+                description["source_type"] = "uploaded_files"
+
         else:
             description = _describe_parser_source(inspect_path)
             description["manual_field_details"] = _manual_field_details_for_ui()
@@ -6358,7 +6392,27 @@ def features_parser_inspect():
                     key: sorted(values)
                     for key, values in candidate_field_origins.items()
                 }
+            
+            # Build extension_profiles so the response renders in "Folder and File Inspection"
+            _ext_key = Path(str(file_name)).suffix.lower()
+            _ext_profile = {
+                "extension": _ext_key,
+                "source_type": description.get("source_type", ""),
+                "candidate_fields": list(description.get("candidate_fields") or []),
+                "field_details": [d for d in (description.get("field_details") or []) if isinstance(d, dict)],
+                "summary": description.get("summary", ""),
+                "sample_file": file_name,
+                "file_count": 1,
+                "folder_name": file_name,
+                "folder_path": "",
+                "virtual_field_details": list(description.get("virtual_field_details") or []),
+            }
+            description["extension_profiles"] = [_ext_profile]
+            description["extension_summaries"] = [{"extension": _ext_key, "count": 1}]
+            if not description.get("folder_summaries"):
+                description["folder_summaries"] = [{"folder_name": file_name, "folder_path": "", "file_count": 1}]
 
+            
         description = _attach_file_extracted_virtual_field(description, name_candidates)
         if "dataframe_candidate_fields" not in description:
             description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
@@ -6399,11 +6453,12 @@ def features_parser_inspect():
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
     finally:
-        if cleanup_path and os.path.exists(cleanup_path):
-            try:
-                os.remove(cleanup_path)
-            except OSError:
-                pass
+        for _cpath in cleanup_paths:
+            if _cpath and os.path.exists(_cpath):
+                try:
+                    os.remove(_cpath)
+                except OSError:
+                    pass
 
 
 @app.route("/features/load_precomputed", methods=["POST"])
@@ -10592,6 +10647,28 @@ def start_computation_redirect(computation_type):
     if parser_config_obj is not None:
         data["parser_config_obj"] = parser_config_obj
 
+    # Handle additional metadata files for subject-level cross-referencing
+    if computation_type == "features":
+        _add_meta_uploads = [f for f in request.files.getlist("additional_metadata_file") if f and f.filename]
+        _add_meta_server_paths = [p.strip() for p in request.form.getlist("additional_metadata_server_path") if p.strip()]
+        _add_file_link_field = (request.form.get("additional_file_link_field") or "").strip()
+        if _add_file_link_field and (_add_meta_uploads or _add_meta_server_paths):
+            _additional_metadata_paths = []
+            for _upl in _add_meta_uploads:
+                _upl_name = secure_filename(_upl.filename)
+                _ext_check = Path(_upl_name).suffix.lower()
+                if _ext_check in FEATURES_PARSER_FILE_EXTENSIONS:
+                    _tmp_path = os.path.join(module_upload_dir, f"{job_id}_addmeta_{_upl_name}")
+                    _upl.save(_tmp_path)
+                    _additional_metadata_paths.append({"path": _tmp_path, "name": _upl_name})
+            for _srv in _add_meta_server_paths:
+                _real = os.path.realpath(_srv)
+                if os.path.isfile(_real):
+                    _additional_metadata_paths.append({"path": _real, "name": os.path.basename(_real)})
+            if _additional_metadata_paths:
+                data["additional_metadata_paths"] = _additional_metadata_paths
+                data["additional_file_link_field"] = _add_file_link_field
+
     # Store initial status
     job_status[job_id] = {
         "status": "in_progress",
@@ -10887,3 +10964,6 @@ def download_results(job_id):
         as_attachment=True,
         download_name=f'{computation_type}_results_{job_id}_output.pkl'
     )
+
+if __name__ == '__main__':
+    app.run(debug=True)
