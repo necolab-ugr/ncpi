@@ -124,6 +124,7 @@
             parserAxisChannels: '0',
             parserAxisSamples: '1',
             parserAxisEpochs: '-1',
+            parserAxisIds: '-1',
             parserEnableEpoching: false,
             parserEpochLengthS: '5.0',
             parserEpochStepS: '5.0',
@@ -475,15 +476,15 @@
                 const profiles = Array.isArray(payload?.folder_structure_profiles)
                     ? payload.folder_structure_profiles
                     : [];
-                const nestedPaths = profiles
-                    .filter((profile) => !!profile?.has_nested_subfolders)
+                const selectablePaths = profiles
+                    .filter((profile) => Array.isArray(profile?.data_file_candidates) && profile.data_file_candidates.length > 0)
                     .map((profile) => String(profile?.folder_path || '').trim())
                     .filter((path) => path.length > 0);
-                const payloadSelections = this.normalizeDataFileSelectionMap(payload?.data_file_selection_map, nestedPaths);
+                const payloadSelections = this.normalizeDataFileSelectionMap(payload?.data_file_selection_map, selectablePaths);
                 const previousSelections = mode === 'empirical'
-                    ? this.normalizeDataFileSelectionMap(this.empiricalDataFileSelections, nestedPaths)
-                    : this.normalizeDataFileSelectionMap(this.simulationDataFileSelections, nestedPaths);
-                const nextSelections = nestedPaths.length > 0
+                    ? this.normalizeDataFileSelectionMap(this.empiricalDataFileSelections, selectablePaths)
+                    : this.normalizeDataFileSelectionMap(this.simulationDataFileSelections, selectablePaths);
+                const nextSelections = selectablePaths.length > 0
                     ? (Object.keys(payloadSelections).length > 0 ? payloadSelections : previousSelections)
                     : {};
                 if (mode === 'empirical') {
@@ -506,7 +507,8 @@
             },
             parserFolderDataFileCandidates(folderProfile) {
                 const profile = this.parserFolderStructureByPath(folderProfile?.folder_path);
-                return Array.isArray(profile?.data_file_candidates) ? profile.data_file_candidates : [];
+                if (Array.isArray(profile?.data_file_candidates)) return profile.data_file_candidates;
+                return Array.isArray(folderProfile?.data_file_candidates) ? folderProfile.data_file_candidates : [];
             },
             parserFolderAllSubfolders(folderPathOrProfile) {
                 // Accept either a folder path string or a folderProfile object directly
@@ -801,6 +803,29 @@
             parserCandidateFieldsWithoutFileExtracted() {
                 const fields = Array.isArray(this.parserInfo?.candidate_fields) ? this.parserInfo.candidate_fields : [];
                 return fields.filter((field) => !this.parserIsFileExtractedField(field));
+            },
+            parserChannelNameSourceCandidates() {
+                const base = this.parserCandidateFieldsWithoutFileExtracted()
+                    .map((field) => String(field || '').trim())
+                    .filter((field) => field.length > 0);
+                const additionalFromCandidates = Array.isArray(this.metadataInfo?.candidate_fields)
+                    ? this.metadataInfo.candidate_fields
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0 && !this.parserIsFileExtractedField(field))
+                    : [];
+                const additionalFromDetails = Array.isArray(this.metadataInfo?.field_details)
+                    ? this.metadataInfo.field_details
+                        .map((item) => String(item?.field || '').trim())
+                        .filter((field) => field.length > 0 && !this.parserIsFileExtractedField(field))
+                    : [];
+                const out = [];
+                const seen = new Set();
+                for (const field of [...base, ...additionalFromCandidates, ...additionalFromDetails]) {
+                    if (seen.has(field)) continue;
+                    seen.add(field);
+                    out.push(field);
+                }
+                return out;
             },
             parserFieldOptionStyle(field) {
                 return this.parserIsVirtualField(field)
@@ -1127,6 +1152,7 @@
                 this.parserAxisChannels = '0';
                 this.parserAxisSamples = '1';
                 this.parserAxisEpochs = '-1';
+                this.parserAxisIds = '-1';
                 this.parserEnableEpoching = false;
                 this.parserEpochLengthS = '5.0';
                 this.parserEpochStepS = '5.0';
@@ -1476,7 +1502,7 @@
                     this.parserChNamesLocator = '';
                 }
 
-                const allowedChSources = new Set(this.parserCandidateFieldsWithoutFileExtracted().map((field) => String(field)));
+                const allowedChSources = new Set(this.parserChannelNameSourceCandidates().map((field) => String(field)));
                 const normalizedChSource = String(this.parserChNamesSource || '').trim();
                 if (
                     !normalizedChSource ||
@@ -1888,6 +1914,19 @@
                         `        fs=${fsValue},`,
                         `        ch_names=${chNamesExpr},`,
                     ];
+                    if (this.parserArrayAxesEnabled) {
+                        const axisItems = [
+                            `            'channels': ${Number.parseInt(String(this.parserAxisChannels || '0'), 10)},`,
+                            `            'samples': ${Number.parseInt(String(this.parserAxisSamples || '1'), 10)},`,
+                        ];
+                        const idsAxis = Number.parseInt(String(this.parserAxisIds || '-1'), 10);
+                        const epochsAxis = Number.parseInt(String(this.parserAxisEpochs || '-1'), 10);
+                        if (Number.isFinite(idsAxis) && idsAxis >= 0) axisItems.push(`            'ids': ${idsAxis},`);
+                        if (Number.isFinite(epochsAxis) && epochsAxis >= 0) axisItems.push(`            'epochs': ${epochsAxis},`);
+                        lines.push('        array_axes={');
+                        lines.push(...axisItems);
+                        lines.push('        },');
+                    }
                     const metadataEntries = [];
                     if (recordingTypeValue !== 'None') metadataEntries.push(`            'recording_type': ${recordingTypeValue},`);
                     if (metadataMode === 'simulated') {
@@ -1980,6 +2019,19 @@
                     `        fs=${fsValue},`,
                     `        ch_names=${chNamesExpr},`,
                 ];
+                if (this.parserArrayAxesEnabled) {
+                    const axisItems = [
+                        `            'channels': ${Number.parseInt(String(this.parserAxisChannels || '0'), 10)},`,
+                        `            'samples': ${Number.parseInt(String(this.parserAxisSamples || '1'), 10)},`,
+                    ];
+                    const idsAxis = Number.parseInt(String(this.parserAxisIds || '-1'), 10);
+                    const epochsAxis = Number.parseInt(String(this.parserAxisEpochs || '-1'), 10);
+                    if (Number.isFinite(idsAxis) && idsAxis >= 0) axisItems.push(`            'ids': ${idsAxis},`);
+                    if (Number.isFinite(epochsAxis) && epochsAxis >= 0) axisItems.push(`            'epochs': ${epochsAxis},`);
+                    lines.push('        array_axes={');
+                    lines.push(...axisItems);
+                    lines.push('        },');
+                }
                 const metadataEntries = [];
                 if (recordingTypeValue !== 'None') metadataEntries.push(`            'recording_type': ${recordingTypeValue},`);
                 if (subjectIdValue !== 'None') metadataEntries.push(`            'subject_id': ${subjectIdValue},`);
@@ -2599,14 +2651,14 @@
                                         <div class="text-xs text-gray-500 dark:text-gray-400"><span x-text="folderProfile.file_count || 0"></span> file(s)</div>
                                     </div>
 
-                                    <div x-show="folderProfile.has_nested_subfolders" class="space-y-2 rounded-lg border border-red-200/70 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3">
-                                        <h4 class="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">Nested subfolder structure detected</h4>
-                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90">
+                                    <div x-show="parserFolderDataFileCandidates(folderProfile).length > 0" class="space-y-2 rounded-lg border border-red-200/70 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3">
+                                        <h4 class="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">Data source selection</h4>
+                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="folderProfile.has_nested_subfolders">
                                             Sample subfolder:
                                             <span class="font-mono" x-text="folderProfile.sample_subfolder_name || '-'"></span>
                                         </p>
                                         <label class="text-xs block">
-                                            <span class="block text-red-800/90 dark:text-red-200/90 mb-1">Data file in sample subfolder</span>
+                                            <span class="block text-red-800/90 dark:text-red-200/90 mb-1" x-text="folderProfile.has_nested_subfolders ? 'Data file in sample subfolder' : 'Data extension used as source'"></span>
                                             <select
                                                 class="w-full rounded-lg border-red-200 dark:border-red-900/60 bg-white dark:bg-[#191e33] text-xs"
                                                 :value="parserFolderSelectedDataFile(folderProfile)"
@@ -2617,11 +2669,11 @@
                                                 </template>
                                             </select>
                                         </label>
-                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="folderProfile.selected_data_pattern">
+                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="folderProfile.has_nested_subfolders && folderProfile.selected_data_pattern">
                                             Homologous matching pattern:
                                             <span class="font-mono" x-text="folderProfile.selected_data_pattern"></span>
                                         </p>
-                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="(folderProfile.matched_data_files || []).length > 0">
+                                        <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="folderProfile.has_nested_subfolders && (folderProfile.matched_data_files || []).length > 0">
                                             Matched data files:
                                             <span x-text="effectiveMatchedCount(folderProfile)"></span>
                                         </p>
@@ -2916,7 +2968,7 @@
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
-                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-ch-source-'+field">
+                                                <template x-for="field in parserChannelNameSourceCandidates()" :key="'pipeline-ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
@@ -2954,7 +3006,7 @@
                                             <p class="text-[11px] text-gray-500 dark:text-gray-400">
                                                 Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                             </p>
-                                            <div class="grid grid-cols-3 gap-3">
+                                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
@@ -2962,6 +3014,9 @@
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
@@ -2971,6 +3026,22 @@
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
+                                                    </select>
+                                                </label>
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">IDs axis</span>
+                                                    <select name="parser_axis_ids" x-model="parserAxisIds"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
@@ -2981,6 +3052,9 @@
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
                                                     </select>
                                                 </label>
                                             </div>
@@ -3176,7 +3250,7 @@
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
-                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'ch-source-'+field">
+                                                <template x-for="field in parserChannelNameSourceCandidates()" :key="'ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
@@ -3216,7 +3290,7 @@
                                                 Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                                 Use this when the parser cannot infer the correct orientation automatically.
                                             </p>
-                                            <div class="grid grid-cols-3 gap-3">
+                                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
@@ -3224,6 +3298,9 @@
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
@@ -3233,6 +3310,22 @@
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
+                                                    </select>
+                                                </label>
+                                                <label class="text-sm">
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">IDs axis</span>
+                                                    <select name="parser_axis_ids" x-model="parserAxisIds"
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
+                                                        <option value="0">Dim 0</option>
+                                                        <option value="1">Dim 1</option>
+                                                        <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
@@ -3243,6 +3336,9 @@
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
+                                                        <option value="3">Dim 3</option>
+                                                        <option value="4">Dim 4</option>
+                                                        <option value="5">Dim 5</option>
                                                     </select>
                                                 </label>
                                             </div>

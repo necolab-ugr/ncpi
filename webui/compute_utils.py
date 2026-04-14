@@ -25,6 +25,7 @@ import itertools
 import threading
 import time
 import traceback
+from collections.abc import Mapping as MappingABC
 from tmp_paths import TMP_ROOT, configure_temp_environment, tmp_subdir
 
 configure_temp_environment()
@@ -440,6 +441,158 @@ def _predict_inference_with_compat(inference_obj, features, base_kwargs, exec_kw
     return fn(features, **kwargs)
 
 
+def _is_matlab_v73_error(exc):
+    msg = str(exc or "").lower()
+    return "please use hdf reader for matlab v7.3 files" in msg
+
+
+class _HDF5MatLazyMapping(MappingABC):
+    __lazy_hdf5__ = True
+
+    def __init__(self, file_path, group_path="/"):
+        self.file_path = str(file_path)
+        self.group_path = str(group_path or "/")
+
+    def _keys(self):
+        import h5py
+        with h5py.File(self.file_path, "r") as h5f:
+            grp = h5f[self.group_path]
+            return [str(k) for k in grp.keys() if not str(k).startswith("#")]
+
+    def __iter__(self):
+        return iter(self._keys())
+
+    def __len__(self):
+        return len(self._keys())
+
+    def __getitem__(self, key):
+        key_str = str(key)
+        import h5py
+        with h5py.File(self.file_path, "r") as h5f:
+            grp = h5f[self.group_path]
+            if key_str not in grp:
+                raise KeyError(key_str)
+            node = grp[key_str]
+            return _hdf5_mat_to_python_node(node, h5f, self.file_path)
+
+    def __contains__(self, key):
+        key_str = str(key)
+        import h5py
+        with h5py.File(self.file_path, "r") as h5f:
+            grp = h5f[self.group_path]
+            return key_str in grp
+
+    def keys(self):
+        return self._keys()
+
+    def items(self):
+        for k in self._keys():
+            yield k, self[k]
+
+    def get(self, key, default=None):
+        try:
+            return self[key]
+        except Exception:
+            return default
+
+
+def _hdf5_mat_to_python_value(value, h5file, file_path=None):
+    import h5py
+
+    if isinstance(value, h5py.Reference):
+        if not value:
+            return None
+        return _hdf5_mat_to_python_node(h5file[value], h5file, file_path)
+
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+
+    if isinstance(value, np.ndarray):
+        if value.dtype == object:
+            out = np.empty(value.shape, dtype=object)
+            for idx, item in np.ndenumerate(value):
+                out[idx] = _hdf5_mat_to_python_value(item, h5file, file_path)
+            if out.ndim == 0:
+                try:
+                    return out.item()
+                except Exception:
+                    return out
+            return out
+        if value.ndim == 0:
+            try:
+                return value.item()
+            except Exception:
+                return value
+        return value
+
+    return value
+
+
+def _hdf5_mat_to_python_node(node, h5file, file_path=None):
+    import h5py
+
+    if isinstance(node, h5py.Group):
+        if file_path:
+            return _HDF5MatLazyMapping(file_path, node.name)
+        out = {}
+        for key in node.keys():
+            if str(key).startswith("#"):
+                continue
+            out[str(key)] = _hdf5_mat_to_python_node(node[key], h5file, file_path)
+        return out
+
+    if isinstance(node, h5py.Dataset):
+        return _hdf5_mat_to_python_value(node[()], h5file, file_path)
+
+    return node
+
+
+def _load_mat_with_fallback(source, *, in_memory=False, source_name="mat file"):
+    scipy_exc = None
+    try:
+        import scipy.io as sio
+        try:
+            if in_memory:
+                raw = source if isinstance(source, (bytes, bytearray, memoryview)) else bytes(source or b"")
+                return sio.loadmat(io.BytesIO(raw), squeeze_me=True, struct_as_record=False)
+            return sio.loadmat(source, squeeze_me=True, struct_as_record=False)
+        except Exception as exc:
+            scipy_exc = exc
+            if not _is_matlab_v73_error(exc):
+                raise
+    except Exception as exc:
+        if scipy_exc is None:
+            scipy_exc = exc
+
+    try:
+        import h5py
+    except Exception as exc:
+        if _is_matlab_v73_error(scipy_exc):
+            raise ValueError(
+                f"Failed to parse MATLAB v7.3 file '{source_name}'. Install h5py or provide a pre-v7.3 .mat file. "
+                f"Original error: {scipy_exc}"
+            )
+        raise ValueError(f"Failed to parse MATLAB file '{source_name}': {scipy_exc}") from exc
+
+    try:
+        if in_memory:
+            raw = source if isinstance(source, (bytes, bytearray, memoryview)) else bytes(source or b"")
+            with h5py.File(io.BytesIO(raw), "r") as h5f:
+                return {
+                    str(key): _hdf5_mat_to_python_node(h5f[key], h5f, None)
+                    for key in h5f.keys()
+                    if not str(key).startswith("#")
+                }
+        return _HDF5MatLazyMapping(str(source), "/")
+    except Exception as exc:
+        if scipy_exc is not None:
+            raise ValueError(
+                f"Failed to parse MATLAB file '{source_name}' with scipy and h5py. "
+                f"scipy: {scipy_exc}; h5py: {exc}"
+            )
+        raise
+
+
 def _load_uploaded_source_bytes(name, ext, content):
     safe_name = str(name or "uploaded_file")
     ext = str(ext or os.path.splitext(safe_name)[1]).lower()
@@ -485,11 +638,7 @@ def _load_uploaded_source_bytes(name, ext, content):
         return pd.read_excel(io.BytesIO(raw))
 
     if ext == ".mat":
-        try:
-            import scipy.io as sio
-        except Exception as exc:
-            raise ValueError(f"scipy is required to parse .mat files: {exc}")
-        return sio.loadmat(io.BytesIO(raw), squeeze_me=True, struct_as_record=False)
+        return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
@@ -533,11 +682,7 @@ def _load_uploaded_source_path(path, name=None, ext=None):
         return pd.read_excel(safe_path)
 
     if ext == ".mat":
-        try:
-            import scipy.io as sio
-        except Exception as exc:
-            raise ValueError(f"scipy is required to parse .mat files: {exc}")
-        return sio.loadmat(safe_path, squeeze_me=True, struct_as_record=False)
+        return _load_mat_with_fallback(safe_path, in_memory=False, source_name=safe_name)
 
     if ext == ".set":
         try:
@@ -593,7 +738,7 @@ def _try_resolve_companion_ch_names(ch_locator, upload_items):
             obj = _load_uploaded_source_path(path, name, ext)
         except Exception:
             return None
-        if not isinstance(obj, dict):
+        if not isinstance(obj, MappingABC):
             return None
         key = ch_locator if ch_locator in obj else next(
             (k for k in obj if isinstance(k, str) and not k.startswith("_") and k.lower() == ch_locator.lower()),
@@ -653,6 +798,43 @@ def _try_resolve_companion_ch_names(ch_locator, upload_items):
                     search_root = next_root
 
     return None, set()
+
+
+def _try_resolve_additional_metadata_ch_names(ch_locator, additional_metadata_paths):
+    """Resolve channel names from Additional Files tabular metadata columns.
+
+    Returns list[str] or None.
+    """
+    if not ch_locator or not isinstance(ch_locator, str):
+        return None
+    entries = list(additional_metadata_paths or [])
+    if not entries:
+        return None
+
+    values = []
+    seen = set()
+    for entry in entries:
+        path = entry.get("path")
+        name = entry.get("name")
+        if not path:
+            continue
+        try:
+            obj = _load_uploaded_source_path(path, name, None)
+        except Exception:
+            continue
+        if not isinstance(obj, pd.DataFrame):
+            continue
+        if ch_locator not in obj.columns:
+            continue
+        series = obj[ch_locator].dropna()
+        for raw in series.tolist():
+            token = str(raw).strip()
+            if not token or token in seen:
+                continue
+            seen.add(token)
+            values.append(token)
+
+    return values if values else None
 
 
 def _structure_signature_for_value(value, depth=0, max_depth=2):
@@ -1723,8 +1905,9 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 and isinstance(getattr(parse_cfg.fields, "ch_names", None), str)
                 and parse_cfg.fields.ch_names not in {"__self__", ""}
             ):
+                _ch_locator_name = str(parse_cfg.fields.ch_names)
                 _comp_names, _comp_indices = _try_resolve_companion_ch_names(
-                    parse_cfg.fields.ch_names, empirical_uploads
+                    _ch_locator_name, empirical_uploads
                 )
                 if _comp_names:
                     import dataclasses
@@ -1741,6 +1924,25 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                         job_status, job_id,
                         f"Loaded {len(_comp_names)} channel name(s) from companion file."
                     )
+                else:
+                    _add_meta_paths = list(params.get("additional_metadata_paths") or [])
+                    _meta_names = _try_resolve_additional_metadata_ch_names(
+                        _ch_locator_name,
+                        _add_meta_paths,
+                    )
+                    if _meta_names:
+                        import dataclasses
+                        parse_cfg = dataclasses.replace(
+                            parse_cfg,
+                            fields=dataclasses.replace(parse_cfg.fields, ch_names=_meta_names),
+                        )
+                        parser = EphysDatasetParser(parse_cfg)
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"Loaded {len(_meta_names)} channel name(s) from Additional Files column "
+                            f"'{_ch_locator_name}'."
+                        )
 
             total_uploads = len(empirical_uploads)
             if total_uploads == 0:
@@ -1770,6 +1972,10 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     payload.get("name"),
                     payload.get("ext"),
                 )
+                if job_id in job_status:
+                    # Keep users informed during potentially long parsing stages.
+                    stage_progress = min(8, max(1, int(8 * idx / max(1, total_uploads))))
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), stage_progress)
 
                 current_signature = _build_source_structure_signature(source_obj)
                 folder_key = str(
@@ -1794,7 +2000,36 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                             "Ensure files within each folder share the same structure."
                         )
 
-                parsed = parser.parse(source_obj)
+                parse_running = {"flag": True, "last_log": time.time()}
+                parse_started = time.time()
+
+                def _parse_heartbeat():
+                    while parse_running["flag"]:
+                        time.sleep(10.0)
+                        if not parse_running["flag"]:
+                            break
+                        now = time.time()
+                        elapsed = int(now - parse_started)
+                        if now - parse_running["last_log"] >= 20.0:
+                            _append_job_output(
+                                job_status,
+                                job_id,
+                                f"Still parsing '{name}'... ({elapsed}s elapsed)"
+                            )
+                            parse_running["last_log"] = now
+
+                heartbeat = threading.Thread(target=_parse_heartbeat, daemon=True)
+                heartbeat.start()
+                try:
+                    parsed = parser.parse(source_obj)
+                finally:
+                    parse_running["flag"] = False
+                    heartbeat.join(timeout=0.2)
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Finished parsing '{name}' in {time.time() - parse_started:.1f}s."
+                )
                 if not isinstance(parsed, pd.DataFrame):
                     raise ValueError(f"Parser output for '{name}' is not a dataframe.")
                 if file_id_metadata_fields:
@@ -2134,11 +2369,7 @@ def _read_training_input_any(file_path):
     elif ext in {".npy", ".npz"}:
         loaders.append(("numpy.load", lambda p: np.load(p, allow_pickle=True)))
     elif ext == ".mat":
-        try:
-            import scipy.io as sio
-            loaders.append(("scipy.io.loadmat", lambda p: sio.loadmat(p, squeeze_me=True, struct_as_record=False)))
-        except Exception:
-            pass
+        loaders.append(("mat.load_with_fallback", lambda p: _load_mat_with_fallback(p, in_memory=False, source_name=os.path.basename(str(p)))))
 
     # Generic fallbacks (for unknown extensions or when extension is misleading).
     generic_fallbacks = [
@@ -2151,11 +2382,7 @@ def _read_training_input_any(file_path):
         ("numpy.load", lambda p: np.load(p, allow_pickle=True)),
     ]
     if ext != ".mat":
-        try:
-            import scipy.io as sio
-            generic_fallbacks.append(("scipy.io.loadmat", lambda p: sio.loadmat(p, squeeze_me=True, struct_as_record=False)))
-        except Exception:
-            pass
+        generic_fallbacks.append(("mat.load_with_fallback", lambda p: _load_mat_with_fallback(p, in_memory=False, source_name=os.path.basename(str(p)))))
     loaders.extend(generic_fallbacks)
 
     seen = set()

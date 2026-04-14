@@ -1,8 +1,10 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
+import ast
 import json
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union, Literal, Tuple
+from collections.abc import Mapping as MappingABC
 import numpy as np
 from ncpi import tools
 
@@ -74,6 +76,146 @@ def _require_scipy(context: str = "") -> None:
             msg += f" for {context}"
         msg += " but is not installed."
         raise ImportError(msg)
+
+
+def _require_h5py(context: str = "") -> None:
+    if not tools.ensure_module("h5py"):
+        msg = "h5py is required"
+        if context:
+            msg += f" for {context}"
+        msg += " but is not installed."
+        raise ImportError(msg)
+
+
+def _is_matlab_v73_error(exc: Exception) -> bool:
+    return "please use hdf reader for matlab v7.3 files" in str(exc or "").lower()
+
+
+class _HDF5MatLazyMapping(MappingABC):
+    __lazy_hdf5__ = True
+
+    def __init__(self, file_path: str, group_path: str = "/") -> None:
+        self.file_path = str(file_path)
+        self.group_path = str(group_path or "/")
+
+    def _keys(self) -> list[str]:
+        import h5py  # type: ignore
+        with h5py.File(self.file_path, "r") as h5f:
+            grp = h5f[self.group_path]
+            return [str(k) for k in grp.keys() if not str(k).startswith("#")]
+
+    def __iter__(self):
+        return iter(self._keys())
+
+    def __len__(self) -> int:
+        return len(self._keys())
+
+    def __getitem__(self, key: str) -> Any:
+        key_str = str(key)
+        import h5py  # type: ignore
+        with h5py.File(self.file_path, "r") as h5f:
+            grp = h5f[self.group_path]
+            if key_str not in grp:
+                raise KeyError(key_str)
+            return _hdf5_mat_to_python_node(grp[key_str], h5f, self.file_path)
+
+    def __contains__(self, key: object) -> bool:
+        key_str = str(key)
+        import h5py  # type: ignore
+        with h5py.File(self.file_path, "r") as h5f:
+            grp = h5f[self.group_path]
+            return key_str in grp
+
+    def keys(self):
+        return self._keys()
+
+    def items(self):
+        for k in self._keys():
+            yield k, self[k]
+
+    def get(self, key: str, default: Any = None) -> Any:
+        try:
+            return self[key]
+        except Exception:
+            return default
+
+
+def _hdf5_mat_to_python_value(value: Any, h5file: Any, file_path: Optional[str] = None) -> Any:
+    import h5py  # type: ignore
+
+    if isinstance(value, h5py.Reference):
+        if not value:
+            return None
+        return _hdf5_mat_to_python_node(h5file[value], h5file, file_path)
+
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="ignore")
+
+    if isinstance(value, np.ndarray):
+        if value.dtype == object:
+            out = np.empty(value.shape, dtype=object)
+            for idx, item in np.ndenumerate(value):
+                out[idx] = _hdf5_mat_to_python_value(item, h5file, file_path)
+            if out.ndim == 0:
+                try:
+                    return out.item()
+                except Exception:
+                    return out
+            return out
+        if value.ndim == 0:
+            try:
+                return value.item()
+            except Exception:
+                return value
+        return value
+
+    return value
+
+
+def _hdf5_mat_to_python_node(node: Any, h5file: Any, file_path: Optional[str] = None) -> Any:
+    import h5py  # type: ignore
+
+    if isinstance(node, h5py.Group):
+        if file_path:
+            return _HDF5MatLazyMapping(file_path, node.name)
+        out: Dict[str, Any] = {}
+        for key in node.keys():
+            if str(key).startswith("#"):
+                continue
+            out[str(key)] = _hdf5_mat_to_python_node(node[key], h5file, file_path)
+        return out
+
+    if isinstance(node, h5py.Dataset):
+        return _hdf5_mat_to_python_value(node[()], h5file, file_path)
+
+    return node
+
+
+def _load_mat_with_fallback(path: Path) -> Any:
+    scipy_exc: Optional[Exception] = None
+    try:
+        _require_scipy("MATLAB .mat loading")
+        import scipy.io as sio  # type: ignore
+        try:
+            return sio.loadmat(path, squeeze_me=True, struct_as_record=False)
+        except Exception as exc:
+            scipy_exc = exc
+            if not _is_matlab_v73_error(exc):
+                raise
+    except Exception as exc:
+        if scipy_exc is None:
+            scipy_exc = exc
+
+    _require_h5py("MATLAB v7.3 .mat loading")
+    try:
+        return _HDF5MatLazyMapping(str(path), "/")
+    except Exception as exc:
+        if scipy_exc is not None:
+            raise ValueError(
+                f"Failed to parse MATLAB file '{path}' with scipy and h5py. "
+                f"scipy: {scipy_exc}; h5py: {exc}"
+            )
+        raise
 
 
 # ---- Locators -------------------------------------------------------------
@@ -153,9 +295,9 @@ class CanonicalFields:
     long_time_col: Optional[str] = None
 
     # Optional: explicit axis mapping for multi-dimensional arrays.
-    # Dict mapping "channels", "samples", and optionally "epochs" to axis indices.
+    # Dict mapping "channels", "samples", and optionally "epochs"/"ids" to axis indices.
     # When provided, overrides heuristic axis detection.
-    # Example: {"channels": 0, "samples": 1, "epochs": 2}
+    # Example: {"ids": 0, "channels": 1, "samples": 2, "epochs": 3}
     array_axes: Optional[Mapping[str, int]] = None
 
 
@@ -285,11 +427,8 @@ class EphysDatasetParser:
                     return json.load(f), source_file
 
             if suffix == ".mat":
-                _require_scipy("MATLAB .mat loading")
-                import scipy.io as sio  # type: ignore
-
-                # squeeze_me helps reduce MATLAB scalars/arrays to python scalars/1D arrays
-                return sio.loadmat(path, squeeze_me=True, struct_as_record=False), source_file
+                # Supports both classic MAT files and MATLAB v7.3 (HDF5-backed).
+                return _load_mat_with_fallback(path), source_file
 
             if suffix == ".set":
                 _require_mne("EEGLAB .set loading")
@@ -361,7 +500,7 @@ class EphysDatasetParser:
                 return cur[key]
 
         # dict-like
-        if isinstance(cur, dict) and key in cur:
+        if isinstance(cur, MappingABC) and key in cur:
             return cur[key]
 
         # list/tuple indexing
@@ -373,7 +512,7 @@ class EphysDatasetParser:
             return getattr(cur, key)
 
         # dict-like but key might be present as string for MATLAB objects
-        if isinstance(cur, dict) and isinstance(key, str):
+        if isinstance(cur, MappingABC) and isinstance(key, str):
             # try common variations
             if key in cur:
                 return cur[key]
@@ -404,7 +543,7 @@ class EphysDatasetParser:
                 return self._parse_mne_epochs(obj, source_file)
 
         # dict-like
-        if isinstance(obj, dict):
+        if isinstance(obj, MappingABC):
             return self._parse_dict_like(obj, source_file)
 
         # numpy array
@@ -538,6 +677,9 @@ class EphysDatasetParser:
 
         meta = self._resolve_metadata(d)
 
+        def _subject_ids_for_axis(base_meta: Mapping[str, Any], n_ids: int) -> list[Any]:
+            return self._normalize_subject_id_list(base_meta.get("subject_id", None), n_ids)
+
         # data can be:
         # - 2D: (time, channels) or (channels, time)
         # - 3D: (epochs, channels, time) or (epochs, time, channels)
@@ -644,6 +786,89 @@ class EphysDatasetParser:
                         rows.append(self._row_from_series(meta, ch, e, ep_arr[i, :], fs, data_domain, freqs, spectral_kind, source_file))
             return rows
 
+        if arr.ndim == 4:
+            ax = f.array_axes
+            if not (ax and "channels" in ax and "samples" in ax):
+                raise ValueError(
+                    "4D dict-like arrays require explicit array_axes mapping with at least "
+                    "'channels' and 'samples' (and typically 'ids' and/or 'epochs')."
+                )
+
+            ch_ax = int(ax["channels"])
+            sa_ax = int(ax["samples"])
+            id_ax = int(ax["ids"]) if "ids" in ax else -1
+            ep_ax = int(ax["epochs"]) if "epochs" in ax else -1
+
+            used = [ch_ax, sa_ax] + ([id_ax] if id_ax >= 0 else []) + ([ep_ax] if ep_ax >= 0 else [])
+            if len(set(used)) != len(used):
+                raise ValueError("array_axes contains duplicated axis indices.")
+            if any(idx < 0 or idx >= arr.ndim for idx in used):
+                raise ValueError(f"array_axes indices must be in [0, {arr.ndim - 1}] for shape {arr.shape}.")
+
+            remaining = [i for i in range(arr.ndim) if i not in used]
+            if len(remaining) > 0:
+                raise ValueError(
+                    "4D dict-like arrays must map all dimensions via array_axes "
+                    "(use ids/epochs/channels/samples)."
+                )
+
+            if id_ax >= 0 and ep_ax >= 0:
+                arr4 = arr.transpose(id_ax, ep_ax, ch_ax, sa_ax)
+                n_ids, n_ep, n_ch, _ = arr4.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = dict(meta)
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for e in range(n_ep):
+                        for i, ch in enumerate(labels):
+                            rows.append(
+                                self._row_from_series(
+                                    meta_i, ch, e, arr4[sid, e, i, :], fs, data_domain, freqs, spectral_kind, source_file
+                                )
+                            )
+                return rows
+
+            if id_ax >= 0:
+                arr4 = arr.transpose(id_ax, ch_ax, sa_ax, ep_ax) if ep_ax >= 0 else arr.transpose(id_ax, ch_ax, sa_ax, [i for i in range(arr.ndim) if i not in {id_ax, ch_ax, sa_ax}][0])
+                # Normalize to (ids, channels, samples, epochs_like)
+                if arr4.ndim != 4:
+                    raise ValueError(f"Unexpected 4D transpose result shape: {arr4.shape}")
+                n_ids, n_ch, _, n_extra = arr4.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = dict(meta)
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for e in range(n_extra):
+                        for i, ch in enumerate(labels):
+                            rows.append(
+                                self._row_from_series(
+                                    meta_i, ch, e, arr4[sid, i, :, e], fs, data_domain, freqs, spectral_kind, source_file
+                                )
+                            )
+                return rows
+
+            if ep_ax >= 0:
+                arr4 = arr.transpose(ep_ax, ch_ax, sa_ax, [i for i in range(arr.ndim) if i not in {ep_ax, ch_ax, sa_ax}][0])
+                n_ep, n_ch, _, n_extra = arr4.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                rows = []
+                for e in range(n_ep):
+                    for sid in range(n_extra):
+                        meta_i = dict(meta)
+                        if "subject_id" not in meta_i:
+                            meta_i["subject_id"] = sid
+                        for i, ch in enumerate(labels):
+                            rows.append(
+                                self._row_from_series(
+                                    meta_i, ch, e, arr4[e, i, :, sid], fs, data_domain, freqs, spectral_kind, source_file
+                                )
+                            )
+                return rows
+
         raise ValueError(f"Unsupported data ndim for dict-like source: {arr.ndim}")
 
     # ---- ndarray (.npy in-memory) ----
@@ -665,6 +890,9 @@ class EphysDatasetParser:
             labels = None
 
         meta = self._resolve_metadata(arr)
+
+        def _subject_ids_for_axis(base_meta: Mapping[str, Any], n_ids: int) -> list[Any]:
+            return self._normalize_subject_id_list(base_meta.get("subject_id", None), n_ids)
 
         a = np.asarray(arr)
         if a.ndim == 1:
@@ -707,6 +935,76 @@ class EphysDatasetParser:
                 for i in range(n_ch):
                     rows.append(self._row_from_series(meta, labels2[i], e, a[e, :, i], fs, data_domain, freqs, spectral_kind, source_file))
             return rows
+
+        if a.ndim == 4:
+            ax = f.array_axes
+            if not (ax and "channels" in ax and "samples" in ax):
+                raise ValueError(
+                    "4D ndarray inputs require explicit array_axes mapping with at least "
+                    "'channels' and 'samples' (and typically 'ids' and/or 'epochs')."
+                )
+
+            ch_ax = int(ax["channels"])
+            sa_ax = int(ax["samples"])
+            id_ax = int(ax["ids"]) if "ids" in ax else -1
+            ep_ax = int(ax["epochs"]) if "epochs" in ax else -1
+
+            used = [ch_ax, sa_ax] + ([id_ax] if id_ax >= 0 else []) + ([ep_ax] if ep_ax >= 0 else [])
+            if len(set(used)) != len(used):
+                raise ValueError("array_axes contains duplicated axis indices.")
+            if any(idx < 0 or idx >= a.ndim for idx in used):
+                raise ValueError(f"array_axes indices must be in [0, {a.ndim - 1}] for shape {a.shape}.")
+
+            remaining = [i for i in range(a.ndim) if i not in used]
+            if len(remaining) > 0:
+                raise ValueError(
+                    "4D ndarray inputs must map all dimensions via array_axes "
+                    "(use ids/epochs/channels/samples)."
+                )
+
+            if id_ax >= 0 and ep_ax >= 0:
+                a4 = a.transpose(id_ax, ep_ax, ch_ax, sa_ax)
+                n_ids, n_ep, n_ch, _ = a4.shape
+                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = dict(meta)
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for e in range(n_ep):
+                        for i in range(n_ch):
+                            rows.append(self._row_from_series(meta_i, labels2[i], e, a4[sid, e, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+
+            if id_ax >= 0:
+                extra_ax = [i for i in range(a.ndim) if i not in {id_ax, ch_ax, sa_ax}][0]
+                a4 = a.transpose(id_ax, ch_ax, sa_ax, extra_ax)
+                n_ids, n_ch, _, n_extra = a4.shape
+                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = dict(meta)
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for e in range(n_extra):
+                        for i in range(n_ch):
+                            rows.append(self._row_from_series(meta_i, labels2[i], e, a4[sid, i, :, e], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+
+            if ep_ax >= 0:
+                extra_ax = [i for i in range(a.ndim) if i not in {ep_ax, ch_ax, sa_ax}][0]
+                a4 = a.transpose(ep_ax, ch_ax, sa_ax, extra_ax)
+                n_ep, n_ch, _, n_extra = a4.shape
+                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                rows = []
+                for e in range(n_ep):
+                    for sid in range(n_extra):
+                        meta_i = dict(meta)
+                        if "subject_id" not in meta_i:
+                            meta_i["subject_id"] = sid
+                        for i in range(n_ch):
+                            rows.append(self._row_from_series(meta_i, labels2[i], e, a4[e, i, :, sid], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
 
         raise ValueError(f"Unsupported ndarray ndim: {a.ndim}")
 
@@ -841,6 +1139,171 @@ class EphysDatasetParser:
     # Row construction utilities
     # -------------------------
 
+    def _try_ascii_decode(self, value: Any) -> Optional[str]:
+        nums: list[int] = []
+
+        def _collect(x: Any) -> bool:
+            if isinstance(x, np.ndarray):
+                if x.ndim == 0:
+                    try:
+                        return _collect(x.item())
+                    except Exception:
+                        return False
+                for item in x.tolist():
+                    if not _collect(item):
+                        return False
+                return True
+            if isinstance(x, (list, tuple)):
+                for item in x:
+                    if not _collect(item):
+                        return False
+                return True
+            if isinstance(x, (np.integer, int)):
+                nums.append(int(x))
+                return True
+            if isinstance(x, (np.floating, float)):
+                if not np.isfinite(float(x)):
+                    return False
+                xi = int(float(x))
+                if abs(float(x) - float(xi)) > 1e-9:
+                    return False
+                nums.append(xi)
+                return True
+            return False
+
+        ok = _collect(value)
+        if not ok or not nums:
+            return None
+        printable = [i for i in nums if i != 0]
+        if len(printable) < 3:
+            return None
+        if not all(32 <= i <= 126 for i in printable):
+            return None
+        return "".join(chr(i) for i in printable).strip()
+
+    def _coerce_subject_id_token(self, value: Any) -> Any:
+        """Normalize subject_id payloads from MATLAB/HDF5 into readable values."""
+        if value is None:
+            return None
+        if isinstance(value, bytes):
+            try:
+                return value.decode("utf-8", errors="ignore").strip()
+            except Exception:
+                return str(value)
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("[") and text.endswith("]"):
+                try:
+                    parsed = ast.literal_eval(text)
+                    decoded = self._try_ascii_decode(parsed)
+                    if decoded:
+                        return decoded
+                except Exception:
+                    pass
+            return text
+
+        decoded_direct = self._try_ascii_decode(value)
+        if decoded_direct:
+            return decoded_direct
+
+        try:
+            if np.isscalar(value):
+                if isinstance(value, (np.integer, int)):
+                    return int(value)
+                if isinstance(value, (np.floating, float)):
+                    if float(value).is_integer():
+                        return int(value)
+                    return float(value)
+                return value
+        except Exception:
+            pass
+
+        try:
+            arr = np.asarray(value)
+        except Exception:
+            return str(value)
+
+        if arr.size == 0:
+            return None
+
+        # Character arrays
+        if arr.dtype.kind in {"U", "S"}:
+            flat = [str(x) for x in arr.reshape(-1).tolist()]
+            if all(len(x) == 1 for x in flat):
+                return "".join(flat).strip()
+            if len(flat) == 1:
+                return flat[0].strip()
+            return [x.strip() for x in flat]
+
+        # Numeric arrays that encode ASCII chars
+        try:
+            nums = np.asarray(value, dtype=float).reshape(-1)
+            ints = []
+            ok = True
+            for x in nums.tolist():
+                if not np.isfinite(x):
+                    ok = False
+                    break
+                xi = int(x)
+                if abs(float(x) - float(xi)) > 1e-9:
+                    ok = False
+                    break
+                ints.append(xi)
+            if ok and ints:
+                printable = [i for i in ints if i != 0]
+                if printable and all(32 <= i <= 126 for i in printable):
+                    return "".join(chr(i) for i in printable).strip()
+                if len(ints) == 1:
+                    return ints[0]
+        except Exception:
+            pass
+
+        # Object arrays / nested cells
+        try:
+            obj_arr = np.asarray(value, dtype=object).reshape(-1)
+            flat_tokens = [self._coerce_subject_id_token(item) for item in obj_arr.tolist()]
+            if flat_tokens and all(isinstance(t, str) and len(t) == 1 for t in flat_tokens):
+                return "".join(flat_tokens).strip()
+            if len(flat_tokens) == 1:
+                return flat_tokens[0]
+            return flat_tokens
+        except Exception:
+            return str(value)
+
+    def _normalize_subject_id_list(self, raw: Any, n_ids: int) -> list[Any]:
+        if n_ids <= 0:
+            return []
+        if raw is None:
+            return list(range(n_ids))
+        arr = np.asarray(raw, dtype=object)
+        if arr.ndim == 0:
+            token = self._coerce_subject_id_token(arr.item() if hasattr(arr, "item") else raw)
+            return [token for _ in range(n_ids)]
+        flat = arr.reshape(-1).tolist()
+        norm_flat = [self._coerce_subject_id_token(item) for item in flat]
+        if len(norm_flat) == n_ids:
+            return norm_flat
+        if len(norm_flat) > 0:
+            return [norm_flat[0] for _ in range(n_ids)]
+        return list(range(n_ids))
+
+    def _coerce_subject_id_metadata_value(self, value: Any) -> Any:
+        """Keep multi-id containers as containers; decode element-wise."""
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple, np.ndarray)):
+            try:
+                arr = np.asarray(value, dtype=object)
+            except Exception:
+                return self._coerce_subject_id_token(value)
+            if arr.ndim == 0:
+                try:
+                    return self._coerce_subject_id_token(arr.item())
+                except Exception:
+                    return self._coerce_subject_id_token(value)
+            return [self._coerce_subject_id_token(item) for item in arr.reshape(-1).tolist()]
+        return self._coerce_subject_id_token(value)
+
     def _resolve_metadata(self, obj: Any) -> dict:
         out: dict = {}
         HAS_PANDAS = tools.ensure_module("pandas")
@@ -862,6 +1325,8 @@ class EphysDatasetParser:
                         else:
                             # Non-constant metadata column: keep as list (or raise, your choice)
                             v = v.to_list()
+                if str(k) == "subject_id":
+                    v = self._coerce_subject_id_metadata_value(v)
 
                 out[k] = v
             except Exception:
@@ -877,6 +1342,13 @@ class EphysDatasetParser:
             else:
                 # allow extra metadata without breaking
                 row[k] = v
+        if "subject_id" in row:
+            sid = row["subject_id"]
+            if isinstance(sid, (list, tuple, np.ndarray)):
+                sid_list = self._normalize_subject_id_list(sid, 1)
+                row["subject_id"] = sid_list[0] if sid_list else None
+            else:
+                row["subject_id"] = self._coerce_subject_id_token(sid)
         row["source_file"] = source_file
         return row
 
