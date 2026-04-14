@@ -78,7 +78,7 @@
     {% endif %}
 
     <!-- DataFrame preview (shown when finished and preview data is available) -->
-    <div x-show="status === 'finished' && (previewColumns.length > 0 || previewError)"
+    <div x-show="computationType !== 'simulation' && status === 'finished' && (previewColumns.length > 0 || previewError)"
          class="w-full mt-6 space-y-2">
         <div class="flex items-center justify-between text-xs text-text-light-secondary dark:text-[#929bc9]">
             <span class="font-semibold lowercase tracking-wide">result preview</span>
@@ -280,7 +280,15 @@ document.addEventListener('alpine:init', () => {
                         this.error = null;
                         this.cancelling = false;
                         this.progress = 100; // Finalize display
-                        this.fetchPreview();
+                        if (this.computationType !== 'simulation') {
+                            this.fetchPreview();
+                        } else {
+                            this.previewColumns = [];
+                            this.previewRows = [];
+                            this.previewTotalRows = null;
+                            this.previewTotalCols = null;
+                            this.previewError = null;
+                        }
                         // Polling stops automatically here as it doesn't set a new timeout
 
                     } else if (data.status === 'cancelled') {

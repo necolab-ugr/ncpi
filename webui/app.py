@@ -139,6 +139,44 @@ HAGEN_DEFAULTS = {
     "model": "iaf_psc_exp",
 }
 
+CAVALLARI_DEFAULTS = {
+    "tstop": 6000.0,
+    "dt": 2 ** -4,
+    "local_num_threads": 64,
+    "X": ["E", "I"],
+    "N_X": [4000, 1000],
+    "model": "iaf_bw_2003",
+    "P": 0.2,
+    "extent": 1.0,
+    "exc_exc_recurrent": 0.178,
+    "exc_inh_recurrent": 0.233,
+    "inh_exc_recurrent": -2.01,
+    "inh_inh_recurrent": -2.70,
+    "th_exc_external": 0.234,
+    "th_inh_external": 0.317,
+    "cc_exc_external": 0.187,
+    "cc_inh_external": 0.254,
+    "v_0": 1.5,
+    "A_ext": 0.0,
+    "f_ext": 0.0,
+    "OU_sigma": 0.4,
+    "OU_tau": 16.0,
+    "V_th_X": [-52.0, -52.0],
+    "V_reset_X": [-59.0, -59.0],
+    "t_ref_X": [2.0, 1.0],
+    "g_L_X": [25.0, 20.0],
+    "C_m_X": [500.0, 200.0],
+    "E_ex_X": [0.0, 0.0],
+    "E_in_X": [-80.0, -80.0],
+    "E_L_X": [-70.0, -70.0],
+    "tau_rise_AMPA_X": [0.4, 0.2],
+    "tau_decay_AMPA_X": [2.0, 1.0],
+    "tau_rise_GABA_A_X": [0.25, 0.25],
+    "tau_decay_GABA_A_X": [5.0, 5.0],
+    "tau_m_X": [20.0, 10.0],
+    "I_e_X": [0.0, 0.0],
+}
+
 FOUR_AREA_DEFAULTS = {
     "tstop": 12000.0,
     "dt": 2 ** -4,
@@ -182,6 +220,44 @@ HAGEN_GRID_KEYS = [
     "n_ext",
     "nu_ext",
     "J_ext",
+]
+
+CAVALLARI_GRID_KEYS = [
+    "tstop",
+    "dt",
+    "local_num_threads",
+    "X",
+    "N_X",
+    "model",
+    "P",
+    "extent",
+    "exc_exc_recurrent",
+    "exc_inh_recurrent",
+    "inh_exc_recurrent",
+    "inh_inh_recurrent",
+    "th_exc_external",
+    "th_inh_external",
+    "cc_exc_external",
+    "cc_inh_external",
+    "v_0",
+    "A_ext",
+    "f_ext",
+    "OU_sigma",
+    "OU_tau",
+    "V_th_X",
+    "V_reset_X",
+    "t_ref_X",
+    "g_L_X",
+    "C_m_X",
+    "E_ex_X",
+    "E_in_X",
+    "E_L_X",
+    "tau_rise_AMPA_X",
+    "tau_decay_AMPA_X",
+    "tau_rise_GABA_A_X",
+    "tau_decay_GABA_A_X",
+    "tau_m_X",
+    "I_e_X",
 ]
 
 FOUR_AREA_GRID_KEYS = [
@@ -803,6 +879,16 @@ def _simulation_grid_defaults(model_type):
             "local_num_threads": HAGEN_DEFAULTS["local_num_threads"],
         }
         defaults.update({key: HAGEN_DEFAULTS[key] for key in HAGEN_GRID_KEYS if key in HAGEN_DEFAULTS})
+        return defaults
+    if model_type == "cavallari":
+        defaults = {
+            "tstop": CAVALLARI_DEFAULTS["tstop"],
+            "dt": CAVALLARI_DEFAULTS["dt"],
+            "local_num_threads": CAVALLARI_DEFAULTS["local_num_threads"],
+        }
+        defaults.update(
+            {key: CAVALLARI_DEFAULTS[key] for key in CAVALLARI_GRID_KEYS if key in CAVALLARI_DEFAULTS}
+        )
         return defaults
 
     inter_area_p = FOUR_AREA_DEFAULTS["inter_area_p"]
@@ -4215,6 +4301,146 @@ def _build_hagen_network_params(form):
     ])
 
 
+def _build_cavallari_network_params(form):
+    X = _parse_literal(form, "X", CAVALLARI_DEFAULTS["X"])
+    N_X = _parse_literal(form, "N_X", CAVALLARI_DEFAULTS["N_X"])
+    model = _parse_str(form, "model", CAVALLARI_DEFAULTS["model"])
+    P = _parse_float(form, "P", CAVALLARI_DEFAULTS["P"])
+    extent = _parse_float(form, "extent", CAVALLARI_DEFAULTS["extent"])
+    exc_exc_recurrent = _parse_float(
+        form, "exc_exc_recurrent", CAVALLARI_DEFAULTS["exc_exc_recurrent"]
+    )
+    exc_inh_recurrent = _parse_float(
+        form, "exc_inh_recurrent", CAVALLARI_DEFAULTS["exc_inh_recurrent"]
+    )
+    inh_exc_recurrent = _parse_float(
+        form, "inh_exc_recurrent", CAVALLARI_DEFAULTS["inh_exc_recurrent"]
+    )
+    inh_inh_recurrent = _parse_float(
+        form, "inh_inh_recurrent", CAVALLARI_DEFAULTS["inh_inh_recurrent"]
+    )
+    th_exc_external = _parse_float(
+        form, "th_exc_external", CAVALLARI_DEFAULTS["th_exc_external"]
+    )
+    th_inh_external = _parse_float(
+        form, "th_inh_external", CAVALLARI_DEFAULTS["th_inh_external"]
+    )
+    cc_exc_external = _parse_float(
+        form, "cc_exc_external", CAVALLARI_DEFAULTS["cc_exc_external"]
+    )
+    cc_inh_external = _parse_float(
+        form, "cc_inh_external", CAVALLARI_DEFAULTS["cc_inh_external"]
+    )
+    v_0 = _parse_float(form, "v_0", CAVALLARI_DEFAULTS["v_0"])
+    A_ext = _parse_float(form, "A_ext", CAVALLARI_DEFAULTS["A_ext"])
+    f_ext = _parse_float(form, "f_ext", CAVALLARI_DEFAULTS["f_ext"])
+    OU_sigma = _parse_float(form, "OU_sigma", CAVALLARI_DEFAULTS["OU_sigma"])
+    OU_tau = _parse_float(form, "OU_tau", CAVALLARI_DEFAULTS["OU_tau"])
+    V_th_X = _parse_literal(form, "V_th_X", CAVALLARI_DEFAULTS["V_th_X"])
+    V_reset_X = _parse_literal(form, "V_reset_X", CAVALLARI_DEFAULTS["V_reset_X"])
+    t_ref_X = _parse_literal(form, "t_ref_X", CAVALLARI_DEFAULTS["t_ref_X"])
+    g_L_X = _parse_literal(form, "g_L_X", CAVALLARI_DEFAULTS["g_L_X"])
+    C_m_X = _parse_literal(form, "C_m_X", CAVALLARI_DEFAULTS["C_m_X"])
+    E_ex_X = _parse_literal(form, "E_ex_X", CAVALLARI_DEFAULTS["E_ex_X"])
+    E_in_X = _parse_literal(form, "E_in_X", CAVALLARI_DEFAULTS["E_in_X"])
+    E_L_X = _parse_literal(form, "E_L_X", CAVALLARI_DEFAULTS["E_L_X"])
+    tau_rise_AMPA_X = _parse_literal(
+        form, "tau_rise_AMPA_X", CAVALLARI_DEFAULTS["tau_rise_AMPA_X"]
+    )
+    tau_decay_AMPA_X = _parse_literal(
+        form, "tau_decay_AMPA_X", CAVALLARI_DEFAULTS["tau_decay_AMPA_X"]
+    )
+    tau_rise_GABA_A_X = _parse_literal(
+        form, "tau_rise_GABA_A_X", CAVALLARI_DEFAULTS["tau_rise_GABA_A_X"]
+    )
+    tau_decay_GABA_A_X = _parse_literal(
+        form, "tau_decay_GABA_A_X", CAVALLARI_DEFAULTS["tau_decay_GABA_A_X"]
+    )
+    tau_m_X = _parse_literal(form, "tau_m_X", CAVALLARI_DEFAULTS["tau_m_X"])
+    I_e_X = _parse_literal(form, "I_e_X", CAVALLARI_DEFAULTS["I_e_X"])
+
+    _ensure_length(X, "X", 2)
+    _ensure_length(N_X, "N_X", 2)
+    _ensure_length(V_th_X, "V_th_X", 2)
+    _ensure_length(V_reset_X, "V_reset_X", 2)
+    _ensure_length(t_ref_X, "t_ref_X", 2)
+    _ensure_length(g_L_X, "g_L_X", 2)
+    _ensure_length(C_m_X, "C_m_X", 2)
+    _ensure_length(E_ex_X, "E_ex_X", 2)
+    _ensure_length(E_in_X, "E_in_X", 2)
+    _ensure_length(E_L_X, "E_L_X", 2)
+    _ensure_length(tau_rise_AMPA_X, "tau_rise_AMPA_X", 2)
+    _ensure_length(tau_decay_AMPA_X, "tau_decay_AMPA_X", 2)
+    _ensure_length(tau_rise_GABA_A_X, "tau_rise_GABA_A_X", 2)
+    _ensure_length(tau_decay_GABA_A_X, "tau_decay_GABA_A_X", 2)
+    _ensure_length(tau_m_X, "tau_m_X", 2)
+    _ensure_length(I_e_X, "I_e_X", 2)
+
+    return "\n".join([
+        "# Cavallari et al. (2014) conductance-based recurrent network parameters",
+        "",
+        "Network_params = {",
+        f"    \"N_exc\": {int(N_X[0])},",
+        f"    \"N_inh\": {int(N_X[1])},",
+        f"    \"P\": {P},",
+        f"    \"extent\": {extent},",
+        f"    \"exc_exc_recurrent\": {exc_exc_recurrent},",
+        f"    \"exc_inh_recurrent\": {exc_inh_recurrent},",
+        f"    \"inh_exc_recurrent\": {inh_exc_recurrent},",
+        f"    \"inh_inh_recurrent\": {inh_inh_recurrent},",
+        f"    \"th_exc_external\": {th_exc_external},",
+        f"    \"th_inh_external\": {th_inh_external},",
+        f"    \"cc_exc_external\": {cc_exc_external},",
+        f"    \"cc_inh_external\": {cc_inh_external},",
+        f"    \"v_0\": {v_0},",
+        f"    \"A_ext\": {A_ext},",
+        f"    \"f_ext\": {f_ext},",
+        f"    \"OU_sigma\": {OU_sigma},",
+        f"    \"OU_tau\": {OU_tau},",
+        "}",
+        "",
+        "excitatory_cell_params = {",
+        f"    \"V_th\": {V_th_X[0]},",
+        f"    \"V_reset\": {V_reset_X[0]},",
+        f"    \"t_ref\": {t_ref_X[0]},",
+        f"    \"g_L\": {g_L_X[0]},",
+        f"    \"C_m\": {C_m_X[0]},",
+        f"    \"E_ex\": {E_ex_X[0]},",
+        f"    \"E_in\": {E_in_X[0]},",
+        f"    \"E_L\": {E_L_X[0]},",
+        f"    \"tau_rise_AMPA\": {tau_rise_AMPA_X[0]},",
+        f"    \"tau_decay_AMPA\": {tau_decay_AMPA_X[0]},",
+        f"    \"tau_rise_GABA_A\": {tau_rise_GABA_A_X[0]},",
+        f"    \"tau_decay_GABA_A\": {tau_decay_GABA_A_X[0]},",
+        f"    \"tau_m\": {tau_m_X[0]},",
+        f"    \"I_e\": {I_e_X[0]},",
+        "}",
+        "",
+        "inhibitory_cell_params = {",
+        f"    \"V_th\": {V_th_X[1]},",
+        f"    \"V_reset\": {V_reset_X[1]},",
+        f"    \"t_ref\": {t_ref_X[1]},",
+        f"    \"g_L\": {g_L_X[1]},",
+        f"    \"C_m\": {C_m_X[1]},",
+        f"    \"E_ex\": {E_ex_X[1]},",
+        f"    \"E_in\": {E_in_X[1]},",
+        f"    \"E_L\": {E_L_X[1]},",
+        f"    \"tau_rise_AMPA\": {tau_rise_AMPA_X[1]},",
+        f"    \"tau_decay_AMPA\": {tau_decay_AMPA_X[1]},",
+        f"    \"tau_rise_GABA_A\": {tau_rise_GABA_A_X[1]},",
+        f"    \"tau_decay_GABA_A\": {tau_decay_GABA_A_X[1]},",
+        f"    \"tau_m\": {tau_m_X[1]},",
+        f"    \"I_e\": {I_e_X[1]},",
+        "}",
+        "",
+        "Neuron_params = [excitatory_cell_params, inhibitory_cell_params]",
+        "",
+        f"X = {_format_value(X)}",
+        f"model = {_format_value(model)}",
+        "",
+    ])
+
+
 def _build_four_area_network_params(form):
     areas = _parse_literal(form, "areas", FOUR_AREA_DEFAULTS["areas"])
     _ensure_length(areas, "areas", 4)
@@ -4660,9 +4886,19 @@ def _run_job_with_post_success_cleanup(job_id, module_key, func, *func_args):
 def new_sim():
     return render_template("1.2.0.new_sim.html")
 
-@app.route("/simulation/new_sim/brunel")
-def new_sim_brunel():
-    return render_template("1.2.2.new_sim_brunel.html")
+@app.route("/simulation/new_sim/hagen")
+def new_sim_hagen():
+    return render_template("1.2.2.new_sim_hagen.html")
+
+@app.route("/simulation/new_sim/cavallari")
+def new_sim_cavallari():
+    neuron_model_dir = os.path.join(
+        _repo_root, "examples", "simulation", "Cavallari_model", "neuron_model"
+    )
+    return render_template(
+        "1.2.4.new_sim_cavallari.html",
+        cavallari_neuron_model_dir=neuron_model_dir,
+    )
 
 @app.route("/simulation/new_sim/four_area")
 def new_sim_four_area():
@@ -4688,11 +4924,21 @@ def _simulation_computation(job_id, job_status, params):
                 repo_root, "examples", "simulation", "Hagen_model", "simulation"
             )
             sim_defaults = HAGEN_DEFAULTS
+            cavallari_neuron_model_dir = None
+        elif model_type == "cavallari":
+            example_root = os.path.join(
+                repo_root, "examples", "simulation", "Cavallari_model", "LIF_simulation"
+            )
+            sim_defaults = CAVALLARI_DEFAULTS
+            cavallari_neuron_model_dir = os.path.join(
+                repo_root, "examples", "simulation", "Cavallari_model", "neuron_model"
+            )
         else:
             example_root = os.path.join(
                 repo_root, "examples", "simulation", "four_area_cortical_model", "simulation"
             )
             sim_defaults = FOUR_AREA_DEFAULTS
+            cavallari_neuron_model_dir = None
 
         output_dir = SIMULATION_DATA_DIR
         os.makedirs(output_dir, exist_ok=True)
@@ -4740,6 +4986,8 @@ def _simulation_computation(job_id, job_status, params):
                 raise JobCancelledError("Computation cancelled by user.")
             if model_type == "hagen":
                 network_params_content = _build_hagen_network_params(form)
+            elif model_type == "cavallari":
+                network_params_content = _build_cavallari_network_params(form)
             else:
                 network_params_content = _build_four_area_network_params(form)
             simulation_params_content = _build_simulation_params(form, sim_defaults)
@@ -4769,13 +5017,21 @@ def _simulation_computation(job_id, job_status, params):
             _enforce_simulation_chunk_seconds(os.path.join(python_dir, "simulation.py"), chunk_ms=1000.0)
 
             example_script_path = os.path.join(run_root, "example_model_simulation.py")
-            example_script = "\n".join([
+            example_script_lines = [
                 "import os",
                 "import sys",
                 f"sys.path.insert(0, {repr(repo_root)})",
                 "import ncpi",
                 "",
                 "if __name__ == \"__main__\":",
+            ]
+            if model_type == "cavallari" and cavallari_neuron_model_dir:
+                example_script_lines.extend([
+                    "    # Point the copied Cavallari simulation script to the compiled custom neuron module.",
+                    f"    os.environ['NCPI_CAVALLARI_NEURON_MODEL_DIR'] = {repr(cavallari_neuron_model_dir)}",
+                    "",
+                ])
+            example_script_lines.extend([
                 "    # Create a Simulation object",
                 "    sim = ncpi.Simulation(param_folder='params', python_folder='python', output_folder=%s)"
                 % repr(trial_output_dir),
@@ -4785,6 +5041,7 @@ def _simulation_computation(job_id, job_status, params):
                 "    sim.simulate('simulation.py', 'simulation_params.py')",
                 "",
             ])
+            example_script = "\n".join(example_script_lines)
             with open(example_script_path, "w", encoding="utf-8") as f:
                 f.write(example_script)
 
@@ -4978,11 +5235,15 @@ def _simulation_computation_custom(job_id, job_status, params):
 @app.route("/run_trial_simulation/<model_type>", methods=["POST"])
 def run_trial_simulation(model_type):
     model_type = model_type.lower()
-    if model_type not in {"hagen", "four_area"}:
+    if model_type not in {"hagen", "cavallari", "four_area"}:
         return "Model type is not valid", 400
 
     form = request.form.to_dict()
-    ref_page = "new_sim_brunel" if model_type == "hagen" else "new_sim_four_area"
+    ref_page = {
+        "hagen": "new_sim_hagen",
+        "cavallari": "new_sim_cavallari",
+        "four_area": "new_sim_four_area",
+    }[model_type]
 
     try:
         run_mode, run_forms = _expand_simulation_forms(model_type, form)
@@ -4992,6 +5253,8 @@ def run_trial_simulation(model_type):
 
     if model_type == "hagen":
         sim_defaults = HAGEN_DEFAULTS
+    elif model_type == "cavallari":
+        sim_defaults = CAVALLARI_DEFAULTS
     else:
         sim_defaults = FOUR_AREA_DEFAULTS
 
@@ -5366,13 +5629,33 @@ def field_potential_proxy():
         "vm": os.path.join(default_dir, "vm.pkl"),
         "ampa": os.path.join(default_dir, "ampa.pkl"),
         "gaba": os.path.join(default_dir, "gaba.pkl"),
+        "exc_state_events": os.path.join(default_dir, "exc_state_events.pkl"),
         "nu_ext": os.path.join(default_dir, "nu_ext.pkl"),
     }
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
+    default_sim_names = {
+        "times": "times.pkl" if default_sim["times"] else "",
+        "gids": "gids.pkl" if default_sim["gids"] else "",
+        "vm": "vm.pkl" if default_sim["vm"] else "",
+        "ampa": "ampa.pkl" if default_sim["ampa"] else "",
+        "gaba": "gaba.pkl" if default_sim["gaba"] else "",
+    }
+    # Cavallari simulations store aggregated currents in exc_state_events.pkl.
+    if default_sim.get("exc_state_events"):
+        default_sim["vm"] = True
+        default_sim["ampa"] = True
+        default_sim["gaba"] = True
+        if not os.path.exists(default_paths["vm"]):
+            default_sim_names["vm"] = "exc_state_events.pkl"
+        if not os.path.exists(default_paths["ampa"]):
+            default_sim_names["ampa"] = "exc_state_events.pkl"
+        if not os.path.exists(default_paths["gaba"]):
+            default_sim_names["gaba"] = "exc_state_events.pkl"
     webui_runtime = _detect_webui_runtime_context(request)
     return render_template(
         "2.3.0.field_potential_proxy.html",
         default_sim=default_sim,
+        default_sim_names=default_sim_names,
         default_sim_paths=default_paths,
         webui_runtime=webui_runtime,
     )
@@ -5382,11 +5665,11 @@ def field_potential_proxy():
 def field_potential_proxy_infer_trials():
     file_key = (request.form.get("file_key") or "").strip()
     default_names = {
-        "times_file": "times.pkl",
-        "gids_file": "gids.pkl",
-        "vm_file": "vm.pkl",
-        "ampa_file": "ampa.pkl",
-        "gaba_file": "gaba.pkl",
+        "times_file": ["times.pkl"],
+        "gids_file": ["gids.pkl"],
+        "vm_file": ["vm.pkl", "exc_state_events.pkl"],
+        "ampa_file": ["ampa.pkl", "exc_state_events.pkl"],
+        "gaba_file": ["gaba.pkl", "exc_state_events.pkl"],
     }
     if file_key not in default_names:
         return jsonify({"error": "Invalid simulation file key for trial detection."}), 400
@@ -5417,9 +5700,18 @@ def field_potential_proxy_infer_trials():
             source_path = _validate_existing_pickle_file_path(server_path_raw, "Server simulation file")
             source_kind = "server-path"
         elif use_default:
-            default_path = os.path.join(SIMULATION_DATA_DIR, default_names[file_key])
-            if not os.path.isfile(default_path):
-                return jsonify({"error": f"Default file not found: {default_path}"}), 404
+            default_candidates = default_names[file_key]
+            default_path = next(
+                (
+                    os.path.join(SIMULATION_DATA_DIR, name)
+                    for name in default_candidates
+                    if os.path.isfile(os.path.join(SIMULATION_DATA_DIR, name))
+                ),
+                None,
+            )
+            if not default_path:
+                expected = ", ".join(default_candidates)
+                return jsonify({"error": f"Default file not found. Expected one of: {expected}"}), 404
             source_path = default_path
             source_kind = "default-simulation"
         else:
@@ -7131,6 +7423,10 @@ def _simulation_model_type(sim_data):
         net = net[0] if net else {}
     if isinstance(net, dict) and "areas" in net:
         return "four_area"
+    if isinstance(net, dict) and (
+        net.get("model") == "iaf_bw_2003" or "neuron_params" in net or "network_params" in net
+    ):
+        return "cavallari"
     return "hagen"
 
 
@@ -7381,7 +7677,7 @@ def _compute_trial_cdm_proxy(trial):
     bins = np.arange(0.0, tstop + dt, dt)
     centers = bins[:-1]
 
-    if model == "hagen":
+    if model in {"hagen", "cavallari"}:
         cdm = np.zeros_like(centers, dtype=float)
         for pop_name, pop_times in times.items():
             hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
@@ -7399,9 +7695,40 @@ def _compute_trial_cdm_proxy(trial):
     return centers, cdm
 
 
+def _normalize_field_potential_selection_path(path):
+    normalized_path = os.path.realpath((path or "").strip())
+    if not normalized_path:
+        return ""
+    if os.path.basename(normalized_path).lower() != "sim_data.pkl":
+        return normalized_path
+    proxy_path = os.path.join(os.path.dirname(normalized_path), "proxy.pkl")
+    if os.path.isfile(proxy_path):
+        return os.path.realpath(proxy_path)
+    return normalized_path
+
+
+def _normalize_analysis_selected_key(raw_key):
+    if not isinstance(raw_key, str):
+        return ""
+    key = raw_key.strip()
+    if not key:
+        return ""
+    if not key.startswith("field_potential::"):
+        return key
+    try:
+        _, path = key.split("::", 1)
+    except ValueError:
+        return ""
+    normalized_path = _normalize_field_potential_selection_path(path)
+    if not normalized_path or not os.path.isfile(normalized_path):
+        return ""
+    return f"field_potential::{normalized_path}"
+
+
 def _parse_selected_analysis_file_keys(selected_keys):
     simulation_files = set()
     field_potential_paths = []
+    seen_field_potential_paths = set()
     for raw_key in selected_keys:
         if not isinstance(raw_key, str):
             continue
@@ -7423,7 +7750,10 @@ def _parse_selected_analysis_file_keys(selected_keys):
             except ValueError:
                 continue
             path = (path or "").strip()
-            if path and os.path.isfile(path):
+            if path:
+                path = _normalize_field_potential_selection_path(path)
+            if path and os.path.isfile(path) and path not in seen_field_potential_paths:
+                seen_field_potential_paths.add(path)
                 field_potential_paths.append(path)
     return simulation_files, field_potential_paths
 
@@ -7633,11 +7963,14 @@ def analysis_select_features_file():
 
 @app.route("/analysis/sync_selected_simulation_files", methods=["POST"])
 def analysis_sync_selected_simulation_files():
-    selected_keys = [
-        (key or "").strip()
-        for key in request.form.getlist("selected_keys")
-        if (key or "").strip()
-    ]
+    selected_keys = []
+    seen_selected_keys = set()
+    for raw_key in request.form.getlist("selected_keys"):
+        normalized_key = _normalize_analysis_selected_key(raw_key)
+        if not normalized_key or normalized_key in seen_selected_keys:
+            continue
+        seen_selected_keys.add(normalized_key)
+        selected_keys.append(normalized_key)
 
     detected_entries = _list_detected_analysis_data_files()
     by_key = {entry["key"]: entry for entry in detected_entries}
@@ -9063,9 +9396,21 @@ def analysis_plot_simulation():
         preferred = None
         for path, payload in loaded_candidates:
             name = os.path.basename(path).lower()
-            if "cdm" in name or "dipole" in name:
+            if "proxy" in name:
                 preferred = (path, payload)
                 break
+        if preferred is None:
+            for path, payload in loaded_candidates:
+                name = os.path.basename(path).lower()
+                if "cdm" in name or "dipole" in name:
+                    preferred = (path, payload)
+                    break
+        if preferred is None:
+            for path, payload in loaded_candidates:
+                name = os.path.basename(path).lower()
+                if name != "sim_data.pkl":
+                    preferred = (path, payload)
+                    break
         if preferred is None:
             preferred = loaded_candidates[0]
 
@@ -10902,16 +11247,43 @@ def preview_results(job_id):
             df = pd.read_pickle(path)
         if not isinstance(df, pd.DataFrame):
             return jsonify({"error": "Result is not a DataFrame"}), 400
-        # Drop array-valued columns that can't be serialized
-        array_cols = [c for c in df.columns if df[c].dtype == object and len(df) > 0
-                      and hasattr(df[c].iloc[0], '__len__') and not isinstance(df[c].iloc[0], str)]
-        preview = df.drop(columns=array_cols, errors="ignore").head(20)
+
+        def _format_preview_value(value):
+            if isinstance(value, np.ndarray):
+                arr = np.asarray(value)
+                flat = arr.reshape(-1)
+                shown = ", ".join(str(item) for item in flat[:8])
+                suffix = ", ..." if flat.size > 8 else ""
+                return f"shape={arr.shape}; [{shown}{suffix}]"
+            if isinstance(value, (list, tuple)):
+                arr = np.asarray(value, dtype=object)
+                flat = arr.reshape(-1)
+                shown = ", ".join(str(item) for item in flat[:8])
+                suffix = ", ..." if flat.size > 8 else ""
+                return f"len={len(value)}; [{shown}{suffix}]"
+            if isinstance(value, dict):
+                shown_items = list(value.items())[:6]
+                shown = ", ".join(f"{k}={v}" for k, v in shown_items)
+                suffix = ", ..." if len(value) > 6 else ""
+                return "{" + shown + suffix + "}"
+            if value is None:
+                return ""
+            try:
+                if pd.isna(value):
+                    return ""
+            except Exception:
+                pass
+            return str(value)
+
+        preview = df.head(20).copy()
+        for col in preview.columns:
+            preview[col] = preview[col].map(_format_preview_value)
         return jsonify({
             "columns": list(preview.columns),
-            "rows": preview.astype(str).values.tolist(),
+            "rows": preview.values.tolist(),
             "total_rows": len(df),
             "total_cols": len(df.columns),
-            "dropped_cols": array_cols,
+            "dropped_cols": [],
         })
     except Exception as exc:
         return jsonify({"error": str(exc)}), 500

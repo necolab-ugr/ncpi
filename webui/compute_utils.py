@@ -1354,6 +1354,30 @@ def _load_simulation_dt_ms(file_paths):
     return _coerce_dt_ms(dt_obj), dt_path
 
 
+def _coerce_proxy_series_array(value, label):
+    arr = np.asarray(value, dtype=float)
+    if arr.ndim == 0:
+        arr = np.asarray([[float(arr)]], dtype=float)
+    elif arr.ndim == 1:
+        arr = arr[np.newaxis, :]
+    elif arr.ndim != 2:
+        raise ValueError(f"{label} must be a 1D or 2D numeric array, got shape {arr.shape}.")
+    return arr
+
+
+def _extract_proxy_component_from_payload(payload, component_key):
+    if isinstance(payload, list):
+        return [_extract_proxy_component_from_payload(item, component_key) for item in payload]
+
+    if isinstance(payload, dict):
+        if component_key in payload:
+            return _coerce_proxy_series_array(payload[component_key], component_key)
+        if component_key == "Vm" and "V_m" in payload:
+            return _coerce_proxy_series_array(payload["V_m"], "V_m")
+
+    return _coerce_proxy_series_array(payload, component_key)
+
+
 def _first_numeric_from_column(df, column_name):
     if column_name not in df.columns:
         return None
@@ -3301,6 +3325,38 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             fallback_name = None if ignore_default else default_name
             return _resolve_sim_file(file_paths, key, fallback_name, required=required)
 
+        def _resolve_proxy_file_candidates(key, default_names, required=True):
+            ignore_default = _is_truthy(params.get(f"{key}_ignore_default"))
+            uploaded_path = file_paths.get(key)
+            if uploaded_path and allowed_file(uploaded_path) and os.path.exists(uploaded_path):
+                return uploaded_path
+            if not ignore_default:
+                for default_name in default_names:
+                    if not default_name:
+                        continue
+                    default_path = os.path.join(DEFAULT_SIM_DATA_DIR, default_name)
+                    if os.path.exists(default_path):
+                        return default_path
+            if required:
+                expected = ", ".join(default_names)
+                raise FileNotFoundError(
+                    f"Missing required input '{key}'. Upload a file or place one of [{expected}] in {DEFAULT_SIM_DATA_DIR}."
+                )
+            return None
+
+        def _load_proxy_component(component_key, file_key, default_names, label):
+            source_path = _resolve_proxy_file_candidates(file_key, default_names, required=True)
+            payload = read_file(source_path)
+            component = _extract_proxy_component_from_payload(payload, component_key)
+            source_name = os.path.basename(source_path)
+            if source_name == "exc_state_events.pkl":
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Using {component_key} extracted from {source_name}.",
+                )
+            return component
+
         dt_from_stage, dt_path = _load_simulation_dt_ms(file_paths)
         proxy_sim_step = None
         dt_source = None
@@ -3316,25 +3372,45 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         elif method == 'AMPA':
             _append_job_output(job_status, job_id, "Loading AMPA currents...")
-            ampa_path = _resolve_proxy_file('ampa_file', 'ampa.pkl', required=True)
-            sim_data['AMPA'] = read_file(ampa_path)
+            sim_data['AMPA'] = _load_proxy_component(
+                "AMPA",
+                "ampa_file",
+                ["ampa.pkl", "exc_state_events.pkl"],
+                "AMPA currents",
+            )
 
         elif method == 'GABA':
             _append_job_output(job_status, job_id, "Loading GABA currents...")
-            gaba_path = _resolve_proxy_file('gaba_file', 'gaba.pkl', required=True)
-            sim_data['GABA'] = read_file(gaba_path)
+            sim_data['GABA'] = _load_proxy_component(
+                "GABA",
+                "gaba_file",
+                ["gaba.pkl", "exc_state_events.pkl"],
+                "GABA currents",
+            )
 
         elif method == 'Vm':
             _append_job_output(job_status, job_id, "Loading membrane potentials...")
-            vm_path = _resolve_proxy_file('vm_file', 'vm.pkl', required=True)
-            sim_data['Vm'] = read_file(vm_path)
+            sim_data['Vm'] = _load_proxy_component(
+                "Vm",
+                "vm_file",
+                ["vm.pkl", "exc_state_events.pkl"],
+                "membrane potentials",
+            )
 
         elif method in {'I', 'I_abs', 'LRWS', 'ERWS1', 'ERWS2'}:
             _append_job_output(job_status, job_id, "Loading AMPA and GABA currents...")
-            ampa_path = _resolve_proxy_file('ampa_file', 'ampa.pkl', required=True)
-            gaba_path = _resolve_proxy_file('gaba_file', 'gaba.pkl', required=True)
-            sim_data['AMPA'] = read_file(ampa_path)
-            sim_data['GABA'] = read_file(gaba_path)
+            sim_data['AMPA'] = _load_proxy_component(
+                "AMPA",
+                "ampa_file",
+                ["ampa.pkl", "exc_state_events.pkl"],
+                "AMPA currents",
+            )
+            sim_data['GABA'] = _load_proxy_component(
+                "GABA",
+                "gaba_file",
+                ["gaba.pkl", "exc_state_events.pkl"],
+                "GABA currents",
+            )
 
             if method == 'ERWS2':
                 _append_job_output(job_status, job_id, f"Preparing nu_ext values ({nu_ext_mode} mode)...")

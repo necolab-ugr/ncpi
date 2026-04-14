@@ -36,15 +36,15 @@
 <div class="flex flex-col gap-6 w-full max-w-[800px] mx-auto">
     <div
         class="group relative flex flex-col md:flex-row items-center gap-8 p-8 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary transition-all duration-300 shadow-sm overflow-hidden">
-        <a href="{{url_for('new_sim_brunel')}}" class="flex flex-1 flex-col gap-4">
+        <a href="{{url_for('new_sim_hagen')}}" class="flex flex-1 flex-col gap-4">
             <div class="flex items-center gap-3">
                 <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
                     <span class="material-symbols-outlined text-3xl">hub</span>
                 </div>
-                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Random balanced network (Brunel model)</h3>
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Random balanced network (Hagen's model)</h3>
             </div>
             <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
-                A recurrently connected network model of excitatory and inhibitory populations implemented with LIF neurons.
+                A recurrently connected network model of excitatory and inhibitory populations implemented with LIF neurons and current-based synapses.
             </p>
             <div class="pt-2">
                 <button
@@ -53,28 +53,33 @@
                 </button>
             </div>
         </a>
-        <a href="{{url_for('new_sim_brunel')}}"
+        <a href="{{url_for('new_sim_hagen')}}"
             class="w-48 h-48 relative bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-800">
-
-            <img src="{{url_for('static', filename='images/LIF_model_representations/Brunel_network_model.png')}}" alt="Brunel" class="h-31 w-31 object-contain"/>
-
-            <!-- <div class="absolute inset-0 opacity-20">
-                <svg class="w-full h-full" viewBox="0 0 100 100">
-                    <circle class="text-slate-400" cx="50" cy="50" fill="none" r="40" stroke="currentColor"
-                        stroke-width="0.5"></circle>
-                </svg>
+            <img src="{{url_for('static', filename='images/LIF_model_representations/current_model.png')}}" alt="Hagen" class="h-31 w-31 object-contain"/>
+        </a>
+    </div>
+    <div
+        class="group relative flex flex-col md:flex-row items-center gap-8 p-8 bg-white dark:bg-[#111422] border-2 border-slate-200 dark:border-slate-800 rounded-2xl hover:border-primary transition-all duration-300 shadow-sm overflow-hidden">
+        <a href="{{url_for('new_sim_cavallari')}}" class="flex flex-1 flex-col gap-4">
+            <div class="flex items-center gap-3">
+                <div class="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10 text-primary">
+                    <span class="material-symbols-outlined text-3xl">hub</span>
+                </div>
+                <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Random balanced network (Cavallari's model)</h3>
             </div>
-            <div class="relative flex items-center justify-center gap-4">
-                <div class="flex flex-col items-center gap-2">
-                    <div class="schematic-dot bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]"></div>
-                    <div class="text-[10px] font-bold text-blue-500 uppercase tracking-tighter">Exc</div>
-                </div>
-                <div class="w-12 h-px bg-gradient-to-r from-blue-500 via-slate-300 to-red-500"></div>
-                <div class="flex flex-col items-center gap-2">
-                    <div class="schematic-dot bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"></div>
-                    <div class="text-[10px] font-bold text-red-500 uppercase tracking-tighter">Inh</div>
-                </div>
-            </div> -->
+            <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
+                A recurrently connected network model of excitatory and inhibitory populations implemented with LIF neurons and conductance-based synapses.
+            </p>
+            <div class="pt-2">
+                <button
+                    class="flex items-center justify-center px-8 py-3 bg-primary text-slate-900 font-bold rounded-lg hover:brightness-105 transition-all shadow-sm">
+                    Configure model
+                </button>
+            </div>
+        </a>
+        <a href="{{url_for('new_sim_cavallari')}}"
+            class="w-48 h-48 relative bg-slate-50 dark:bg-slate-800/50 rounded-xl flex items-center justify-center overflow-hidden border border-slate-100 dark:border-slate-800">
+            <img src="{{url_for('static', filename='images/LIF_model_representations/conductance_model.png')}}" alt="Cavallari" class="h-31 w-31 object-contain"/>
         </a>
     </div>
     <div
@@ -87,7 +92,7 @@
                 <h3 class="text-2xl font-bold text-slate-800 dark:text-white">Four-area cortical network model</h3>
             </div>
             <p class="text-slate-500 dark:text-slate-400 text-base leading-relaxed">
-                Four coupled cortical areas, each built from the above LIF local circuit and representing frontal, temporal,
+                Four coupled cortical areas, each built from the local Hagen's model LIF circuit and representing frontal, temporal,
                 parietal, and occipital cortex.
             </p>
             <div class="pt-2">

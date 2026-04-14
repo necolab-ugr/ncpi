@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+{% block title %}New simulation{% endblock %}
+
+{% block head %}
+{{ super() }}
+<script id="tailwind-config">
+    tailwind.config = {
+        darkMode: "class",
+        theme: {
+            extend: {
+                colors: {
+                    "primary": "#FAC638",
+                    "background-light": "#f6f6f8",
+                    "background-dark": "#101322",
+                },
+                fontFamily: {
+                    "display": ["Space Grotesk"]
+                },
+                borderRadius: { "DEFAULT": "0.25rem", "lg": "0.5rem", "xl": "0.75rem", "full": "9999px" },
+            },
+        },
+    }
+</script>
+<style>
+    .param-input[type=number]::-webkit-outer-spin-button,
+    .param-input[type=number]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+    .param-input[type=number] {
+        -moz-appearance: textfield;
+        appearance: textfield;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+<div class="flex flex-col gap-3 text-center mb-6">
+    <p class="text-slate-900 dark:text-white text-4xl font-black leading-tight tracking-[-0.033em]">Configure a Cavallari Model Simulation</p>
+    <p class="text-slate-500 dark:text-[#929bc9] text-lg font-normal leading-normal max-w-3xl mx-auto">
+        Random balanced excitatory and inhibitory LIF network using the Cavallari conductance-based synapse model and custom `iaf_bw_2003` neuron extension.
+    </p>
+</div>
+
+<template id="parameter-section">
+    <section class="parameter-section">
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Simulation parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Simulation time
+                        <i>t</i><sub>stop</sub> (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" step="any" data-param="tstop" />
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Time step
+                        <i>d</i><i>t</i> (ms)</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" step="any" data-param="dt"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Number of threads</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" min="1" step="1" data-param="local_num_threads" />
+                </label>
+            </div>
+        </section>
+
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Network</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Populations <i>X</i></span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Population sizes <i>N</i><sub><i>X</i></sub></span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="N_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Neuron model</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 cursor-not-allowed"
+                        type="text" data-param="model" readonly />
+                    <span class="text-xs text-slate-500 dark:text-slate-400">Fixed by the selected simulation template and cannot be modified.</span>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Connection probability <i>P</i></span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" step="any" data-param="P"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Spatial extent</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="number" step="any" data-param="extent"/>
+                </label>
+            </div>
+        </section>
+
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Conductance-Based Connectivity And Drive</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Recurrent conductance <i>g</i><sub>EE</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="exc_exc_recurrent"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Recurrent conductance <i>g</i><sub>IE</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="exc_inh_recurrent"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Recurrent conductance <i>g</i><sub>EI</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="inh_exc_recurrent"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Recurrent conductance <i>g</i><sub>II</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="inh_inh_recurrent"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Thalamic input to excitatory population</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="th_exc_external"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Thalamic input to inhibitory population</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="th_inh_external"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Cortical input to excitatory population</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="cc_exc_external"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Cortical input to inhibitory population</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="cc_inh_external"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Baseline drive <i>v</i><sub>0</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="v_0"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Oscillatory amplitude <i>A</i><sub>ext</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="A_ext"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Oscillatory frequency <i>f</i><sub>ext</sub> (Hz)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="f_ext"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Ornstein-Uhlenbeck sigma</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="OU_sigma"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Ornstein-Uhlenbeck tau (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="number" step="any" data-param="OU_tau"/>
+                </label>
+            </div>
+        </section>
+
+        <section class="flex flex-col gap-6">
+            <h2
+                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                Neuron Parameters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Threshold potential <i>V</i><sub>th</sub> (mV)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="V_th_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Reset potential <i>V</i><sub>reset</sub> (mV)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="V_reset_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Refractory period <i>t</i><sub>ref</sub> (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="t_ref_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Leak conductance <i>g</i><sub>L</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="g_L_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane capacitance <i>C</i><sub>m</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="C_m_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Excitatory reversal potential <i>E</i><sub>ex</sub> (mV)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="E_ex_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Inhibitory reversal potential <i>E</i><sub>in</sub> (mV)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="E_in_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Leak reversal potential <i>E</i><sub>L</sub> (mV)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="E_L_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">AMPA rise time (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="tau_rise_AMPA_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">AMPA decay time (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="tau_decay_AMPA_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">GABA rise time (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="tau_rise_GABA_A_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">GABA decay time (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="tau_decay_GABA_A_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Membrane time constant <i>&tau;</i><sub>m</sub> (ms)</span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="tau_m_X"/>
+                </label>
+                <label class="flex flex-col gap-2">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Injected current <i>I</i><sub>e</sub></span>
+                    <input class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white" type="text" data-param="I_e_X"/>
+                </label>
+            </div>
+        </section>
+    </section>
+</template>
+
+<form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='cavallari') }}">
+    <section class="flex flex-col gap-4 px-4 pb-2">
+        <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Simulation mode</h2>
+        <div class="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-left dark:border-amber-500/30 dark:bg-amber-500/10">
+            <p class="text-sm font-semibold text-amber-900 dark:text-amber-200">Compile the custom neuron module before running this simulation.</p>
+            <p class="mt-2 text-sm text-amber-900/90 dark:text-amber-100/90">
+                Compile the files in this folder before launching the Cavallari model. More information can be found in the Cavallari model README.
+            </p>
+            <p class="mt-2 break-all font-mono text-xs text-amber-950 dark:text-amber-100">{{ cavallari_neuron_model_dir }}</p>
+        </div>
+        <div class="flex flex-col md:flex-row gap-4">
+            <label class="flex items-center gap-2 text-slate-800 dark:text-white text-sm font-medium">
+                <input type="radio" name="sim_run_mode" value="single" checked class="text-primary focus:ring-primary" />
+                Single trial
+            </label>
+            <label class="flex items-center gap-2 text-slate-800 dark:text-white text-sm font-medium">
+                <input type="radio" name="sim_run_mode" value="grid" class="text-primary focus:ring-primary" />
+                Parameter grid sweep
+            </label>
+        </div>
+    </section>
+
+    <div id="parameter-container">
+    </div>
+
+    <div class="flex justify-between items-center gap-4 p-4 mt-6">
+        <div class="flex justify-start gap-4 p-4 mt-6">
+            <a
+                href="{{url_for('dashboard')}}" class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-transparent text-slate-800 dark:text-white text-base font-bold leading-normal tracking-[0.015em] border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800">
+                <span class="truncate">Back to the dashboard</span>
+            </a>
+
+            <a
+                href="{{url_for('simulation')}}" class="flex items-center gap-2 h-12 px-6 rounded-lg bg-white dark:bg-slate-900 text-slate-800 dark:text-white text-sm font-bold border border-slate-300 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors">
+                <span class="material-symbols-outlined text-lg">arrow_back</span>
+                Back to simulation options
+            </a>
+        </div>
+        <div class="flex flex-wrap items-end gap-3">
+            <label class="flex flex-col gap-1">
+                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">NumPy seed</span>
+                <div class="flex items-center gap-2">
+                    <label for="sim-use-numpy-seed" class="inline-flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
+                        <input
+                            id="sim-use-numpy-seed"
+                            name="sim_use_numpy_seed"
+                            type="checkbox"
+                            value="1"
+                            class="h-4 w-4 rounded border-slate-300 text-primary focus:ring-primary"
+                        />
+                        Fix seed
+                    </label>
+                    <input
+                        id="sim-numpy-seed"
+                        name="sim_numpy_seed"
+                        type="number"
+                        min="0"
+                        step="1"
+                        value="0"
+                        disabled
+                        class="form-input h-12 w-28 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white disabled:bg-slate-100 disabled:text-slate-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-400"
+                    />
+                </div>
+                <span class="text-[11px] text-slate-500 dark:text-slate-400">Enable to use a fixed NumPy seed for reproducible randomization.</span>
+            </label>
+            <label for="sim-repetitions" class="flex flex-col gap-1">
+                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Repetitions</span>
+                <input
+                    id="sim-repetitions"
+                    name="sim_repetitions"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value="1"
+                    class="form-input h-12 w-28 rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                />
+            </label>
+            <button type="submit"
+                class="flex min-w-[84px] max-w-[480px] cursor-pointer items-center justify-center overflow-hidden rounded-lg h-12 px-6 bg-primary text-white text-base font-bold leading-normal tracking-[0.015em]">
+                <span id="run-simulation-button-label" class="truncate">Run trial simulation</span>
+            </button>
+        </div>
+    </div>
+</form>
+
+{% endblock %}
+
+{% block scripts %}
+    {{ super() }}
+    <script src="{{ url_for('static', filename='js/simulation_cavallari.js', v='20260414-1') }}"></script>
+{% endblock %}
