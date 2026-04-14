@@ -14,6 +14,7 @@ import re
 import traceback
 from pathlib import Path
 from collections import deque, defaultdict
+from collections.abc import Mapping as MappingABC
 from itertools import product
 from tmp_paths import configure_temp_environment, tmp_subdir
 
@@ -1919,9 +1920,55 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
             ]
             sample_subfolder_path = os.path.join(root, sample_branch)
         else:
-            _validate_uniform_supported_extension_per_folder(folder_entries, kind_label)
             sample_branch = ""
             sample_subfolder_path = ""
+            ext_groups = defaultdict(list)
+            for item in folder_entries:
+                ext_groups[str(item.get("extension") or "").strip().lower()].append(item)
+
+            ext_candidates = sorted([ext for ext in ext_groups.keys() if ext])
+            data_file_candidates = [
+                {
+                    "value": f"__ext__:{ext}",
+                    "label": f"{ext} ({len(ext_groups.get(ext, []))} file(s))",
+                    "extension": ext,
+                    "file_name": "",
+                }
+                for ext in ext_candidates
+            ]
+
+            requested_selection = (
+                selection_map.get(root)
+                or selection_map.get(folder_name)
+                or ""
+            )
+            requested_selection = _to_posix_relpath(requested_selection) if requested_selection else ""
+            requested_extension = ""
+            if requested_selection.startswith("__ext__:"):
+                requested_extension = requested_selection[len("__ext__:"):].strip().lower()
+            elif requested_selection:
+                requested_extension = Path(requested_selection).suffix.lower() or requested_selection.lower()
+
+            if requested_extension not in ext_groups:
+                requested_extension = ext_candidates[0] if ext_candidates else ""
+
+            selected_data_extension = requested_extension
+            selected_data_file = f"__ext__:{selected_data_extension}" if selected_data_extension else ""
+            selected_data_pattern = f"*{selected_data_extension}" if selected_data_extension else ""
+            selected_entries = list(ext_groups.get(selected_data_extension, [])) if selected_data_extension else list(folder_entries)
+            selected_entries.sort(key=lambda item: str(item.get("path") or ""))
+            selected_sample_entry = selected_entries[0] if selected_entries else (folder_entries[0] if folder_entries else None)
+            matched_data_files = [
+                {
+                    "level1_subfolder": str(item.get("level1_subfolder") or ""),
+                    "relative_path": str(item.get("relative_path") or ""),
+                    "subfolder_relative_path": str(item.get("subfolder_relative_path") or ""),
+                    "name": str(item.get("name") or ""),
+                    "path": str(item.get("path") or ""),
+                    "extension": str(item.get("extension") or ""),
+                }
+                for item in selected_entries
+            ]
 
         folder_summaries.append({
             "folder_path": root,
@@ -2343,13 +2390,16 @@ def _extract_locator_candidates(obj, max_depth=6, max_items=120):
             return
         visited.add(marker)
 
-        if isinstance(value, dict):
-            for key, nested in value.items():
+        if isinstance(value, MappingABC):
+            for key in value.keys():
                 key_str = str(key)
                 if key_str.startswith("__"):
                     continue
                 path = f"{prefix}.{key_str}" if prefix else key_str
                 _append(path)
+                if getattr(value, "__lazy_hdf5__", False):
+                    continue
+                nested = value.get(key)
                 if not _is_terminal(nested):
                     _walk(nested, path, depth + 1)
             return
@@ -2577,11 +2627,22 @@ def _summarize_value_for_ui(value):
 
 def _describe_source_fields_for_ui(source_obj, candidate_fields, source_type):
     details = []
+    lazy_mapping = bool(getattr(source_obj, "__lazy_hdf5__", False))
     for field in candidate_fields or []:
         locator = str(field or "").strip()
         if not locator:
             continue
         origin = "dataframe" if source_type == "dataframe" else "field"
+        if lazy_mapping and "." not in locator and "[" not in locator and locator != "__self__":
+            details.append({
+                "field": locator,
+                "origin": origin,
+                "python_type": "HDF5 key",
+                "dtype": "",
+                "shape": None,
+                "detail": "Lazy-loaded MATLAB v7.3 key (resolved when selected).",
+            })
+            continue
         if source_type == "dataframe" and isinstance(source_obj, pd.DataFrame) and locator in source_obj.columns:
             value = source_obj[locator]
         elif locator == "__self__":
@@ -2771,7 +2832,8 @@ def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Se
             "folder_path": folder_name,
             "extension": extension,
         })
-    _validate_uniform_supported_extension_per_folder(entries, label)
+    # Mixed supported extensions are allowed. The parser flow resolves the
+    # selected data source via per-folder data-file selections.
 
 
 def _build_folder_inspection_profiles(folder_entries, folder_summaries):
@@ -3010,6 +3072,28 @@ def _validate_data_locator_against_dataframe_source(data_locator, source_obj, so
         return
     if locator == "__self__":
         return
+    if getattr(source_obj, "__lazy_hdf5__", False):
+        # Fast-path for large MATLAB v7.3 lazy mappings: validate only root token
+        # to avoid expensive dataset materialization in the request thread.
+        root = re.split(r"[.\[]", locator, maxsplit=1)[0].strip()
+        if not root:
+            raise ValueError("Select a valid field for Data locator.")
+        try:
+            has_root = root in source_obj
+        except Exception:
+            has_root = False
+        if not has_root:
+            available = []
+            try:
+                available = [str(k) for k in list(source_obj.keys())[:12]]
+            except Exception:
+                available = []
+            preview = ", ".join(available) if available else "(unavailable)"
+            raise ValueError(
+                f"Data locator '{locator}' root key '{root}' was not found in {source_label}. "
+                f"Top-level keys: {preview}."
+            )
+        return
     resolved = _resolve_locator_value(source_obj, locator)
     if resolved is None:
         raise ValueError(
@@ -3188,11 +3272,7 @@ def _load_uploaded_source_in_memory(upload):
         return pd.read_excel(io.BytesIO(raw))
 
     if ext == ".mat":
-        try:
-            import scipy.io as sio
-        except Exception as exc:
-            raise ValueError(f"scipy is required to parse .mat files: {exc}")
-        return sio.loadmat(io.BytesIO(raw), squeeze_me=True, struct_as_record=False)
+        return compute_utils._load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
     raise ValueError(f"Unsupported file type for in-memory parsing: {ext}")
 
@@ -3516,7 +3596,7 @@ def _describe_parser_source(path):
     candidate_fields = _extract_locator_candidates(source_obj)
     defaults = _build_defaults(candidate_fields)
 
-    if isinstance(source_obj, dict):
+    if isinstance(source_obj, MappingABC):
         top_keys = [str(k) for k in source_obj.keys() if not str(k).startswith("__")]
         data_guess = defaults.get("data")
         resolved_data = _resolve_locator_value(source_obj, data_guess)
@@ -3639,15 +3719,24 @@ def _build_parse_config_from_form(form):
             axis_samples = int(form.get("parser_axis_samples") or 1)
             axis_epochs_raw = form.get("parser_axis_epochs") or "-1"
             axis_epochs = int(axis_epochs_raw)
+            axis_ids_raw = form.get("parser_axis_ids") or "-1"
+            axis_ids = int(axis_ids_raw)
         except (ValueError, TypeError):
             raise ValueError("Invalid array axis mapping values. Axes must be integers.")
-        all_axes = [axis_channels, axis_samples] + ([axis_epochs] if axis_epochs >= 0 else [])
+        all_axes = [axis_channels, axis_samples]
+        if axis_epochs >= 0:
+            all_axes.append(axis_epochs)
+        if axis_ids >= 0:
+            all_axes.append(axis_ids)
         if len(set(all_axes)) != len(all_axes):
             raise ValueError("Array axis mapping: each dimension can only be assigned to one role.")
         array_axes = {"channels": axis_channels, "samples": axis_samples}
         if axis_epochs >= 0:
             array_axes["epochs"] = axis_epochs
+        if axis_ids >= 0:
+            array_axes["ids"] = axis_ids
             # Data is already pre-epoched: disable parser-level epoching
+        if axis_epochs >= 0:
             epoching_enabled = False
             epoch_length_s = None
             epoch_step_s = None
@@ -6279,16 +6368,20 @@ def features_parser_inspect():
             for folder_profile in folder_profiles:
                 folder_path = str(folder_profile.get("folder_path") or "").strip()
                 context = context_by_path.get(folder_path)
-                if not context or not context.get("has_nested_subfolders"):
+                if not context:
                     continue
-                folder_profile["has_nested_subfolders"] = True
+                folder_profile["has_nested_subfolders"] = bool(context.get("has_nested_subfolders"))
                 folder_profile["sample_subfolder_name"] = str(context.get("sample_subfolder_name") or "")
                 folder_profile["sample_subfolder_path"] = str(context.get("sample_subfolder_path") or "")
                 folder_profile["selected_data_file"] = str(context.get("selected_data_file") or "")
                 folder_profile["selected_data_pattern"] = str(context.get("selected_data_pattern") or "")
+                folder_profile["selected_data_extension"] = str(context.get("selected_data_extension") or "")
+                folder_profile["data_file_candidates"] = list(context.get("data_file_candidates") or [])
                 folder_profile["matched_data_files"] = list(context.get("matched_data_files") or [])
                 folder_profile["all_subfolders"] = list(context.get("all_subfolders") or [])
                 folder_profile["structure_warnings"] = list(context.get("structure_warnings") or [])
+                if not context.get("has_nested_subfolders"):
+                    continue
 
                 sample_entry = context.get("sample_selected_entry")
                 if isinstance(sample_entry, dict) and sample_entry.get("path"):
@@ -6332,7 +6425,7 @@ def features_parser_inspect():
                 "data_file_selection_map": {
                     str(item.get("folder_path") or ""): str(item.get("selected_data_file") or "")
                     for item in folder_structure_profiles
-                    if str(item.get("has_nested_subfolders") or "").lower() not in {"", "false", "0"}
+                    if str(item.get("selected_data_file") or "").strip()
                 },
                 "candidate_field_folders": candidate_field_folders,
                 "candidate_field_origins": candidate_field_origins,
@@ -10120,18 +10213,6 @@ def start_computation_redirect(computation_type):
                         row for row in upload_items
                         if Path(str(row[1] or "")).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
                     ]
-                    _validate_uniform_supported_extension_per_folder(
-                        [
-                            {
-                                "folder_name": row[3],
-                                "folder_path": row[3],
-                                "extension": Path(str(row[1] or "")).suffix.lower(),
-                            }
-                            for row in supported_upload_items
-                        ],
-                        "Simulation outputs",
-                    )
-
                     selected_analysis_name_tokens = _extract_analysis_folder_name_tokens_from_form(request.form)
                     if len(selected_analysis_name_tokens) > 1:
                         raise ValueError("Select only one folder for feature extraction.")
@@ -10314,18 +10395,6 @@ def start_computation_redirect(computation_type):
                         row for row in upload_items
                         if Path(str(row[1] or "")).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
                     ]
-                    _validate_uniform_supported_extension_per_folder(
-                        [
-                            {
-                                "folder_name": row[3],
-                                "folder_path": row[3],
-                                "extension": Path(str(row[1] or "")).suffix.lower(),
-                            }
-                            for row in supported_upload_items
-                        ],
-                        "Empirical",
-                    )
-
                     selected_analysis_name_tokens = _extract_analysis_folder_name_tokens_from_form(request.form)
                     if len(selected_analysis_name_tokens) > 1:
                         raise ValueError("Select only one folder for feature extraction.")
@@ -10647,12 +10716,14 @@ def start_computation_redirect(computation_type):
     if parser_config_obj is not None:
         data["parser_config_obj"] = parser_config_obj
 
-    # Handle additional metadata files for subject-level cross-referencing
+    # Handle additional metadata files for parser enrichments:
+    # - subject-level cross-referencing (when link field is provided)
+    # - channel names resolution from additional tabular columns
     if computation_type == "features":
         _add_meta_uploads = [f for f in request.files.getlist("additional_metadata_file") if f and f.filename]
         _add_meta_server_paths = [p.strip() for p in request.form.getlist("additional_metadata_server_path") if p.strip()]
         _add_file_link_field = (request.form.get("additional_file_link_field") or "").strip()
-        if _add_file_link_field and (_add_meta_uploads or _add_meta_server_paths):
+        if _add_meta_uploads or _add_meta_server_paths:
             _additional_metadata_paths = []
             for _upl in _add_meta_uploads:
                 _upl_name = secure_filename(_upl.filename)
@@ -10667,6 +10738,7 @@ def start_computation_redirect(computation_type):
                     _additional_metadata_paths.append({"path": _real, "name": os.path.basename(_real)})
             if _additional_metadata_paths:
                 data["additional_metadata_paths"] = _additional_metadata_paths
+            if _add_file_link_field:
                 data["additional_file_link_field"] = _add_file_link_field
 
     # Store initial status
@@ -10684,7 +10756,6 @@ def start_computation_redirect(computation_type):
     }
 
     # Submit the long-running task according to the computation type.
-    # For features, defer start slightly so the redirect response is sent first.
     upstream_module_by_type = {
         "field_potential_proxy": "field_potential",
         "field_potential_kernel": "field_potential",
@@ -10693,40 +10764,16 @@ def start_computation_redirect(computation_type):
         "inference": "inference",
     }
     upstream_module = upstream_module_by_type.get(computation_type)
-    if computation_type == "features":
-        app.logger.warning(
-            "[compute %s] enqueue features job after redirect (route elapsed %.1f s)",
-            job_id,
-            time.perf_counter() - route_started,
-        )
-        def _submit_deferred_features_job():
-            status = job_status.get(job_id)
-            if not isinstance(status, dict):
-                return
-            if status.get("cancel_requested") or status.get("status") == "cancelled":
-                _mark_job_cancelled(job_id, "Computation cancelled by user.")
-                return
-            future = executor.submit(
-                _run_job_with_post_success_cleanup,
-                job_id,
-                upstream_module,
-                func,
-                data,
-                module_upload_dir,
-            )
-            job_futures[job_id] = future
-
-        threading.Timer(0.05, _submit_deferred_features_job).start()
-    else:
-        future = executor.submit(
-            _run_job_with_post_success_cleanup,
-            job_id,
-            upstream_module,
-            func,
-            data,
-            module_upload_dir,
-        )
-        job_futures[job_id] = future
+    future = executor.submit(
+        _run_job_with_post_success_cleanup,
+        job_id,
+        upstream_module,
+        func,
+        data,
+        module_upload_dir,
+    )
+    job_futures[job_id] = future
+    app.logger.warning("[compute %s] job submitted to executor", job_id)
 
     # Redirect immediately to the loading page (PRG pattern)
     app.logger.warning(
