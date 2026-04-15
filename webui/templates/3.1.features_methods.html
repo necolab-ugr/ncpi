@@ -37,6 +37,11 @@
         return {
             activeTab: initialActiveTab,
             entryChoice: initialEntryChoice,
+            computeFlowSelectorOpen: false,
+            computeFlowConfigOpen: false,
+            computeFlowChoice: '',
+            pipelineStateSnapshot: null,
+            newDataStateSnapshot: null,
             uploads: {},
             pipelineFiles: window.__featuresPipelineFiles || [],
             runtime,
@@ -177,6 +182,12 @@
                     value: 'hctsa'
                 }
             ],
+            init() {
+                if (this.entryChoice === 'compute' && this.activeTab === 'load-data') {
+                    this.computeFlowSelectorOpen = true;
+                    this.computeFlowConfigOpen = false;
+                }
+            },
             isUploaded(id) {
                 return this.uploads[id] !== undefined;
             },
@@ -185,6 +196,211 @@
             },
             isServerRuntime() {
                 return !!this.runtime?.is_server_runtime;
+            },
+            normalizeComputeFlowChoice(choice) {
+                const token = String(choice || '').trim().toLowerCase();
+                if (token === 'pipeline') return 'pipeline';
+                if (token === 'new-data' || token === 'new_data' || token === 'newdata') return 'new-data';
+                return '';
+            },
+            computeFlowStateKeys() {
+                return [
+                    'uploads',
+                    'selectedPipelinePath',
+                    'dataSourceKind',
+                    'empiricalSourceMode',
+                    'simulationSourceMode',
+                    'empiricalFolderPath',
+                    'empiricalDataFileSelections',
+                    'empiricalSubfolderSelections',
+                    'empiricalFileCount',
+                    'empiricalSampleName',
+                    'empiricalUploadSummary',
+                    'empiricalListedFileNames',
+                    'simulationFolderPath',
+                    'simulationFolderPaths',
+                    'simulationDataFileSelections',
+                    'simulationFileCount',
+                    'simulationSampleName',
+                    'simulationInspectedSamples',
+                    'simulationListedFileNames',
+                    'simulationFolderExtensionError',
+                    'simulationLocalFiles',
+                    'appendSimulationSelection',
+                    'additionalFileSourceMode',
+                    'additionalLocalFiles',
+                    'additionalServerFilePaths',
+                    'metadataLoading',
+                    'metadataError',
+                    'metadataInfo',
+                    'additionalFileLinkField',
+                    'parserInfo',
+                    '_baseParserInfo',
+                    'parserLoading',
+                    'parserError',
+                    'parserAnalysisFolderPaths',
+                    'parserAnalysisFolderNames',
+                    'parserDataLocator',
+                    'parserFsManual',
+                    'parserFsSource',
+                    'parserSensorNames',
+                    'parserChNamesSource',
+                    'parserChNamesAutocompleteAxis',
+                    'parserRecordingType',
+                    'parserRecordingTypeLocator',
+                    'parserRecordingTypeSource',
+                    'parserMetadataMode',
+                    'parserMetadataSubjectIdSource',
+                    'parserMetadataSubjectId',
+                    'parserMetadataGroupSource',
+                    'parserMetadataGroup',
+                    'parserMetadataSpeciesSource',
+                    'parserMetadataSpecies',
+                    'parserMetadataConditionSource',
+                    'parserMetadataCondition',
+                    'parserSubjectIdLocator',
+                    'parserGroupLocator',
+                    'parserSpeciesLocator',
+                    'parserConditionLocator',
+                    'parserFsLocator',
+                    'parserChNamesLocator',
+                    'parserTableLayout',
+                    'parserLongTimeCol',
+                    'parserLongChannelCol',
+                    'parserLongValueCol',
+                    'parserArrayAxesEnabled',
+                    'parserAxisChannels',
+                    'parserAxisSamples',
+                    'parserAxisEpochs',
+                    'parserAxisIds',
+                    'parserEnableEpoching',
+                    'parserEpochLengthS',
+                    'parserEpochStepS',
+                    'parserZscore',
+                    'parserEnableAggregate',
+                    'parserAggregateOverSelected',
+                    'parserAggregateMethod',
+                    'parserAggregateLabels',
+                    'submitError',
+                ];
+            },
+            cloneFlowStateValue(value) {
+                if (value instanceof File) return value;
+                if (Array.isArray(value)) {
+                    return value.map((item) => this.cloneFlowStateValue(item));
+                }
+                if (value && typeof value === 'object') {
+                    if (typeof structuredClone === 'function') {
+                        try {
+                            return structuredClone(value);
+                        } catch (_err) {
+                            // fall through to JSON clone
+                        }
+                    }
+                    try {
+                        return JSON.parse(JSON.stringify(value));
+                    } catch (_err) {
+                        return value;
+                    }
+                }
+                return value;
+            },
+            buildComputeFlowSnapshot() {
+                const snapshot = {};
+                for (const key of this.computeFlowStateKeys()) {
+                    snapshot[key] = this.cloneFlowStateValue(this[key]);
+                }
+                return snapshot;
+            },
+            applyComputeFlowSnapshot(snapshot) {
+                if (!snapshot || typeof snapshot !== 'object') return;
+                for (const key of this.computeFlowStateKeys()) {
+                    if (Object.prototype.hasOwnProperty.call(snapshot, key)) {
+                        this[key] = this.cloneFlowStateValue(snapshot[key]);
+                    }
+                }
+                this.persistSimulationLocalFiles(this.simulationLocalFiles || []);
+            },
+            saveComputeFlowSnapshot(choice) {
+                const normalized = this.normalizeComputeFlowChoice(choice);
+                if (!normalized) return;
+                const snapshot = this.buildComputeFlowSnapshot();
+                if (normalized === 'pipeline') {
+                    this.pipelineStateSnapshot = snapshot;
+                } else {
+                    this.newDataStateSnapshot = snapshot;
+                }
+            },
+            restoreComputeFlowSnapshot(choice) {
+                const normalized = this.normalizeComputeFlowChoice(choice);
+                if (!normalized) return false;
+                const snapshot = normalized === 'pipeline'
+                    ? this.pipelineStateSnapshot
+                    : this.newDataStateSnapshot;
+                if (!snapshot) return false;
+                this.applyComputeFlowSnapshot(snapshot);
+                return true;
+            },
+            openLoadDataStep() {
+                this.activeTab = 'load-data';
+                const normalized = this.normalizeComputeFlowChoice(this.computeFlowChoice);
+                if (!normalized) {
+                    this.computeFlowSelectorOpen = true;
+                    this.computeFlowConfigOpen = false;
+                    return;
+                }
+                this.restoreComputeFlowSnapshot(normalized);
+                this.computeFlowSelectorOpen = false;
+                this.computeFlowConfigOpen = true;
+            },
+            openComputeFlowSelector() {
+                const normalized = this.normalizeComputeFlowChoice(this.computeFlowChoice);
+                if (this.computeFlowConfigOpen && normalized) {
+                    this.saveComputeFlowSnapshot(normalized);
+                }
+                this.activeTab = 'load-data';
+                this.computeFlowConfigOpen = false;
+                this.computeFlowSelectorOpen = true;
+            },
+            chooseComputeFlow(choice) {
+                const target = this.normalizeComputeFlowChoice(choice);
+                if (!target) return;
+                const current = this.normalizeComputeFlowChoice(this.computeFlowChoice);
+                if (current && current !== target) {
+                    this.saveComputeFlowSnapshot(current);
+                }
+                this.computeFlowChoice = target;
+                this.activeTab = 'load-data';
+                if (!this.restoreComputeFlowSnapshot(target)) {
+                    if (target === 'pipeline') {
+                        this.additionalLocalFiles = [];
+                        this.additionalServerFilePaths = [];
+                        this.metadataInfo = null;
+                        this.metadataError = '';
+                        this.setNewDataMode('pipeline');
+                    } else {
+                        this.setNewDataMode('new-simulation');
+                    }
+                }
+                this.computeFlowSelectorOpen = false;
+                this.computeFlowConfigOpen = true;
+            },
+            backToComputeFlowSelector() {
+                this.openComputeFlowSelector();
+            },
+            continueFromComputeFlowConfig() {
+                const normalized = this.normalizeComputeFlowChoice(this.computeFlowChoice);
+                if (normalized) {
+                    this.saveComputeFlowSnapshot(normalized);
+                }
+                this.computeFlowConfigOpen = false;
+                this.computeFlowSelectorOpen = false;
+                this.activeTab = 'select-method';
+            },
+            currentComputeFlowTitle() {
+                return this.computeFlowChoice === 'pipeline'
+                    ? 'Continue simulation pipeline'
+                    : 'New data';
             },
             clearEmpiricalUploadInput() {
                 const input = document.getElementById('empirical-files');
@@ -254,6 +470,7 @@
                 this.submitError = '';
                 this.parserError = '';
                 this.simulationFolderExtensionError = '';
+                this.computeFlowChoice = 'new-data';
                 this.dataSourceKind = 'new-simulation';
                 this.selectedPipelinePath = '';
                 this.simulationSourceMode = 'upload';
@@ -615,6 +832,7 @@
             async onAdditionalFileInputChange(event) {
                 const files = Array.from(event?.target?.files || []);
                 if (!files.length) return;
+                this.computeFlowChoice = 'new-data';
                 
                 const existing = this.additionalLocalFiles.map(f => f.name);
                 const toAdd = files.filter(f => !existing.includes(f.name));
@@ -648,6 +866,7 @@
                 this.additionalFileDropActive = false;
                 const files = Array.from(event?.dataTransfer?.files || []);
                 if (!files.length) return;
+                this.computeFlowChoice = 'new-data';
                 const existing = this.additionalLocalFiles.map(f => f.name);
                 const toAdd = files.filter(f => !existing.includes(f.name));
                 this.additionalLocalFiles = [...this.additionalLocalFiles, ...toAdd];
@@ -1176,6 +1395,7 @@
                 this.submitError = '';
                 this.empiricalSourceMode = this.defaultEmpiricalSourceMode;
                 this.simulationSourceMode = this.defaultSimulationSourceMode;
+                this.computeFlowChoice = 'pipeline';
                 this.empiricalFolderPath = '';
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
@@ -1210,6 +1430,7 @@
                 this.submitError = '';
                 this.empiricalSourceMode = this.defaultEmpiricalSourceMode;
                 this.simulationSourceMode = this.defaultSimulationSourceMode;
+                this.computeFlowChoice = 'new-data';
                 this.empiricalFolderPath = '';
                 this.simulationFolderPath = '';
                 this.simulationFolderPaths = [];
@@ -1268,6 +1489,7 @@
                 this.submitError = '';
                 this.parserError = '';
                 this.simulationFolderExtensionError = '';
+                this.computeFlowChoice = 'new-data';
                 if (!folderPaths.length) {
                     this.parserError = 'Provide a valid simulation outputs folder path.';
                     this.simulationFileCount = 0;
@@ -1651,6 +1873,7 @@
                         this.parserInfo = this.mergeParserInfos(this._baseParserInfo, payload);
                     } else {
                         this.parserInfo = payload;
+                        this.computeFlowChoice = 'new-data';
                         this.dataSourceKind = 'new-simulation';
                     }
                 } catch (error) {
@@ -2076,13 +2299,19 @@
                 this.entryChoice = choice;
                 if (choice === 'compute') {
                     this.activeTab = 'load-data';
+                    this.computeFlowConfigOpen = false;
+                    this.computeFlowSelectorOpen = true;
                     return;
                 }
                 if (choice === 'load') {
                     this.activeTab = 'load-precomputed';
+                    this.computeFlowConfigOpen = false;
+                    this.computeFlowSelectorOpen = false;
                     return;
                 }
                 this.activeTab = 'entry';
+                this.computeFlowConfigOpen = false;
+                this.computeFlowSelectorOpen = false;
             },
         };
     }
@@ -2103,7 +2332,7 @@
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Load features
                 </button>
-                <button x-show="entryChoice === 'compute'" x-cloak @click="activeTab = 'load-data'"
+                <button x-show="entryChoice === 'compute'" x-cloak @click="openLoadDataStep()"
                     :class="{ 'border-primary text-primary': activeTab === 'load-data', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'load-data' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Load data
@@ -2325,8 +2554,78 @@
 
         <form x-show="entryChoice === 'compute'" x-cloak action="{{ url_for('start_computation_redirect', computation_type='features')}}" method="POST" enctype="multipart/form-data" @submit.prevent="submitComputeFeatures($event)">
             <div class="pt-8">
-                <div x-show="activeTab === 'load-data'" x-cloak>
-                    <div class="mb-6">
+                <div x-show="activeTab === 'load-data' && !computeFlowSelectorOpen && !computeFlowConfigOpen" x-cloak
+                    class="rounded-xl border border-gray-200 dark:border-[#323b67] bg-white dark:bg-[#111422] p-6">
+                    <h2 class="text-lg font-bold text-[#34495E] dark:text-white">Compute source configuration</h2>
+                    <p class="mt-2 text-sm text-gray-600 dark:text-gray-300">
+                        Open the source selector to configure either the simulation pipeline continuation or a new dataset.
+                    </p>
+                    <div class="mt-4 flex flex-wrap gap-3">
+                        <button type="button" @click="openComputeFlowSelector()"
+                            class="h-10 px-4 rounded-lg border border-primary text-primary text-sm font-semibold hover:bg-primary/10">
+                            Choose source
+                        </button>
+                        <button type="button" x-show="computeFlowChoice" x-cloak @click="openLoadDataStep()"
+                            class="h-10 px-4 rounded-lg border border-gray-300 dark:border-[#323b67] text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                            Reopen <span class="ml-1" x-text="currentComputeFlowTitle()"></span> configuration
+                        </button>
+                    </div>
+                </div>
+
+                <div x-show="activeTab === 'load-data' && computeFlowSelectorOpen" x-cloak
+                    class="fixed inset-0 z-40 flex items-center justify-center bg-black/55 p-4"
+                    @keydown.escape.window="chooseEntry('entry')">
+                    <div class="w-full max-w-3xl rounded-2xl border border-gray-200 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-2xl">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
+                            <h2 class="text-lg font-bold text-[#34495E] dark:text-white">Choose data source</h2>
+                            <button type="button" @click="chooseEntry('entry')" class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">Close</button>
+                        </div>
+                        <div class="p-6">
+                            <p class="text-sm text-gray-600 dark:text-gray-300 mb-4">
+                                Select which source you want to configure for feature extraction.
+                            </p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <button type="button" @click="chooseComputeFlow('pipeline')"
+                                    class="text-left rounded-xl border border-gray-200 dark:border-[#323b67] p-5 hover:border-primary hover:bg-primary/5 transition-colors">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="material-symbols-outlined text-primary">history</span>
+                                        <span class="font-bold text-[#34495E] dark:text-white">Continue simulation pipeline</span>
+                                    </div>
+                                    <p class="text-xs text-gray-600 dark:text-gray-300">
+                                        Reuse detected simulation outputs and continue with parser setup.
+                                    </p>
+                                </button>
+                                <button type="button" @click="chooseComputeFlow('new-data')"
+                                    class="text-left rounded-xl border border-gray-200 dark:border-[#323b67] p-5 hover:border-primary hover:bg-primary/5 transition-colors">
+                                    <div class="flex items-center gap-2 mb-2">
+                                        <span class="material-symbols-outlined text-primary">add_circle</span>
+                                        <span class="font-bold text-[#34495E] dark:text-white">New data</span>
+                                    </div>
+                                    <p class="text-xs text-gray-600 dark:text-gray-300">
+                                        Upload or select a folder and enrich it with additional metadata files.
+                                    </p>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div x-show="activeTab === 'load-data' && computeFlowConfigOpen" x-cloak
+                    class="fixed inset-0 z-40 flex items-start justify-center bg-black/55 p-4 sm:p-6 overflow-y-auto"
+                    @keydown.escape.window="backToComputeFlowSelector()">
+                    <div class="w-full max-w-6xl rounded-2xl border border-gray-200 dark:border-[#323b67] bg-white dark:bg-[#111422] shadow-2xl">
+                        <div class="px-6 py-4 border-b border-gray-200 dark:border-[#323b67] flex items-center justify-between">
+                            <div>
+                                <h2 class="text-lg font-bold text-[#34495E] dark:text-white" x-text="currentComputeFlowTitle() + ' configuration'"></h2>
+                                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Configure source files, parser fields, and metadata mapping.</p>
+                            </div>
+                            <button type="button" @click="backToComputeFlowSelector()"
+                                class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                                Back to source selection
+                            </button>
+                        </div>
+                        <div class="p-4 sm:p-6 space-y-6">
+                    <div class="mb-6" x-show="computeFlowChoice === 'new-data'" x-cloak>
                         <h2 class="text-xl font-bold text-[#34495E] dark:text-white">What data do you want to work with?</h2>
                         <div class="mt-4 rounded-xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/70 dark:bg-sky-950/20 p-4">
                             <p class="text-sm font-bold text-sky-900 dark:text-sky-200">Zenodo datasets for loading data</p>
@@ -2375,8 +2674,14 @@
                     <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
                 
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div x-show="computeFlowChoice === 'pipeline'" x-cloak class="relative lg:col-span-2 flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                        <div x-show="parserLoading" x-cloak class="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-white/75 dark:bg-[#111422]/80 backdrop-blur-[1px]">
+                            <div class="flex items-center gap-3 px-4 py-2 rounded-lg border border-gray-200 dark:border-[#323b67] bg-white/95 dark:bg-[#191e33] shadow-sm">
+                                <span class="h-5 w-5 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></span>
+                                <span class="text-sm font-semibold text-[#34495E] dark:text-white">Loading dataset...</span>
+                            </div>
+                        </div>
                         <div class="flex items-center gap-2 mb-4">
                             <span class="material-symbols-outlined text-primary">history</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Continue simulation pipeline</h3>
@@ -2403,10 +2708,16 @@
                         </div>
                     </div>
 
-                    <div class="flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                    <div x-show="computeFlowChoice === 'new-data'" x-cloak class="relative flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                        <div x-show="parserLoading" x-cloak class="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-white/75 dark:bg-[#111422]/80 backdrop-blur-[1px]">
+                            <div class="flex items-center gap-3 px-4 py-2 rounded-lg border border-gray-200 dark:border-[#323b67] bg-white/95 dark:bg-[#191e33] shadow-sm">
+                                <span class="h-5 w-5 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></span>
+                                <span class="text-sm font-semibold text-[#34495E] dark:text-white">Loading dataset...</span>
+                            </div>
+                        </div>
                         <div class="flex items-center gap-2 mb-4">
                             <span class="material-symbols-outlined text-primary">add_circle</span>
-                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">New data</h3>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Data folder for feature extraction</h3>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
                             Inspect a data folder for feature extraction from local upload or server storage.
@@ -2512,13 +2823,19 @@
                         </div>
                     </div>
 
-                    <div class="md:col-span-2 flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-3">
+                    <div x-show="computeFlowChoice === 'new-data'" x-cloak class="relative flex flex-col bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-3">
+                        <div x-show="metadataLoading" x-cloak class="absolute inset-0 z-20 flex items-center justify-center rounded-xl bg-white/75 dark:bg-[#111422]/80 backdrop-blur-[1px]">
+                            <div class="flex items-center gap-3 px-4 py-2 rounded-lg border border-gray-200 dark:border-[#323b67] bg-white/95 dark:bg-[#191e33] shadow-sm">
+                                <span class="h-5 w-5 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></span>
+                                <span class="text-sm font-semibold text-[#34495E] dark:text-white">Loading metadata...</span>
+                            </div>
+                        </div>
                         <div class="mt-1 flex items-center gap-2 mb-4">
                             <span class="material-symbols-outlined text-primary">attach_file</span>
-                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Additional files</h3>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Additional metadata files</h3>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                            Attach individual files from local upload or server storage.
+                            Add metadata files (e.g., subject/group/channel annotations) that complement the dataset loaded in New data and can be used for field mapping during feature extraction.
                         </p>
 
                         <div
@@ -2587,7 +2904,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div x-show="metadataLoading" x-cloak class="mt-3 text-xs text-blue-600 dark:text-blue-400">Inspecting file(s)...</div>
+                        <div x-show="metadataLoading" x-cloak class="mt-3 text-xs text-blue-600 dark:text-blue-400">Loading metadata...</div>
                         <div x-show="metadataError" x-cloak class="mt-3 text-xs text-red-600 dark:text-red-400" x-text="metadataError"></div>
                     </div>
                 </div>
@@ -2910,7 +3227,10 @@
                             <span class="material-symbols-outlined text-primary">tune</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Configure EphysDatasetParser</h3>
                         </div>
-                        <div x-show="parserLoading" class="text-sm text-gray-500 dark:text-gray-400">Inspecting selected data...</div>
+                        <div x-show="parserLoading" class="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                            <span class="h-4 w-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></span>
+                            <span>Inspecting selected data...</span>
+                        </div>
                         <div x-show="parserError" class="text-sm text-red-600 dark:text-red-400" x-text="parserError"></div>
 
                         <template x-if="parserInfo">
@@ -3525,12 +3845,25 @@
                         </template>
                     </div>
 
-                    <div x-show="activeTab === 'load-data' && hasAnyData()" x-cloak class="mt-8 rounded-xl border border-slate-700 bg-slate-950 text-slate-100 overflow-hidden">
+                    <div x-show="hasAnyData()" x-cloak class="mt-8 rounded-xl border border-slate-700 bg-slate-950 text-slate-100 overflow-hidden">
                         <div class="px-4 py-2 border-b border-slate-800 flex items-center gap-2 text-xs uppercase tracking-wide text-slate-400">
                             <span class="material-symbols-outlined text-sm">terminal</span>
                             EphysDatasetParser Debug Terminal
                         </div>
                         <pre class="p-4 text-xs leading-relaxed font-mono whitespace-pre-wrap overflow-x-auto max-h-96" x-text="parserDebugCode()"></pre>
+                    </div>
+
+                    <div class="mt-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+                        <button type="button" @click="backToComputeFlowSelector()"
+                            class="w-full sm:w-auto h-11 px-5 rounded-lg border border-gray-300 dark:border-[#323b67] text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
+                            Back
+                        </button>
+                        <button type="button" @click="continueFromComputeFlowConfig()" :disabled="!hasAnyData()"
+                            class="w-full sm:w-auto h-11 px-5 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Next: Select method
+                        </button>
+                    </div>
+                        </div>
                     </div>
                 </div>
 
@@ -4032,7 +4365,7 @@
 
                 <template x-if="activeTab !== 'load-data'">
                     <button type="button"
-                        @click="if (activeTab === 'select-method') { activeTab = 'load-data' } else if (activeTab === 'configure-method') { activeTab = 'select-method' }"
+                        @click="if (activeTab === 'select-method') { openLoadDataStep() } else if (activeTab === 'configure-method') { activeTab = 'select-method' }"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
                         <span class="material-symbols-outlined">arrow_back</span>
                         Back step
@@ -4049,9 +4382,9 @@
                     </button>
                 </template>
 
-                <template x-if="activeTab !== 'configure-method' && hasAnyData()">
+                <template x-if="activeTab === 'select-method' && hasAnyData()">
                     <button type="button"
-                        @click="if (activeTab === 'load-data') { activeTab = 'select-method' } else if (activeTab === 'select-method') { activeTab = 'configure-method' }"
+                        @click="activeTab = 'configure-method'"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
                         Next step
                         <span class="material-symbols-outlined">arrow_forward</span>
