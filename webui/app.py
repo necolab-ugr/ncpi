@@ -3368,6 +3368,8 @@ def _copy_parse_config(base_cfg, *, fields):
         fields=fields,
         epoch_length_s=base_cfg.epoch_length_s,
         epoch_step_s=base_cfg.epoch_step_s,
+        segment_t0_s=base_cfg.segment_t0_s,
+        segment_t1_s=base_cfg.segment_t1_s,
         preload=base_cfg.preload,
         pick_types=base_cfg.pick_types,
         max_seconds=base_cfg.max_seconds,
@@ -3731,8 +3733,16 @@ def _build_parse_config_from_form(form):
     aggregate_enabled = str(form.get("parser_enable_aggregate", "")).lower() in {"1", "true", "on", "yes"}
     epoch_length_s = _optional_float(form.get("parser_epoch_length_s")) if epoching_enabled else None
     epoch_step_s = _optional_float(form.get("parser_epoch_step_s")) if epoching_enabled else None
+    segment_t0_s = _optional_float(form.get("parser_segment_t0_s"))
+    segment_t1_s = _optional_float(form.get("parser_segment_t1_s"))
     if epoching_enabled and (epoch_length_s is None or epoch_step_s is None):
         raise ValueError("Epoching is enabled. Provide both epoch length and epoch step in seconds.")
+    if (
+        segment_t0_s is not None
+        and segment_t1_s is not None
+        and float(segment_t1_s) <= float(segment_t0_s)
+    ):
+        raise ValueError("Temporal segmentation requires end time > start time.")
 
     aggregate_over = None
     aggregate_method = "sum"
@@ -3914,6 +3924,8 @@ def _build_parse_config_from_form(form):
             fields=fields,
             epoch_length_s=epoch_length_s,
             epoch_step_s=epoch_step_s,
+            segment_t0_s=segment_t0_s,
+            segment_t1_s=segment_t1_s,
             zscore=zscore,
             aggregate_over=aggregate_over,
             aggregate_method=aggregate_method,
@@ -3950,6 +3962,8 @@ def _build_parse_config_from_form(form):
         fields=fields,
         epoch_length_s=epoch_length_s,
         epoch_step_s=epoch_step_s,
+        segment_t0_s=segment_t0_s,
+        segment_t1_s=segment_t1_s,
         zscore=zscore,
         aggregate_over=aggregate_over,
         aggregate_method=aggregate_method,
@@ -9949,6 +9963,15 @@ def start_computation_redirect(computation_type):
             if _optional_float(request.form.get("parser_epoch_step_s")) is None:
                 flash('Set an epoch step in seconds.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
+        seg_t0 = _optional_float(request.form.get("parser_segment_t0_s"))
+        seg_t1 = _optional_float(request.form.get("parser_segment_t1_s"))
+        if (
+            seg_t0 is not None
+            and seg_t1 is not None
+            and float(seg_t1) <= float(seg_t0)
+        ):
+            flash('Temporal segmentation requires end time greater than start time.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
 
         if data_source_kind == "pipeline":
             if uploaded_files:

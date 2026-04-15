@@ -133,6 +133,8 @@
             parserEnableEpoching: false,
             parserEpochLengthS: '5.0',
             parserEpochStepS: '5.0',
+            parserSegmentT0S: '',
+            parserSegmentT1S: '',
             parserZscore: false,
             parserEnableAggregate: false,
             parserAggregateOverSelected: ['sensor'],
@@ -276,6 +278,8 @@
                     'parserEnableEpoching',
                     'parserEpochLengthS',
                     'parserEpochStepS',
+                    'parserSegmentT0S',
+                    'parserSegmentT1S',
                     'parserZscore',
                     'parserEnableAggregate',
                     'parserAggregateOverSelected',
@@ -1257,6 +1261,7 @@
                 const kind = this.resolvedDataSourceKind();
                 if (!this.selectedMethod) return false;
                 if (!this.parserDataLocator) return false;
+                if (this.segmentBoundsInvalid()) return false;
                 if (this.parserEnableAggregate && (!Array.isArray(this.parserAggregateOverSelected) || this.parserAggregateOverSelected.length === 0)) return false;
                 const fsSource = String(this.parserFsSource || '').trim();
                 if (!fsSource) return false;
@@ -1282,6 +1287,17 @@
                     return true;
                 }
                 return false;
+            },
+            optionalFiniteNumber(value) {
+                const raw = String(value ?? '').trim();
+                if (!raw) return null;
+                const num = Number.parseFloat(raw);
+                return Number.isFinite(num) ? num : null;
+            },
+            segmentBoundsInvalid() {
+                const t0 = this.optionalFiniteNumber(this.parserSegmentT0S);
+                const t1 = this.optionalFiniteNumber(this.parserSegmentT1S);
+                return t0 !== null && t1 !== null && t1 <= t0;
             },
             epochsDefinedByAxes() {
                 return this.parserArrayAxesEnabled && String(this.parserAxisEpochs) !== '-1';
@@ -1375,6 +1391,8 @@
                 this.parserEnableEpoching = false;
                 this.parserEpochLengthS = '5.0';
                 this.parserEpochStepS = '5.0';
+                this.parserSegmentT0S = '';
+                this.parserSegmentT1S = '';
                 this.parserZscore = false;
                 this.parserEnableAggregate = false;
                 this.parserAggregateOverSelected = ['sensor'];
@@ -2092,6 +2110,8 @@
                 const epochEnabled = !!this.parserEnableEpoching;
                 const epochLength = this.parserEpochLengthS || '5.0';
                 const epochStep = this.parserEpochStepS || '5.0';
+                const segmentT0 = String(this.parserSegmentT0S || '').trim();
+                const segmentT1 = String(this.parserSegmentT1S || '').trim();
                 const toPyString = (value) => "'" + String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
                 const chSource = String(this.parserChNamesSource || '').trim();
                 let chNamesExpr = 'None';
@@ -2183,6 +2203,12 @@
                         lines.push('        },');
                     }
                     lines.push('    ),');
+                    if (segmentT0) {
+                        lines.push(`    segment_t0_s=${segmentT0},`);
+                    }
+                    if (segmentT1) {
+                        lines.push(`    segment_t1_s=${segmentT1},`);
+                    }
                     if (epochEnabled) {
                         lines.push(`    epoch_length_s=${epochLength},`);
                         lines.push(`    epoch_step_s=${epochStep},`);
@@ -2267,6 +2293,12 @@
                     lines.push('        },');
                 }
                 lines.push('    ),');
+                if (segmentT0) {
+                    lines.push(`    segment_t0_s=${segmentT0},`);
+                }
+                if (segmentT1) {
+                    lines.push(`    segment_t1_s=${segmentT1},`);
+                }
                 if (epochEnabled) {
                     lines.push(`    epoch_length_s=${epochLength},`);
                     lines.push(`    epoch_step_s=${epochStep},`);
@@ -3523,6 +3555,29 @@
                                         Apply z-score normalization
                                     </label>
 
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment start time (s)</span>
+                                            <input type="number" step="any" name="parser_segment_t0_s" x-model="parserSegmentT0S"
+                                                placeholder="Optional (e.g., 10)"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment end time (s)</span>
+                                            <input type="number" step="any" name="parser_segment_t1_s" x-model="parserSegmentT1S"
+                                                placeholder="Optional (e.g., 60)"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
+                                        </label>
+                                    </div>
+                                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                                        Optional temporal segmentation applied before epoching. Leave empty to use the full signal.
+                                    </p>
+                                    <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400">
+                                        End time must be greater than start time.
+                                    </p>
+
                                 </div>
 
                                 <div x-show="resolvedDataSourceKind() === 'new-empirical'" class="space-y-4">
@@ -3744,11 +3799,34 @@
                                         </label>
                                     </div>
 
-                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                        <input type="checkbox" x-model="parserZscore"
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserZscore"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                        Apply z-score normalization
+                                    Apply z-score normalization
+                                </label>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment start time (s)</span>
+                                        <input type="number" step="any" name="parser_segment_t0_s" x-model="parserSegmentT0S"
+                                            placeholder="Optional (e.g., 10)"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                     </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment end time (s)</span>
+                                        <input type="number" step="any" name="parser_segment_t1_s" x-model="parserSegmentT1S"
+                                            placeholder="Optional (e.g., 60)"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
+                                    </label>
+                                </div>
+                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    Optional temporal segmentation applied before epoching. Leave empty to use the full signal.
+                                </p>
+                                <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400">
+                                    End time must be greater than start time.
+                                </p>
 
                                 </div>
 
