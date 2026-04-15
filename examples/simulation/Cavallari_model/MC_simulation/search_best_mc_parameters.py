@@ -53,6 +53,14 @@ POPULATION_ORDER = ("E", "I")
 POPULATION_SIZE_KEYS = {"E": "N_exc", "I": "N_inh"}
 RECURRENT_WEIGHT_KEYS = ("weight_EE", "weight_IE", "weight_EI", "weight_II")
 THALAMIC_WEIGHT_KEYS = ("th_exc_external", "th_inh_external")
+BASELINE_MC_CONDUCTANCES = {
+    "weight_EE": 0.000178,
+    "weight_IE": 0.000233,
+    "weight_EI": 0.00201,
+    "weight_II": 0.00270,
+    "th_exc_external": 0.000234,
+    "th_inh_external": 0.000317,
+}
 
 # Tunable parameters
 MAX_SIMULATIONS = 100
@@ -513,6 +521,7 @@ def write_mc_runtime_analysis_params(path: Path, mc_analysis_params_path: Path, 
 import importlib.util
 
 ANALYSIS_PARAMS_PATH = {str(mc_analysis_params_path)!r}
+BASELINE_MC_CONDUCTANCES = {BASELINE_MC_CONDUCTANCES!r}
 RECURRENT_SCALE = {float(recurrent_scale)!r}
 TH_SCALE = {float(th_scale)!r}
 TSTOP_MS = {float(tstop_ms)!r}
@@ -524,10 +533,12 @@ spec.loader.exec_module(module)
 
 params = module.KernelParams
 params.MC_params = dict(params.MC_params)
+for key, value in BASELINE_MC_CONDUCTANCES.items():
+    params.MC_params[key] = float(value)
 for key in {RECURRENT_WEIGHT_KEYS!r}:
-    params.MC_params[key] *= RECURRENT_SCALE
+    params.MC_params[key] = BASELINE_MC_CONDUCTANCES[key] * RECURRENT_SCALE
 for key in {THALAMIC_WEIGHT_KEYS!r}:
-    params.MC_params[key] *= TH_SCALE
+    params.MC_params[key] = BASELINE_MC_CONDUCTANCES[key] * TH_SCALE
 
 weight_scale = float(getattr(params, "conductance_weight_scale", 1.0))
 params.MC_params["weight_matrix"] = [

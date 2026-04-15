@@ -51,20 +51,23 @@ class KernelParams:
     # Time lag relative to spike for kernel predictions
     tau = 100
 
-    # Parameters adapted from the Cavallari LIF network while keeping
-    # the Hagen multicompartment morphologies and active mechanisms.
+    # Parameters selected by optimization of the Cavallari-inspired
+    # multicompartment network while keeping the Hagen morphologies and
+    # active mechanisms.
+    # The optimized values are implemented as scale factors applied to the
+    # baseline Cavallari LIF conductances.
     # LIF conductances are in nS-like units; LFPy/NEURON Exp2Syn weights
     # are in uS, so copied conductance weights are scaled by 1e-3.
     MC_params = {
-        'weight_EE': 0.000178,
-        'weight_IE': 0.000233,
-        'weight_EI': 0.00201,
-        'weight_II': 0.00270,
+        'weight_EE': 0.000178*3.34726,
+        'weight_IE': 0.000233*3.34726,
+        'weight_EI': 0.00201*3.34726,
+        'weight_II': 0.00270*3.34726,
         'biophys': 'lin',
         'i_syn': True,
         'n_ext': [1, 1],
-        'th_exc_external': 0.000234,
-        'th_inh_external': 0.000317,
+        'th_exc_external': 0.000234*42.5574,
+        'th_inh_external': 0.000317*42.5574,
         'v_0': 1.5,
         'g_eff': True,
         'perseg_Vrest': False}
