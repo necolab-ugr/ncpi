@@ -17,6 +17,7 @@ from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
 from itertools import product
 from tmp_paths import configure_temp_environment, tmp_subdir
+import random
 
 # Resolve shared temp root before importing other runtime modules.
 configure_temp_environment()
@@ -11057,6 +11058,25 @@ def start_computation_redirect(computation_type):
     if prepared_features_df is not None:
         data["prepared_features_df"] = prepared_features_df
     if empirical_upload_paths is not None:
+        if computation_type == 'features':
+            import math
+            subsampling = request.form.get('subsampling_10_percent') == '1'
+            if subsampling:
+                # Calculate 10% of number of files
+                original_count = len(empirical_upload_paths)
+                keep_count = max(1, math.ceil(original_count * 0.1))
+                
+                random_sampling = request.form.get('random_sampling') == '1'
+
+                if random_sampling:
+                    empirical_upload_paths = random.sample(empirical_upload_paths, keep_count)
+                else:
+                    empirical_upload_paths = empirical_upload_paths[:keep_count] 
+
+                app.logger.warning(
+                    "[compute %s] Subsampling enabled: reduced from %d to %d files (10%% = %d)",
+                    job_id, original_count, len(empirical_upload_paths), keep_count
+                )           
         data["empirical_upload_paths"] = empirical_upload_paths
     if parser_config_obj is not None:
         data["parser_config_obj"] = parser_config_obj

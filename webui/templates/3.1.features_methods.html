@@ -3909,7 +3909,7 @@
                     </div>
 
                     <div x-show="selectedMethod" class="space-y-6">
-                        <section class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
+                        <section class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6" x-data="{ subsamplingEnabled: false }">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white mb-4">Execution settings</h2>
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
@@ -3933,6 +3933,22 @@
                                         <option value="forkserver">forkserver</option>
                                     </select>
                                 </label>
+                                <div class="flex flex-wrap items-center gap-4 col-span-1 md:col-span-3">
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" name="subsampling_10_percent" value="1"
+                                            x-model="subsamplingEnabled"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Subsampling of 10% of data
+                                    </label>
+
+                                    <!-- Checkbox: Random sampling (only visible if subsamplingEnabled is true) -->
+                                    <label x-show="subsamplingEnabled" x-cloak
+                                        class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" name="random_sampling" value="1"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Random sampling
+                                    </label>
+                                </div>
                             </div>
                         </section>
 
