@@ -1257,36 +1257,41 @@
                 this.parserDataLocator = preferred || allowed[0] || '';
             },
             canSubmitFeatures() {
-                if (this.submitInProgress) return false;
+                return !this.computeSubmitBlockReason();
+            },
+            computeSubmitBlockReason() {
+                if (this.submitInProgress) return '';
                 const kind = this.resolvedDataSourceKind();
-                if (!this.selectedMethod) return false;
-                if (!this.parserDataLocator) return false;
-                if (this.segmentBoundsInvalid()) return false;
-                if (this.parserEnableAggregate && (!Array.isArray(this.parserAggregateOverSelected) || this.parserAggregateOverSelected.length === 0)) return false;
+                if (!this.selectedMethod) return 'Select a feature method in "Select Method".';
+                if (!this.parserDataLocator) return 'Select a Data locator in EphysDatasetParser configuration.';
+                if (this.segmentBoundsInvalid()) return this.segmentValidationError();
+                if (this.parserEnableAggregate && (!Array.isArray(this.parserAggregateOverSelected) || this.parserAggregateOverSelected.length === 0)) {
+                    return 'Aggregation is enabled but no aggregate-over field is selected.';
+                }
                 const fsSource = String(this.parserFsSource || '').trim();
-                if (!fsSource) return false;
-                if (fsSource === '__numeric__' && !String(this.parserFsManual || '').trim()) return false;
+                if (!fsSource) return 'Select a sampling frequency source.';
+                if (fsSource === '__numeric__' && !String(this.parserFsManual || '').trim()) return 'Provide a numeric sampling frequency value.';
                 const recSource = String(this.parserRecordingTypeSource || '').trim();
-                if (!recSource) return false;
-                if (recSource === '__value__' && !String(this.parserRecordingType || '').trim()) return false;
+                if (!recSource) return 'Select a recording type source.';
+                if (recSource === '__value__' && !String(this.parserRecordingType || '').trim()) return 'Select a recording type value.';
                 const chSource = String(this.parserChNamesSource || '').trim();
-                if (!chSource) return false;
-                if (chSource === '__manual__' && !String(this.parserSensorNames || '').trim()) return false;
-                if (this.parserFolderSelectionCount() > 1 && this.parserSelectedFolderCount() !== 1) return false;
+                if (!chSource) return 'Select a channel names source.';
+                if (chSource === '__manual__' && !String(this.parserSensorNames || '').trim()) return 'Provide manual channel names (comma-separated).';
+                if (this.parserFolderSelectionCount() > 1 && this.parserSelectedFolderCount() !== 1) return 'Select exactly one folder for parser analysis.';
 
                 if (kind === 'pipeline') {
-                    if (!this.epochsDefinedByAxes() && this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
-                    return true;
+                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return 'Epoching is enabled. Set both epoch length and epoch step.';
+                    return '';
                 }
                 if (kind === 'new-simulation') {
                     const folderPaths = Array.isArray(this.simulationFolderPaths) ? this.simulationFolderPaths : [];
                     const hasSimulationPath = (folderPaths.length > 0 || String(this.simulationFolderPath || '').trim().length > 0)
                         && this.simulationFileCount > 0;
-                    if (!this.isUploaded('data-file') && !hasSimulationPath) return false;
-                    if (!this.epochsDefinedByAxes() && this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return false;
-                    return true;
+                    if (!this.isUploaded('data-file') && !hasSimulationPath) return 'Load a data folder/file in New data before computing features.';
+                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return 'Epoching is enabled. Set both epoch length and epoch step.';
+                    return '';
                 }
-                return false;
+                return 'Data source configuration is incomplete.';
             },
             optionalFiniteNumber(value) {
                 const raw = String(value ?? '').trim();
@@ -1294,10 +1299,22 @@
                 const num = Number.parseFloat(raw);
                 return Number.isFinite(num) ? num : null;
             },
-            segmentBoundsInvalid() {
+            segmentValidationError() {
                 const t0 = this.optionalFiniteNumber(this.parserSegmentT0S);
                 const t1 = this.optionalFiniteNumber(this.parserSegmentT1S);
-                return t0 !== null && t1 !== null && t1 <= t0;
+                if (t0 !== null && t0 < 0) return 'Start time must be non-negative.';
+                if (t1 !== null && t1 < 0) return 'End time must be non-negative.';
+                if (t0 !== null && t1 !== null && t1 <= t0) return 'End time must be greater than start time.';
+                if (this.parserEnableEpoching && t0 !== null && t1 !== null) {
+                    const epochLength = this.optionalFiniteNumber(this.parserEpochLengthS);
+                    if (epochLength !== null && (t1 - t0) < epochLength) {
+                        return 'Segment duration must be at least as long as epoch length when epoching is enabled.';
+                    }
+                }
+                return '';
+            },
+            segmentBoundsInvalid() {
+                return this.segmentValidationError().length > 0;
             },
             epochsDefinedByAxes() {
                 return this.parserArrayAxesEnabled && String(this.parserAxisEpochs) !== '-1';
@@ -3397,7 +3414,7 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epochs axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trials/Epochs axis</span>
                                                     <select name="parser_axis_epochs" x-model="parserAxisEpochs"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
@@ -3411,7 +3428,7 @@
                                                 </label>
                                             </div>
                                             <p class="text-[11px] text-amber-700 dark:text-amber-400" x-show="epochsDefinedByAxes()">
-                                                The data already contains epochs — parser-level epoching is disabled.
+                                                Trials/Epochs axis is defined. Enable epoching below to further divide samples within each trial.
                                             </p>
                                         </div>
                                     </div>
@@ -3558,14 +3575,14 @@
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment start time (s)</span>
-                                            <input type="number" step="any" name="parser_segment_t0_s" x-model="parserSegmentT0S"
+                                            <input type="number" step="any" min="0" name="parser_segment_t0_s" x-model="parserSegmentT0S"
                                                 placeholder="Optional (e.g., 10)"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
                                                 :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                         </label>
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment end time (s)</span>
-                                            <input type="number" step="any" name="parser_segment_t1_s" x-model="parserSegmentT1S"
+                                            <input type="number" step="any" min="0" name="parser_segment_t1_s" x-model="parserSegmentT1S"
                                                 placeholder="Optional (e.g., 60)"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
                                                 :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
@@ -3574,9 +3591,7 @@
                                     <p class="text-xs text-gray-500 dark:text-gray-400">
                                         Optional temporal segmentation applied before epoching. Leave empty to use the full signal.
                                     </p>
-                                    <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400">
-                                        End time must be greater than start time.
-                                    </p>
+                                    <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400" x-text="segmentValidationError()"></p>
 
                                 </div>
 
@@ -3704,7 +3719,7 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epochs axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trials/Epochs axis</span>
                                                     <select name="parser_axis_epochs" x-model="parserAxisEpochs"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
@@ -3718,7 +3733,7 @@
                                                 </label>
                                             </div>
                                             <p class="text-[11px] text-amber-700 dark:text-amber-400" x-show="epochsDefinedByAxes()">
-                                                The data already contains epochs — parser-level epoching is disabled.
+                                                Trials/Epochs axis is defined. Enable epoching below to further divide samples within each trial.
                                             </p>
                                         </div>
                                     </div>
@@ -3808,14 +3823,14 @@
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment start time (s)</span>
-                                        <input type="number" step="any" name="parser_segment_t0_s" x-model="parserSegmentT0S"
+                                        <input type="number" step="any" min="0" name="parser_segment_t0_s" x-model="parserSegmentT0S"
                                             placeholder="Optional (e.g., 10)"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
                                             :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                     </label>
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment end time (s)</span>
-                                        <input type="number" step="any" name="parser_segment_t1_s" x-model="parserSegmentT1S"
+                                        <input type="number" step="any" min="0" name="parser_segment_t1_s" x-model="parserSegmentT1S"
                                             placeholder="Optional (e.g., 60)"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
                                             :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
@@ -3824,9 +3839,7 @@
                                 <p class="text-xs text-gray-500 dark:text-gray-400">
                                     Optional temporal segmentation applied before epoching. Leave empty to use the full signal.
                                 </p>
-                                <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400">
-                                    End time must be greater than start time.
-                                </p>
+                                <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400" x-text="segmentValidationError()"></p>
 
                                 </div>
 
@@ -3860,15 +3873,12 @@
                                         :value="JSON.stringify(metadataInfo ? (metadataInfo.candidate_fields || []) : [])">
                                 </div>
 
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300"
-                                    :class="epochsDefinedByAxes() ? 'opacity-40 cursor-not-allowed' : ''">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                     <input type="checkbox" x-model="parserEnableEpoching"
-                                        :disabled="epochsDefinedByAxes()"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Enable epoching
-                                    <span x-show="epochsDefinedByAxes()" class="text-[11px] text-amber-600 dark:text-amber-400 font-normal">(disabled — epochs defined by array axis)</span>
                                 </label>
-                                <input type="hidden" name="parser_enable_epoching" :value="(parserEnableEpoching && !epochsDefinedByAxes()) ? '1' : '0'">
+                                <input type="hidden" name="parser_enable_epoching" :value="parserEnableEpoching ? '1' : '0'">
 
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                     <input type="checkbox" x-model="parserEnableAggregate"
@@ -3906,7 +3916,7 @@
                                     </label>
                                 </div>
 
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching && !epochsDefinedByAxes()">
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epoch length (s)</span>
                                         <input type="number" step="any" name="parser_epoch_length_s" x-model="parserEpochLengthS"
@@ -4447,6 +4457,14 @@
                     x-text="`${formatBytes(uploadBytesLoaded)} / ${formatBytes(uploadBytesTotal)}`"></p>
                 <p x-show="submitError" class="text-xs text-red-600 dark:text-red-400" x-text="submitError"></p>
             </div>
+
+            <template x-if="activeTab === 'configure-method' && !submitInProgress && computeSubmitBlockReason()">
+                <div class="mt-6 w-full p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 rounded-xl">
+                    <p class="text-sm text-amber-800 dark:text-amber-200">
+                        Configuration issue: <span class="font-semibold" x-text="computeSubmitBlockReason()"></span>
+                    </p>
+                </div>
+            </template>
 
             <div class="mt-10 flex flex-col sm:flex-row justify-between items-center gap-4">
                 <template x-if="activeTab === 'load-data'">
