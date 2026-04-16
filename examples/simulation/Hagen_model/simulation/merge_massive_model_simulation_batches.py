@@ -4,19 +4,18 @@ import os
 import pickle
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
-
 import matplotlib
 import numpy as np
-
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
 BATCH_DIR_PATTERN = re.compile(r"batch_(\d{4,})$")
 SIM_DATA_METHODS = ("CDM", "specparam", "catch22")
-DEFAULT_SCRATCH_ROOT = "/SCRATCH/TIC117/pablomc/Hagen_model_simulations"
-DEFAULT_INPUT_ROOT = os.path.join(DEFAULT_SCRATCH_ROOT, "simulation_output")
-DEFAULT_OUTPUT_DIR = os.path.join(DEFAULT_INPUT_ROOT, "merged")
+# DEFAULT_DATA_ROOT = "/SCRATCH/TIC117/pablomc/Hagen_model_simulations"
+DEFAULT_DATA_ROOT = "/DATOS/pablomc/simulation_datasets/Hagen_v2/Hagen_model_simulations"
+DEFAULT_INPUT_ROOT = os.path.join(DEFAULT_DATA_ROOT, "simulation_output")
+DEFAULT_OUTPUT_DIR = os.path.join(DEFAULT_DATA_ROOT, "merged")
 DEFAULT_VALID_SAMPLES_PLOT = "valid_parameter_samples.png"
 
 
@@ -135,6 +134,27 @@ def normalize_batch_id(value, fallback_batch_id: int) -> int:
     return int(value)
 
 
+class ProgressPrinter:
+    def __init__(self, total: int, label: str):
+        self.total = max(int(total), 0)
+        self.label = label
+        self.completed = 0
+        self.next_percent = 10
+
+    def update(self, count: int = 1) -> None:
+        if self.total <= 0:
+            return
+
+        self.completed = min(self.total, self.completed + count)
+        current_percent = int((self.completed * 100) / self.total)
+        while self.next_percent <= 100 and current_percent >= self.next_percent:
+            print(
+                f"{self.label}: {self.next_percent}% "
+                f"({self.completed}/{self.total} samples)"
+            )
+            self.next_percent += 10
+
+
 def remap_valid_sample_indices(
     all_rows: List[Dict[str, object]],
     valid_rows: List[Dict[str, object]],
@@ -142,11 +162,16 @@ def remap_valid_sample_indices(
     merged_output_dir: str,
 ) -> None:
     index_map: Dict[Tuple[int, int], int] = {}
+    progress = ProgressPrinter(
+        len(valid_details) + len(all_rows) + len(valid_rows),
+        "Remapping sample indices",
+    )
 
     for global_index, detail in enumerate(valid_details):
         batch_id = normalize_batch_id(detail.get("batch_id"), -1)
         old_sample_index = parse_optional_int(detail.get("sample_index"))
         if old_sample_index is None:
+            progress.update()
             continue
 
         detail["sample_index"] = global_index
@@ -155,27 +180,33 @@ def remap_valid_sample_indices(
             for method in SIM_DATA_METHODS
         }
         index_map[(batch_id, old_sample_index)] = global_index
+        progress.update()
 
     for row in all_rows:
         if not parse_bool(row.get("valid")):
             row["sample_index"] = ""
+            progress.update()
             continue
 
         batch_id = normalize_batch_id(row.get("batch_id"), -1)
         old_sample_index = parse_optional_int(row.get("sample_index"))
         if old_sample_index is None:
             row["sample_index"] = ""
+            progress.update()
             continue
 
         row["sample_index"] = index_map.get((batch_id, old_sample_index), "")
+        progress.update()
 
     for row in valid_rows:
         batch_id = normalize_batch_id(row.get("batch_id"), -1)
         old_sample_index = parse_optional_int(row.get("sample_index"))
         if old_sample_index is None:
             row["sample_index"] = ""
+            progress.update()
             continue
         row["sample_index"] = index_map.get((batch_id, old_sample_index), "")
+        progress.update()
 
 
 def merge_sim_data_for_method(batch_dirs: Sequence[Tuple[int, str]], method: str, output_dir: str) -> None:
@@ -256,6 +287,7 @@ def plot_valid_parameter_samples(valid_details: Sequence[dict], output_dir: str)
     for row_idx in range(n_params):
         for col_idx in range(n_params):
             ax = axes[row_idx, col_idx]
+            is_diagonal = row_idx == col_idx
             if row_idx == col_idx:
                 ax.hist(sampled_values[:, col_idx], bins=20, color="0.75", edgecolor="0.35")
             elif row_idx > col_idx:
@@ -271,13 +303,18 @@ def plot_valid_parameter_samples(valid_details: Sequence[dict], output_dir: str)
                 ax.axis("off")
                 continue
 
-            if row_idx == n_params - 1:
+            if is_diagonal:
+                ax.set_xlabel(parameter_names[col_idx], fontsize=8)
+                ax.set_ylabel("Samples / bin", fontsize=8)
+                ax.tick_params(axis="x", labelbottom=True)
+                ax.tick_params(axis="y", labelleft=True)
+            elif row_idx == n_params - 1:
                 ax.set_xlabel(parameter_names[col_idx], fontsize=8)
             else:
                 ax.set_xticklabels([])
-            if col_idx == 0:
+            if not is_diagonal and col_idx == 0:
                 ax.set_ylabel(parameter_names[row_idx], fontsize=8)
-            else:
+            elif not is_diagonal:
                 ax.set_yticklabels([])
             ax.tick_params(labelsize=7)
 
