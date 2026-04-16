@@ -501,14 +501,37 @@ class EphysDatasetParser:
             if locator == "__self__":
                 return obj
 
-            # dotted path
-            parts = locator.split(".")
+            # Divide by ., but considering possible "[" / "]"
+            # E.g.: "OptoRampsLFP[0,0].LFP" -> ["OptoRampsLFP[0,0]", "LFP"]
+            parts = []
+            for part in locator.split('.'):
+                parts.append(part)
+            
             cur = obj
-            for p in parts:
-                cur = self._step(cur, p)
-
-            # If final resolves to a zero-arg callable attribute and locator looked like a method name,
-            # we DO NOT auto-call here by default; user can provide lambda if desired.
+            for part in parts:
+                # Extract base name and indexes between []
+                base = part
+                indices = []
+                if '[' in part and part.endswith(']'):
+                    base, rest = part.split('[', 1)
+                    rest = rest.rstrip(']')
+                    # Allow multiple indexes separated by a comma: "0,0"
+                    for idx_str in rest.split(','):
+                        idx_str = idx_str.strip()
+                        try:
+                            indices.append(int(idx_str))
+                        except ValueError:
+                            # Si no es entero, lo ignoramos (podría ser slice, etc.)
+                            pass
+                
+                cur = self._step(cur, base)
+                
+                # Apply indexes sequentially
+                for idx in indices:
+                    if isinstance(cur, (list, tuple, np.ndarray)):
+                        cur = cur[idx]
+                    else:
+                        raise KeyError(f"Cannot index into {type(cur)} with {idx}")
             return cur
 
         return locator
@@ -539,6 +562,21 @@ class EphysDatasetParser:
                 return cur[key]
             if key.encode() in cur:  # rare
                 return cur[key.encode()]
+
+        # Object-arrays handling (MATLAB structures 1xN)
+        if isinstance(cur, np.ndarray) and cur.dtype == np.object_:
+            if cur.size == 1:
+                return self._step(cur.item(), key)
+            results = []
+            for item in cur.flat:
+                try:
+                    results.append(self._step(item, key))
+                except KeyError as e:
+                    raise KeyError(
+                        f"Cannot resolve '{key}' on element of type {type(item)!r} "
+                        f"inside object array of shape {cur.shape}"
+                    ) from e
+            return results
 
         raise KeyError(f"Cannot resolve step '{key}' on object of type {type(cur)!r}")
 
@@ -671,13 +709,29 @@ class EphysDatasetParser:
             rows.append(r)
         return rows
 
+
+    def _extract_first_if_list(self, value):
+        """If the value is not an empty list, return its first element; if not, the original value."""
+        if isinstance(value, list) and value:
+            return value[0]
+        return value
+
     # ---- dict-like (.mat/.json) ----
 
     def _parse_dict_like(self, d: dict, source_file: Optional[str]) -> list[dict]:
         f = self.config.fields
 
         data = self._resolve(d, f.data)
+        # If data is a list (the result of multiple structures), take the first element
+        if isinstance(data, list):
+            if data:
+                data = data[0]
+            else:
+                data = None
+
         fs = self._resolve(d, f.fs)
+        # Handle a possible list that comes from a struct array
+        fs = self._extract_first_if_list(fs)
         fs = float(np.asarray(fs).item()) if fs is not None and np.asarray(fs).size == 1 else (float(fs) if fs is not None else None)
 
         data_domain = self._resolve(d, f.data_domain) or "time"
@@ -1334,6 +1388,9 @@ class EphysDatasetParser:
         for k, loc in self.config.fields.metadata.items():
             try:
                 v = self._resolve(obj, loc)
+
+                # If the metadata is a list (as a result of multiple structures), take the first element to obtain a groupable scalar
+                v = self._extract_first_if_list(v)
 
                 # If metadata resolves to a pandas Series (e.g., df["group"]),
                 # reduce it to a scalar if it's constant across rows.

@@ -3267,7 +3267,8 @@ def _resolve_locator_value(obj, locator):
     parser = EphysDatasetParser(ParseConfig())
     try:
         return parser._resolve(obj, locator)
-    except Exception:
+    except Exception as e:
+        traceback.print_exc()
         return None
 
 
