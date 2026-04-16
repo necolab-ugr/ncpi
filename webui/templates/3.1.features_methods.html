@@ -3310,60 +3310,6 @@
                                         </label>
                                     </div>
 
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
-                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
-                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-fs-source-'+field">
-                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
-                                                </template>
-                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
-                                            </select>
-                                        </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
-                                            <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
-                                                :disabled="parserFsSource !== '__numeric__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                                placeholder="e.g. 16000 for dt=0.0625 ms">
-                                        </label>
-                                    </div>
-
-                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
-                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
-                                                <template x-for="field in parserChannelNameSourceCandidates()" :key="'pipeline-ch-source-'+field">
-                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
-                                                </template>
-                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
-                                            </select>
-                                        </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
-                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
-                                                min="0" max="4" step="1" inputmode="numeric"
-                                                :disabled="parserChNamesSource !== '__autocomplete__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                                placeholder="0-4">
-                                        </label>
-                                    </div>
-                                    <input type="hidden" name="parser_fs_locator"
-                                        :value="(parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__') ? parserFsSource : ''">
-                                    <input type="hidden" name="parser_ch_names_locator"
-                                        :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
-                                    <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
-                                        <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
-                                            :disabled="parserChNamesSource !== '__manual__'"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                            placeholder="e.g. ch0, ch1, ch2">
-                                    </label>
-
                                     <!-- Array dimension mapping (pipeline/simulation) -->
                                     <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
                                         <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
@@ -3432,6 +3378,60 @@
                                             </p>
                                         </div>
                                     </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
+                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
+                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-fs-source-'+field">
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
+                                                </template>
+                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
+                                            <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
+                                                :disabled="parserFsSource !== '__numeric__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="e.g. 16000 for dt=0.0625 ms">
+                                        </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
+                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
+                                                <template x-for="field in parserChannelNameSourceCandidates()" :key="'pipeline-ch-source-'+field">
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
+                                                </template>
+                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
+                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
+                                                min="0" max="4" step="1" inputmode="numeric"
+                                                :disabled="parserChNamesSource !== '__autocomplete__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="0-4">
+                                        </label>
+                                    </div>
+                                    <input type="hidden" name="parser_fs_locator"
+                                        :value="(parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__') ? parserFsSource : ''">
+                                    <input type="hidden" name="parser_ch_names_locator"
+                                        :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
+                                    <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
+                                        <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
+                                            :disabled="parserChNamesSource !== '__manual__'"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                            placeholder="e.g. ch0, ch1, ch2">
+                                    </label>
 
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
@@ -3613,60 +3613,6 @@
                                         </label>
                                     </div>
 
-                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
-                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
-                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'fs-source-'+field">
-                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
-                                                </template>
-                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
-                                            </select>
-                                        </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
-                                            <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
-                                                :disabled="parserFsSource !== '__numeric__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                                placeholder="e.g. 16000 for dt=0.0625 ms">
-                                        </label>
-                                    </div>
-
-                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
-                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
-                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
-                                                <template x-for="field in parserChannelNameSourceCandidates()" :key="'ch-source-'+field">
-                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
-                                                </template>
-                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
-                                            </select>
-                                        </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
-                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
-                                                min="0" max="4" step="1" inputmode="numeric"
-                                                :disabled="parserChNamesSource !== '__autocomplete__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                                placeholder="0-4">
-                                        </label>
-                                    </div>
-                                    <input type="hidden" name="parser_fs_locator"
-                                        :value="(parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__') ? parserFsSource : ''">
-                                    <input type="hidden" name="parser_ch_names_locator"
-                                        :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
-                                    <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
-                                        <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
-                                            :disabled="parserChNamesSource !== '__manual__'"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                            placeholder="e.g. ch0, ch1, ch2">
-                                    </label>
-
                                     <!-- Array dimension mapping -->
                                     <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
                                         <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
@@ -3737,6 +3683,60 @@
                                             </p>
                                         </div>
                                     </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
+                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
+                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'fs-source-'+field">
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
+                                                </template>
+                                                <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
+                                            <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
+                                                :disabled="parserFsSource !== '__numeric__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="e.g. 16000 for dt=0.0625 ms">
+                                        </label>
+                                    </div>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
+                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
+                                                <template x-for="field in parserChannelNameSourceCandidates()" :key="'ch-source-'+field">
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
+                                                </template>
+                                                <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
+                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
+                                                min="0" max="4" step="1" inputmode="numeric"
+                                                :disabled="parserChNamesSource !== '__autocomplete__'"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                placeholder="0-4">
+                                        </label>
+                                    </div>
+                                    <input type="hidden" name="parser_fs_locator"
+                                        :value="(parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__') ? parserFsSource : ''">
+                                    <input type="hidden" name="parser_ch_names_locator"
+                                        :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
+                                    <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
+                                        <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
+                                            :disabled="parserChNamesSource !== '__manual__'"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                            placeholder="e.g. ch0, ch1, ch2">
+                                    </label>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
