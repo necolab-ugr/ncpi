@@ -11083,11 +11083,12 @@ def start_computation_redirect(computation_type):
     if empirical_upload_paths is not None:
         if computation_type == 'features':
             import math
-            subsampling = request.form.get('subsampling_10_percent') == '1'
+            subsampling = request.form.get('subsampling') == '1'
             if subsampling:
-                # Calculate 10% of number of files
+                sampling_percentage = float(request.form.get('sampling_percentage'))/100
+                # Calculate % of number of files
                 original_count = len(empirical_upload_paths)
-                keep_count = max(1, math.ceil(original_count * 0.1))
+                keep_count = max(1, math.ceil(original_count * sampling_percentage))
                 
                 random_sampling = request.form.get('random_sampling') == '1'
 
@@ -11097,8 +11098,8 @@ def start_computation_redirect(computation_type):
                     empirical_upload_paths = empirical_upload_paths[:keep_count] 
 
                 app.logger.warning(
-                    "[compute %s] Subsampling enabled: reduced from %d to %d files (10%% = %d)",
-                    job_id, original_count, len(empirical_upload_paths), keep_count
+                    "[compute %s] Subsampling enabled: reduced from %d to %d files (%d%% = %d)",
+                    job_id, original_count, len(empirical_upload_paths), sampling_percentage * 100, keep_count
                 )           
         data["empirical_upload_paths"] = empirical_upload_paths
     if parser_config_obj is not None:

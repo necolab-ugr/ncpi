@@ -4013,11 +4013,21 @@
                                 </label>
                                 <div class="flex flex-wrap items-center gap-4 col-span-1 md:col-span-3">
                                     <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                        <input type="checkbox" name="subsampling_10_percent" value="1"
+                                        <input type="checkbox" name="subsampling" value="1"
                                             x-model="subsamplingEnabled"
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                        Subsampling of 10% of data
+                                        Subsampling of data
                                     </label>
+
+                                    <!-- Slider: Sampling percentage (only visible if subsamplingEnabled is true) -->
+                                    <div x-show="subsamplingEnabled" x-cloak class="flex items-center gap-3 text-sm">
+                                        <label class="text-[#34495E] dark:text-gray-300">Sampling percentage:</label>
+                                        <input type="range" name="sampling_percentage" min="5" max="95" step="5" value="10"
+                                            class="w-48 h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 dark:bg-gray-700 accent-primary">
+                                        <span class="text-[#34495E] dark:text-gray-300 font-mono min-w-[3rem]">
+                                            <span x-data="{ percentage: 10 }" x-init="$el.closest('div').querySelector('input').addEventListener('input', function(e) { percentage = e.target.value; })" x-text="percentage"></span>%
+                                        </span>
+                                    </div>
 
                                     <!-- Checkbox: Random sampling (only visible if subsamplingEnabled is true) -->
                                     <label x-show="subsamplingEnabled" x-cloak
