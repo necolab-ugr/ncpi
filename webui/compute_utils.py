@@ -6,7 +6,7 @@ import numpy as np
 import sys
 
 # Prefer local repository package over globally installed ncpi.
-_webui_dir = os.path.dirname(os.path.abspath(__file__))
+_webui_dir = os.path.dirname(os.path.realpath(__file__))
 _repo_root = os.path.dirname(_webui_dir)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
@@ -3568,7 +3568,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded_files):
     try:
         _append_job_output(job_status, job_id, "Starting kernel computation.")
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        repo_root = _repo_root
         default_mc_folder = os.path.expandvars(
             os.path.expanduser(os.path.join("$HOME", "multicompartment_neuron_network"))
         )

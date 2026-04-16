@@ -68,7 +68,7 @@ def _module_uploads_dir_for(computation_type):
     return INFERENCE_UPLOADS_DIR
 
 # Prefer the local repository package over any globally installed ncpi version.
-_webui_dir = os.path.dirname(os.path.abspath(__file__))
+_webui_dir = os.path.dirname(os.path.realpath(__file__))
 _repo_root = os.path.dirname(_webui_dir)
 if _repo_root not in sys.path:
     sys.path.insert(0, _repo_root)
@@ -4325,7 +4325,7 @@ def _build_hagen_network_params(form):
     ])
 
 
-def _build_cavallari_network_params(form):
+def _build_cavallari_lif_params(form):
     X = _parse_literal(form, "X", CAVALLARI_DEFAULTS["X"])
     N_X = _parse_literal(form, "N_X", CAVALLARI_DEFAULTS["N_X"])
     model = _parse_str(form, "model", CAVALLARI_DEFAULTS["model"])
@@ -4400,61 +4400,135 @@ def _build_cavallari_network_params(form):
     _ensure_length(tau_m_X, "tau_m_X", 2)
     _ensure_length(I_e_X, "I_e_X", 2)
 
+    network_params = {
+        "N_exc": int(N_X[0]),
+        "N_inh": int(N_X[1]),
+        "P": P,
+        "extent": extent,
+        "exc_exc_recurrent": exc_exc_recurrent,
+        "exc_inh_recurrent": exc_inh_recurrent,
+        "inh_exc_recurrent": inh_exc_recurrent,
+        "inh_inh_recurrent": inh_inh_recurrent,
+        "th_exc_external": th_exc_external,
+        "th_inh_external": th_inh_external,
+        "cc_exc_external": cc_exc_external,
+        "cc_inh_external": cc_inh_external,
+        "v_0": v_0,
+        "A_ext": A_ext,
+        "f_ext": f_ext,
+        "OU_sigma": OU_sigma,
+        "OU_tau": OU_tau,
+    }
+
+    excitatory_cell_params = {
+        "V_th": V_th_X[0],
+        "V_reset": V_reset_X[0],
+        "t_ref": t_ref_X[0],
+        "g_L": g_L_X[0],
+        "C_m": C_m_X[0],
+        "E_ex": E_ex_X[0],
+        "E_in": E_in_X[0],
+        "E_L": E_L_X[0],
+        "tau_rise_AMPA": tau_rise_AMPA_X[0],
+        "tau_decay_AMPA": tau_decay_AMPA_X[0],
+        "tau_rise_GABA_A": tau_rise_GABA_A_X[0],
+        "tau_decay_GABA_A": tau_decay_GABA_A_X[0],
+        "tau_m": tau_m_X[0],
+        "I_e": I_e_X[0],
+    }
+
+    inhibitory_cell_params = {
+        "V_th": V_th_X[1],
+        "V_reset": V_reset_X[1],
+        "t_ref": t_ref_X[1],
+        "g_L": g_L_X[1],
+        "C_m": C_m_X[1],
+        "E_ex": E_ex_X[1],
+        "E_in": E_in_X[1],
+        "E_L": E_L_X[1],
+        "tau_rise_AMPA": tau_rise_AMPA_X[1],
+        "tau_decay_AMPA": tau_decay_AMPA_X[1],
+        "tau_rise_GABA_A": tau_rise_GABA_A_X[1],
+        "tau_decay_GABA_A": tau_decay_GABA_A_X[1],
+        "tau_m": tau_m_X[1],
+        "I_e": I_e_X[1],
+    }
+
+    return {
+        "X": list(X),
+        "N_X": [int(N_X[0]), int(N_X[1])],
+        "model": model,
+        "neuron_params": {
+            "E": excitatory_cell_params,
+            "I": inhibitory_cell_params,
+        },
+        "network_params": network_params,
+    }
+
+
+def _build_cavallari_network_params(form):
+    lif_params = _build_cavallari_lif_params(form)
+    X = lif_params["X"]
+    model = lif_params["model"]
+    network_params = lif_params["network_params"]
+    excitatory_cell_params = lif_params["neuron_params"]["E"]
+    inhibitory_cell_params = lif_params["neuron_params"]["I"]
+
     return "\n".join([
         "# Cavallari et al. (2014) conductance-based recurrent network parameters",
         "",
         "Network_params = {",
-        f"    \"N_exc\": {int(N_X[0])},",
-        f"    \"N_inh\": {int(N_X[1])},",
-        f"    \"P\": {P},",
-        f"    \"extent\": {extent},",
-        f"    \"exc_exc_recurrent\": {exc_exc_recurrent},",
-        f"    \"exc_inh_recurrent\": {exc_inh_recurrent},",
-        f"    \"inh_exc_recurrent\": {inh_exc_recurrent},",
-        f"    \"inh_inh_recurrent\": {inh_inh_recurrent},",
-        f"    \"th_exc_external\": {th_exc_external},",
-        f"    \"th_inh_external\": {th_inh_external},",
-        f"    \"cc_exc_external\": {cc_exc_external},",
-        f"    \"cc_inh_external\": {cc_inh_external},",
-        f"    \"v_0\": {v_0},",
-        f"    \"A_ext\": {A_ext},",
-        f"    \"f_ext\": {f_ext},",
-        f"    \"OU_sigma\": {OU_sigma},",
-        f"    \"OU_tau\": {OU_tau},",
+        f"    \"N_exc\": {network_params['N_exc']},",
+        f"    \"N_inh\": {network_params['N_inh']},",
+        f"    \"P\": {network_params['P']},",
+        f"    \"extent\": {network_params['extent']},",
+        f"    \"exc_exc_recurrent\": {network_params['exc_exc_recurrent']},",
+        f"    \"exc_inh_recurrent\": {network_params['exc_inh_recurrent']},",
+        f"    \"inh_exc_recurrent\": {network_params['inh_exc_recurrent']},",
+        f"    \"inh_inh_recurrent\": {network_params['inh_inh_recurrent']},",
+        f"    \"th_exc_external\": {network_params['th_exc_external']},",
+        f"    \"th_inh_external\": {network_params['th_inh_external']},",
+        f"    \"cc_exc_external\": {network_params['cc_exc_external']},",
+        f"    \"cc_inh_external\": {network_params['cc_inh_external']},",
+        f"    \"v_0\": {network_params['v_0']},",
+        f"    \"A_ext\": {network_params['A_ext']},",
+        f"    \"f_ext\": {network_params['f_ext']},",
+        f"    \"OU_sigma\": {network_params['OU_sigma']},",
+        f"    \"OU_tau\": {network_params['OU_tau']},",
         "}",
         "",
         "excitatory_cell_params = {",
-        f"    \"V_th\": {V_th_X[0]},",
-        f"    \"V_reset\": {V_reset_X[0]},",
-        f"    \"t_ref\": {t_ref_X[0]},",
-        f"    \"g_L\": {g_L_X[0]},",
-        f"    \"C_m\": {C_m_X[0]},",
-        f"    \"E_ex\": {E_ex_X[0]},",
-        f"    \"E_in\": {E_in_X[0]},",
-        f"    \"E_L\": {E_L_X[0]},",
-        f"    \"tau_rise_AMPA\": {tau_rise_AMPA_X[0]},",
-        f"    \"tau_decay_AMPA\": {tau_decay_AMPA_X[0]},",
-        f"    \"tau_rise_GABA_A\": {tau_rise_GABA_A_X[0]},",
-        f"    \"tau_decay_GABA_A\": {tau_decay_GABA_A_X[0]},",
-        f"    \"tau_m\": {tau_m_X[0]},",
-        f"    \"I_e\": {I_e_X[0]},",
+        f"    \"V_th\": {excitatory_cell_params['V_th']},",
+        f"    \"V_reset\": {excitatory_cell_params['V_reset']},",
+        f"    \"t_ref\": {excitatory_cell_params['t_ref']},",
+        f"    \"g_L\": {excitatory_cell_params['g_L']},",
+        f"    \"C_m\": {excitatory_cell_params['C_m']},",
+        f"    \"E_ex\": {excitatory_cell_params['E_ex']},",
+        f"    \"E_in\": {excitatory_cell_params['E_in']},",
+        f"    \"E_L\": {excitatory_cell_params['E_L']},",
+        f"    \"tau_rise_AMPA\": {excitatory_cell_params['tau_rise_AMPA']},",
+        f"    \"tau_decay_AMPA\": {excitatory_cell_params['tau_decay_AMPA']},",
+        f"    \"tau_rise_GABA_A\": {excitatory_cell_params['tau_rise_GABA_A']},",
+        f"    \"tau_decay_GABA_A\": {excitatory_cell_params['tau_decay_GABA_A']},",
+        f"    \"tau_m\": {excitatory_cell_params['tau_m']},",
+        f"    \"I_e\": {excitatory_cell_params['I_e']},",
         "}",
         "",
         "inhibitory_cell_params = {",
-        f"    \"V_th\": {V_th_X[1]},",
-        f"    \"V_reset\": {V_reset_X[1]},",
-        f"    \"t_ref\": {t_ref_X[1]},",
-        f"    \"g_L\": {g_L_X[1]},",
-        f"    \"C_m\": {C_m_X[1]},",
-        f"    \"E_ex\": {E_ex_X[1]},",
-        f"    \"E_in\": {E_in_X[1]},",
-        f"    \"E_L\": {E_L_X[1]},",
-        f"    \"tau_rise_AMPA\": {tau_rise_AMPA_X[1]},",
-        f"    \"tau_decay_AMPA\": {tau_decay_AMPA_X[1]},",
-        f"    \"tau_rise_GABA_A\": {tau_rise_GABA_A_X[1]},",
-        f"    \"tau_decay_GABA_A\": {tau_decay_GABA_A_X[1]},",
-        f"    \"tau_m\": {tau_m_X[1]},",
-        f"    \"I_e\": {I_e_X[1]},",
+        f"    \"V_th\": {inhibitory_cell_params['V_th']},",
+        f"    \"V_reset\": {inhibitory_cell_params['V_reset']},",
+        f"    \"t_ref\": {inhibitory_cell_params['t_ref']},",
+        f"    \"g_L\": {inhibitory_cell_params['g_L']},",
+        f"    \"C_m\": {inhibitory_cell_params['C_m']},",
+        f"    \"E_ex\": {inhibitory_cell_params['E_ex']},",
+        f"    \"E_in\": {inhibitory_cell_params['E_in']},",
+        f"    \"E_L\": {inhibitory_cell_params['E_L']},",
+        f"    \"tau_rise_AMPA\": {inhibitory_cell_params['tau_rise_AMPA']},",
+        f"    \"tau_decay_AMPA\": {inhibitory_cell_params['tau_decay_AMPA']},",
+        f"    \"tau_rise_GABA_A\": {inhibitory_cell_params['tau_rise_GABA_A']},",
+        f"    \"tau_decay_GABA_A\": {inhibitory_cell_params['tau_decay_GABA_A']},",
+        f"    \"tau_m\": {inhibitory_cell_params['tau_m']},",
+        f"    \"I_e\": {inhibitory_cell_params['I_e']},",
         "}",
         "",
         "Neuron_params = [excitatory_cell_params, inhibitory_cell_params]",
@@ -4942,7 +5016,7 @@ def _simulation_computation(job_id, job_status, params):
         estimate_seconds = float(params.get("estimate_seconds", 60.0))
         per_run_estimate = max(1.0, estimate_seconds / max(1, len(run_forms)))
 
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        repo_root = _repo_root
         if model_type == "hagen":
             example_root = os.path.join(
                 repo_root, "examples", "simulation", "Hagen_model", "simulation"
@@ -5010,10 +5084,13 @@ def _simulation_computation(job_id, job_status, params):
                 raise JobCancelledError("Computation cancelled by user.")
             if model_type == "hagen":
                 network_params_content = _build_hagen_network_params(form)
+                cavallari_lif_params = None
             elif model_type == "cavallari":
                 network_params_content = _build_cavallari_network_params(form)
+                cavallari_lif_params = _build_cavallari_lif_params(form)
             else:
                 network_params_content = _build_four_area_network_params(form)
+                cavallari_lif_params = None
             simulation_params_content = _build_simulation_params(form, sim_defaults)
 
             run_id = str(uuid.uuid4())
@@ -5030,15 +5107,19 @@ def _simulation_computation(job_id, job_status, params):
             with open(os.path.join(params_dir, "simulation_params.py"), "w", encoding="utf-8") as f:
                 f.write(simulation_params_content)
 
-            shutil.copy(
-                os.path.join(example_root, "python", "network.py"),
-                os.path.join(python_dir, "network.py"),
-            )
+            if model_type != "cavallari":
+                shutil.copy(
+                    os.path.join(example_root, "python", "network.py"),
+                    os.path.join(python_dir, "network.py"),
+                )
             shutil.copy(
                 os.path.join(example_root, "python", "simulation.py"),
                 os.path.join(python_dir, "simulation.py"),
             )
             _enforce_simulation_chunk_seconds(os.path.join(python_dir, "simulation.py"), chunk_ms=1000.0)
+            if model_type == "cavallari" and cavallari_lif_params is not None:
+                with open(os.path.join(trial_output_dir, "network.pkl"), "wb") as f:
+                    pickle.dump(cavallari_lif_params, f)
 
             example_script_path = os.path.join(run_root, "example_model_simulation.py")
             example_script_lines = [
@@ -5060,11 +5141,20 @@ def _simulation_computation(job_id, job_status, params):
                 "    sim = ncpi.Simulation(param_folder='params', python_folder='python', output_folder=%s)"
                 % repr(trial_output_dir),
                 "",
-                "    # Run the network and simulation scripts (analysis is intentionally skipped)",
-                "    sim.network('network.py', 'network_params.py')",
-                "    sim.simulate('simulation.py', 'simulation_params.py')",
-                "",
             ])
+            if model_type == "cavallari":
+                example_script_lines.extend([
+                    "    # Cavallari stores its network payload in output/network.pkl and runs a single simulation script.",
+                    "    sim.simulate('simulation.py', 'simulation_params.py')",
+                    "",
+                ])
+            else:
+                example_script_lines.extend([
+                    "    # Run the network and simulation scripts (analysis is intentionally skipped)",
+                    "    sim.network('network.py', 'network_params.py')",
+                    "    sim.simulate('simulation.py', 'simulation_params.py')",
+                    "",
+                ])
             example_script = "\n".join(example_script_lines)
             with open(example_script_path, "w", encoding="utf-8") as f:
                 f.write(example_script)
@@ -5201,7 +5291,7 @@ def _simulation_computation_custom(job_id, job_status, params):
         _clear_simulation_grid_metadata_file(output_dir)
 
         example_script_path = os.path.join(temp_run_dir, "example_model_simulation.py")
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        repo_root = _repo_root
         example_script = "\n".join([
             "import os",
             "import sys",
@@ -5537,7 +5627,7 @@ def field_potential_kernel():
     mc_outputs_default = os.path.join(
         mc_models_default, "output", "adb947bfb931a5a8d09ad078a6d256b0"
     )
-    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    repo_root = _repo_root
     kernel_params_default = os.path.join(
         repo_root,
         "examples",
