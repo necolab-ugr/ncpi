@@ -318,6 +318,12 @@ class ParseConfig:
     epoch_length_s: Optional[float] = None
     epoch_step_s: Optional[float] = None
 
+    # Optional temporal segmentation (applied before epoching), in seconds.
+    # Example:
+    #   segment_t0_s=10.0, segment_t1_s=60.0 -> keep only [10, 60]s from each row.
+    segment_t0_s: Optional[float] = None
+    segment_t1_s: Optional[float] = None
+
     # MNE-specific operational options (only used if input is MNE or you load with MNE)
     preload: bool = True
     pick_types: Optional[Dict[str, bool]] = None
@@ -383,6 +389,10 @@ class EphysDatasetParser:
 
         # 1) Parse raw rows (one row per sensor / epoch)
         rows = self._parse_object(obj, source_file=source_file)
+
+        # 1b) Optional temporal segmentation BEFORE z-score/aggregation/epoching
+        rows = self._apply_time_segment_rows(rows)
+
         df = self._rows_to_df(rows)
 
         # 2) Optional z-scoring BEFORE epoching (default behavior)
@@ -1461,6 +1471,11 @@ class EphysDatasetParser:
             )
 
             # Use a string epoch id if base_epoch already exists
+            base_t0 = row.get("t0")
+            try:
+                base_t0 = float(base_t0) if base_t0 is not None else 0.0
+            except Exception:
+                base_t0 = 0.0
             for k, start in enumerate(range(0, x.shape[0] - win + 1, step)):
                 seg = x[start: start + win]
 
@@ -1474,10 +1489,124 @@ class EphysDatasetParser:
                     r["epoch"] = f"{base_epoch}:{k}"
 
                 # time bounds for this epoch
-                r["t0"] = float(start / fs)
-                r["t1"] = float((start + win - 1) / fs)
+                r["t0"] = float(base_t0 + (start / fs))
+                r["t1"] = float(base_t0 + ((start + win - 1) / fs))
 
                 out.append(r)
+
+        return out
+
+    def _apply_time_segment_rows(self, rows: list[dict]) -> list[dict]:
+        """Crop each time-domain row to [segment_t0_s, segment_t1_s] before epoching."""
+        t0_cfg = self.config.segment_t0_s
+        t1_cfg = self.config.segment_t1_s
+        if t0_cfg is None and t1_cfg is None:
+            return rows
+
+        if t0_cfg is not None:
+            t0_cfg = float(t0_cfg)
+        if t1_cfg is not None:
+            t1_cfg = float(t1_cfg)
+        if t0_cfg is not None and t1_cfg is not None and t1_cfg <= t0_cfg:
+            raise ValueError("Temporal segmentation requires segment_t1_s > segment_t0_s.")
+
+        out: list[dict] = []
+        eps = 1e-12
+        for row in rows:
+            data_domain = row.get("data_domain") or "time"
+            if data_domain != "time":
+                out.append(row)
+                continue
+
+            x = row.get("data")
+            if x is None:
+                out.append(row)
+                continue
+            x = np.asarray(x)
+            if x.ndim != 1 or x.size == 0:
+                out.append(row)
+                continue
+
+            n = int(x.shape[0])
+            fs = row.get("fs", None)
+            fs_val: Optional[float] = None
+            try:
+                fs_float = float(fs)
+                if np.isfinite(fs_float) and fs_float > 0:
+                    fs_val = fs_float
+            except Exception:
+                fs_val = None
+
+            row_t0 = row.get("t0", None)
+            row_t1 = row.get("t1", None)
+            try:
+                row_t0_val = float(row_t0) if row_t0 is not None else 0.0
+            except Exception:
+                row_t0_val = 0.0
+            try:
+                row_t1_val = float(row_t1) if row_t1 is not None else None
+            except Exception:
+                row_t1_val = None
+
+            if row_t1_val is None:
+                if fs_val is not None and n > 0:
+                    row_t1_val = float(row_t0_val + (n - 1) / fs_val)
+                else:
+                    # Cannot infer temporal support: keep as-is.
+                    out.append(row)
+                    continue
+
+            seg_t0 = t0_cfg if t0_cfg is not None else row_t0_val
+            seg_t1 = t1_cfg if t1_cfg is not None else row_t1_val
+            # Clip requested interval to this row's support.
+            clip_t0 = max(float(seg_t0), float(row_t0_val))
+            clip_t1 = min(float(seg_t1), float(row_t1_val))
+            if clip_t1 <= clip_t0:
+                # No overlap for this row: drop it.
+                continue
+
+            if fs_val is not None:
+                i0 = int(np.ceil(((clip_t0 - row_t0_val) * fs_val) - eps))
+                i1 = int(np.floor(((clip_t1 - row_t0_val) * fs_val) + eps))
+                i0 = max(0, min(i0, n - 1))
+                i1 = max(0, min(i1, n - 1))
+                if i1 < i0:
+                    continue
+                y = x[i0:i1 + 1]
+                r = dict(row)
+                r["data"] = np.asarray(y)
+                r["t0"] = float(row_t0_val + (i0 / fs_val))
+                r["t1"] = float(row_t0_val + (i1 / fs_val))
+                out.append(r)
+                continue
+
+            # Fallback when fs is missing: infer dt from row t0/t1 and array length.
+            if n <= 1:
+                if clip_t0 <= row_t0_val <= clip_t1:
+                    r = dict(row)
+                    r["data"] = np.asarray(x[:1])
+                    r["t0"] = float(row_t0_val)
+                    r["t1"] = float(row_t0_val)
+                    out.append(r)
+                continue
+
+            dt = (row_t1_val - row_t0_val) / float(n - 1)
+            if not np.isfinite(dt) or dt <= 0:
+                out.append(row)
+                continue
+
+            i0 = int(np.ceil(((clip_t0 - row_t0_val) / dt) - eps))
+            i1 = int(np.floor(((clip_t1 - row_t0_val) / dt) + eps))
+            i0 = max(0, min(i0, n - 1))
+            i1 = max(0, min(i1, n - 1))
+            if i1 < i0:
+                continue
+            y = x[i0:i1 + 1]
+            r = dict(row)
+            r["data"] = np.asarray(y)
+            r["t0"] = float(row_t0_val + i0 * dt)
+            r["t1"] = float(row_t0_val + i1 * dt)
+            out.append(r)
 
         return out
 
