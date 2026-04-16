@@ -1,3 +1,5 @@
+"""Plot simulation features using data from the first Hagen dataset version."""
+
 import os
 import numpy as np
 import pandas as pd
