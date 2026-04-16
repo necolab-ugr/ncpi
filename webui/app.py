@@ -3738,12 +3738,26 @@ def _build_parse_config_from_form(form):
     segment_t1_s = _optional_float(form.get("parser_segment_t1_s"))
     if epoching_enabled and (epoch_length_s is None or epoch_step_s is None):
         raise ValueError("Epoching is enabled. Provide both epoch length and epoch step in seconds.")
+    if segment_t0_s is not None and float(segment_t0_s) < 0:
+        raise ValueError("Temporal segmentation start time must be non-negative.")
+    if segment_t1_s is not None and float(segment_t1_s) < 0:
+        raise ValueError("Temporal segmentation end time must be non-negative.")
     if (
         segment_t0_s is not None
         and segment_t1_s is not None
         and float(segment_t1_s) <= float(segment_t0_s)
     ):
         raise ValueError("Temporal segmentation requires end time > start time.")
+    if (
+        epoching_enabled
+        and epoch_length_s is not None
+        and segment_t0_s is not None
+        and segment_t1_s is not None
+        and (float(segment_t1_s) - float(segment_t0_s)) < float(epoch_length_s)
+    ):
+        raise ValueError(
+            "When epoching is enabled, temporal segmentation window must be at least as long as epoch length."
+        )
 
     aggregate_over = None
     aggregate_method = "sum"
@@ -3832,11 +3846,6 @@ def _build_parse_config_from_form(form):
             array_axes["epochs"] = axis_epochs
         if axis_ids >= 0:
             array_axes["ids"] = axis_ids
-            # Data is already pre-epoched: disable parser-level epoching
-        if axis_epochs >= 0:
-            epoching_enabled = False
-            epoch_length_s = None
-            epoch_step_s = None
 
     sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
     ch_names_source = (form.get("parser_ch_names_source") or "").strip()
@@ -9957,8 +9966,10 @@ def start_computation_redirect(computation_type):
             flash('Select the data locator for EphysDatasetParser.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
         epoching_enabled = str(request.form.get("parser_enable_epoching", "")).lower() in {"1", "true", "on", "yes"}
+        epoch_length_value = None
         if epoching_enabled:
-            if _optional_float(request.form.get("parser_epoch_length_s")) is None:
+            epoch_length_value = _optional_float(request.form.get("parser_epoch_length_s"))
+            if epoch_length_value is None:
                 flash('Set an epoch length in seconds.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
             if _optional_float(request.form.get("parser_epoch_step_s")) is None:
@@ -9966,12 +9977,27 @@ def start_computation_redirect(computation_type):
                 return redirect(request.referrer or url_for('features_methods'))
         seg_t0 = _optional_float(request.form.get("parser_segment_t0_s"))
         seg_t1 = _optional_float(request.form.get("parser_segment_t1_s"))
+        if seg_t0 is not None and float(seg_t0) < 0:
+            flash('Temporal segmentation start time must be non-negative.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
+        if seg_t1 is not None and float(seg_t1) < 0:
+            flash('Temporal segmentation end time must be non-negative.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
         if (
             seg_t0 is not None
             and seg_t1 is not None
             and float(seg_t1) <= float(seg_t0)
         ):
             flash('Temporal segmentation requires end time greater than start time.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
+        if (
+            epoching_enabled
+            and epoch_length_value is not None
+            and seg_t0 is not None
+            and seg_t1 is not None
+            and (float(seg_t1) - float(seg_t0)) < float(epoch_length_value)
+        ):
+            flash('Segment duration must be at least as long as epoch length when epoching is enabled.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
 
         if data_source_kind == "pipeline":

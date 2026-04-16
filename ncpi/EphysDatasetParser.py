@@ -385,6 +385,17 @@ class EphysDatasetParser:
         Parse a source (path or in-memory object) into a pandas DataFrame
         with DEFAULT_COLUMNS.
         """
+        if (
+            self.config.epoch_length_s is not None
+            and self.config.segment_t0_s is not None
+            and self.config.segment_t1_s is not None
+        ):
+            seg_len = float(self.config.segment_t1_s) - float(self.config.segment_t0_s)
+            if seg_len < float(self.config.epoch_length_s):
+                raise ValueError(
+                    "Temporal segmentation window must be at least as long as epoch_length_s when epoching is enabled."
+                )
+
         obj, source_file = self._load_source(source)
 
         # 1) Parse raw rows (one row per sensor / epoch)
@@ -1507,10 +1518,16 @@ class EphysDatasetParser:
             t0_cfg = float(t0_cfg)
         if t1_cfg is not None:
             t1_cfg = float(t1_cfg)
+        if t0_cfg is not None and t0_cfg < 0:
+            raise ValueError("Temporal segmentation requires non-negative segment_t0_s.")
+        if t1_cfg is not None and t1_cfg < 0:
+            raise ValueError("Temporal segmentation requires non-negative segment_t1_s.")
         if t0_cfg is not None and t1_cfg is not None and t1_cfg <= t0_cfg:
             raise ValueError("Temporal segmentation requires segment_t1_s > segment_t0_s.")
 
         out: list[dict] = []
+        has_segmentable_time_row = False
+        has_overlapping_time_row = False
         eps = 1e-12
         for row in rows:
             data_domain = row.get("data_domain") or "time"
@@ -1556,6 +1573,7 @@ class EphysDatasetParser:
                     out.append(row)
                     continue
 
+            has_segmentable_time_row = True
             seg_t0 = t0_cfg if t0_cfg is not None else row_t0_val
             seg_t1 = t1_cfg if t1_cfg is not None else row_t1_val
             # Clip requested interval to this row's support.
@@ -1578,6 +1596,7 @@ class EphysDatasetParser:
                 r["t0"] = float(row_t0_val + (i0 / fs_val))
                 r["t1"] = float(row_t0_val + (i1 / fs_val))
                 out.append(r)
+                has_overlapping_time_row = True
                 continue
 
             # Fallback when fs is missing: infer dt from row t0/t1 and array length.
@@ -1588,6 +1607,7 @@ class EphysDatasetParser:
                     r["t0"] = float(row_t0_val)
                     r["t1"] = float(row_t0_val)
                     out.append(r)
+                    has_overlapping_time_row = True
                 continue
 
             dt = (row_t1_val - row_t0_val) / float(n - 1)
@@ -1607,6 +1627,12 @@ class EphysDatasetParser:
             r["t0"] = float(row_t0_val + i0 * dt)
             r["t1"] = float(row_t0_val + i1 * dt)
             out.append(r)
+            has_overlapping_time_row = True
+
+        if has_segmentable_time_row and not has_overlapping_time_row:
+            raise ValueError(
+                "Temporal segmentation window does not overlap with any time-domain samples in the loaded data."
+            )
 
         return out
 
