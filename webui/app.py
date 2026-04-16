@@ -3851,11 +3851,14 @@ def _build_parse_config_from_form(form):
     sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
     ch_names_source = (form.get("parser_ch_names_source") or "").strip()
     ch_names_locator = (form.get("parser_ch_names_locator") or "").strip() or None
-    ch_names_autocomplete_axis = _parse_nonnegative_int(
-        form.get("parser_ch_names_autocomplete_axis"),
-        default=0,
-        field_name="Autocomplete channel axis",
-    )
+    if array_axes is not None and "channels" in array_axes:
+        ch_names_autocomplete_axis = int(array_axes.get("channels", 0))
+    else:
+        ch_names_autocomplete_axis = _parse_nonnegative_int(
+            form.get("parser_ch_names_autocomplete_axis"),
+            default=0,
+            field_name="Autocomplete channel axis",
+        )
     if ch_names_source == "__manual__":
         if sensor_names is None:
             raise ValueError("Provide manual channel names when channel names source is set to manual.")
@@ -10141,11 +10144,19 @@ def start_computation_redirect(computation_type):
                     return redirect(request.referrer or url_for('features_methods'))
             elif ch_names_source == "__autocomplete__":
                 try:
-                    _parse_nonnegative_int(
-                        request.form.get("parser_ch_names_autocomplete_axis"),
-                        default=0,
-                        field_name="Autocomplete channel axis",
-                    )
+                    array_axes_enabled = str(request.form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
+                    if array_axes_enabled:
+                        _parse_nonnegative_int(
+                            request.form.get("parser_axis_channels"),
+                            default=0,
+                            field_name="Channels axis",
+                        )
+                    else:
+                        _parse_nonnegative_int(
+                            request.form.get("parser_ch_names_autocomplete_axis"),
+                            default=0,
+                            field_name="Autocomplete channel axis",
+                        )
                 except Exception as exc:
                     flash(str(exc), 'error')
                     return redirect(request.referrer or url_for('features_methods'))
@@ -11391,7 +11402,7 @@ def get_status(job_id):
 
 @app.route("/preview_results/<job_id>")
 def preview_results(job_id):
-    """Returns the first rows of the result DataFrame as JSON for in-UI preview."""
+    """Returns paginated rows of the result DataFrame for in-UI exploration."""
     status = job_status.get(job_id)
     if not status or status.get("status") != "finished" or not status.get("results"):
         return jsonify({"error": "Results not available"}), 404
@@ -11408,6 +11419,25 @@ def preview_results(job_id):
             df = pd.read_pickle(path)
         if not isinstance(df, pd.DataFrame):
             return jsonify({"error": "Result is not a DataFrame"}), 400
+
+        # Query controls
+        page_raw = request.args.get("page", 1)
+        page_size_raw = request.args.get("page_size", 20)
+        search_query = (request.args.get("search") or "").strip()
+        sort_col = (request.args.get("sort_col") or "").strip()
+        sort_dir = (request.args.get("sort_dir") or "asc").strip().lower()
+        if sort_dir not in {"asc", "desc"}:
+            sort_dir = "asc"
+        try:
+            page = int(page_raw)
+        except Exception:
+            page = 1
+        try:
+            page_size = int(page_size_raw)
+        except Exception:
+            page_size = 20
+        page = max(1, page)
+        page_size = max(5, min(200, page_size))
 
         def _format_preview_value(value):
             if isinstance(value, np.ndarray):
@@ -11436,14 +11466,56 @@ def preview_results(job_id):
                 pass
             return str(value)
 
-        preview = df.head(20).copy()
+        # Optional full-text filter across all columns
+        filtered_df = df
+        if search_query:
+            search_lower = search_query.lower()
+            mask = pd.Series(False, index=df.index)
+            for col in df.columns:
+                series = df[col]
+                try:
+                    col_mask = series.astype(str).str.contains(search_query, case=False, na=False, regex=False)
+                except Exception:
+                    col_mask = series.map(lambda value: search_lower in str(value).lower() if value is not None else False)
+                mask = mask | col_mask
+            filtered_df = df.loc[mask]
+
+        # Optional sorting
+        sort_applied = ""
+        if sort_col and sort_col in filtered_df.columns:
+            try:
+                filtered_df = filtered_df.sort_values(
+                    by=sort_col,
+                    ascending=(sort_dir != "desc"),
+                    kind="mergesort",
+                    na_position="last",
+                )
+                sort_applied = sort_col
+            except Exception:
+                sort_applied = ""
+
+        total_rows = len(df)
+        filtered_rows = len(filtered_df)
+        total_pages = max(1, (filtered_rows + page_size - 1) // page_size)
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * page_size
+        stop = start + page_size
+        preview = filtered_df.iloc[start:stop].copy()
         for col in preview.columns:
             preview[col] = preview[col].map(_format_preview_value)
         return jsonify({
             "columns": list(preview.columns),
             "rows": preview.values.tolist(),
-            "total_rows": len(df),
+            "total_rows": total_rows,
+            "filtered_rows": filtered_rows,
             "total_cols": len(df.columns),
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "search": search_query,
+            "sort_col": sort_applied,
+            "sort_dir": sort_dir if sort_applied else "asc",
             "dropped_cols": [],
         })
     except Exception as exc:
