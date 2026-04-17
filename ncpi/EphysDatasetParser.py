@@ -722,12 +722,6 @@ class EphysDatasetParser:
         f = self.config.fields
 
         data = self._resolve(d, f.data)
-        # If data is a list (the result of multiple structures), take the first element
-        if isinstance(data, list):
-            if data:
-                data = data[0]
-            else:
-                data = None
 
         fs = self._resolve(d, f.fs)
         # Handle a possible list that comes from a struct array
