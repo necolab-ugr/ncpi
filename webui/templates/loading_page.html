@@ -77,38 +77,79 @@
     </div>
     {% endif %}
 
-    <!-- DataFrame preview (shown when finished and preview data is available) -->
+    <!-- DataFrame explorer (shown when finished and preview data is available) -->
     <div x-show="computationType !== 'simulation' && status === 'finished' && (previewColumns.length > 0 || previewError)"
-         class="w-full mt-6 space-y-2">
-        <div class="flex items-center justify-between text-xs text-text-light-secondary dark:text-[#929bc9]">
-            <span class="font-semibold lowercase tracking-wide">result preview</span>
-            <span x-show="previewTotalRows !== null"
-                  class="text-[11px]"
-                  x-text="`showing up to 20 of ${previewTotalRows} rows · ${previewTotalCols} columns`"></span>
+         class="w-full mt-6 space-y-3">
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-xs text-text-light-secondary dark:text-[#929bc9]">
+            <span class="font-semibold lowercase tracking-wide">result explorer</span>
+            <span x-show="previewTotalRows !== null" class="text-[11px]" x-text="previewSummaryText()"></span>
         </div>
+
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+            <div class="text-xs text-slate-500 dark:text-slate-400">
+                Click a column name to sort ascending/descending.
+            </div>
+            <div class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                <span>Rows/page</span>
+                <select x-model="previewPageSize" @change="onPreviewPageSizeChange()"
+                    class="h-9 px-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs">
+                    <option value="20">20</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                </select>
+            </div>
+        </div>
+
+        <div x-show="previewLoading" class="text-xs text-slate-500 dark:text-slate-400">Loading table...</div>
         <div x-show="previewError" class="text-xs text-red-500 dark:text-red-400" x-text="previewError"></div>
-        <div x-show="previewColumns.length > 0"
-             class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+
+        <div x-show="previewColumns.length > 0" class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
             <table class="min-w-full text-xs font-mono">
                 <thead class="bg-slate-100 dark:bg-slate-800 sticky top-0">
                     <tr>
                         <template x-for="col in previewColumns" :key="'th-'+col">
-                            <th class="px-3 py-1.5 text-left text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap border-b border-slate-200 dark:border-slate-700"
-                                x-text="col"></th>
+                            <th class="px-3 py-1.5 text-left text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap border-b border-slate-200 dark:border-slate-700">
+                                <button type="button" @click="togglePreviewSort(col)"
+                                    class="inline-flex items-center gap-1 hover:text-primary">
+                                    <span x-text="col"></span>
+                                    <span class="text-[10px]" x-show="previewSortCol === col" x-text="previewSortDir === 'desc' ? '▼' : '▲'"></span>
+                                </button>
+                            </th>
                         </template>
                     </tr>
                 </thead>
                 <tbody>
+                    <template x-if="previewRows.length === 0">
+                        <tr>
+                            <td :colspan="previewColumns.length || 1" class="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                No rows available.
+                            </td>
+                        </tr>
+                    </template>
                     <template x-for="(row, ri) in previewRows" :key="'tr-'+ri">
                         <tr :class="ri % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800/50'">
                             <template x-for="(cell, ci) in row" :key="'td-'+ri+'-'+ci">
-                                <td class="px-3 py-1 text-slate-700 dark:text-slate-300 whitespace-nowrap max-w-[200px] truncate border-b border-slate-100 dark:border-slate-800"
+                                <td class="px-3 py-1 text-slate-700 dark:text-slate-300 whitespace-nowrap max-w-[240px] truncate border-b border-slate-100 dark:border-slate-800"
                                     x-text="cell"></td>
                             </template>
                         </tr>
                     </template>
                 </tbody>
             </table>
+        </div>
+
+        <div x-show="previewColumns.length > 0" class="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+            <span x-text="previewPageLabel()"></span>
+            <div class="flex items-center gap-2">
+                <button type="button" @click="changePreviewPage(-1)" :disabled="previewPage <= 1 || previewLoading"
+                    class="h-8 px-3 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800">
+                    Previous
+                </button>
+                <button type="button" @click="changePreviewPage(1)" :disabled="previewPage >= previewTotalPages || previewLoading"
+                    class="h-8 px-3 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800">
+                    Next
+                </button>
+            </div>
         </div>
     </div>
 
@@ -211,7 +252,14 @@ document.addEventListener('alpine:init', () => {
         previewRows: [],
         previewTotalRows: null,
         previewTotalCols: null,
+        previewPage: 1,
+        previewPageSize: '20',
+        previewTotalPages: 1,
+        previewSortCol: '',
+        previewSortDir: 'asc',
+        previewLoading: false,
         previewError: null,
+        previewRequestId: 0,
         
         init() {
             this.startTime = Date.now();
@@ -287,6 +335,11 @@ document.addEventListener('alpine:init', () => {
                             this.previewRows = [];
                             this.previewTotalRows = null;
                             this.previewTotalCols = null;
+                            this.previewPage = 1;
+                            this.previewTotalPages = 1;
+                            this.previewSortCol = '';
+                            this.previewSortDir = 'asc';
+                            this.previewLoading = false;
                             this.previewError = null;
                         }
                         // Polling stops automatically here as it doesn't set a new timeout
@@ -325,21 +378,85 @@ document.addEventListener('alpine:init', () => {
             const encodedType = encodeURIComponent(this.computationType || '');
             window.location.href = `/download_results/${encodedJobId}?computation_type=${encodedType}`;
         },
+        previewSummaryText() {
+            if (this.previewTotalRows === null) return '';
+            return `${this.previewTotalRows} rows · ${this.previewTotalCols} columns`;
+        },
+        previewPageLabel() {
+            const total = Number(this.previewTotalPages || 1);
+            const page = Number(this.previewPage || 1);
+            return `Page ${page} of ${Math.max(1, total)}`;
+        },
+        onPreviewPageSizeChange() {
+            const parsed = Number.parseInt(String(this.previewPageSize || '20'), 10);
+            const clamped = Number.isFinite(parsed) ? Math.max(5, Math.min(200, parsed)) : 20;
+            this.previewPageSize = String(clamped);
+            this.previewPage = 1;
+            this.fetchPreview();
+        },
+        togglePreviewSort(col) {
+            const column = String(col || '').trim();
+            if (!column) return;
+            if (this.previewSortCol === column) {
+                this.previewSortDir = this.previewSortDir === 'asc' ? 'desc' : 'asc';
+            } else {
+                this.previewSortCol = column;
+                this.previewSortDir = 'asc';
+            }
+            this.previewPage = 1;
+            this.fetchPreview();
+        },
+        changePreviewPage(delta) {
+            if (this.previewLoading) return;
+            const step = Number.parseInt(String(delta || 0), 10);
+            if (!Number.isFinite(step) || step === 0) return;
+            const nextPage = Number(this.previewPage || 1) + step;
+            const minPage = 1;
+            const maxPage = Math.max(1, Number(this.previewTotalPages || 1));
+            if (nextPage < minPage || nextPage > maxPage) return;
+            this.previewPage = nextPage;
+            this.fetchPreview();
+        },
         async fetchPreview() {
             if (!this.jobId) return;
+            const requestId = (this.previewRequestId || 0) + 1;
+            this.previewRequestId = requestId;
+            this.previewLoading = true;
+            this.previewError = null;
             try {
-                const resp = await fetch(`/preview_results/${encodeURIComponent(this.jobId)}`, {
+                const params = new URLSearchParams();
+                params.set('page', String(this.previewPage || 1));
+                params.set('page_size', String(this.previewPageSize || '20'));
+                if (this.previewSortCol) {
+                    params.set('sort_col', this.previewSortCol);
+                    params.set('sort_dir', this.previewSortDir || 'asc');
+                }
+                const resp = await fetch(`/preview_results/${encodeURIComponent(this.jobId)}?${params.toString()}`, {
                     cache: 'no-store',
                     headers: { 'X-Requested-With': 'XMLHttpRequest' },
                 });
                 const data = await resp.json();
-                if (data.error) { this.previewError = data.error; return; }
+                if (requestId !== this.previewRequestId) return;
+                if (data.error) {
+                    this.previewError = data.error;
+                    return;
+                }
                 this.previewColumns = data.columns || [];
                 this.previewRows = data.rows || [];
                 this.previewTotalRows = data.total_rows;
                 this.previewTotalCols = data.total_cols;
+                this.previewPage = Number(data.page || 1);
+                this.previewPageSize = String(data.page_size || this.previewPageSize || '20');
+                this.previewTotalPages = Number(data.total_pages || 1);
+                this.previewSortCol = data.sort_col || '';
+                this.previewSortDir = data.sort_dir || 'asc';
             } catch (e) {
+                if (requestId !== this.previewRequestId) return;
                 this.previewError = e && e.message ? e.message : 'Could not load preview.';
+            } finally {
+                if (requestId === this.previewRequestId) {
+                    this.previewLoading = false;
+                }
             }
         },
         async cancelComputation() {

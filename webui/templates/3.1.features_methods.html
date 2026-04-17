@@ -2141,7 +2141,9 @@
                         ? `[${sensors.map((s) => toPyString(s)).join(', ')}]`
                         : '[]';
                 } else if (chSource === '__autocomplete__') {
-                    const axis = Number.parseInt(String(this.parserChNamesAutocompleteAxis || '0'), 10);
+                    const axis = this.parserArrayAxesEnabled
+                        ? Number.parseInt(String(this.parserAxisChannels || '0'), 10)
+                        : 0;
                     const axisValue = Number.isFinite(axis) && axis >= 0 ? axis : 0;
                     const locatorExpr = dataLocator === '__self__' ? 'data' : `data.${dataLocator}`;
                     chNamesExpr = `[f"ch{i}" for i in range(${locatorExpr}.shape[${axisValue}])]`;
@@ -3400,7 +3402,7 @@
                                         </label>
                                     </div>
 
-                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
+                                    <div class="grid grid-cols-1 gap-4 items-end">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
@@ -3411,14 +3413,9 @@
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
-                                        </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
-                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
-                                                min="0" max="4" step="1" inputmode="numeric"
-                                                :disabled="parserChNamesSource !== '__autocomplete__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                                placeholder="0-4">
+                                            <span class="block text-[11px] text-gray-400 mt-1">
+                                                Autocomplete uses Channels axis from "Specify array dimension mapping" (defaults to Dim 0 if mapping is off).
+                                            </span>
                                         </label>
                                     </div>
                                     <input type="hidden" name="parser_fs_locator"
@@ -3589,7 +3586,8 @@
                                         </label>
                                     </div>
                                     <p class="text-xs text-gray-500 dark:text-gray-400">
-                                        Optional temporal segmentation applied before epoching. Leave empty to use the full signal.
+                                        Optional temporal segmentation applied before epoching. Leave both empty to use the full signal.
+                                        Set only start time (t0) to keep data from t0 to the end, or only end time (t1) to keep data from the beginning to t1.
                                     </p>
                                     <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400" x-text="segmentValidationError()"></p>
 
@@ -3705,7 +3703,7 @@
                                         </label>
                                     </div>
 
-                                    <div class="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_8rem] gap-4 items-end">
+                                    <div class="grid grid-cols-1 gap-4 items-end">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
@@ -3716,14 +3714,9 @@
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
-                                        </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Autocomplete channel axis</span>
-                                            <input type="number" name="parser_ch_names_autocomplete_axis" x-model="parserChNamesAutocompleteAxis"
-                                                min="0" max="4" step="1" inputmode="numeric"
-                                                :disabled="parserChNamesSource !== '__autocomplete__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
-                                                placeholder="0-4">
+                                            <span class="block text-[11px] text-gray-400 mt-1">
+                                                Autocomplete uses Channels axis from "Specify array dimension mapping" (defaults to Dim 0 if mapping is off).
+                                            </span>
                                         </label>
                                     </div>
                                     <input type="hidden" name="parser_fs_locator"
@@ -3837,7 +3830,8 @@
                                     </label>
                                 </div>
                                 <p class="text-xs text-gray-500 dark:text-gray-400">
-                                    Optional temporal segmentation applied before epoching. Leave empty to use the full signal.
+                                    Optional temporal segmentation applied before epoching. Leave both empty to use the full signal.
+                                    Set only start time (t0) to keep data from t0 to the end, or only end time (t1) to keep data from the beginning to t1.
                                 </p>
                                 <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400" x-text="segmentValidationError()"></p>
 
