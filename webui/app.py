@@ -5572,6 +5572,11 @@ def field_potential_load_precomputed():
     }
 
     inputs = []
+    if source_mode == "auto-detected":
+        if not _list_field_potential_detected_files():
+            flash("No detected field potential files are available from previous steps.", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+        return redirect(request.referrer or url_for("field_potential_load"))
     if source_mode == "server-path":
         if not server_file_paths:
             flash("Select at least one server field potential file (.pkl/.pickle).", "error")
@@ -10451,13 +10456,25 @@ def start_computation_redirect(computation_type):
 
         has_uploaded_features = _has_upload("features_predict_file", "features_predict", "file-upload-features")
         has_server_features_path = bool(features_server_file_path)
-        if inference_features_source_mode not in {"upload", "server-path"}:
-            inference_features_source_mode = "server-path" if has_server_features_path else "upload"
-        # Fallback: infer source mode from provided fields when UI mode sync fails.
-        if inference_features_source_mode == "upload" and not has_uploaded_features and has_server_features_path:
+        if inference_features_source_mode not in {"upload", "server-path", "auto-detected"}:
+            if has_existing_features:
+                inference_features_source_mode = "auto-detected"
+            elif has_server_features_path:
+                inference_features_source_mode = "server-path"
+            else:
+                inference_features_source_mode = "upload"
+        # Compatibility fallback when old UI states are posted.
+        if inference_features_source_mode == "upload" and not has_uploaded_features and has_existing_features and not has_server_features_path:
+            inference_features_source_mode = "auto-detected"
+        if inference_features_source_mode == "upload" and not has_uploaded_features and has_server_features_path and not has_existing_features:
             inference_features_source_mode = "server-path"
-        if inference_features_source_mode == "server-path" and not has_server_features_path and has_uploaded_features:
-            inference_features_source_mode = "upload"
+        if inference_features_source_mode == "server-path" and not has_server_features_path and has_existing_features and not has_uploaded_features:
+            inference_features_source_mode = "auto-detected"
+        if inference_features_source_mode == "auto-detected" and not has_existing_features:
+            if has_server_features_path and not has_uploaded_features:
+                inference_features_source_mode = "server-path"
+            elif has_uploaded_features:
+                inference_features_source_mode = "upload"
 
         if inference_features_source_mode == "server-path":
             try:
@@ -10468,9 +10485,13 @@ def start_computation_redirect(computation_type):
             except Exception as exc:
                 flash(str(exc), 'error')
                 return redirect(request.referrer or url_for('inference'))
+        elif inference_features_source_mode == "auto-detected":
+            if not has_existing_features:
+                flash('No auto-detected features dataframe is available from previous steps.', 'error')
+                return redirect(request.referrer or url_for('inference'))
         else:
-            if not has_uploaded_features and not has_existing_features:
-                flash('Upload features data or use an auto-loaded features file.', 'error')
+            if not has_uploaded_features:
+                flash('Upload features data or switch to Server file / Pipeline detection.', 'error')
                 return redirect(request.referrer or url_for('inference'))
 
         has_uploaded_model = _has_upload("model_file", "model-file", "file-upload-model")

@@ -504,10 +504,22 @@ function setupUploadZones() {
             }
         };
 
+        const hideUploadedBox = () => {
+            if (!uploadedBox || !uploadedName) return;
+            uploadedName.textContent = '';
+            uploadedBox.classList.add('hidden');
+            if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
+        };
+
         const isServerPathMode = () => {
             if (!sourceModeInput) return false;
             const value = String(sourceModeInput.value || '').trim().toLowerCase();
             return value === 'server-path';
+        };
+        const isAutoDetectedMode = () => {
+            if (!sourceModeInput) return false;
+            const value = String(sourceModeInput.value || '').trim().toLowerCase();
+            return value === 'auto-detected';
         };
 
         if (!sourceModeInput || !serverPathInput) {
@@ -522,23 +534,30 @@ function setupUploadZones() {
 
         const controls = document.createElement('div');
         controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
+        const hasDetectedDefault = Boolean(defaultName);
         controls.innerHTML = `
+            <button type="button" data-upload-action="true" class="proxy-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
             <button type="button" data-upload-action="true" class="proxy-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
             <button type="button" data-upload-action="true" class="proxy-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
         `;
         zone.insertBefore(controls, zone.firstChild);
 
+        const autoBtn = controls.querySelector('.proxy-upload-auto');
         const localBtn = controls.querySelector('.proxy-upload-local');
         const serverBtn = controls.querySelector('.proxy-upload-server');
 
         const applyModeVisuals = (mode) => {
             const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
             const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-            [localBtn, serverBtn].forEach((btn) => {
+            [autoBtn, localBtn, serverBtn].forEach((btn) => {
+                if (!btn) return;
                 btn.classList.remove(...activeClasses);
                 btn.classList.add(...inactiveClasses);
             });
-            if (mode === 'server-path') {
+            if (mode === 'auto-detected' && autoBtn) {
+                autoBtn.classList.add(...activeClasses);
+                autoBtn.classList.remove(...inactiveClasses);
+            } else if (mode === 'server-path') {
                 serverBtn.classList.add(...activeClasses);
                 serverBtn.classList.remove(...inactiveClasses);
             } else {
@@ -561,7 +580,25 @@ function setupUploadZones() {
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
-                    syncUploadedBoxToDefault();
+                    hideUploadedBox();
+                }
+            }
+        };
+
+        const syncAutoDetectedUi = () => {
+            if (filename) {
+                filename.textContent = hasDetectedDefault ? defaultName : 'No detected default file';
+            }
+            if (uploadedBox && uploadedName) {
+                if (hasDetectedDefault && !isDefaultIgnored()) {
+                    uploadedName.textContent = defaultName;
+                    if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
+                    uploadedBox.classList.remove('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
+                } else {
+                    uploadedName.textContent = '';
+                    uploadedBox.classList.add('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.add('hidden');
                 }
             }
         };
@@ -580,21 +617,25 @@ function setupUploadZones() {
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
-                    syncUploadedBoxToDefault();
+                    hideUploadedBox();
                 }
             }
         };
 
         const setMode = (mode) => {
-            const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+            const normalized = String(mode || '').trim().toLowerCase();
+            const nextMode = normalized === 'server-path'
+                ? 'server-path'
+                : (normalized === 'auto-detected' ? 'auto-detected' : 'upload');
             sourceModeInput.value = nextMode;
             applyModeVisuals(nextMode);
             zone.classList.remove('border-primary', 'bg-primary/5');
-            if (nextMode === 'upload') {
-                serverPathInput.value = '';
+            if (nextMode === 'auto-detected') {
+                setDefaultIgnored(false);
+                syncAutoDetectedUi();
+            } else if (nextMode === 'upload') {
                 syncLocalSelectionUi();
             } else {
-                input.value = '';
                 syncServerSelectionUi();
             }
         };
@@ -621,6 +662,14 @@ function setupUploadZones() {
             localBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 setMode('upload');
+                notifyNuExtTrialDetection();
+            });
+        }
+        if (autoBtn) {
+            autoBtn.addEventListener('click', (event) => {
+                event.stopPropagation();
+                if (!hasDetectedDefault) return;
+                setMode('auto-detected');
                 notifyNuExtTrialDetection();
             });
         }
@@ -652,15 +701,19 @@ function setupUploadZones() {
             if (event.target && event.target.closest('[data-upload-action]')) {
                 return;
             }
-            if (isServerPathMode()) {
+            const mode = String(sourceModeInput.value || '').trim().toLowerCase();
+            if (mode === 'server-path') {
                 openServerPicker();
+                return;
+            }
+            if (mode === 'auto-detected') {
                 return;
             }
             input.click();
         });
         zone.addEventListener('dragover', (event) => {
             event.preventDefault();
-            if (isServerPathMode()) {
+            if (isServerPathMode() || isAutoDetectedMode()) {
                 return;
             }
             zone.classList.add('border-primary', 'bg-primary/5');
@@ -670,7 +723,7 @@ function setupUploadZones() {
         });
         zone.addEventListener('drop', (event) => {
             event.preventDefault();
-            if (isServerPathMode()) {
+            if (isServerPathMode() || isAutoDetectedMode()) {
                 return;
             }
             zone.classList.remove('border-primary', 'bg-primary/5');
@@ -700,14 +753,21 @@ function setupUploadZones() {
             if (selectedServerPath) {
                 return { fileKey, kind: 'server', path: selectedServerPath };
             }
-            if (defaultName && !isDefaultIgnored()) {
+            const mode = String(sourceModeInput.value || '').trim().toLowerCase();
+            if ((mode === 'auto-detected' || mode === 'upload') && defaultName && !isDefaultIgnored()) {
                 return { fileKey, kind: 'default', useDefault: true };
             }
             return null;
         });
 
         const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
-        setMode(initialMode === 'server-path' ? 'server-path' : defaultMode);
+        if (initialMode === 'server-path') {
+            setMode('server-path');
+        } else if (initialMode === 'auto-detected' || (hasDetectedDefault && !isDefaultIgnored())) {
+            setMode('auto-detected');
+        } else {
+            setMode(defaultMode);
+        }
     });
 
     notifyNuExtTrialDetection();

@@ -101,6 +101,7 @@
             dropZone: getElementByIdSafe(cfg.dropZoneId),
             sourceModeInput: getElementByIdSafe(cfg.sourceModeInputId),
             serverPathInput: getElementByIdSafe(cfg.serverPathInputId),
+            modeAutoBtn: getElementByIdSafe(cfg.modeAutoBtnId),
             modeUploadBtn: getElementByIdSafe(cfg.modeUploadBtnId),
             modeServerBtn: getElementByIdSafe(cfg.modeServerBtnId),
             dropZoneHint: getElementByIdSafe(cfg.dropZoneHintId),
@@ -108,6 +109,7 @@
             selectedLocalList: getElementByIdSafe(cfg.selectedLocalListId),
             selectedServerContainer: getElementByIdSafe(cfg.selectedServerContainerId),
             selectedServerList: getElementByIdSafe(cfg.selectedServerListId),
+            selectedDetectedContainer: getElementByIdSafe(cfg.selectedDetectedContainerId),
             modalRoot: getElementByIdSafe(cfg.modalRootId),
             modalPath: getElementByIdSafe(cfg.modalPathId),
             modalEntries: getElementByIdSafe(cfg.modalEntriesId),
@@ -159,6 +161,8 @@
         const localPickerId = String(cfg.localPickerId || cfg.historyKey || cfg.formId || "ncpi_local_picker");
         const fileInputResetOnClick = cfg.fileInputResetOnClick !== false;
         const allowMultipleServerSelection = cfg.allowMultipleServerSelection !== false;
+        const allowAutoDetectedSource = Boolean(cfg.allowAutoDetectedSource);
+        const detectedAvailable = Boolean(cfg.detectedAvailable);
         const noMatchesText = String(cfg.noMatchesText || "No matching files or subdirectories found.");
         const noServerSelectionText = String(cfg.noServerSelectionText || "Select at least one file.");
         const serverListErrorText = String(cfg.serverListErrorText || "Failed to list server files.");
@@ -178,6 +182,7 @@
         ).toLowerCase();
         const loadUploadHintText = String(cfg.uploadHintText || "Drag and drop pkl files or click to browse");
         const loadServerHintText = String(cfg.serverHintText || loadUploadHintText);
+        const loadAutoHintText = String(cfg.autoHintText || "Using detected files from previous steps");
 
         const onLocalError = typeof cfg.onLocalError === "function" ? cfg.onLocalError : null;
         const onLocalErrorClear = typeof cfg.onLocalErrorClear === "function" ? cfg.onLocalErrorClear : null;
@@ -206,6 +211,12 @@
         }
 
         function submitIfReady() {
+            if (sourceMode === "auto-detected") {
+                if (detectedAvailable) {
+                    elements.form.submit();
+                }
+                return;
+            }
             if (sourceMode === "upload" && elements.fileInput.files && elements.fileInput.files.length > 0) {
                 elements.form.submit();
                 return;
@@ -317,27 +328,56 @@
         }
 
         function setSourceMode(mode) {
-            sourceMode = allowServerSource && mode === "server-path" ? "server-path" : "upload";
+            if (allowAutoDetectedSource && detectedAvailable && mode === "auto-detected") {
+                sourceMode = "auto-detected";
+            } else if (allowServerSource && mode === "server-path") {
+                sourceMode = "server-path";
+            } else {
+                sourceMode = "upload";
+            }
             elements.sourceModeInput.value = sourceMode;
             clearLocalError();
 
+            if (elements.modeAutoBtn) {
+                elements.modeAutoBtn.classList.remove(...activeButtonClasses);
+                elements.modeAutoBtn.classList.add(...inactiveButtonClasses);
+            }
             elements.modeUploadBtn.classList.remove(...activeButtonClasses);
             elements.modeUploadBtn.classList.add(...inactiveButtonClasses);
             elements.modeServerBtn.classList.remove(...activeButtonClasses);
             elements.modeServerBtn.classList.add(...inactiveButtonClasses);
 
-            if (sourceMode === "upload") {
+            if (sourceMode === "auto-detected") {
+                if (elements.modeAutoBtn) {
+                    elements.modeAutoBtn.classList.add(...activeButtonClasses);
+                    elements.modeAutoBtn.classList.remove(...inactiveButtonClasses);
+                }
+                elements.dropZoneHint.textContent = loadAutoHintText;
+                elements.selectedLocalContainer.classList.add("hidden");
+                elements.selectedServerContainer.classList.add("hidden");
+                if (elements.selectedDetectedContainer) {
+                    elements.selectedDetectedContainer.classList.remove("hidden");
+                }
+            } else if (sourceMode === "upload") {
                 elements.modeUploadBtn.classList.add(...activeButtonClasses);
                 elements.modeUploadBtn.classList.remove(...inactiveButtonClasses);
                 elements.dropZoneHint.textContent = loadUploadHintText;
                 elements.selectedServerContainer.classList.add("hidden");
-                elements.serverPathInput.value = "";
-                serverBrowserSelectedPaths = [];
+                renderSelectedLocalFiles(elements.fileInput.files || []);
+                if (elements.selectedDetectedContainer) {
+                    elements.selectedDetectedContainer.classList.add("hidden");
+                }
             } else {
                 elements.modeServerBtn.classList.add(...activeButtonClasses);
                 elements.modeServerBtn.classList.remove(...inactiveButtonClasses);
                 elements.dropZoneHint.textContent = loadServerHintText;
-                hideSelectedLocalFiles();
+                elements.selectedLocalContainer.classList.add("hidden");
+                const selectedServerPaths = parseSelectedServerFiles();
+                serverBrowserSelectedPaths = selectedServerPaths.slice();
+                setSelectedServerFiles(selectedServerPaths);
+                if (elements.selectedDetectedContainer) {
+                    elements.selectedDetectedContainer.classList.add("hidden");
+                }
             }
         }
 
@@ -524,7 +564,6 @@
             }
             setInputFiles(selected);
             renderSelectedLocalFiles(selected);
-            setSelectedServerFiles([]);
             submitIfReady();
         }
 
@@ -533,6 +572,9 @@
         });
 
         elements.dropZone.addEventListener("click", () => {
+            if (sourceMode === "auto-detected") {
+                return;
+            }
             if (sourceMode === "upload") {
                 const supportsFsaPicker = typeof window.showOpenFilePicker === "function" && window.isSecureContext;
                 if (!supportsFsaPicker) {
@@ -570,6 +612,21 @@
             event.stopPropagation();
             setSourceMode("server-path");
         });
+
+        if (elements.modeAutoBtn) {
+            if (!(allowAutoDetectedSource && detectedAvailable)) {
+                elements.modeAutoBtn.disabled = true;
+                elements.modeAutoBtn.setAttribute("aria-disabled", "true");
+            }
+            elements.modeAutoBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                if (!(allowAutoDetectedSource && detectedAvailable)) {
+                    return;
+                }
+                setSourceMode("auto-detected");
+                submitIfReady();
+            });
+        }
 
         ["dragenter", "dragover"].forEach((eventName) => {
             elements.dropZone.addEventListener(eventName, (event) => {
@@ -631,7 +688,11 @@
 
         const defaultModeKey = String(cfg.defaultModeKey || "default_simulation_source_mode");
         const runtimeDefault = String(cfg.defaultMode || runtime[defaultModeKey] || "").toLowerCase();
-        setSourceMode(runtimeDefault === "server-path" ? "server-path" : "upload");
+        if (allowAutoDetectedSource && detectedAvailable && runtimeDefault === "auto-detected") {
+            setSourceMode("auto-detected");
+        } else {
+            setSourceMode(runtimeDefault === "server-path" ? "server-path" : "upload");
+        }
 
         return api;
     }

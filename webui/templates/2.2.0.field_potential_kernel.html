@@ -2245,12 +2245,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const controls = document.createElement('div');
         controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
+        const hasDetectedDefault = Boolean(defaultLoadedName);
         controls.innerHTML = `
+            <button type="button" data-kernel-upload-action="true" class="kernel-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
             <button type="button" data-kernel-upload-action="true" class="kernel-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
             <button type="button" data-kernel-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
         `;
         zone.insertBefore(controls, zone.firstChild);
 
+        const autoBtn = controls.querySelector('.kernel-upload-auto');
         const localBtn = controls.querySelector('.kernel-upload-local');
         const serverBtn = controls.querySelector('.kernel-upload-server');
         const hintEl = zone.querySelector('[data-role="hint"]') || zone.querySelector('p.text-\\[10px\\]');
@@ -2293,11 +2296,15 @@ document.addEventListener('DOMContentLoaded', () => {
         const applyModeVisuals = (mode) => {
             const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
             const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-            [localBtn, serverBtn].forEach((btn) => {
+            [autoBtn, localBtn, serverBtn].forEach((btn) => {
+                if (!btn) return;
                 btn.classList.remove(...activeClasses);
                 btn.classList.add(...inactiveClasses);
             });
-            if (mode === 'server-path') {
+            if (mode === 'auto-detected' && autoBtn) {
+                autoBtn.classList.add(...activeClasses);
+                autoBtn.classList.remove(...inactiveClasses);
+            } else if (mode === 'server-path') {
                 serverBtn.classList.add(...activeClasses);
                 serverBtn.classList.remove(...inactiveClasses);
             } else {
@@ -2313,9 +2320,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let fallbackDefaultName = defaultLoadedName;
 
-        const getMode = () => (
-            String(modeInput.value || '').trim().toLowerCase() === 'server-path' ? 'server-path' : 'upload'
-        );
+        const getMode = () => {
+            const mode = String(modeInput.value || '').trim().toLowerCase();
+            if (mode === 'server-path') return 'server-path';
+            if (mode === 'auto-detected') return 'auto-detected';
+            return 'upload';
+        };
 
         const getSelectedLocalFile = () => (
             fileInput.files && fileInput.files[0] ? fileInput.files[0] : null
@@ -2341,7 +2351,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const renderUploadMode = () => {
             const selectedLocal = getSelectedLocalFile();
-            const localName = selectedLocal ? selectedLocal.name : fallbackDefaultName;
+            const localName = selectedLocal ? selectedLocal.name : '';
             setLocalSummary(localName);
         };
 
@@ -2349,19 +2359,39 @@ document.addEventListener('DOMContentLoaded', () => {
             setServerSummary(serverPathInput.value);
         };
 
+        const renderAutoDetectedMode = () => {
+            setLocalSummary(hasDetectedDefault ? fallbackDefaultName : '');
+            if (hintEl) {
+                hintEl.textContent = hasDetectedDefault
+                    ? 'Using detected file from previous steps'
+                    : 'No detected file available';
+            }
+        };
+
         const setMode = (mode) => {
-            const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+            const normalized = String(mode || '').trim().toLowerCase();
+            const nextMode = normalized === 'server-path'
+                ? 'server-path'
+                : (normalized === 'auto-detected' ? 'auto-detected' : 'upload');
             modeInput.value = nextMode;
             applyModeVisuals(nextMode);
-            if (nextMode === 'server-path') {
-                fileInput.value = '';
+            if (nextMode === 'auto-detected') {
+                renderAutoDetectedMode();
+            } else if (nextMode === 'server-path') {
                 renderServerMode();
             } else {
-                serverPathInput.value = '';
                 renderUploadMode();
             }
         };
 
+        if (autoBtn) {
+            autoBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (!hasDetectedDefault) return;
+                setMode('auto-detected');
+            });
+        }
         localBtn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -2400,9 +2430,13 @@ document.addEventListener('DOMContentLoaded', () => {
             if (event.target && event.target.closest('[data-kernel-upload-action]')) {
                 return;
             }
-            if (getMode() === 'server-path') {
+            const mode = getMode();
+            if (mode === 'server-path') {
                 await openServerFileModal(serverPathInput, cfg.extensions, cfg.historyKey || KERNEL_SERVER_FILE_HISTORY_KEY);
                 renderServerMode();
+                return;
+            }
+            if (mode === 'auto-detected') {
                 return;
             }
             fileInput.click();
@@ -2460,10 +2494,17 @@ document.addEventListener('DOMContentLoaded', () => {
             renderServerMode();
         });
 
-        const initialMode = getMode();
+        const initialModeRaw = String(modeInput.value || '').trim().toLowerCase();
+        const initialMode = initialModeRaw === 'auto-detected'
+            ? 'auto-detected'
+            : (initialModeRaw === 'server-path' ? 'server-path' : 'upload');
         applyModeVisuals(initialMode);
         if (initialMode === 'server-path') {
             renderServerMode();
+        } else if (initialMode === 'auto-detected') {
+            renderAutoDetectedMode();
+        } else if (hasDetectedDefault && !getSelectedLocalFile() && !String(serverPathInput.value || '').trim()) {
+            setMode('auto-detected');
         } else {
             renderUploadMode();
         }
