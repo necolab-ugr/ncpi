@@ -725,10 +725,10 @@
         class="flex justify-between items-center gap-4 mt-10 pt-6 border-t border-border-light dark:border-[#323b67]">
         <!-- Previous/Return Button -->
         <template x-if="activeTab === 'create_kernel'">
-            <a href="{{ url_for('dashboard') }}"
+            <a href="{{ url_for('field_potential') }}"
                 class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto text-primary dark:text-white font-bold text-base rounded-lg hover:bg-primary/10 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors border border-primary dark:border-white/50">
                 <span class="material-symbols-outlined">arrow_back</span>
-                Return to ncpi dashboard
+                Back to selection
             </a>
         </template>
         <template x-if="activeTab !== 'create_kernel'">
