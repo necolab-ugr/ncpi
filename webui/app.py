@@ -3835,14 +3835,27 @@ def _build_parse_config_from_form(form):
             axis_ids = int(axis_ids_raw)
         except (ValueError, TypeError):
             raise ValueError("Invalid array axis mapping values. Axes must be integers.")
-        all_axes = [axis_channels, axis_samples]
+        if axis_channels < -1:
+            raise ValueError("Channels axis must be greater than or equal to -1 (None).")
+        if axis_samples < 0:
+            raise ValueError("Samples axis must be greater than or equal to 0.")
+        if axis_epochs < -1:
+            raise ValueError("Trials/Epochs axis must be greater than or equal to -1 (None).")
+        if axis_ids < -1:
+            raise ValueError("IDs axis must be greater than or equal to -1 (None).")
+
+        all_axes = [axis_samples]
+        if axis_channels >= 0:
+            all_axes.append(axis_channels)
         if axis_epochs >= 0:
             all_axes.append(axis_epochs)
         if axis_ids >= 0:
             all_axes.append(axis_ids)
         if len(set(all_axes)) != len(all_axes):
             raise ValueError("Array axis mapping: each dimension can only be assigned to one role.")
-        array_axes = {"channels": axis_channels, "samples": axis_samples}
+        array_axes = {"samples": axis_samples}
+        if axis_channels >= 0:
+            array_axes["channels"] = axis_channels
         if axis_epochs >= 0:
             array_axes["epochs"] = axis_epochs
         if axis_ids >= 0:
@@ -10151,11 +10164,9 @@ def start_computation_redirect(computation_type):
                 try:
                     array_axes_enabled = str(request.form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
                     if array_axes_enabled:
-                        _parse_nonnegative_int(
-                            request.form.get("parser_axis_channels"),
-                            default=0,
-                            field_name="Channels axis",
-                        )
+                        axis_channels_value = int(request.form.get("parser_axis_channels") or 0)
+                        if axis_channels_value < -1:
+                            raise ValueError("Channels axis must be greater than or equal to -1 (None).")
                     else:
                         _parse_nonnegative_int(
                             request.form.get("parser_ch_names_autocomplete_axis"),
