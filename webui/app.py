@@ -3835,14 +3835,27 @@ def _build_parse_config_from_form(form):
             axis_ids = int(axis_ids_raw)
         except (ValueError, TypeError):
             raise ValueError("Invalid array axis mapping values. Axes must be integers.")
-        all_axes = [axis_channels, axis_samples]
+        if axis_channels < -1:
+            raise ValueError("Channels axis must be greater than or equal to -1 (None).")
+        if axis_samples < 0:
+            raise ValueError("Samples axis must be greater than or equal to 0.")
+        if axis_epochs < -1:
+            raise ValueError("Trials/Epochs axis must be greater than or equal to -1 (None).")
+        if axis_ids < -1:
+            raise ValueError("IDs axis must be greater than or equal to -1 (None).")
+
+        all_axes = [axis_samples]
+        if axis_channels >= 0:
+            all_axes.append(axis_channels)
         if axis_epochs >= 0:
             all_axes.append(axis_epochs)
         if axis_ids >= 0:
             all_axes.append(axis_ids)
         if len(set(all_axes)) != len(all_axes):
             raise ValueError("Array axis mapping: each dimension can only be assigned to one role.")
-        array_axes = {"channels": axis_channels, "samples": axis_samples}
+        array_axes = {"samples": axis_samples}
+        if axis_channels >= 0:
+            array_axes["channels"] = axis_channels
         if axis_epochs >= 0:
             array_axes["epochs"] = axis_epochs
         if axis_ids >= 0:
@@ -5572,6 +5585,11 @@ def field_potential_load_precomputed():
     }
 
     inputs = []
+    if source_mode == "auto-detected":
+        if not _list_field_potential_detected_files():
+            flash("No detected field potential files are available from previous steps.", "error")
+            return redirect(request.referrer or url_for("field_potential_load"))
+        return redirect(request.referrer or url_for("field_potential_load"))
     if source_mode == "server-path":
         if not server_file_paths:
             flash("Select at least one server field potential file (.pkl/.pickle).", "error")
@@ -10146,11 +10164,9 @@ def start_computation_redirect(computation_type):
                 try:
                     array_axes_enabled = str(request.form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
                     if array_axes_enabled:
-                        _parse_nonnegative_int(
-                            request.form.get("parser_axis_channels"),
-                            default=0,
-                            field_name="Channels axis",
-                        )
+                        axis_channels_value = int(request.form.get("parser_axis_channels") or 0)
+                        if axis_channels_value < -1:
+                            raise ValueError("Channels axis must be greater than or equal to -1 (None).")
                     else:
                         _parse_nonnegative_int(
                             request.form.get("parser_ch_names_autocomplete_axis"),
@@ -10451,13 +10467,25 @@ def start_computation_redirect(computation_type):
 
         has_uploaded_features = _has_upload("features_predict_file", "features_predict", "file-upload-features")
         has_server_features_path = bool(features_server_file_path)
-        if inference_features_source_mode not in {"upload", "server-path"}:
-            inference_features_source_mode = "server-path" if has_server_features_path else "upload"
-        # Fallback: infer source mode from provided fields when UI mode sync fails.
-        if inference_features_source_mode == "upload" and not has_uploaded_features and has_server_features_path:
+        if inference_features_source_mode not in {"upload", "server-path", "auto-detected"}:
+            if has_existing_features:
+                inference_features_source_mode = "auto-detected"
+            elif has_server_features_path:
+                inference_features_source_mode = "server-path"
+            else:
+                inference_features_source_mode = "upload"
+        # Compatibility fallback when old UI states are posted.
+        if inference_features_source_mode == "upload" and not has_uploaded_features and has_existing_features and not has_server_features_path:
+            inference_features_source_mode = "auto-detected"
+        if inference_features_source_mode == "upload" and not has_uploaded_features and has_server_features_path and not has_existing_features:
             inference_features_source_mode = "server-path"
-        if inference_features_source_mode == "server-path" and not has_server_features_path and has_uploaded_features:
-            inference_features_source_mode = "upload"
+        if inference_features_source_mode == "server-path" and not has_server_features_path and has_existing_features and not has_uploaded_features:
+            inference_features_source_mode = "auto-detected"
+        if inference_features_source_mode == "auto-detected" and not has_existing_features:
+            if has_server_features_path and not has_uploaded_features:
+                inference_features_source_mode = "server-path"
+            elif has_uploaded_features:
+                inference_features_source_mode = "upload"
 
         if inference_features_source_mode == "server-path":
             try:
@@ -10468,9 +10496,13 @@ def start_computation_redirect(computation_type):
             except Exception as exc:
                 flash(str(exc), 'error')
                 return redirect(request.referrer or url_for('inference'))
+        elif inference_features_source_mode == "auto-detected":
+            if not has_existing_features:
+                flash('No auto-detected features dataframe is available from previous steps.', 'error')
+                return redirect(request.referrer or url_for('inference'))
         else:
-            if not has_uploaded_features and not has_existing_features:
-                flash('Upload features data or use an auto-loaded features file.', 'error')
+            if not has_uploaded_features:
+                flash('Upload features data or switch to Server file / Pipeline detection.', 'error')
                 return redirect(request.referrer or url_for('inference'))
 
         has_uploaded_model = _has_upload("model_file", "model-file", "file-upload-model")

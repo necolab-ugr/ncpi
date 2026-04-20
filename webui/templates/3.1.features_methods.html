@@ -2144,9 +2144,13 @@
                     const axis = this.parserArrayAxesEnabled
                         ? Number.parseInt(String(this.parserAxisChannels || '0'), 10)
                         : 0;
-                    const axisValue = Number.isFinite(axis) && axis >= 0 ? axis : 0;
                     const locatorExpr = dataLocator === '__self__' ? 'data' : `data.${dataLocator}`;
-                    chNamesExpr = `[f"ch{i}" for i in range(${locatorExpr}.shape[${axisValue}])]`;
+                    if (this.parserArrayAxesEnabled && Number.isFinite(axis) && axis < 0) {
+                        chNamesExpr = `['ch0']`;
+                    } else {
+                        const axisValue = Number.isFinite(axis) && axis >= 0 ? axis : 0;
+                        chNamesExpr = `[f"ch{i}" for i in range(${locatorExpr}.shape[${axisValue}])]`;
+                    }
                 } else if (chSource) {
                     chNamesExpr = toPyString(chSource);
                 }
@@ -2177,17 +2181,24 @@
                         `        ch_names=${chNamesExpr},`,
                     ];
                     if (this.parserArrayAxesEnabled) {
-                        const axisItems = [
-                            `            'channels': ${Number.parseInt(String(this.parserAxisChannels || '0'), 10)},`,
-                            `            'samples': ${Number.parseInt(String(this.parserAxisSamples || '1'), 10)},`,
-                        ];
+                        const axisItems = [];
+                        const channelsAxis = Number.parseInt(String(this.parserAxisChannels || '-1'), 10);
+                        if (Number.isFinite(channelsAxis) && channelsAxis >= 0) {
+                            axisItems.push(`            'channels': ${channelsAxis},`);
+                        }
+                        const samplesAxis = Number.parseInt(String(this.parserAxisSamples || '1'), 10);
+                        if (Number.isFinite(samplesAxis) && samplesAxis >= 0) {
+                            axisItems.push(`            'samples': ${samplesAxis},`);
+                        }
                         const idsAxis = Number.parseInt(String(this.parserAxisIds || '-1'), 10);
                         const epochsAxis = Number.parseInt(String(this.parserAxisEpochs || '-1'), 10);
                         if (Number.isFinite(idsAxis) && idsAxis >= 0) axisItems.push(`            'ids': ${idsAxis},`);
                         if (Number.isFinite(epochsAxis) && epochsAxis >= 0) axisItems.push(`            'epochs': ${epochsAxis},`);
-                        lines.push('        array_axes={');
-                        lines.push(...axisItems);
-                        lines.push('        },');
+                        if (axisItems.length > 0) {
+                            lines.push('        array_axes={');
+                            lines.push(...axisItems);
+                            lines.push('        },');
+                        }
                     }
                     const metadataEntries = [];
                     if (recordingTypeValue !== 'None') metadataEntries.push(`            'recording_type': ${recordingTypeValue},`);
@@ -2288,17 +2299,24 @@
                     `        ch_names=${chNamesExpr},`,
                 ];
                 if (this.parserArrayAxesEnabled) {
-                    const axisItems = [
-                        `            'channels': ${Number.parseInt(String(this.parserAxisChannels || '0'), 10)},`,
-                        `            'samples': ${Number.parseInt(String(this.parserAxisSamples || '1'), 10)},`,
-                    ];
+                    const axisItems = [];
+                    const channelsAxis = Number.parseInt(String(this.parserAxisChannels || '-1'), 10);
+                    if (Number.isFinite(channelsAxis) && channelsAxis >= 0) {
+                        axisItems.push(`            'channels': ${channelsAxis},`);
+                    }
+                    const samplesAxis = Number.parseInt(String(this.parserAxisSamples || '1'), 10);
+                    if (Number.isFinite(samplesAxis) && samplesAxis >= 0) {
+                        axisItems.push(`            'samples': ${samplesAxis},`);
+                    }
                     const idsAxis = Number.parseInt(String(this.parserAxisIds || '-1'), 10);
                     const epochsAxis = Number.parseInt(String(this.parserAxisEpochs || '-1'), 10);
                     if (Number.isFinite(idsAxis) && idsAxis >= 0) axisItems.push(`            'ids': ${idsAxis},`);
                     if (Number.isFinite(epochsAxis) && epochsAxis >= 0) axisItems.push(`            'epochs': ${epochsAxis},`);
-                    lines.push('        array_axes={');
-                    lines.push(...axisItems);
-                    lines.push('        },');
+                    if (axisItems.length > 0) {
+                        lines.push('        array_axes={');
+                        lines.push(...axisItems);
+                        lines.push('        },');
+                    }
                 }
                 const metadataEntries = [];
                 if (recordingTypeValue !== 'None') metadataEntries.push(`            'recording_type': ${recordingTypeValue},`);
@@ -3328,6 +3346,7 @@
                                                     <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
@@ -3629,6 +3648,7 @@
                                                     <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>

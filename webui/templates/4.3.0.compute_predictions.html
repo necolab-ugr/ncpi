@@ -49,7 +49,7 @@
     id="compute-predictions-root"
     x-data="{
         runtime: (window.__webuiRuntime || {}),
-        featuresSourceMode: 'upload',
+        featuresSourceMode: '{{ "auto-detected" if default_feature_file else "upload" }}',
         featuresServerFilePath: '',
         assetsSourceMode: 'upload',
         assetsServerFolderPath: '',
@@ -137,7 +137,7 @@
             <div class="grid grid-cols-1 gap-6">
                 <div>
                     <input id="existing-features-file" type="hidden" name="existing_features_file" value="{{ default_feature_file | default('') }}">
-                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="upload">
+                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="{{ 'auto-detected' if default_feature_file else 'upload' }}">
                     <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="">
                     <input id="file-upload-features" class="hidden" name="features_predict_file" type="file" />
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -156,6 +156,14 @@
                         id="features-drop-zone"
                         class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                         <div class="flex flex-wrap justify-center gap-2">
+                            <button
+                                id="features-source-auto-btn"
+                                type="button"
+                                class="custom-mode-auto-btn px-3 py-1.5 text-xs rounded-lg border"
+                                {% if not default_feature_file %}disabled aria-disabled="true"{% endif %}
+                            >
+                                Pipeline detection
+                            </button>
                             <button id="features-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
                             <button id="features-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
                             <button id="features-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
@@ -758,6 +766,7 @@
         const localName = byId("features-selected-local-name");
         const serverSummary = byId("features-selected-server");
         const serverPathEl = byId("features-selected-server-path");
+        const autoBtn = byId("features-source-auto-btn");
         const uploadBtn = byId("features-source-upload-btn");
         const serverBtn = byId("features-source-server-btn");
         const hintEl = byId("features-drop-zone-hint");
@@ -773,15 +782,35 @@
 
         const activeClasses = ["border-primary", "bg-primary/10", "text-primary", "font-semibold"];
         const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
-        [uploadBtn, serverBtn].forEach((btn) => {
+        const modeButtons = [uploadBtn, serverBtn];
+        if (autoBtn) modeButtons.push(autoBtn);
+        modeButtons.forEach((btn) => {
             btn.classList.remove(...activeClasses);
             btn.classList.add(...inactiveClasses);
         });
 
-        const sourceMode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
+        const rawMode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
+        const sourceMode = rawMode === "auto-detected" ? "auto-detected" : (rawMode === "server-path" ? "server-path" : "upload");
         const serverPath = String(featuresServerFilePathInput.value || "").trim();
         const file = (input.files && input.files[0]) ? input.files[0] : null;
         const existingName = (existingInput.value || "").trim();
+
+        if (sourceMode === "auto-detected") {
+            if (autoBtn) {
+                autoBtn.classList.add(...activeClasses);
+                autoBtn.classList.remove(...inactiveClasses);
+            }
+            if (hintEl) hintEl.textContent = "Using detected features dataframe from previous steps";
+            localSummary.classList.add("hidden");
+            serverSummary.classList.add("hidden");
+            serverPathEl.textContent = "";
+            loadedStatus.style.display = existingName ? "" : "none";
+            notLoadedStatus.style.display = existingName ? "none" : "";
+            if (state) {
+                state.featuresSourceMode = "auto-detected";
+            }
+            return;
+        }
 
         if (sourceMode === "server-path") {
             serverBtn.classList.add(...activeClasses);
@@ -811,7 +840,6 @@
         serverPathEl.textContent = "";
         if (state) {
             state.featuresSourceMode = "upload";
-            state.featuresServerFilePath = "";
         }
 
         if (file) {
@@ -819,19 +847,13 @@
             localSummary.classList.remove("hidden");
             loadedStatus.style.display = "none";
             notLoadedStatus.style.display = "none";
-            existingInput.value = "";
             return;
         }
 
         localName.textContent = "";
         localSummary.classList.add("hidden");
-        if (existingName) {
-            loadedStatus.style.display = "";
-            notLoadedStatus.style.display = "none";
-        } else {
-            loadedStatus.style.display = "none";
-            notLoadedStatus.style.display = "";
-        }
+        loadedStatus.style.display = "none";
+        notLoadedStatus.style.display = "";
     }
 
     function refreshAssetsIndividualCards() {
@@ -920,7 +942,6 @@
                 card.uploadBtn.classList.remove(...inactiveClasses);
                 if (card.hint) card.hint.textContent = "Drag and drop files or click to browse";
                 card.serverSummary.classList.add("hidden");
-                card.serverPath.textContent = "";
                 card.localName.textContent = file ? file.name : "";
                 card.localSummary.classList.toggle("hidden", !file);
             }
@@ -1825,6 +1846,7 @@
         const existingInput = byId("existing-features-file");
         const featuresSourceModeInput = byId("features-source-mode");
         const featuresServerFilePathInput = byId("features-server-file-path");
+        const featuresSourceAutoBtn = byId("features-source-auto-btn");
         const featuresSourceUploadBtn = byId("features-source-upload-btn");
         const featuresSourceServerBtn = byId("features-source-server-btn");
         const featuresServerBrowseBtn = byId("features-server-browse-btn");
@@ -1912,18 +1934,28 @@
             refreshFeaturesLoadStatus();
             refreshAssetsIndividualCards();
         });
+        if (featuresSourceAutoBtn && featuresSourceModeInput) {
+            featuresSourceAutoBtn.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (featuresSourceAutoBtn.disabled) return;
+                if (state) {
+                    state.featuresSourceMode = "auto-detected";
+                }
+                featuresSourceModeInput.value = "auto-detected";
+                syncInputValue(featuresSourceModeInput);
+                refreshFeaturesLoadStatus();
+            });
+        }
         if (featuresSourceUploadBtn && featuresSourceModeInput && featuresServerFilePathInput) {
             featuresSourceUploadBtn.addEventListener("click", (event) => {
                 event.preventDefault();
                 event.stopPropagation();
                 if (state) {
                     state.featuresSourceMode = "upload";
-                    state.featuresServerFilePath = "";
                 }
                 featuresSourceModeInput.value = "upload";
-                featuresServerFilePathInput.value = "";
                 syncInputValue(featuresSourceModeInput);
-                syncInputValue(featuresServerFilePathInput);
                 refreshFeaturesLoadStatus();
             });
         }
@@ -1933,12 +1965,9 @@
                 event.stopPropagation();
                 if (state) {
                     state.featuresSourceMode = "server-path";
-                    state.featuresServerFilePath = "";
                 }
                 featuresSourceModeInput.value = "server-path";
                 syncInputValue(featuresSourceModeInput);
-                input.value = "";
-                if (existingInput) existingInput.value = "";
                 refreshFeaturesLoadStatus();
             });
         }
@@ -1966,32 +1995,9 @@
             const normalizedMode = String(mode || "upload").trim().toLowerCase() === "server-path" ? "server-path" : "upload";
             if (state) {
                 state.assetsSourceMode = normalizedMode;
-                if (normalizedMode === "upload") {
-                    state.assetsServerFolderPath = "";
-                    state.assetsModelServerFilePath = "";
-                    state.assetsScalerServerFilePath = "";
-                    state.assetsDensityServerFilePath = "";
-                    state.assetsServerDetectedModel = "";
-                    state.assetsServerDetectedScaler = "";
-                    state.assetsServerDetectedDensity = "";
-                    state.assetsServerInspectError = "";
-                    state.assetsServerFolderFilesPreview = [];
-                    state.assetsServerFolderFilesTotal = 0;
-                    state.assetsServerFolderFilesMore = 0;
-                }
             }
             modelAssetsSourceInput.value = normalizedMode;
             syncInputValue(modelAssetsSourceInput);
-            if (normalizedMode === "upload" && assetsServerFolderInput) {
-                assetsServerFolderInput.value = "";
-                if (assetsModelServerFilePathInput) assetsModelServerFilePathInput.value = "";
-                if (assetsScalerServerFilePathInput) assetsScalerServerFilePathInput.value = "";
-                if (assetsDensityServerFilePathInput) assetsDensityServerFilePathInput.value = "";
-                syncInputValue(assetsServerFolderInput);
-                if (assetsModelServerFilePathInput) syncInputValue(assetsModelServerFilePathInput);
-                if (assetsScalerServerFilePathInput) syncInputValue(assetsScalerServerFilePathInput);
-                if (assetsDensityServerFilePathInput) syncInputValue(assetsDensityServerFilePathInput);
-            }
             if (typeof syncAssetsMode === "function") syncAssetsMode();
             refreshAssetsIndividualCards();
         };
@@ -2011,6 +2017,9 @@
                     }
                     return;
                 }
+                if (mode === "auto-detected") {
+                    return;
+                }
                 input.value = "";
                 input.click();
             });
@@ -2023,13 +2032,9 @@
             if (!setInputFiles(input, dropped, true)) return;
             if (state) {
                 state.featuresSourceMode = "upload";
-                state.featuresServerFilePath = "";
             }
             featuresSourceModeInput.value = "upload";
-            if (featuresServerFilePathInput) featuresServerFilePathInput.value = "";
             syncInputValue(featuresSourceModeInput);
-            if (featuresServerFilePathInput) syncInputValue(featuresServerFilePathInput);
-            if (existingInput) existingInput.value = "";
             input.dispatchEvent(new Event("change", { bubbles: true }));
         });
 
@@ -2041,20 +2046,8 @@
             if (assetsModeFolder) {
                 assetsModeFolder.checked = false;
             }
-            if (assetsServerFolderInput) {
-                assetsServerFolderInput.value = "";
-                syncInputValue(assetsServerFolderInput);
-            }
             if (state) {
                 state.assetsUploadMode = "individual";
-                state.assetsServerFolderPath = "";
-                state.assetsServerDetectedModel = "";
-                state.assetsServerDetectedScaler = "";
-                state.assetsServerDetectedDensity = "";
-                state.assetsServerInspectError = "";
-                state.assetsServerFolderFilesPreview = [];
-                state.assetsServerFolderFilesTotal = 0;
-                state.assetsServerFolderFilesMore = 0;
             }
             if (typeof syncAssetsMode === "function") syncAssetsMode();
             refreshAssetsIndividualCards();
@@ -2181,10 +2174,14 @@
                 const hasLocalFeatures = Boolean(input && input.files && input.files.length);
                 const hasExistingFeatures = Boolean(existingInput && String(existingInput.value || "").trim());
                 const hasServerFeatures = Boolean(featuresServerFilePathInput && String(featuresServerFilePathInput.value || "").trim());
-                if (hasServerFeatures && !hasLocalFeatures && !hasExistingFeatures) {
-                    featuresMode = "server-path";
-                } else if (!hasServerFeatures && (hasLocalFeatures || hasExistingFeatures)) {
-                    featuresMode = "upload";
+                if (!["upload", "server-path", "auto-detected"].includes(featuresMode)) {
+                    if (hasExistingFeatures) {
+                        featuresMode = "auto-detected";
+                    } else if (hasServerFeatures) {
+                        featuresMode = "server-path";
+                    } else {
+                        featuresMode = "upload";
+                    }
                 }
                 featuresSourceModeInput.value = featuresMode;
                 syncInputValue(featuresSourceModeInput);
@@ -2192,7 +2189,21 @@
                     liveState.featuresSourceMode = featuresMode;
                 }
 
-                if (featuresMode === "server-path") {
+                if (featuresMode === "auto-detected") {
+                    if (input) input.value = "";
+                    if (featuresServerFilePathInput) {
+                        featuresServerFilePathInput.value = "";
+                        syncInputValue(featuresServerFilePathInput);
+                    }
+                    if (liveState) {
+                        liveState.featuresServerFilePath = "";
+                    }
+                    if (!hasExistingFeatures) {
+                        event.preventDefault();
+                        window.alert("No detected features dataframe is available from previous steps.");
+                        return;
+                    }
+                } else if (featuresMode === "server-path") {
                     if (input) input.value = "";
                     if (existingInput) existingInput.value = "";
                     if (!hasServerFeatures) {
@@ -2208,9 +2219,10 @@
                     if (liveState) {
                         liveState.featuresServerFilePath = "";
                     }
-                    if (!hasLocalFeatures && !hasExistingFeatures) {
+                    if (existingInput) existingInput.value = "";
+                    if (!hasLocalFeatures) {
                         event.preventDefault();
-                        window.alert("Upload features data, or select a detected features dataframe.");
+                        window.alert("Upload features data or switch source mode.");
                         return;
                     }
                 }
@@ -2231,11 +2243,6 @@
                 let assetsSource = String(modelAssetsSourceInput.value || "upload").trim().toLowerCase();
                 if (assetsSource !== "upload" && assetsSource !== "server-path") {
                     assetsSource = hasServerAny ? "server-path" : "upload";
-                }
-                if (hasServerAny && !hasLocalFolder && !hasLocalIndividual) {
-                    assetsSource = "server-path";
-                } else if (!hasServerAny && (hasLocalFolder || hasLocalIndividual)) {
-                    assetsSource = "upload";
                 }
                 modelAssetsSourceInput.value = assetsSource;
                 syncInputValue(modelAssetsSourceInput);

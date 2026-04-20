@@ -62,11 +62,16 @@
 
                     <form id="fieldPotentialUploadForm" action="{{ url_for('field_potential_load_precomputed') }}" method="POST" enctype="multipart/form-data" class="space-y-4">
                         <input type="file" id="fieldPotentialFileInput" name="precomputed_fp_file" class="hidden" accept=".pkl,.pickle" multiple />
-                        <input type="hidden" id="fieldPotentialSourceModeInput" name="precomputed_fp_source_mode" value="upload" />
+                        <input type="hidden" id="fieldPotentialSourceModeInput" name="precomputed_fp_source_mode" value="{{ 'auto-detected' if has_field_potential_data else 'upload' }}" />
                         <input type="hidden" id="fieldPotentialServerFilePathInput" name="precomputed_fp_server_file_path" value="" />
                         <div id="fieldPotentialDropZone"
                             class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
                             <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
+                                <button type="button" id="fieldPotentialModeAutoBtn"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
+                                    {% if not has_field_potential_data %}disabled aria-disabled="true"{% endif %}>
+                                    Pipeline detection
+                                </button>
                                 <button type="button" id="fieldPotentialModeUploadBtn"
                                     class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
                                     Local upload
@@ -87,6 +92,10 @@
                             <div id="selectedFieldPotentialServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
                                 <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server files</span>
                                 <div id="selectedFieldPotentialServerFilePath" class="mt-2 font-mono break-all"></div>
+                            </div>
+                            <div id="selectedFieldPotentialDetectedFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
+                                <span class="block font-semibold text-slate-600 dark:text-slate-300">Detected from previous steps</span>
+                                <div class="mt-2">Using the field potential files already detected in this session.</div>
                             </div>
                         </div>
                     </form>
@@ -236,6 +245,7 @@
             dropZoneId: 'fieldPotentialDropZone',
             sourceModeInputId: 'fieldPotentialSourceModeInput',
             serverPathInputId: 'fieldPotentialServerFilePathInput',
+            modeAutoBtnId: 'fieldPotentialModeAutoBtn',
             modeUploadBtnId: 'fieldPotentialModeUploadBtn',
             modeServerBtnId: 'fieldPotentialModeServerBtn',
             dropZoneHintId: 'fieldPotentialDropZoneHint',
@@ -243,6 +253,7 @@
             selectedLocalListId: 'selectedFieldPotentialFilesList',
             selectedServerContainerId: 'selectedFieldPotentialServerFile',
             selectedServerListId: 'selectedFieldPotentialServerFilePath',
+            selectedDetectedContainerId: 'selectedFieldPotentialDetectedFiles',
             modalRootId: 'fieldPotentialServerFileModal',
             modalPathId: 'fieldPotentialServerFileBrowserPath',
             modalEntriesId: 'fieldPotentialServerFileBrowserEntries',
@@ -255,6 +266,9 @@
             activeButtonClasses: ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'],
             inactiveButtonClasses: ['border-slate-200', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'],
             dragActiveClasses: ['border-primary'],
+            allowAutoDetectedSource: true,
+            detectedAvailable: {{ 'true' if has_field_potential_data else 'false' }},
+            defaultMode: '{{ 'auto-detected' if has_field_potential_data else 'upload' }}',
         });
     }
 </script>
