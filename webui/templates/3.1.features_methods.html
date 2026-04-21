@@ -2984,7 +2984,7 @@
                             <span class="material-symbols-outlined text-primary">folder_open</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Folder and File Inspection</h3>
                         </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
+                        <p class="text-xs text-gray-500 dark:text-gray-100" x-text="parserInfo.summary"></p>
 
                         <div x-show="(parserInfo.folder_summaries || []).length > 0" class="space-y-2">
                             <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Files per folder</h4>
@@ -3296,7 +3296,7 @@
                             <span class="material-symbols-outlined text-primary">tune</span>
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Configure EphysDatasetParser</h3>
                         </div>
-                        <div x-show="parserLoading" class="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+                        <div x-show="parserLoading" class="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-100">
                             <span class="h-4 w-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></span>
                             <span>Inspecting selected data...</span>
                         </div>
@@ -3304,8 +3304,8 @@
 
                         <template x-if="parserInfo">
                             <div class="space-y-4">
-                                <p class="text-xs text-gray-500 dark:text-gray-400" x-text="parserInfo.summary"></p>
-                                <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                <p class="text-xs text-gray-500 dark:text-gray-100" x-text="parserInfo.summary"></p>
+                                <p class="text-[11px] text-gray-500 dark:text-gray-100">
                                     Menu colors:
                                     <span style="color: #0f766e;">data fields</span>,
                                     <span style="color: #1d4ed8; font-weight: 600;">manual entries</span>,
@@ -3315,10 +3315,10 @@
                                 <div x-show="resolvedDataSourceKind() === 'pipeline' || resolvedDataSourceKind() === 'new-simulation'" class="space-y-4">
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
-                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Data locator *</span>
+                                            <span class="block text-[11px] text-gray-400 dark:text-gray-400 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">Select</option>
                                                 <template x-for="field in parserDataLocatorCandidates()" :key="'pipeline-data-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3338,14 +3338,14 @@
                                             Specify array dimension mapping
                                         </label>
                                         <div x-show="parserArrayAxesEnabled" class="space-y-2">
-                                            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                            <p class="text-[11px] text-gray-500 dark:text-gray-100">
                                                 Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                             </p>
                                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3356,9 +3356,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Samples axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Samples axis</span>
                                                     <select name="parser_axis_samples" x-model="parserAxisSamples"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
@@ -3368,9 +3368,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">IDs axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">IDs axis</span>
                                                     <select name="parser_axis_ids" x-model="parserAxisIds"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3381,9 +3381,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trials/Epochs axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trials/Epochs axis</span>
                                                     <select name="parser_axis_epochs" x-model="parserAxisEpochs"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3402,9 +3402,9 @@
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency source *</span>
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
                                                 <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3413,26 +3413,30 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz) value</span>
                                             <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
                                                 :disabled="parserFsSource !== '__numeric__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                :class="{
+                                                    'bg-white' : parserFsSource == '__numeric__',
+                                                    'bg-background-light' : parserFsSource !== '__numeric__'
+                                                }"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] dark:bg-[#191e33] text-sm disabled:opacity-50"
                                                 placeholder="e.g. 16000 for dt=0.0625 ms">
                                         </label>
                                     </div>
 
                                     <div class="grid grid-cols-1 gap-4 items-end">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
                                                 <template x-for="field in parserChannelNameSourceCandidates()" :key="'pipeline-ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
-                                            <span class="block text-[11px] text-gray-400 mt-1">
+                                            <span class="block text-[11px] text-gray-400 mt-1 dark:text-gray-400">
                                                 Autocomplete uses Channels axis from "Specify array dimension mapping" (defaults to Dim 0 if mapping is off).
                                             </span>
                                         </label>
@@ -3442,18 +3446,18 @@
                                     <input type="hidden" name="parser_ch_names_locator"
                                         :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
                                     <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channel names (comma-separated)</span>
                                         <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
                                             :disabled="parserChNamesSource !== '__manual__'"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50"
                                             placeholder="e.g. ch0, ch1, ch2">
                                     </label>
 
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type source *</span>
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__value__" :style="parserManualOptionStyle()">Value</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-rec-type-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3462,10 +3466,10 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type value</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type value</span>
                                             <select name="parser_recording_type" x-model="parserRecordingType"
                                                 :disabled="parserRecordingTypeSource !== '__value__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50">
                                                 <option value="LFP">LFP</option>
                                                 <option value="CDM">CDM</option>
                                                 <option value="EEG">EEG</option>
@@ -3480,7 +3484,7 @@
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <fieldset class="text-sm md:col-span-2">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data origin</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Data origin</span>
                                             <div class="flex flex-wrap gap-2">
                                                 <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer"
                                                     :class="parserMetadataMode === 'empirical' ? 'bg-primary/10 border-primary text-primary dark:text-primary' : ''">
@@ -3497,15 +3501,15 @@
                                             </div>
                                         </fieldset>
                                     </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400" x-show="parserMetadataMode === 'simulated'">
+                                    <p class="text-xs text-gray-500 dark:text-gray-100" x-show="parserMetadataMode === 'simulated'">
                                         Metadata is auto-filled as one synthetic subject.
                                     </p>
                                     <div x-show="parserMetadataMode === 'empirical'" class="space-y-4">
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <label class="text-sm">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject ID source</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Subject ID source</span>
                                                 <select name="parser_metadata_subject_id_source" x-model="parserMetadataSubjectIdSource"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
@@ -3515,17 +3519,17 @@
                                                 </select>
                                             </label>
                                             <label class="text-sm" x-show="parserMetadataSubjectIdSource === '__value__'">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject ID value</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Subject ID value</span>
                                                 <input type="text" name="parser_metadata_subject_id" x-model="parserMetadataSubjectId"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                                     placeholder="e.g. subject_01">
                                             </label>
                                         </div>
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <label class="text-sm">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Group source</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Group source</span>
                                                 <select name="parser_metadata_group_source" x-model="parserMetadataGroupSource"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
@@ -3535,17 +3539,17 @@
                                                 </select>
                                             </label>
                                             <label class="text-sm" x-show="parserMetadataGroupSource === '__value__'">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Group value</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Group value</span>
                                                 <input type="text" name="parser_metadata_group" x-model="parserMetadataGroup"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                                     placeholder="e.g. control">
                                             </label>
                                         </div>
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <label class="text-sm">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Species source</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Species source</span>
                                                 <select name="parser_metadata_species_source" x-model="parserMetadataSpeciesSource"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
@@ -3555,17 +3559,17 @@
                                                 </select>
                                             </label>
                                             <label class="text-sm" x-show="parserMetadataSpeciesSource === '__value__'">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Species value</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Species value</span>
                                                 <input type="text" name="parser_metadata_species" x-model="parserMetadataSpecies"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                                     placeholder="e.g. human">
                                             </label>
                                         </div>
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                             <label class="text-sm">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Condition source</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Condition source</span>
                                                 <select name="parser_metadata_condition_source" x-model="parserMetadataConditionSource"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
@@ -3575,9 +3579,9 @@
                                                 </select>
                                             </label>
                                             <label class="text-sm" x-show="parserMetadataConditionSource === '__value__'">
-                                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Condition value</span>
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Condition value</span>
                                                 <input type="text" name="parser_metadata_condition" x-model="parserMetadataCondition"
-                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                                     placeholder="e.g. rest">
                                             </label>
                                         </div>
@@ -3590,21 +3594,21 @@
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment start time (s)</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Segment start time (s)</span>
                                             <input type="number" step="any" min="0" name="parser_segment_t0_s" x-model="parserSegmentT0S"
                                                 placeholder="Optional (e.g., 10)"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                                 :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment end time (s)</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Segment end time (s)</span>
                                             <input type="number" step="any" min="0" name="parser_segment_t1_s" x-model="parserSegmentT1S"
                                                 placeholder="Optional (e.g., 60)"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                                 :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                         </label>
                                     </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                                    <p class="text-xs text-gray-500 dark:text-gray-100">
                                         Optional temporal segmentation applied before epoching. Leave both empty to use the full signal.
                                         Set only start time (t0) to keep data from t0 to the end, or only end time (t1) to keep data from the beginning to t1.
                                     </p>
@@ -3615,10 +3619,10 @@
                                 <div x-show="resolvedDataSourceKind() === 'new-empirical'" class="space-y-4">
                                     <div class="grid grid-cols-1 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Data locator *</span>
-                                            <span class="block text-[11px] text-gray-400 dark:text-gray-500 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Data locator *</span>
+                                            <span class="block text-[11px] text-gray-400 dark:text-gray-300 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
                                             <select name="parser_data_locator" x-model="parserDataLocator"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">Select</option>
                                                 <template x-for="field in parserDataLocatorCandidates()" :key="'data-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3632,22 +3636,22 @@
 
                                     <!-- Array dimension mapping -->
                                     <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
-                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                             <input type="checkbox" x-model="parserArrayAxesEnabled"
                                                 class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                             Specify array dimension mapping
                                         </label>
                                         <input type="hidden" name="parser_array_axes_enabled" :value="parserArrayAxesEnabled ? '1' : '0'">
                                         <div x-show="parserArrayAxesEnabled" class="space-y-2">
-                                            <p class="text-[11px] text-gray-500 dark:text-gray-400">
+                                            <p class="text-[11px] text-gray-500 dark:text-gray-100">
                                                 Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                                 Use this when the parser cannot infer the correct orientation automatically.
                                             </p>
                                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channels axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3658,9 +3662,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Samples axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Samples axis</span>
                                                     <select name="parser_axis_samples" x-model="parserAxisSamples"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
@@ -3670,9 +3674,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">IDs axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">IDs axis</span>
                                                     <select name="parser_axis_ids" x-model="parserAxisIds"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3683,9 +3687,9 @@
                                                     </select>
                                                 </label>
                                                 <label class="text-sm">
-                                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trials/Epochs axis</span>
+                                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trials/Epochs axis</span>
                                                     <select name="parser_axis_epochs" x-model="parserAxisEpochs"
-                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3704,9 +3708,9 @@
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency source *</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency source *</span>
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
                                                 <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3715,19 +3719,19 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz) value</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz) value</span>
                                             <input type="number" step="any" min="0" name="parser_fs_manual" x-model="parserFsManual"
                                                 :disabled="parserFsSource !== '__numeric__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50"
                                                 placeholder="e.g. 16000 for dt=0.0625 ms">
                                         </label>
                                     </div>
 
                                     <div class="grid grid-cols-1 gap-4 items-end">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names source *</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channel names source *</span>
                                             <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
                                                 <template x-for="field in parserChannelNameSourceCandidates()" :key="'ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3744,18 +3748,18 @@
                                     <input type="hidden" name="parser_ch_names_locator"
                                         :value="(parserChNamesSource && parserChNamesSource !== '__manual__' && parserChNamesSource !== '__autocomplete__') ? parserChNamesSource : ''">
                                     <label class="text-sm" x-show="parserChNamesSource === '__manual__'">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Channel names (comma-separated)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channel names (comma-separated)</span>
                                         <input type="text" name="parser_sensor_names" x-model="parserSensorNames"
                                             :disabled="parserChNamesSource !== '__manual__'"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50"
                                             placeholder="e.g. ch0, ch1, ch2">
                                     </label>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type source *</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type source *</span>
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__value__" :style="parserManualOptionStyle()">Value</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'rec-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
@@ -3764,10 +3768,10 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Recording type value</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type value</span>
                                             <select name="parser_recording_type" x-model="parserRecordingType"
                                                 :disabled="parserRecordingTypeSource !== '__value__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm disabled:opacity-50">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50">
                                                 <option value="LFP">LFP</option>
                                                 <option value="CDM">CDM</option>
                                                 <option value="EEG">EEG</option>
@@ -3782,9 +3786,9 @@
 
                                     <div x-show="resolvedDataSourceKind() === 'new-empirical'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Subject ID column</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Subject ID column</span>
                                             <select name="parser_subject_id_locator" x-model="parserSubjectIdLocator"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'subject-id-source-'+field">
@@ -3793,9 +3797,9 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Group column</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Group column</span>
                                             <select name="parser_group_locator" x-model="parserGroupLocator"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'group-source-'+field">
@@ -3804,9 +3808,9 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Species column</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Species column</span>
                                             <select name="parser_species_locator" x-model="parserSpeciesLocator"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'species-source-'+field">
@@ -3815,9 +3819,9 @@
                                             </select>
                                         </label>
                                         <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Condition column</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Condition column</span>
                                             <select name="parser_condition_locator" x-model="parserConditionLocator"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'condition-source-'+field">
@@ -3835,21 +3839,21 @@
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment start time (s)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Segment start time (s)</span>
                                         <input type="number" step="any" min="0" name="parser_segment_t0_s" x-model="parserSegmentT0S"
                                             placeholder="Optional (e.g., 10)"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Segment end time (s)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Segment end time (s)</span>
                                         <input type="number" step="any" min="0" name="parser_segment_t1_s" x-model="parserSegmentT1S"
                                             placeholder="Optional (e.g., 60)"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                     </label>
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400">
+                                <p class="text-xs text-gray-500 dark:text-gray-100">
                                     Optional temporal segmentation applied before epoching. Leave both empty to use the full signal.
                                     Set only start time (t0) to keep data from t0 to the end, or only end time (t1) to keep data from the beginning to t1.
                                 </p>
@@ -3870,9 +3874,9 @@
                                         The app will use it to look up group, condition, and other metadata for each subject.
                                     </p>
                                     <label class="text-sm block">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Link field in additional file</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Link field in additional file</span>
                                         <select name="additional_file_link_field" x-model="additionalFileLinkField"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                             <option value="">— None (do not link) —</option>
                                             <template x-for="field in (metadataInfo.candidate_fields || [])" :key="'add-link-'+field">
                                                 <option :value="field" x-text="field"></option>
@@ -3904,9 +3908,9 @@
 
                                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserEnableAggregate">
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate over fields</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate over fields</span>
                                         <select multiple x-model="parserAggregateOverSelected"
-                                            class="w-full min-h-32 rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            class="w-full min-h-32 rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                             <template x-for="field in aggregateOverOptions()" :key="'agg-over-'+field">
                                                 <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                             </template>
@@ -3914,32 +3918,32 @@
                                         <span class="block text-[11px] text-gray-400 mt-1">Choose one or more fields.</span>
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate method</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate method</span>
                                         <select name="parser_aggregate_method" x-model="parserAggregateMethod"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                             <option value="sum">sum</option>
                                             <option value="mean">mean</option>
                                             <option value="median">median</option>
                                         </select>
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Aggregate labels (dict)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate labels (dict)</span>
                                         <input type="text" name="parser_aggregate_labels" x-model="parserAggregateLabels"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="e.g. {'sensor': 'all'}">
                                     </label>
                                 </div>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching">
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epoch length (s)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Epoch length (s)</span>
                                         <input type="number" step="any" name="parser_epoch_length_s" x-model="parserEpochLengthS"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Epoch step (s)</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Epoch step (s)</span>
                                         <input type="number" step="any" name="parser_epoch_step_s" x-model="parserEpochStepS"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                     </label>
                                 </div>
                                 <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
@@ -3982,14 +3986,14 @@
                                             class="form-radio h-4 w-4 mt-0.5 text-primary focus:ring-primary/50 border-gray-300 bg-background-light"
                                             name="select-method" type="radio" />
                                         <span class="ml-3">
-                                            <span class="block text-sm font-semibold text-[#34495E] dark:text-gray-200" x-text="method.label"></span>
-                                            <span class="block text-xs text-gray-500 dark:text-gray-400" x-text="method.description"></span>
+                                            <span class="block text-sm font-semibold text-[#34495E] dark:text-gray-100" x-text="method.label"></span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-200" x-text="method.description"></span>
                                         </span>
                                     </label>
                                 </template>
                             </div>
                             <div class="mt-4 p-3 dark:bg-gray-800 bg-gray-50 rounded-lg" x-show="selectedMethod">
-                                <p class="text-sm text-gray-600 dark:text-gray-300">
+                                <p class="text-sm text-gray-600 dark:text-gray-100">
                                     Selected: <span class="font-semibold text-primary" x-text="methods.find(m => m.value === selectedMethod)?.label"></span>
                                 </p>
                             </div>
@@ -4015,28 +4019,28 @@
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white mb-4">Execution settings</h2>
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Parallel workers (n_jobs)</span>
+                                    <span class="block text-xs text-[#34495E] dark:text-gray-100 mb-1">Parallel workers (n_jobs)</span>
                                     <input type="number" min="1" step="1" name="features_n_jobs"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         value="1">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Chunksize</span>
+                                    <span class="block text-xs text-[#34495E] dark:text-gray-100 mb-1">Chunksize</span>
                                     <input type="number" min="1" step="1" name="features_chunksize"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Start method</span>
+                                    <span class="block text-xs text-[#34495E] dark:text-gray-100 mb-1">Start method</span>
                                     <select name="features_start_method"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="spawn">spawn</option>
                                         <option value="fork">fork</option>
                                         <option value="forkserver">forkserver</option>
                                     </select>
                                 </label>
-                                <div class="flex flex-wrap items-center gap-4 col-span-1 md:col-span-3">
-                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <div class="flex flex-wrap items-center gap-7 col-span-1 md:col-span-4">
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                         <input type="checkbox" name="subsampling" value="1"
                                             x-model="subsamplingEnabled"
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
@@ -4044,18 +4048,18 @@
                                     </label>
 
                                     <!-- Slider: Sampling percentage (only visible if subsamplingEnabled is true) -->
-                                    <div x-show="subsamplingEnabled" x-cloak class="flex items-center gap-3 text-sm">
-                                        <label class="text-[#34495E] dark:text-gray-300">Sampling percentage:</label>
+                                    <div x-show="subsamplingEnabled" x-cloak class="flex items-center gap-2 text-sm">
+                                        <label class="text-[#34495E] dark:text-gray-100">Sampling percentage:</label>
                                         <input type="range" name="sampling_percentage" min="5" max="95" step="5" value="10"
                                             class="w-48 h-2 rounded-lg appearance-none cursor-pointer bg-gray-200 dark:bg-gray-700 accent-primary">
-                                        <span class="text-[#34495E] dark:text-gray-300 font-mono min-w-[3rem]">
+                                        <span class="text-[#34495E] dark:text-gray-100 font-mono min-w-[3rem]">
                                             <span x-data="{ percentage: 10 }" x-init="$el.closest('div').querySelector('input').addEventListener('input', function(e) { percentage = e.target.value; })" x-text="percentage"></span>%
                                         </span>
                                     </div>
 
                                     <!-- Checkbox: Random sampling (only visible if subsamplingEnabled is true) -->
                                     <label x-show="subsamplingEnabled" x-cloak
-                                        class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                         <input type="checkbox" name="random_sampling" value="1"
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                         Random sampling
@@ -4066,7 +4070,7 @@
 
                         <section x-show="selectedMethod === 'catch22'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white mb-4">catch22 options</h2>
-                            <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                            <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                 <input type="checkbox" name="catch22_normalize" value="1"
                                     class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                 Normalize each sample before feature extraction
@@ -4077,15 +4081,15 @@
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">specparam options</h2>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
                                     <input type="number" step="any" name="specparam_fs"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional: fallback to parsed dataframe fs">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Select peak</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Select peak</span>
                                     <select name="specparam_select_peak"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="max_pw">max_pw</option>
                                         <option value="max_cf_in_range">max_cf_in_range</option>
                                         <option value="all">all</option>
@@ -4095,78 +4099,78 @@
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range min (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range min (Hz)</span>
                                     <input type="number" step="any" name="specparam_freq_min" value="1.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range max (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range max (Hz)</span>
                                     <input type="number" step="any" name="specparam_freq_max" value="45.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Welch nperseg</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch nperseg</span>
                                     <input type="number" step="1" min="1" name="specparam_welch_nperseg"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Welch noverlap</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch noverlap</span>
                                     <input type="number" step="1" min="0" name="specparam_welch_noverlap"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Welch kwargs (JSON/dict)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch kwargs (JSON/dict)</span>
                                     <textarea name="specparam_welch_kwargs" rows="2"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="e.g. {'detrend': 'constant'}"></textarea>
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">SpectralModel kwargs (JSON/dict)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">SpectralModel kwargs (JSON/dict)</span>
                                     <textarea name="specparam_model_kwargs" rows="2"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="e.g. {'peak_width_limits': [1, 8], 'max_n_peaks': 6}"></textarea>
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Metric policy</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Metric policy</span>
                                     <select name="specparam_metric_policy"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="reject">reject</option>
                                         <option value="flag">flag</option>
                                     </select>
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Threshold gof_rsquared</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Threshold gof_rsquared</span>
                                     <input type="number" min="0" max="1" step="any" name="specparam_threshold_gof_rsquared"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <label class="text-sm block">
-                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Additional metric thresholds (JSON/dict)</span>
+                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional metric thresholds (JSON/dict)</span>
                                 <textarea name="specparam_metric_thresholds" rows="2"
-                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                     placeholder="e.g. {'gof_rsquared': 0.95}"></textarea>
                             </label>
 
                             <div class="flex flex-wrap gap-5">
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="specparam_debug" value="1"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Debug mode
                                 </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="specparam_normalize" value="1"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Normalize each sample
@@ -4179,15 +4183,15 @@
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
                                     <input type="number" step="any" name="dfa_sampling_frequency"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional: fallback to parsed dataframe fs">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Analysis mode</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Analysis mode</span>
                                     <select x-model="dfaAnalysisMode" name="dfa_analysis_mode"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="envelope">envelope input</option>
                                         <option value="frequency_range">single frequency range</option>
                                         <option value="spectrum_range">spectrum bins</option>
@@ -4197,101 +4201,101 @@
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Fit interval min (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Fit interval min (s)</span>
                                     <input type="number" step="any" name="dfa_fit_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Required for envelope mode">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Fit interval max (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Fit interval max (s)</span>
                                     <input type="number" step="any" name="dfa_fit_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Required for envelope mode">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Compute interval min (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Compute interval min (s)</span>
                                     <input type="number" step="any" name="dfa_compute_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Required for envelope mode">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Compute interval max (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Compute interval max (s)</span>
                                     <input type="number" step="any" name="dfa_compute_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Required for envelope mode">
                                 </label>
                             </div>
 
                             <div x-show="dfaAnalysisMode === 'frequency_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range min (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range min (Hz)</span>
                                     <input type="number" step="any" name="dfa_frequency_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range max (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range max (Hz)</span>
                                     <input type="number" step="any" name="dfa_frequency_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
 
                             <div x-show="dfaAnalysisMode === 'spectrum_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range min (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
                                     <input type="number" step="any" name="dfa_spectrum_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         value="1.0">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range max (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
                                     <input type="number" step="any" name="dfa_spectrum_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         value="45.0">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Bad channel indices</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indices</span>
                                     <input type="text" name="dfa_bad_idxes"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="e.g. 1,3,5">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trim seconds</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
                                     <input type="number" step="any" name="dfa_trim_seconds" value="1.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Hilbert n_fft</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
                                     <input type="number" step="1" min="1" name="dfa_hilbert_n_fft"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <label class="text-sm block">
-                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Filter kwargs (JSON/dict)</span>
+                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (JSON/dict)</span>
                                 <textarea name="dfa_filter_kwargs" rows="2"
-                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                     placeholder="e.g. {'fir_design': 'firwin'}"></textarea>
                             </label>
 
                             <div class="flex flex-wrap gap-5">
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="dfa_overlap" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Overlap windows (50%)
                                 </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="dfa_input_is_envelope" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Input is already an envelope
                                 </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="dfa_normalize" value="1"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Normalize each sample
@@ -4304,15 +4308,15 @@
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Sampling frequency (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
                                     <input type="number" step="any" name="fei_sampling_frequency"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional: fallback to parsed dataframe fs">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Analysis mode</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Analysis mode</span>
                                     <select x-model="fEIAnalysisMode" name="fei_analysis_mode"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="envelope">envelope input</option>
                                         <option value="frequency_range">single frequency range</option>
                                         <option value="spectrum_range">spectrum bins</option>
@@ -4322,126 +4326,126 @@
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Window size (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Window size (s)</span>
                                     <input type="number" step="any" name="fei_window_size_sec"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Required">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Window overlap [0,1)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Window overlap [0,1)</span>
                                     <input type="number" min="0" max="0.99" step="any" name="fei_window_overlap" value="0.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA value (optional)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA value (optional)</span>
                                     <input type="number" step="any" name="fei_dfa_value"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Single-channel envelope only">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA threshold</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA threshold</span>
                                     <input type="number" min="0" max="1" step="any" name="fei_dfa_threshold" value="0.6"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Hilbert n_fft</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
                                     <input type="number" step="1" min="1" name="fei_hilbert_n_fft"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA fit interval min (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA fit interval min (s)</span>
                                     <input type="number" step="any" name="fei_dfa_fit_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA fit interval max (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA fit interval max (s)</span>
                                     <input type="number" step="any" name="fei_dfa_fit_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA compute interval min (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA compute interval min (s)</span>
                                     <input type="number" step="any" name="fei_dfa_compute_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">DFA compute interval max (s)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA compute interval max (s)</span>
                                     <input type="number" step="any" name="fei_dfa_compute_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <div x-show="fEIAnalysisMode === 'frequency_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range min (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range min (Hz)</span>
                                     <input type="number" step="any" name="fei_frequency_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Frequency range max (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range max (Hz)</span>
                                     <input type="number" step="any" name="fei_frequency_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
 
                             <div x-show="fEIAnalysisMode === 'spectrum_range'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range min (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
                                     <input type="number" step="any" name="fei_spectrum_min" value="1.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Spectrum range max (Hz)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
                                     <input type="number" step="any" name="fei_spectrum_max" value="45.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Bad channel indices</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indices</span>
                                     <input type="text" name="fei_bad_idxes"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="e.g. 1,3,5">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Trim seconds</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
                                     <input type="number" step="any" name="fei_trim_seconds" value="1.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm">
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Filter kwargs (JSON/dict)</span>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (JSON/dict)</span>
                                     <input type="text" name="fei_filter_kwargs"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
                             <div class="flex flex-wrap gap-5">
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="fei_dfa_overlap" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     DFA overlap (50%)
                                 </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="fei_input_is_envelope" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Input is already an envelope
                                 </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                     <input type="checkbox" name="fei_normalize" value="1"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Normalize each sample
@@ -4452,12 +4456,12 @@
                         <section x-show="selectedMethod === 'hctsa'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">hctsa options</h2>
                             <label class="text-sm block">
-                                <span class="block text-xs text-gray-500 dark:text-gray-400 mb-1">hctsa_folder *</span>
+                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">hctsa_folder *</span>
                                 <input type="text" name="hctsa_folder"
-                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-background-light dark:bg-[#191e33] text-sm"
+                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                     placeholder="Path to hctsa installation">
                             </label>
-                            <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                            <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                 <input type="checkbox" name="hctsa_return_meta" value="1"
                                     class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                 Return hctsa metadata summary
@@ -4477,7 +4481,7 @@
                     <div x-show="uploadProgressKnown" class="h-full bg-primary transition-all duration-200" :style="`width: ${Math.max(0, Math.min(100, uploadProgress))}%`"></div>
                     <div x-show="!uploadProgressKnown" class="absolute inset-y-0 left-0 w-1/3 bg-primary/70 upload-indeterminate"></div>
                 </div>
-                <p x-show="uploadBytesTotal > 0" class="text-xs text-gray-500 dark:text-gray-400"
+                <p x-show="uploadBytesTotal > 0" class="text-xs text-gray-500 dark:text-gray-100"
                     x-text="`${formatBytes(uploadBytesLoaded)} / ${formatBytes(uploadBytesTotal)}`"></p>
                 <p x-show="submitError" class="text-xs text-red-600 dark:text-red-400" x-text="submitError"></p>
             </div>
