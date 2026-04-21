@@ -2,6 +2,36 @@
 
 {% block title %}Previous Sessions{% endblock %}
 
+{% block head %}
+{{ super() }}
+<script>
+async function editSessionName(btn) {
+    const card = btn.closest('article');
+    const sessionRoot = card.querySelector('input[name="session_root"]').value;
+    const currentName = card.querySelector('.session-display-name').innerText;
+
+    const newName = prompt("Enter new display name for this session:", currentName);
+    if (!newName || newName.trim() === "" || newName.trim() === currentName) return;
+
+    const response = await fetch("{{ url_for('update_session_name') }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            session_root: sessionRoot,
+            display_name: newName.trim()
+        })
+    });
+
+    const result = await response.json();
+    if (result.success) {
+        card.querySelector('.session-display-name').innerText = result.display_name;
+    } else {
+        alert("Error updating name: " + (result.error || "Unknown error"));
+    }
+}
+</script>
+{% endblock %}
+
 {% block content %}
 <section class="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 sm:px-6 lg:px-8">
     <div class="rounded-3xl border border-gray-200/70 bg-white/90 p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
@@ -39,7 +69,15 @@
             <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div class="space-y-3">
                     <div class="flex flex-wrap items-center gap-3">
-                        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">{{ entry.name }}</h2>
+                        <div class="flex items-center gap-2">
+                            <h2 class="session-display-name text-xl font-semibold text-gray-900 dark:text-white">{{ entry.name }}</h2>
+                            <button type="button" onclick="editSessionName(this)" class="text-gray-400 hover:text-primary transition-colors" title="Edit session name">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
+                                </svg>
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 break-all">{{ entry.path }}</p>
                         {% if entry.is_active %}
                         <span class="rounded-full bg-primary px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white">Active</span>
                         {% endif %}
