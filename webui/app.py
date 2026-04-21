@@ -10564,7 +10564,6 @@ def start_computation_redirect(computation_type):
         inference_features_source_mode = (request.form.get("features_source_mode") or "upload").strip().lower()
         inference_model_assets_source = (request.form.get("model_assets_source") or "upload").strip().lower()
         features_server_file_path = (request.form.get("features_server_file_path") or "").strip()
-        inference_assets_server_folder_path = (request.form.get("inference_assets_server_folder_path") or "").strip()
         inference_model_server_file_path = (request.form.get("inference_model_server_file_path") or "").strip()
         inference_scaler_server_file_path = (request.form.get("inference_scaler_server_file_path") or "").strip()
         inference_density_server_file_path = (request.form.get("inference_density_server_file_path") or "").strip()
@@ -10612,103 +10611,59 @@ def start_computation_redirect(computation_type):
         has_uploaded_model = _has_upload("model_file", "model-file", "file-upload-model")
         has_uploaded_scaler = _has_upload("scaler_file", "scaler-file", "file-upload-scaler")
         has_uploaded_density = _has_upload("density_estimator_file", "density-estimator-file", "file-upload-density-estimator")
-        folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
-        has_folder_uploads = bool(folder_uploads)
         has_individual_assets = has_uploaded_model or has_uploaded_scaler or has_uploaded_density
-        has_server_assets_folder_path = bool(inference_assets_server_folder_path)
         has_server_asset_file_paths = bool(
             inference_model_server_file_path
             or inference_scaler_server_file_path
             or inference_density_server_file_path
         )
-        assets_upload_mode = (request.form.get("assets_upload_mode") or "").strip().lower()
-        if assets_upload_mode not in {"individual", "folder"}:
-            assets_upload_mode = "individual"
         inference_assets_server_files = {}
 
         if inference_model_assets_source not in {"upload", "server-path"}:
-            inference_model_assets_source = "server-path" if (has_server_assets_folder_path or has_server_asset_file_paths) else "upload"
+            inference_model_assets_source = "server-path" if has_server_asset_file_paths else "upload"
         if (
             inference_model_assets_source == "upload"
-            and not has_folder_uploads
             and not has_individual_assets
-            and (has_server_assets_folder_path or has_server_asset_file_paths)
+            and has_server_asset_file_paths
         ):
             inference_model_assets_source = "server-path"
         if (
             inference_model_assets_source == "server-path"
-            and not has_server_assets_folder_path
             and not has_server_asset_file_paths
-            and (has_folder_uploads or has_individual_assets)
+            and has_individual_assets
         ):
             inference_model_assets_source = "upload"
 
         if inference_model_assets_source == "server-path":
-            if assets_upload_mode == "individual" and has_server_assets_folder_path and not has_server_asset_file_paths:
-                assets_upload_mode = "folder"
-            if assets_upload_mode == "folder" and not has_server_assets_folder_path and has_server_asset_file_paths:
-                assets_upload_mode = "individual"
-
-        if inference_model_assets_source == "server-path":
-            if assets_upload_mode == "folder":
+            try:
+                inference_assets_server_files["model_file"] = _validate_existing_file_path(
+                    inference_model_server_file_path,
+                    "Inference server model file",
+                )
+            except Exception as exc:
+                flash(str(exc), 'error')
+                return redirect(request.referrer or url_for('inference'))
+            if inference_scaler_server_file_path:
                 try:
-                    inference_assets_server_files = _collect_inference_assets_folder_files(
-                        inference_assets_server_folder_path
+                    inference_assets_server_files["scaler_file"] = _validate_existing_file_path(
+                        inference_scaler_server_file_path,
+                        "Inference server scaler file",
                     )
                 except Exception as exc:
                     flash(str(exc), 'error')
                     return redirect(request.referrer or url_for('inference'))
-                if "model_file" not in inference_assets_server_files:
-                    flash(
-                        'Server assets folder must contain a model/posterior file (e.g. model.* or posterior.*).',
-                        'error',
-                    )
-                    return redirect(request.referrer or url_for('inference'))
-            else:
+            if inference_density_server_file_path:
                 try:
-                    inference_assets_server_files["model_file"] = _validate_existing_file_path(
-                        inference_model_server_file_path,
-                        "Inference server model file",
+                    inference_assets_server_files["density_estimator_file"] = _validate_existing_file_path(
+                        inference_density_server_file_path,
+                        "Inference server density estimator file",
                     )
                 except Exception as exc:
                     flash(str(exc), 'error')
                     return redirect(request.referrer or url_for('inference'))
-                if inference_scaler_server_file_path:
-                    try:
-                        inference_assets_server_files["scaler_file"] = _validate_existing_file_path(
-                            inference_scaler_server_file_path,
-                            "Inference server scaler file",
-                        )
-                    except Exception as exc:
-                        flash(str(exc), 'error')
-                        return redirect(request.referrer or url_for('inference'))
-                if inference_density_server_file_path:
-                    try:
-                        inference_assets_server_files["density_estimator_file"] = _validate_existing_file_path(
-                            inference_density_server_file_path,
-                            "Inference server density estimator file",
-                        )
-                    except Exception as exc:
-                        flash(str(exc), 'error')
-                        return redirect(request.referrer or url_for('inference'))
         else:
-            if has_folder_uploads and has_individual_assets:
-                flash('Use only one assets upload mode: either individual files or one folder.', 'error')
-                return redirect(request.referrer or url_for('inference'))
-            if assets_upload_mode == "folder" and has_individual_assets:
-                flash('Assets upload mode is set to folder, so individual asset files are not allowed.', 'error')
-                return redirect(request.referrer or url_for('inference'))
-            if assets_upload_mode == "individual" and has_folder_uploads:
-                flash('Assets upload mode is set to individual files, so folder upload is not allowed.', 'error')
-                return redirect(request.referrer or url_for('inference'))
-
-            folder_has_model = False
-            for folder_upload in folder_uploads:
-                if _infer_inference_asset_role(folder_upload.filename or "") == "model_file":
-                    folder_has_model = True
-                    break
-            if not has_uploaded_model and not folder_has_model:
-                flash('Upload a model file, or upload a folder that contains a model/posterior file (e.g. model.* or posterior.*).', 'error')
+            if not has_uploaded_model:
+                flash('Upload a model file or switch assets source to Server file.', 'error')
                 return redirect(request.referrer or url_for('inference'))
 
         estimated_time_remaining = time.time() + 130 # 130 seconds of estimated time remaining
@@ -11167,9 +11122,6 @@ def start_computation_redirect(computation_type):
         }
 
         for i, file_key in enumerate(files_obj):
-            if computation_type == "inference" and file_key == "inference_assets_folder":
-                # Folder uploads are handled below via getlist.
-                continue
             file = files_obj[file_key]
             if not file or not file.filename:
                 if computation_type in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
@@ -11255,30 +11207,6 @@ def start_computation_redirect(computation_type):
                     file_paths["kernel_params_module_file"] = copied_path
                     kernel_params_module_override = copied_path
         if computation_type == "inference":
-            if inference_model_assets_source != "server-path":
-                folder_uploads = [f for f in files_obj.getlist("inference_assets_folder") if f and f.filename]
-                for idx, upload in enumerate(folder_uploads):
-                    raw_name = upload.filename or ""
-                    base_name = os.path.basename(raw_name)
-                    safe_name = secure_filename(base_name)
-                    if not safe_name:
-                        continue
-                    unique_filename = f"{computation_type}_inference_assets_folder_{idx}_{job_id}_{safe_name}"
-                    file_path = os.path.join(module_upload_dir, unique_filename)
-                    upload.save(file_path)
-
-                    normalized_key = _infer_inference_asset_role(safe_name)
-
-                    # Do not override explicit single-file uploads from dedicated controls.
-                    if normalized_key and normalized_key not in file_paths:
-                        file_paths[normalized_key] = file_path
-                    else:
-                        try:
-                            if os.path.exists(file_path):
-                                os.remove(file_path)
-                        except OSError:
-                            pass
-
             if inference_features_source_mode == "server-path" and inference_features_server_path:
                 copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(inference_features_server_path)}"
                 copied_path = os.path.join(module_upload_dir, copied_name)
@@ -11324,11 +11252,9 @@ def start_computation_redirect(computation_type):
         data["features_server_file_path"] = (
             inference_features_server_path or (request.form.get("features_server_file_path") or "").strip()
         )
-        data["inference_assets_server_folder_path"] = inference_assets_server_folder_path
         data["inference_model_server_file_path"] = inference_model_server_file_path
         data["inference_scaler_server_file_path"] = inference_scaler_server_file_path
         data["inference_density_server_file_path"] = inference_density_server_file_path
-        data["assets_upload_mode"] = assets_upload_mode
     if computation_type == "inference_training":
         data["training_features_source_mode"] = inference_training_features_source_mode
         data["training_parameters_source_mode"] = inference_training_parameters_source_mode
