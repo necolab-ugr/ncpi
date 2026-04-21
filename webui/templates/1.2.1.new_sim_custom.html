@@ -59,24 +59,14 @@
                         <p class="mt-2 text-xs leading-relaxed">
                             A common and practical way to organize these scripts is to group NEST scripts into three categories, as done in <code>ncpi.Simulation</code>:
                             <code>network</code> (network specification), <code>simulation</code> (network creation + simulation run),
-                            and <code>analysis</code> (post-processing of results).
+                            and <code>analysis</code> (post-processing of results). In this WebUI, the analysis script is intentionally left out because the Analysis module already provides graphical analysis tools.
                         </p>
-                    </div>
-                    <div class="rounded-lg border border-sky-200/80 dark:border-sky-800/50 bg-white/70 dark:bg-slate-900/30 p-3">
-                        <p class="text-xs font-semibold uppercase tracking-wide text-sky-800 dark:text-sky-300">Execution Flow</p>
-                        <ol class="mt-2 space-y-1 text-xs list-decimal pl-4">
-                            <li>Run the network implementation script using values from the network parameters script.</li>
-                            <li>Run the simulation implementation script using values from the simulation parameters script.</li>
-                        </ol>
                     </div>
                 </div>
 
-                <p class="mt-3 text-xs leading-relaxed">
-                    In this WebUI, the analysis script is intentionally left out because the Analysis module already provides graphical analysis tools.
-                </p>
                 <p class="mt-2 text-xs leading-relaxed">
-                    You have full freedom to design these scripts (single trial or parameter sweep with multiple trials). The only limitation is that
-                    simulation outputs must be saved as <code>.pkl</code> files so they can be loaded by subsequent WebUI modules.
+                    The interface runs the network implementation script using values from the network parameters script and then runs the
+                    simulation implementation script using values from the simulation parameters script.
                 </p>
 
                 <div class="mt-3 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/80 dark:bg-slate-900/40 p-3">
@@ -91,7 +81,15 @@
 
                 <div class="mt-3 flex items-center gap-2 text-xs rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50/80 dark:bg-amber-900/20 px-3 py-2">
                     <span class="material-symbols-outlined text-amber-700 dark:text-amber-300 text-base">folder</span>
-                    <span>Examples for this form can be found in the ncpi examples folder: <code>examples/simulation/Hagen_model/simulation/params/network_params.py</code>, <code>examples/simulation/Hagen_model/simulation/params/simulation_params.py</code>, <code>examples/simulation/Hagen_model/simulation/python/network.py</code>, and <code>examples/simulation/Hagen_model/simulation/python/simulation.py</code>.</span>
+                    <div>
+                        <p>Examples for this form can be found in the ncpi examples folder:</p>
+                        <ul class="mt-1 list-disc pl-5">
+                            <li><code>examples/simulation/Hagen_model/simulation/params/network_params.py</code></li>
+                            <li><code>examples/simulation/Hagen_model/simulation/params/simulation_params.py</code></li>
+                            <li><code>examples/simulation/Hagen_model/simulation/python/network.py</code></li>
+                            <li><code>examples/simulation/Hagen_model/simulation/python/simulation.py</code></li>
+                        </ul>
+                    </div>
                 </div>
             </div>
 
