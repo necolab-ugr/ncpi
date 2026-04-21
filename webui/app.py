@@ -16,6 +16,7 @@ from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
 from itertools import product
+import tmp_paths
 from tmp_paths import configure_temp_environment, tmp_subdir
 import random
 
@@ -51,6 +52,29 @@ FEATURES_INSPECTION_DIR = _module_tmp_subdir("features", "inspection")
 PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
 INFERENCE_UPLOADS_DIR = _module_tmp_subdir("inference", "uploads")
 ANALYSIS_DATA_DIR = _module_tmp_subdir("analysis", "data")
+
+
+def refresh_tmp_paths():
+    global SIMULATION_DATA_DIR, SIMULATION_RUNS_DIR, SIMULATION_CUSTOM_UPLOADS_DIR
+    global FIELD_POTENTIAL_PROXY_DIR, FIELD_POTENTIAL_KERNEL_DIR, FIELD_POTENTIAL_MEEG_DIR
+    global FIELD_POTENTIAL_KERNEL_LOCAL_UPLOADS_DIR, FEATURES_DATA_DIR, FEATURES_INSPECTION_DIR
+    global PREDICTIONS_DATA_DIR, INFERENCE_UPLOADS_DIR, ANALYSIS_DATA_DIR, PATH_HISTORY_STORAGE_DIR
+
+    configure_temp_environment()
+    SIMULATION_DATA_DIR = _module_tmp_subdir("simulation", "data")
+    SIMULATION_RUNS_DIR = _module_tmp_subdir("simulation", "runs")
+    SIMULATION_CUSTOM_UPLOADS_DIR = _module_tmp_subdir("simulation", "custom_uploads")
+    FIELD_POTENTIAL_PROXY_DIR = _module_tmp_subdir("field_potential", "proxy")
+    FIELD_POTENTIAL_KERNEL_DIR = _module_tmp_subdir("field_potential", "kernel")
+    FIELD_POTENTIAL_MEEG_DIR = _module_tmp_subdir("field_potential", "meeg")
+    FIELD_POTENTIAL_KERNEL_LOCAL_UPLOADS_DIR = _module_tmp_subdir("field_potential", "kernel", "local_folder_uploads")
+    FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
+    FEATURES_INSPECTION_DIR = _module_tmp_subdir("features", "inspection")
+    PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
+    INFERENCE_UPLOADS_DIR = _module_tmp_subdir("inference", "uploads")
+    ANALYSIS_DATA_DIR = _module_tmp_subdir("analysis", "data")
+    PATH_HISTORY_STORAGE_DIR = tmp_subdir("ncpi_webui_path_history")
+    return tmp_paths.TMP_ROOT
 
 
 def _module_uploads_dir_for(computation_type):
@@ -4654,6 +4678,52 @@ def _build_four_area_network_params(form):
     ])
 
 
+def _has_running_jobs():
+    for future in job_futures.values():
+        try:
+            if future is not None and not future.done():
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _format_session_timestamp(value):
+    try:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(float(value)))
+    except Exception:
+        return "Unknown"
+
+
+def _describe_session_modules(session_root):
+    labels = []
+    for module_name in sorted(_MODULE_TMP_NAMES):
+        module_dir = os.path.join(session_root, module_name)
+        if os.path.isdir(module_dir):
+            labels.append(module_name.replace("_", " "))
+    return labels
+
+
+def _build_saved_session_entries():
+    entries = []
+    active_root = os.path.realpath(tmp_paths.TMP_ROOT)
+    for session_root in tmp_paths.list_session_roots():
+        real_root = os.path.realpath(session_root)
+        try:
+            updated_at = os.path.getmtime(real_root)
+        except OSError:
+            updated_at = 0.0
+        entries.append({
+            "id": tmp_paths.session_id_from_root(real_root),
+            "name": os.path.basename(real_root),
+            "path": real_root,
+            "updated_at": _format_session_timestamp(updated_at),
+            "is_active": real_root == active_root,
+            "modules": _describe_session_modules(real_root),
+        })
+    return entries
+
+
 # Main dashboard page loading
 @app.route("/")
 def dashboard():
@@ -4698,6 +4768,40 @@ def dashboard():
         analysis_data_files=analysis_data_files,
         has_analysis_data=bool(analysis_data_files),
     )
+
+
+@app.route("/sessions")
+def saved_sessions():
+    return render_template(
+        "sessions.html",
+        session_entries=_build_saved_session_entries(),
+        active_session_id=tmp_paths.SESSION_ID,
+        active_session_root=os.path.realpath(tmp_paths.TMP_ROOT),
+        switched=bool(request.args.get("switched")),
+        has_running_jobs=_has_running_jobs(),
+    )
+
+
+@app.route("/sessions/load", methods=["POST"])
+def load_saved_session():
+    if _has_running_jobs():
+        flash("Cannot switch sessions while a computation is still running.")
+        return redirect(url_for("saved_sessions"))
+
+    session_root = str(request.form.get("session_root") or "").strip()
+    if not session_root:
+        flash("Select a saved session folder before loading it.")
+        return redirect(url_for("saved_sessions"))
+
+    try:
+        tmp_paths.activate_session_root(session_root=session_root, create=False)
+        refresh_tmp_paths()
+        compute_utils.refresh_tmp_paths()
+    except Exception as exc:
+        flash(str(exc))
+        return redirect(url_for("saved_sessions"))
+
+    return redirect(url_for("saved_sessions", switched=1))
 
 # Simulation configuration page
 @app.route("/simulation")

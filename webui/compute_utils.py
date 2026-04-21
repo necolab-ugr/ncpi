@@ -26,7 +26,8 @@ import threading
 import time
 import traceback
 from collections.abc import Mapping as MappingABC
-from tmp_paths import TMP_ROOT, configure_temp_environment, tmp_subdir
+import tmp_paths
+from tmp_paths import configure_temp_environment, tmp_subdir
 
 configure_temp_environment()
 
@@ -69,11 +70,23 @@ def _field_potential_kernel_search_roots():
 
 sim_data_path = 'zenodo_sim_files/data/'
 model_scaler_path = 'zenodo_sim_files/ML_models/4_param/MLP'
+TMP_ROOT = tmp_paths.TMP_ROOT
 DEFAULT_SIM_DATA_DIR = _module_tmp_subdir("simulation", "data")
 FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
 PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
 INFERENCE_TRAINING_DATA_DIR = _module_tmp_subdir("inference", "training_data")
 MAX_OUTPUT_LINES = 200
+
+
+def refresh_tmp_paths():
+    global TMP_ROOT, DEFAULT_SIM_DATA_DIR, FEATURES_DATA_DIR, PREDICTIONS_DATA_DIR, INFERENCE_TRAINING_DATA_DIR
+
+    TMP_ROOT = configure_temp_environment()
+    DEFAULT_SIM_DATA_DIR = _module_tmp_subdir("simulation", "data")
+    FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
+    PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
+    INFERENCE_TRAINING_DATA_DIR = _module_tmp_subdir("inference", "training_data")
+    return TMP_ROOT
 
 # Dataframe file upload format check
 ALLOWED_EXTENSIONS = {'csv', 'xlsx', 'xls', 'parquet', 'feather', 'pkl', 'pickle'}

@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block title %}Previous Sessions{% endblock %}
+
+{% block content %}
+<section class="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 sm:px-6 lg:px-8">
+    <div class="rounded-3xl border border-gray-200/70 bg-white/90 p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div class="space-y-3">
+                <p class="text-sm font-medium uppercase tracking-[0.24em] text-primary">Session Browser</p>
+                <h1 class="text-3xl font-bold tracking-tight text-gray-900 dark:text-white">Load previous sessions</h1>
+                <p class="max-w-3xl text-sm text-gray-600 dark:text-gray-300">
+                    Select one of the saved webui session folders to make it the active temporary workspace for the current Flask process.
+                </p>
+            </div>
+            <div class="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm dark:border-primary/30 dark:bg-primary/10">
+                <p class="font-semibold text-gray-900 dark:text-white">Active session</p>
+                <p class="mt-1 break-all text-gray-700 dark:text-gray-200">{{ active_session_root }}</p>
+            </div>
+        </div>
+    </div>
+
+    {% if switched %}
+    <div class="rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-emerald-800 dark:border-emerald-700/70 dark:bg-emerald-900/20 dark:text-emerald-200">
+        Session folder updated. New webui output will be written under the selected session root.
+    </div>
+    {% endif %}
+
+    {% if has_running_jobs %}
+    <div class="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-amber-900 dark:border-amber-700/70 dark:bg-amber-900/20 dark:text-amber-200">
+        A computation is still running. Session switching is disabled until all jobs finish.
+    </div>
+    {% endif %}
+
+    {% if session_entries %}
+    <div class="grid gap-4">
+        {% for entry in session_entries %}
+        <article class="rounded-3xl border {% if entry.is_active %}border-primary/50 bg-primary/5 dark:border-primary/40 dark:bg-primary/10{% else %}border-gray-200/70 bg-white dark:border-white/10 dark:bg-white/5{% endif %} p-6 shadow-sm transition-colors">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div class="space-y-3">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">{{ entry.name }}</h2>
+                        {% if entry.is_active %}
+                        <span class="rounded-full bg-primary px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-white">Active</span>
+                        {% endif %}
+                    </div>
+                    <dl class="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                        <div>
+                            <dt class="font-medium text-gray-900 dark:text-white">Session id</dt>
+                            <dd>{{ entry.id }}</dd>
+                        </div>
+                        <div>
+                            <dt class="font-medium text-gray-900 dark:text-white">Folder</dt>
+                            <dd class="break-all">{{ entry.path }}</dd>
+                        </div>
+                        <div>
+                            <dt class="font-medium text-gray-900 dark:text-white">Last modified</dt>
+                            <dd>{{ entry.updated_at }}</dd>
+                        </div>
+                        <div>
+                            <dt class="font-medium text-gray-900 dark:text-white">Detected modules</dt>
+                            <dd>
+                                {% if entry.modules %}
+                                    {{ entry.modules | join(', ') }}
+                                {% else %}
+                                    No module folders detected yet
+                                {% endif %}
+                            </dd>
+                        </div>
+                    </dl>
+                </div>
+                <form action="{{ url_for('load_saved_session') }}" method="post" class="shrink-0">
+                    <input type="hidden" name="session_root" value="{{ entry.path }}">
+                    <button
+                        type="submit"
+                        class="inline-flex min-w-44 items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition-colors {% if entry.is_active or has_running_jobs %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% else %}bg-primary text-white hover:bg-blue-700{% endif %}"
+                        {% if entry.is_active or has_running_jobs %}disabled{% endif %}>
+                        {% if entry.is_active %}
+                        Current session
+                        {% else %}
+                        Load this folder
+                        {% endif %}
+                    </button>
+                </form>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="rounded-3xl border border-dashed border-gray-300 bg-white/80 p-10 text-center dark:border-white/15 dark:bg-white/5">
+        <h2 class="text-xl font-semibold text-gray-900 dark:text-white">No saved sessions found</h2>
+        <p class="mt-3 text-sm text-gray-600 dark:text-gray-300">
+            Session folders are discovered under the webui temporary base directory after you start the app and create files.
+        </p>
+    </div>
+    {% endif %}
+</section>
+{% endblock %}
