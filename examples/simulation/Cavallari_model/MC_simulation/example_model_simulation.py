@@ -245,6 +245,17 @@ def local_first_cell(network, population_name):
     return cells[0]
 
 
+def get_netstim_spike_count(interval_ms, tstop_ms, safety_factor=2.0):
+    """Return a NetStim spike count that comfortably spans the simulation."""
+    interval_ms = float(interval_ms)
+    tstop_ms = float(tstop_ms)
+    if interval_ms <= 0.0:
+        raise ValueError("`interval_ms` must be positive.")
+    if tstop_ms <= 0.0:
+        return 1
+    return max(1, int(np.ceil(safety_factor * tstop_ms / interval_ms)))
+
+
 def finalize_mpi():
     if MPI.Is_initialized() and not MPI.Is_finalized():
         MPI.Finalize()
@@ -324,6 +335,10 @@ if __name__ == '__main__':
 
     # instantiate Network:
     network = Network(OUTPUTPATH=OUTPUTPATH, **params.networkParameters)
+    ext_netstim_spike_counts = [
+        get_netstim_spike_count(interval_ms=interval, tstop_ms=network.tstop)
+        for interval in params.netstim_interval
+    ]
 
     # create E and I populations:
     for j, (name, size, morphology) in enumerate(zip(params.population_names,
@@ -345,6 +360,7 @@ if __name__ == '__main__':
                 syn = Synapse(cell=cell, idx=i,
                               **params.extSynapseParameters[j])
                 syn.set_spike_times_w_netstim(
+                    number=ext_netstim_spike_counts[j],
                     interval=params.netstim_interval[j],
                     seed=np.random.rand() * 2**32 - 1)
 
@@ -441,6 +457,15 @@ if __name__ == '__main__':
                     subgrp['gids'] = []
                     subgrp['times'] = []
 
+        sim_duration_s = float(params.networkParameters['tstop']) / 1000.0
+        for i, name in enumerate(params.population_names):
+            n_spikes = sum(spt.size for spt in SPIKES['times'][i])
+            mean_rate_hz = n_spikes / (params.population_sizes[i] * sim_duration_s)
+            print(
+                f"Mean firing rate ({name}): {mean_rate_hz:.3f} Hz",
+                flush=True,
+            )
+
     # collect somatic potentials across all RANKs to RANK 0:
     if RANK == 0:
         somavs = []
@@ -521,6 +546,8 @@ if __name__ == '__main__':
     ##########################################################################
 
     if RANK == 0:
+        plot_window = (0., float(params.networkParameters['tstop']))
+
         # spike raster
         fig, ax = plt.subplots(1, 1)
         for name, spts, gids in zip(
@@ -530,10 +557,11 @@ if __name__ == '__main__':
             for spt, gid in zip(spts, gids):
                 t = np.r_[t, spt]
                 g = np.r_[g, np.zeros(spt.size) + gid]
-            inds = (t >= 500) & (t <= 1000)  # show [500, 1000] ms interval
+            inds = (t >= plot_window[0]) & (t <= plot_window[1])
             ax.plot(t[inds], g[inds], '.', ms=3, label=name)
         ax.legend(loc=1)
         remove_axis_junk(ax, lines=['right', 'top'])
+        ax.set_xlim(plot_window)
         ax.set_xlabel('t (ms)')
         ax.set_ylabel('gid')
         ax.set_title('spike raster')
@@ -552,7 +580,7 @@ if __name__ == '__main__':
         draw_lineplot(ax,
                       data,
                       dt=network.dt * int(round(1 // network.dt)),
-                      T=(500, 1000),
+                      T=plot_window,
                       scaling_factor=1.,
                       vlimround=16,
                       label='E',
@@ -576,7 +604,7 @@ if __name__ == '__main__':
         draw_lineplot(ax,
                       data,
                       dt=network.dt * int(round(1 // network.dt)),
-                      T=(500, 1000),
+                      T=plot_window,
                       scaling_factor=1.,
                       vlimround=16,
                       label='I',
@@ -602,7 +630,7 @@ if __name__ == '__main__':
                           ss.decimate(electrode.data[name], q=16,
                                       zero_phase=True),
                           dt=network.dt * 16,
-                          T=(500, 1000),
+                          T=plot_window,
                           scaling_factor=1.,
                           vlimround=None,
                           label=label,
@@ -625,7 +653,7 @@ if __name__ == '__main__':
             for j, (name, label) in enumerate(zip(['E', 'I', 'imem'],
                                                   ['E', 'I', 'sum'])):
                 t = np.arange(current_dipole_moment.data.shape[1]) * network.dt
-                inds = (t >= 500) & (t <= 1000)
+                inds = (t >= plot_window[0]) & (t <= plot_window[1])
                 axes[i, j].plot(
                     t[inds][::16],
                     ss.decimate(current_dipole_moment.data[name][i, inds],
@@ -654,7 +682,7 @@ if __name__ == '__main__':
                           ss.decimate(csd.data[name], q=16,
                                       zero_phase=True),
                           dt=network.dt * 16,
-                          T=(500, 1000),
+                          T=plot_window,
                           scaling_factor=1.,
                           vlimround=None,
                           label=label,

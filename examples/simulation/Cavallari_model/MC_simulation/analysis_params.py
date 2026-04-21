@@ -51,23 +51,22 @@ class KernelParams:
     # Time lag relative to spike for kernel predictions
     tau = 100
 
-    # Parameters selected by optimization of the Cavallari-inspired
-    # multicompartment network while keeping the Hagen morphologies and
-    # active mechanisms.
-    # The optimized values are implemented as scale factors applied to the
-    # baseline Cavallari LIF conductances.
-    # LIF conductances are in nS-like units; LFPy/NEURON Exp2Syn weights
-    # are in uS, so copied conductance weights are scaled by 1e-3.
+    # Conductance values copied from the LIF model are expressed in nS-like units,
+    # whereas LFPy/NEURON Exp2Syn weights are specified in uS; the imported
+    # synaptic weights are therefore rescaled by 1e-3.
+    # The th_#_external terms are increased by a factor of 10 only to trigger
+    # spiking activity in the multicompartment model.
+    # This parameter set is not calibrated to reproduce the LIF model firing rates.
     MC_params = {
-        'weight_EE': 0.000178*3.34726,
-        'weight_IE': 0.000233*3.34726,
-        'weight_EI': 0.00201*3.34726,
-        'weight_II': 0.00270*3.34726,
+        'weight_EE': 0.000178,
+        'weight_IE': 0.000233,
+        'weight_EI': 0.00201,
+        'weight_II': 0.00270,
         'biophys': 'lin',
         'i_syn': True,
         'n_ext': [1, 1],
-        'th_exc_external': 0.000234*42.5574,
-        'th_inh_external': 0.000317*42.5574,
+        'th_exc_external': 0.000234*10.,
+        'th_inh_external': 0.000317*10.,
         'v_0': 1.5,
         'g_eff': True,
         'perseg_Vrest': False}
@@ -99,7 +98,7 @@ class KernelParams:
     # class Network parameters:
     networkParameters = dict(
         dt=2 ** -4,  # simulation time resolution (ms)
-        tstop=12000.,  # simulation duration (ms)
+        tstop=5000.,  # simulation duration (ms)
         v_init=-65.,  # initial membrane voltage for all cells (mV)
         celsius=34,  # simulation temperature (deg. C)
         # OUTPUTPATH=OUTPUTPATH  # set in main simulation script
@@ -135,7 +134,7 @@ class KernelParams:
     population_names = ['E', 'I']
     morphologies = ['BallAndSticks_E.hoc', 'BallAndSticks_I.hoc']
     if TESTING:
-        population_sizes = [40, 10]
+        population_sizes = [400, 100]
         connectionProbability = [[1., 1.], [1., 1.]]
     else:
         population_sizes = [4000, 1000]
