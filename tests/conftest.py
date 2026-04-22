@@ -6,11 +6,6 @@ from pathlib import Path
 
 import pytest
 
-
-# Keep pytest temporary artifacts in a stable location for local server runs.
-Path("/tmp/pytest").mkdir(parents=True, exist_ok=True)
-
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WEBUI_DIR = REPO_ROOT / "webui"
 WEBUI_TESTS_DIR = (Path(__file__).resolve().parent / "webui").resolve()
