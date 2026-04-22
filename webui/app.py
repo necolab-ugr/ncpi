@@ -4845,6 +4845,61 @@ def update_session_name():
         return jsonify({"error": str(e)}), 400
 
 
+@app.route("/sessions/delete", methods=["POST"])
+def delete_session():
+    session_root = request.form.get("session_root", "").strip()
+    if not session_root:
+        flash("No session specified.", "error")
+        return redirect(url_for("saved_sessions"))
+
+    try:
+        # Validate that the folder is a valid session
+        real_root = tmp_paths._validate_session_root(session_root)
+        active_root = os.path.realpath(tmp_paths.TMP_ROOT)
+        
+        if real_root == active_root:
+            flash("Cannot delete the currently active session.", "error")
+            return redirect(url_for("saved_sessions"))
+            
+        if not os.path.isdir(real_root):
+            flash("Session folder not found.", "error")
+            return redirect(url_for("saved_sessions"))
+            
+        shutil.rmtree(real_root)
+        flash("Session deleted successfully.", "success")
+    except Exception as e:
+        flash(f"Error deleting session: {e}", "error")
+        
+    return redirect(url_for("saved_sessions"))
+
+
+@app.route("/sessions/delete_all", methods=["POST"])
+def delete_all_sessions():
+    if _has_running_jobs():
+        flash("Cannot delete sessions while a computation is running.", "error")
+        return redirect(url_for("saved_sessions"))
+        
+    active_root = os.path.realpath(tmp_paths.TMP_ROOT)
+    deleted = 0
+    errors = []
+    
+    for session_root in tmp_paths.list_session_roots():
+        real_root = os.path.realpath(session_root)
+        if real_root == active_root:
+            continue
+        try:
+            shutil.rmtree(real_root)
+            deleted += 1
+        except Exception as e:
+            errors.append(f"{os.path.basename(real_root)}: {e}")
+            
+    if deleted:
+        flash(f"Deleted {deleted} session(s).", "success")
+    if errors:
+        flash(f"Errors: {'; '.join(errors)}", "error")
+        
+    return redirect(url_for("saved_sessions"))
+
 # Simulation configuration page
 @app.route("/simulation")
 def simulation():

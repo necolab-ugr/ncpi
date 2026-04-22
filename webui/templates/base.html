@@ -102,14 +102,18 @@
 
 					<main class="flex-1 py-10 sm:py-16">
 						<!-- Alert messages -->
-						{% with messages = get_flashed_messages() %}
+						 {% for category, class_color, title in [
+							("error", "red", "Error:"),
+							("success", "green", "Success:")
+						] %}
+						{% with messages = get_flashed_messages(category_filter=[category]) %}
 						{% if messages %}
 							{% for message in messages %}
-							<div class="flash-container max-w-4xl mx-auto bg-red-100 border border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300 px-4 py-3 mb-8 rounded relative" role="alert">
-								<strong class="font-bold">Error:</strong>
+							<div class="flash-container max-w-4xl mx-auto bg-{{ class_color }} border border-{{ class_color }}-400 text-{{ class_color }}-700 dark:bg-{{ class_color }}-900/30 dark:border-{{ class_color }}-700 dark:text-{{ class_color }}-300 px-4 py-3 mb-8 rounded relative" role="alert">
+								<strong class="font-bold">{{ title }}</strong>
 								<span class="block sm:inline">{{ message }}</span>
 								<span class="absolute top-0 bottom-0 right-0 px-4 py-3">
-									<svg class="close-button fill-current h-6 w-6 text-red-500 dark:text-red-400" role="button"
+									<svg class="close-button fill-current h-6 w-6 text-{{ class_color }}-500 dark:text-{{ class_color }}-400" role="button"
 										xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
 										<title>Close</title>
 										<path
@@ -120,6 +124,7 @@
 							{% endfor %}
 						{% endif %}
 						{% endwith %}
+						{% endfor %}
 
 						<div id="server-error-banner"
 							class="hidden max-w-4xl mx-auto bg-red-100 border border-red-400 text-red-700 dark:bg-red-900/30 dark:border-red-700 dark:text-red-300 px-4 py-3 mb-8 rounded relative"
