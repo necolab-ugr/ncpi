@@ -294,12 +294,13 @@ def _independent_expected_four_area_trials(app_module, form_data):
                 "delay_YX": values["inter_area.delay_YX"],
             },
         }
-        simulation = {
-            "tstop": values["tstop"],
-            "local_num_threads": values["local_num_threads"],
-            "dt": values["dt"],
-            "numpy_seed": numpy_seed,
-        }
+        simulation = _shared._expected_generated_simulation_params(
+            app_module,
+            tstop=values["tstop"],
+            local_num_threads=values["local_num_threads"],
+            dt=values["dt"],
+            numpy_seed=numpy_seed,
+        )
         for repeat_index in range(repetitions):
             expected_trials.append({
                 "combo_index": combo_index,

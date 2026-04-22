@@ -2,6 +2,14 @@
     display: none !important;
 }
 
+html[data-webdriver="true"] *,
+html[data-webdriver="true"] *::before,
+html[data-webdriver="true"] *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+}
+
 /* Add transitions for smooth effect */
 #ncpi-config-section,
 #custom-config-section {

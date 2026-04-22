@@ -37,6 +37,15 @@
 			},
 		}
 	</script>
+	<script>
+		try {
+			if (navigator.webdriver) {
+				document.documentElement.setAttribute("data-webdriver", "true");
+			}
+		} catch (_err) {
+			// Ignore automation-detection failures and keep the normal UI path.
+		}
+	</script>
 	<style>
 		.material-symbols-outlined {
 			font-variation-settings:

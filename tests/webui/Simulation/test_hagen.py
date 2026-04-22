@@ -432,6 +432,20 @@ def _independent_values_equal(left, right, tol=1e-12):
     return left == right
 
 
+def _expected_generated_simulation_params(app_module, *, tstop, local_num_threads, dt, numpy_seed):
+    """Build the exact simulation_params.py namespace expected from the WebUI."""
+    params = {
+        "tstop": tstop,
+        "local_num_threads": local_num_threads,
+        "dt": dt,
+        "numpy_seed": numpy_seed,
+    }
+    spike_rate_limit = getattr(app_module, "WEBUI_MAX_MEAN_POPULATION_SPIKE_RATE_HZ", None)
+    if spike_rate_limit is not None:
+        params["max_mean_population_spike_rate_hz"] = float(spike_rate_limit)
+    return params
+
+
 def _independent_expected_hagen_trials(app_module, form_data):
     """Derive the expected Hagen trial configurations directly from submitted form data."""
     defaults = app_module.HAGEN_DEFAULTS
@@ -489,12 +503,13 @@ def _independent_expected_hagen_trials(app_module, form_data):
                     "J_ext": values["J_ext"],
                     "model": values["model"],
                 },
-                "simulation": {
-                    "tstop": values["tstop"],
-                    "local_num_threads": values["local_num_threads"],
-                    "dt": values["dt"],
-                    "numpy_seed": numpy_seed,
-                },
+                "simulation": _expected_generated_simulation_params(
+                    app_module,
+                    tstop=values["tstop"],
+                    local_num_threads=values["local_num_threads"],
+                    dt=values["dt"],
+                    numpy_seed=numpy_seed,
+                ),
             })
     return expected_trials
 

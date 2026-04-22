@@ -143,6 +143,7 @@ PATH_HISTORY_CLIENT_ID_SESSION_KEY = "webui_path_history_client_id"
 PATH_HISTORY_STORAGE_DIR = tmp_subdir("ncpi_webui_path_history")
 PATH_HISTORY_MAX_FIELDS = 256
 PATH_HISTORY_MAX_VALUE_LEN = 4096
+WEBUI_MAX_MEAN_POPULATION_SPIKE_RATE_HZ = 500.0
 
 
 HAGEN_DEFAULTS = {
@@ -4297,6 +4298,9 @@ def _build_simulation_params(form, defaults):
         "",
         "# Optional fixed NumPy seed used to derive deterministic randomization in simulation scripts",
         f"numpy_seed = {numpy_seed if numpy_seed is not None else 'None'}",
+        "",
+        "# Allow moderately high-rate sweeps to complete while still guarding runaway outputs",
+        f"max_mean_population_spike_rate_hz = {WEBUI_MAX_MEAN_POPULATION_SPIKE_RATE_HZ}",
         "",
     ])
 
