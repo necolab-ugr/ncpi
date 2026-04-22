@@ -131,6 +131,8 @@ FEATURES_PARSER_FILE_EXTENSIONS = {
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
+FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
 PICKLE_EXTENSIONS = {".pkl", ".pickle"}
 MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
@@ -2141,6 +2143,121 @@ def _extract_filename_text_chains(file_name):
     return [tok for tok in stem.split("_") if tok.strip()]
 
 
+_FILENAME_FORMAT_TOKEN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+def _file_token_virtual_field_key(token_name):
+    token = str(token_name or "").strip().lower()
+    return f"{FILE_TOKEN_VIRTUAL_FIELD_PREFIX}{token}{FILE_TOKEN_VIRTUAL_FIELD_SUFFIX}" if token else ""
+
+
+def _file_token_locator_name(locator):
+    if not isinstance(locator, str):
+        return None
+    raw = str(locator).strip()
+    if not raw.startswith(FILE_TOKEN_VIRTUAL_FIELD_PREFIX):
+        return None
+    token = raw[len(FILE_TOKEN_VIRTUAL_FIELD_PREFIX):]
+    if token.endswith(FILE_TOKEN_VIRTUAL_FIELD_SUFFIX):
+        token = token[: -len(FILE_TOKEN_VIRTUAL_FIELD_SUFFIX)]
+    token = token.strip().lower()
+    if not token or not _FILENAME_FORMAT_TOKEN_NAME_RE.fullmatch(token):
+        return None
+    return token
+
+
+def _parse_filename_format_spec(raw_format):
+    value = str(raw_format or "").strip()
+    if not value:
+        return None
+
+    pieces = []
+    token_names = []
+    token_seen = set()
+    idx = 0
+    while idx < len(value):
+        ch = value[idx]
+        if ch != "$":
+            pieces.append(("literal", ch))
+            idx += 1
+            continue
+        closing = value.find("$", idx + 1)
+        if closing < 0:
+            raise ValueError("Invalid filename format: missing closing '$'.")
+        token_raw = value[idx + 1:closing].strip()
+        if not token_raw:
+            raise ValueError("Invalid filename format: empty token '$$' is not allowed.")
+        token = token_raw.lower()
+        if not _FILENAME_FORMAT_TOKEN_NAME_RE.fullmatch(token):
+            raise ValueError(
+                f"Invalid filename format token '{token_raw}'. Use letters/numbers/underscore and start with a letter."
+            )
+        if token in token_seen:
+            raise ValueError(f"Invalid filename format: token '{token_raw}' is duplicated.")
+        token_seen.add(token)
+        token_names.append(token)
+        pieces.append(("token", token))
+        idx = closing + 1
+
+    if not token_names:
+        raise ValueError("Filename format must include at least one token, e.g. $id$.")
+
+    regex_parts = []
+    group_map = []
+    token_idx = 0
+    for kind, value_part in pieces:
+        if kind == "literal":
+            regex_parts.append(re.escape(value_part))
+            continue
+        group_name = f"tok{token_idx}"
+        token_idx += 1
+        group_map.append((group_name, value_part))
+        regex_parts.append(f"(?P<{group_name}>.+?)")
+
+    return {
+        "raw": value,
+        "tokens": token_names,
+        "group_map": group_map,
+        "regex": re.compile("^" + "".join(regex_parts) + "$"),
+    }
+
+
+def _extract_filename_format_tokens(file_name, format_spec):
+    if not format_spec:
+        return None
+    basename = os.path.basename(str(file_name or "").strip())
+    if not basename:
+        return None
+    matcher = format_spec.get("regex")
+    if matcher is None:
+        return None
+    match = matcher.fullmatch(basename)
+    if not match:
+        return None
+    out = {}
+    for group_name, token_name in (format_spec.get("group_map") or []):
+        out[str(token_name)] = str(match.group(group_name) or "").strip()
+    return out
+
+
+def _matches_filename_format(file_name, format_spec):
+    return _extract_filename_format_tokens(file_name, format_spec) is not None
+
+
+def _filter_named_items_by_filename_format(items, get_name, format_spec):
+    if not format_spec:
+        return list(items or []), []
+    filtered = []
+    skipped = []
+    for item in items or []:
+        name = str(get_name(item) or "").strip()
+        if _matches_filename_format(name, format_spec):
+            filtered.append(item)
+        else:
+            skipped.append(name)
+    return filtered, skipped
+
+
 def _build_file_extracted_virtual_fields(file_names):
     chain_rows = [_extract_filename_text_chains(name) for name in (file_names or [])]
     max_chains = max((len(row) for row in chain_rows), default=0)
@@ -2174,8 +2291,44 @@ def _build_file_extracted_virtual_fields(file_names):
     return fields
 
 
-def _attach_file_extracted_virtual_field(description, file_names):
-    field_infos = _build_file_extracted_virtual_fields(file_names)
+def _build_file_token_virtual_fields(file_names, format_spec):
+    if not format_spec:
+        return []
+    token_values = {token: [] for token in (format_spec.get("tokens") or [])}
+    token_seen = {token: set() for token in token_values}
+    for raw_name in file_names or []:
+        extracted = _extract_filename_format_tokens(raw_name, format_spec)
+        if not extracted:
+            continue
+        for token in token_values:
+            value = str(extracted.get(token) or "").strip()
+            if not value:
+                continue
+            key = value.lower()
+            if key in token_seen[token]:
+                continue
+            token_seen[token].add(key)
+            token_values[token].append(value)
+    fields = []
+    for token in (format_spec.get("tokens") or []):
+        values = token_values.get(token) or []
+        preview = "/".join(values[:6]) if values else token
+        if len(values) > 6:
+            preview += "/..."
+        fields.append({
+            "key": _file_token_virtual_field_key(token),
+            "label": f"file token `{token}`: {preview}",
+            "values": values,
+            "token": token,
+        })
+    return fields
+
+
+def _attach_file_extracted_virtual_field(description, file_names, filename_format_spec=None):
+    if filename_format_spec:
+        field_infos = _build_file_token_virtual_fields(file_names, filename_format_spec)
+    else:
+        field_infos = _build_file_extracted_virtual_fields(file_names)
     if not field_infos:
         return description
     enriched = dict(description or {})
@@ -2222,6 +2375,16 @@ def _resolve_file_extracted_value(file_name, locator):
     if index >= len(chains):
         return None
     return chains[index]
+
+
+def _resolve_file_token_value(file_name, locator, filename_format_spec):
+    token = _file_token_locator_name(locator)
+    if not token:
+        return None
+    extracted = _extract_filename_format_tokens(file_name, filename_format_spec)
+    if not extracted:
+        return None
+    return extracted.get(token)
 
 
 def _collect_feature_pipeline_inputs():
@@ -2828,7 +2991,7 @@ def _manual_field_details_for_ui():
     ]
 
 
-def _build_virtual_field_details_for_ui(file_names):
+def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
     normalized_names = []
     seen_names = set()
     for raw in file_names or []:
@@ -2858,7 +3021,12 @@ def _build_virtual_field_details_for_ui(file_names):
         "example_values": file_id_examples,
         "usage_examples": file_id_usage,
     }]
-    for item in _build_file_extracted_virtual_fields(file_names):
+    if filename_format_spec:
+        virtual_items = _build_file_token_virtual_fields(file_names, filename_format_spec)
+    else:
+        virtual_items = _build_file_extracted_virtual_fields(file_names)
+
+    for item in virtual_items:
         key = str(item.get("key") or "").strip()
         if not key:
             continue
@@ -2867,8 +3035,13 @@ def _build_virtual_field_details_for_ui(file_names):
         if len(values) > 5:
             preview += ", ..."
         position = _file_extracted_chain_index(key)
+        token_name = _file_token_locator_name(key)
         usage_examples = []
-        if position is not None and position >= 0:
+        if token_name:
+            usage_examples.append(
+                f"Represents the `{token_name}` token extracted from the filename format."
+            )
+        elif position is not None and position >= 0:
             usage_examples.append(
                 f"Represents token position {position + 1} extracted from file names."
             )
@@ -2890,7 +3063,11 @@ def _build_virtual_field_details_for_ui(file_names):
             "label": str(item.get("label") or key),
             "origin": "virtual",
             "python_type": "str",
-            "detail": f"Tokens extracted from file names: {preview}" if preview else "Tokens extracted from file names.",
+            "detail": (
+                f"Values extracted for token `{token_name}`: {preview}"
+                if token_name and preview
+                else (f"Tokens extracted from file names: {preview}" if preview else "Tokens extracted from file names.")
+            ),
             "example_values": values[:8],
             "usage_examples": usage_examples,
         })
@@ -2924,6 +3101,69 @@ def _summarize_listed_file_names(listed_file_names):
     }
 
 
+def _summarize_folder_entries(entries):
+    folder_counts = defaultdict(int)
+    ext_counts = defaultdict(int)
+    for entry in entries or []:
+        folder_name = str(entry.get("folder_name") or "selected_folder")
+        folder_path = str(entry.get("folder_path") or "")
+        folder_counts[(folder_name, folder_path)] += 1
+        ext = str(entry.get("extension") or Path(str(entry.get("name") or "")).suffix.lower() or "(no extension)")
+        ext_counts[ext] += 1
+    folder_summaries = [
+        {"folder_name": name, "folder_path": path, "file_count": int(count)}
+        for (name, path), count in sorted(folder_counts.items(), key=lambda item: (item[0][0], item[0][1]))
+    ]
+    extension_summaries = [
+        {"extension": ext, "count": int(count)}
+        for ext, count in sorted(ext_counts.items())
+    ]
+    return folder_summaries, extension_summaries
+
+
+def _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_spec):
+    if not filename_format_spec:
+        return list(folder_contexts or [])
+    filtered_contexts = []
+    for context in folder_contexts or []:
+        if not isinstance(context, dict):
+            continue
+        cloned = dict(context)
+        selected_entries = list(cloned.get("selected_entries") or [])
+        matched_data_files = list(cloned.get("matched_data_files") or [])
+        selected_entries, _ = _filter_named_items_by_filename_format(
+            selected_entries,
+            lambda item: str(item.get("name") or ""),
+            filename_format_spec,
+        )
+        matched_data_files, _ = _filter_named_items_by_filename_format(
+            matched_data_files,
+            lambda item: str(item.get("name") or ""),
+            filename_format_spec,
+        )
+        cloned["selected_entries"] = selected_entries
+        cloned["matched_data_files"] = matched_data_files
+        sample_entry = cloned.get("sample_selected_entry")
+        if not isinstance(sample_entry, dict) or not _matches_filename_format(sample_entry.get("name"), filename_format_spec):
+            cloned["sample_selected_entry"] = selected_entries[0] if selected_entries else (matched_data_files[0] if matched_data_files else None)
+        if cloned["sample_selected_entry"] is None:
+            cloned["selected_data_file"] = ""
+            cloned["selected_data_pattern"] = ""
+        filtered_contexts.append(cloned)
+    return filtered_contexts
+
+
+def _filter_empirical_upload_payloads_by_filename_format(payloads, filename_format_spec):
+    if not filename_format_spec:
+        return list(payloads or []), []
+    filtered, skipped = _filter_named_items_by_filename_format(
+        payloads,
+        lambda item: str(item.get("name") or ""),
+        filename_format_spec,
+    )
+    return filtered, skipped
+
+
 def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Selected"):
     entries = []
     for raw in listed_file_names or []:
@@ -2951,7 +3191,7 @@ def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Se
     # selected data source via per-folder data-file selections.
 
 
-def _build_folder_inspection_profiles(folder_entries, folder_summaries):
+def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename_format_spec=None):
     entries_by_folder = defaultdict(list)
     for row in folder_entries or []:
         folder_path = str(row.get("folder_path") or "").strip()
@@ -2973,7 +3213,18 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries):
         if not rows:
             continue
 
-        folder_file_names = [str(item.get("logical_name") or item.get("name") or "") for item in rows if str(item.get("logical_name") or item.get("name") or "").strip()]
+        if filename_format_spec:
+            folder_file_names = [
+                str(item.get("name") or "").strip()
+                for item in rows
+                if str(item.get("name") or "").strip()
+            ]
+        else:
+            folder_file_names = [
+                str(item.get("logical_name") or item.get("name") or "")
+                for item in rows
+                if str(item.get("logical_name") or item.get("name") or "").strip()
+            ]
         combined_logical_names.extend(folder_file_names)
 
         by_ext = defaultdict(list)
@@ -2990,14 +3241,28 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries):
         extension_profiles = []
         for ext, ext_rows in sorted(by_ext.items()):
             sample = ext_rows[0]
-            ext_names = [
-                str(item.get("logical_name") or item.get("name") or "").strip()
-                for item in ext_rows
-                if str(item.get("logical_name") or item.get("name") or "").strip()
-            ]
+            if filename_format_spec:
+                ext_names = [
+                    str(item.get("name") or "").strip()
+                    for item in ext_rows
+                    if str(item.get("name") or "").strip()
+                ]
+            else:
+                ext_names = [
+                    str(item.get("logical_name") or item.get("name") or "").strip()
+                    for item in ext_rows
+                    if str(item.get("logical_name") or item.get("name") or "").strip()
+                ]
             ext_description = _describe_parser_source(sample["path"])
-            ext_description = _attach_file_extracted_virtual_field(ext_description, ext_names)
-            ext_description["virtual_field_details"] = _build_virtual_field_details_for_ui(ext_names)
+            ext_description = _attach_file_extracted_virtual_field(
+                ext_description,
+                ext_names,
+                filename_format_spec=filename_format_spec,
+            )
+            ext_description["virtual_field_details"] = _build_virtual_field_details_for_ui(
+                ext_names,
+                filename_format_spec=filename_format_spec,
+            )
             ext_description["manual_field_details"] = _manual_field_details_for_ui()
             ext_description["extension"] = ext
             ext_description["sample_file"] = str(sample.get("logical_name") or sample.get("name") or "")
@@ -3023,7 +3288,10 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries):
             "file_count": len(rows),
             "extension_summaries": extension_summaries,
             "extension_profiles": extension_profiles,
-            "virtual_field_details": _build_virtual_field_details_for_ui(folder_file_names),
+            "virtual_field_details": _build_virtual_field_details_for_ui(
+                folder_file_names,
+                filename_format_spec=filename_format_spec,
+            ),
         })
 
     extension_summaries_global = [
@@ -3144,6 +3412,38 @@ def _parse_metadata_field_source(form, source_key, value_key):
         return source
     value = (form.get(value_key) or "").strip()
     return value or None
+
+
+def _validate_parse_cfg_filename_token_locators(parse_cfg, form):
+    metadata_locators = (
+        dict(parse_cfg.fields.metadata or {})
+        if getattr(parse_cfg, "fields", None) is not None
+        else {}
+    )
+    requested_tokens = {}
+    for meta_key, locator in metadata_locators.items():
+        token = _file_token_locator_name(locator)
+        if token:
+            requested_tokens[str(meta_key)] = token
+    if not requested_tokens:
+        return None
+
+    filename_format_spec = _parse_filename_format_spec(form.get("parser_filename_format"))
+    if not filename_format_spec:
+        fields = ", ".join(sorted(requested_tokens.keys()))
+        raise ValueError(
+            "Filename format is required because metadata fields use filename token locators: "
+            f"{fields}."
+        )
+    allowed_tokens = set(filename_format_spec.get("tokens") or [])
+    missing_tokens = sorted({token for token in requested_tokens.values() if token not in allowed_tokens})
+    if missing_tokens:
+        raise ValueError(
+            "Filename format does not define token(s) used in metadata mapping: "
+            + ", ".join(missing_tokens)
+            + "."
+        )
+    return filename_format_spec
 
 
 def _collect_dataframe_candidate_fields_from_description(description):
@@ -4036,6 +4336,7 @@ def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
         )
 
     parse_cfg = _build_parse_config_from_form(form)
+    filename_format_spec = _validate_parse_cfg_filename_token_locators(parse_cfg, form)
     _validate_data_locator_against_dataframe_source(
         parse_cfg.fields.data,
         source_obj,
@@ -4075,6 +4376,11 @@ def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
         for key, locator in metadata_map.items()
         if _file_extracted_chain_index(locator) is not None
     }
+    file_token_fields = {
+        str(key): str(locator)
+        for key, locator in metadata_map.items()
+        if _file_token_locator_name(locator) is not None
+    }
     source_label = os.path.basename(str(source_path or ""))
     if file_id_fields:
         for col_name in file_id_fields:
@@ -4082,6 +4388,15 @@ def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
     if file_extracted_fields:
         for col_name, locator in file_extracted_fields.items():
             parsed_df[col_name] = _resolve_file_extracted_value(source_label, locator)
+    if file_token_fields:
+        for col_name, locator in file_token_fields.items():
+            token_value = _resolve_file_token_value(source_label, locator, filename_format_spec)
+            if token_value is None:
+                token_name = _file_token_locator_name(locator) or locator
+                raise ValueError(
+                    f"Source file '{source_label}' does not match the filename format for token '{token_name}'."
+                )
+            parsed_df[col_name] = token_value
     target_upload_dir = upload_dir or _module_uploads_dir_for("features")
     os.makedirs(target_upload_dir, exist_ok=True)
     normalized_path = os.path.join(target_upload_dir, f"features_data_file_0_{job_id}_parsed.pkl")
@@ -6730,6 +7045,8 @@ def features_parser_inspect():
     listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
     uploads = [f for f in request.files.getlist("file") if f and f.filename]
     _metadata_server_paths_raw = [p.strip() for p in request.form.getlist("metadata_server_path") if p.strip()]
+    filename_format_raw = (request.form.get("parser_filename_format") or "").strip()
+    filename_format_spec = _parse_filename_format_spec(filename_format_raw)
     inspect_path = None
     cleanup_paths = []
     name_candidates = list(listed_file_names)
@@ -6742,6 +7059,8 @@ def features_parser_inspect():
     folder_contexts = []
     candidate_field_folders = {}
     folder_file_count = 0
+    filename_filter_stats = None
+    filename_filter_warning = ""
 
     try:
         if listed_file_names:
@@ -6750,6 +7069,10 @@ def features_parser_inspect():
         if existing_data_path:
             inspect_path = _validate_feature_existing_path(existing_data_path)
             file_name = os.path.basename(inspect_path)
+            if filename_format_spec and not _matches_filename_format(file_name, filename_format_spec):
+                raise ValueError(
+                    f"No files match filename format '{filename_format_spec['raw']}'."
+                )
             if not name_candidates:
                 name_candidates.append(file_name)
         elif empirical_folder_paths:
@@ -6758,6 +7081,32 @@ def features_parser_inspect():
                 "Empirical",
                 data_file_selection_map=empirical_data_file_selections,
             )
+            if filename_format_spec:
+                all_entry_count = len(folder_entries)
+                folder_entries, skipped_names = _filter_named_items_by_filename_format(
+                    folder_entries,
+                    lambda row: str(row.get("name") or ""),
+                    filename_format_spec,
+                )
+                folder_contexts = _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_spec)
+                if not folder_entries:
+                    raise ValueError(
+                        f"No files match filename format '{filename_format_spec['raw']}'."
+                    )
+                folder_summaries, extension_summaries = _summarize_folder_entries(folder_entries)
+                skipped_count = len(skipped_names)
+                if skipped_count > 0:
+                    matched_count = len(folder_entries)
+                    filename_filter_stats = {
+                        "matched_count": int(matched_count),
+                        "skipped_count": int(skipped_count),
+                        "skipped_examples": skipped_names[:8],
+                        "tokens": list(filename_format_spec.get("tokens") or []),
+                    }
+                    filename_filter_warning = (
+                        f"Filename format filter matched {matched_count} of {all_entry_count} files; "
+                        f"skipped {skipped_count} non-matching file(s)."
+                    )
             use_prefix = len(folder_summaries) > 1
             for row in folder_entries:
                 row["logical_name"] = _prefixed_file_name(row["name"], row["folder_name"], apply_prefix=use_prefix)
@@ -6780,7 +7129,11 @@ def features_parser_inspect():
                 _combined_candidates_from_profiles,
                 _candidate_field_folders_from_profiles,
                 combined_logical_names,
-            ) = _build_folder_inspection_profiles(folder_entries, folder_summaries)
+            ) = _build_folder_inspection_profiles(
+                folder_entries,
+                folder_summaries,
+                filename_format_spec=filename_format_spec,
+            )
             if not name_candidates:
                 name_candidates = combined_logical_names
             extension_profiles = [
@@ -6791,6 +7144,10 @@ def features_parser_inspect():
         elif simulation_file_path:
             inspect_path = _validate_simulation_file_path(simulation_file_path)
             file_name = os.path.basename(inspect_path)
+            if filename_format_spec and not _matches_filename_format(file_name, filename_format_spec):
+                raise ValueError(
+                    f"No files match filename format '{filename_format_spec['raw']}'."
+                )
             if not name_candidates:
                 name_candidates.append(file_name)
         elif simulation_folder_paths:
@@ -6799,6 +7156,32 @@ def features_parser_inspect():
                 "Simulation outputs",
                 data_file_selection_map=simulation_data_file_selections,
             )
+            if filename_format_spec:
+                all_entry_count = len(folder_entries)
+                folder_entries, skipped_names = _filter_named_items_by_filename_format(
+                    folder_entries,
+                    lambda row: str(row.get("name") or ""),
+                    filename_format_spec,
+                )
+                folder_contexts = _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_spec)
+                if not folder_entries:
+                    raise ValueError(
+                        f"No files match filename format '{filename_format_spec['raw']}'."
+                    )
+                folder_summaries, extension_summaries = _summarize_folder_entries(folder_entries)
+                skipped_count = len(skipped_names)
+                if skipped_count > 0:
+                    matched_count = len(folder_entries)
+                    filename_filter_stats = {
+                        "matched_count": int(matched_count),
+                        "skipped_count": int(skipped_count),
+                        "skipped_examples": skipped_names[:8],
+                        "tokens": list(filename_format_spec.get("tokens") or []),
+                    }
+                    filename_filter_warning = (
+                        f"Filename format filter matched {matched_count} of {all_entry_count} files; "
+                        f"skipped {skipped_count} non-matching file(s)."
+                    )
             use_prefix = len(folder_summaries) > 1
             for row in folder_entries:
                 row["logical_name"] = _prefixed_file_name(row["name"], row["folder_name"], apply_prefix=use_prefix)
@@ -6821,7 +7204,11 @@ def features_parser_inspect():
                 _combined_candidates_from_profiles,
                 _candidate_field_folders_from_profiles,
                 combined_logical_names,
-            ) = _build_folder_inspection_profiles(folder_entries, folder_summaries)
+            ) = _build_folder_inspection_profiles(
+                folder_entries,
+                folder_summaries,
+                filename_format_spec=filename_format_spec,
+            )
             if not name_candidates:
                 name_candidates = combined_logical_names
             extension_profiles = [
@@ -6859,6 +7246,30 @@ def features_parser_inspect():
                 upload_entries.append({"path": real_path, "name": srv_name, "folder_name": srv_name})
             if not upload_entries:
                 return jsonify({"error": "No valid files provided for inspection."}), 400
+            if filename_format_spec:
+                all_entry_count = len(upload_entries)
+                upload_entries, skipped_names = _filter_named_items_by_filename_format(
+                    upload_entries,
+                    lambda row: str(row.get("name") or ""),
+                    filename_format_spec,
+                )
+                if not upload_entries:
+                    raise ValueError(
+                        f"No files match filename format '{filename_format_spec['raw']}'."
+                    )
+                skipped_count = len(skipped_names)
+                if skipped_count > 0:
+                    matched_count = len(upload_entries)
+                    filename_filter_stats = {
+                        "matched_count": int(matched_count),
+                        "skipped_count": int(skipped_count),
+                        "skipped_examples": skipped_names[:8],
+                        "tokens": list(filename_format_spec.get("tokens") or []),
+                    }
+                    filename_filter_warning = (
+                        f"Filename format filter matched {matched_count} of {all_entry_count} files; "
+                        f"skipped {skipped_count} non-matching file(s)."
+                    )
             inspect_path = upload_entries[0]["path"]
             file_name = upload_entries[0]["name"]
             if len(upload_entries) > 1:
@@ -6868,6 +7279,31 @@ def features_parser_inspect():
 
         else:
             return jsonify({"error": "Provide an existing pipeline file, a simulation folder path, an empirical folder path, or upload a file to inspect."}), 400
+
+        if filename_format_spec and name_candidates:
+            raw_count = len(name_candidates)
+            matched_names, skipped_names = _filter_named_items_by_filename_format(
+                name_candidates,
+                lambda name: name,
+                filename_format_spec,
+            )
+            if matched_names:
+                name_candidates = matched_names
+                if skipped_names and not filename_filter_stats:
+                    filename_filter_stats = {
+                        "matched_count": int(len(matched_names)),
+                        "skipped_count": int(len(skipped_names)),
+                        "skipped_examples": skipped_names[:8],
+                        "tokens": list(filename_format_spec.get("tokens") or []),
+                    }
+                    filename_filter_warning = (
+                        f"Filename format filter matched {len(matched_names)} of {raw_count} files; "
+                        f"skipped {len(skipped_names)} non-matching file(s)."
+                    )
+            elif not folder_entries:
+                raise ValueError(
+                    f"No files match filename format '{filename_format_spec['raw']}'."
+                )
 
         if folder_entries:
             selected_description = _describe_parser_source(inspect_path)
@@ -6962,8 +7398,15 @@ def features_parser_inspect():
                         if str(item.get("name") or "").strip()
                     ]
                     sample_profile = _describe_parser_source(sample_path)
-                    sample_profile = _attach_file_extracted_virtual_field(sample_profile, sample_names or [str(sample_entry.get("name") or "")])
-                    sample_profile["virtual_field_details"] = _build_virtual_field_details_for_ui(sample_names or [str(sample_entry.get("name") or "")])
+                    sample_profile = _attach_file_extracted_virtual_field(
+                        sample_profile,
+                        sample_names or [str(sample_entry.get("name") or "")],
+                        filename_format_spec=filename_format_spec,
+                    )
+                    sample_profile["virtual_field_details"] = _build_virtual_field_details_for_ui(
+                        sample_names or [str(sample_entry.get("name") or "")],
+                        filename_format_spec=filename_format_spec,
+                    )
                     sample_profile["manual_field_details"] = _manual_field_details_for_ui()
                     sample_profile["extension"] = str(sample_entry.get("extension") or "")
                     sample_profile["sample_file"] = str(sample_entry.get("subfolder_relative_path") or sample_entry.get("relative_path") or sample_entry.get("name") or "")
@@ -6986,7 +7429,10 @@ def features_parser_inspect():
                 ),
                 "field_details": combined_field_details,
                 "manual_field_details": _manual_field_details_for_ui(),
-                "virtual_field_details": _build_virtual_field_details_for_ui(name_candidates),
+                "virtual_field_details": _build_virtual_field_details_for_ui(
+                    name_candidates,
+                    filename_format_spec=filename_format_spec,
+                ),
                 "extension_profiles": extension_profiles,
                 "folder_profiles": folder_profiles,
                 "folder_summaries": folder_summaries,
@@ -7076,7 +7522,11 @@ def features_parser_inspect():
                 description["folder_summaries"] = [{"folder_name": file_name, "folder_path": "", "file_count": 1}]
 
             
-        description = _attach_file_extracted_virtual_field(description, name_candidates)
+        description = _attach_file_extracted_virtual_field(
+            description,
+            name_candidates,
+            filename_format_spec=filename_format_spec,
+        )
         if "dataframe_candidate_fields" not in description:
             description["dataframe_candidate_fields"] = _collect_dataframe_candidate_fields_from_description(description)
         if "data_file_candidate_fields" not in description:
@@ -7095,7 +7545,17 @@ def features_parser_inspect():
         if "data_file_source_type" not in description:
             description["data_file_source_type"] = str(description.get("source_type") or "")
         if "virtual_field_details" not in description:
-            description["virtual_field_details"] = _build_virtual_field_details_for_ui(name_candidates)
+            description["virtual_field_details"] = _build_virtual_field_details_for_ui(
+                name_candidates,
+                filename_format_spec=filename_format_spec,
+            )
+        if filename_format_spec:
+            description["filename_format"] = filename_format_spec.get("raw")
+            description["filename_format_tokens"] = list(filename_format_spec.get("tokens") or [])
+            if filename_filter_stats:
+                description["filename_format_filter"] = filename_filter_stats
+            if filename_filter_warning:
+                description["filename_format_warning"] = filename_filter_warning
         description["source_name"] = file_name
         if folder_summaries:
             description["folder_path"] = folder_summaries[0]["folder_path"]
@@ -10724,6 +11184,7 @@ def start_computation_redirect(computation_type):
     prepared_features_df = None
     empirical_upload_paths = None
     parser_config_obj = None
+    filename_format_filter_warnings = []
     if computation_type == "features":
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
         empirical_source_mode = (request.form.get("empirical_source_mode") or "upload").strip()
@@ -10751,6 +11212,8 @@ def start_computation_redirect(computation_type):
             try:
                 cfg_started = time.perf_counter()
                 parse_cfg = _build_parse_config_from_form(request.form)
+                filename_format_spec = _parse_filename_format_spec(request.form.get("parser_filename_format"))
+                _validate_parse_cfg_filename_token_locators(parse_cfg, request.form)
                 app.logger.warning(
                     "[compute %s] simulation parser config built in %.1f ms",
                     job_id,
@@ -10790,6 +11253,26 @@ def start_computation_redirect(computation_type):
                         selected_entries = selected_data_entries
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
+                    if filename_format_spec:
+                        selected_entries, skipped_names = _filter_named_items_by_filename_format(
+                            selected_entries,
+                            lambda row: str(row.get("name") or ""),
+                            filename_format_spec,
+                        )
+                        if skipped_names:
+                            filename_format_filter_warnings.append(
+                                f"Filename format filter skipped {len(skipped_names)} simulation file(s)."
+                            )
+                            app.logger.warning(
+                                "[compute %s] simulation filename format filtered files: matched=%d skipped=%d",
+                                job_id,
+                                len(selected_entries),
+                                len(skipped_names),
+                            )
+                        if not selected_entries:
+                            raise ValueError(
+                                f"No files match filename format '{filename_format_spec['raw']}'."
+                            )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
                         logical_name = _prefixed_file_name(
@@ -10853,7 +11336,27 @@ def start_computation_redirect(computation_type):
                         )
                     if selected_token:
                         upload_items = [row for row in upload_items if row[3] == selected_token]
+                    if filename_format_spec:
+                        upload_items, skipped_names = _filter_named_items_by_filename_format(
+                            upload_items,
+                            lambda row: str(row[1] if len(row) > 1 else ""),
+                            filename_format_spec,
+                        )
+                        if skipped_names:
+                            filename_format_filter_warnings.append(
+                                f"Filename format filter skipped {len(skipped_names)} local simulation file(s)."
+                            )
+                            app.logger.warning(
+                                "[compute %s] simulation filename format filtered local files: matched=%d skipped=%d",
+                                job_id,
+                                len(upload_items),
+                                len(skipped_names),
+                            )
                     if not upload_items:
+                        if filename_format_spec:
+                            raise ValueError(
+                                f"No files match filename format '{filename_format_spec['raw']}'."
+                            )
                         raise ValueError("No files available in the selected analysis folder(s).")
                     use_prefix = len(local_folder_tokens) > 1
 
@@ -10918,6 +11421,8 @@ def start_computation_redirect(computation_type):
             try:
                 cfg_started = time.perf_counter()
                 parse_cfg = _build_parse_config_from_form(request.form)
+                filename_format_spec = _parse_filename_format_spec(request.form.get("parser_filename_format"))
+                _validate_parse_cfg_filename_token_locators(parse_cfg, request.form)
                 app.logger.warning(
                     "[compute %s] parser config built in %.1f ms",
                     job_id,
@@ -10972,6 +11477,26 @@ def start_computation_redirect(computation_type):
                         selected_entries = selected_data_entries
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
+                    if filename_format_spec:
+                        selected_entries, skipped_names = _filter_named_items_by_filename_format(
+                            selected_entries,
+                            lambda row: str(row.get("name") or ""),
+                            filename_format_spec,
+                        )
+                        if skipped_names:
+                            filename_format_filter_warnings.append(
+                                f"Filename format filter skipped {len(skipped_names)} empirical file(s)."
+                            )
+                            app.logger.warning(
+                                "[compute %s] empirical filename format filtered files: matched=%d skipped=%d",
+                                job_id,
+                                len(selected_entries),
+                                len(skipped_names),
+                            )
+                        if not selected_entries:
+                            raise ValueError(
+                                f"No files match filename format '{filename_format_spec['raw']}'."
+                            )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
                         logical_name = _prefixed_file_name(
@@ -11079,7 +11604,27 @@ def start_computation_redirect(computation_type):
 
                     if selected_token:
                         upload_items = [row for row in upload_items if row[3] == selected_token]
+                    if filename_format_spec:
+                        upload_items, skipped_names = _filter_named_items_by_filename_format(
+                            upload_items,
+                            lambda row: str(row[1] if len(row) > 1 else ""),
+                            filename_format_spec,
+                        )
+                        if skipped_names:
+                            filename_format_filter_warnings.append(
+                                f"Filename format filter skipped {len(skipped_names)} local empirical file(s)."
+                            )
+                            app.logger.warning(
+                                "[compute %s] empirical filename format filtered local files: matched=%d skipped=%d",
+                                job_id,
+                                len(upload_items),
+                                len(skipped_names),
+                            )
                     if not upload_items:
+                        if filename_format_spec:
+                            raise ValueError(
+                                f"No files match filename format '{filename_format_spec['raw']}'."
+                            )
                         raise ValueError("No files available in the selected analysis folder(s).")
                     use_prefix = len(local_folder_tokens) > 1
 
@@ -11304,6 +11849,8 @@ def start_computation_redirect(computation_type):
         )
     if kernel_params_module_override is not None:
         data["kernel_params_module"] = kernel_params_module_override
+    if computation_type == "features" and filename_format_filter_warnings:
+        data["filename_format_filter_warnings"] = list(filename_format_filter_warnings)
     # Add file information to the data dictionary
     data['file_paths'] = file_paths
     if prepared_features_df is not None:
