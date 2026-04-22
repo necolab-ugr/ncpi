@@ -13,9 +13,16 @@ _shared = importlib.util.module_from_spec(_SHARED_SPEC)
 assert _SHARED_SPEC.loader is not None
 _SHARED_SPEC.loader.exec_module(_shared)
 
+_FOUR_AREA_SHARED_PATH = Path(__file__).resolve().with_name("test_four_area.py")
+_FOUR_AREA_SHARED_SPEC = importlib.util.spec_from_file_location("test_four_area_shared", _FOUR_AREA_SHARED_PATH)
+_four_area_shared = importlib.util.module_from_spec(_FOUR_AREA_SHARED_SPEC)
+assert _FOUR_AREA_SHARED_SPEC.loader is not None
+_FOUR_AREA_SHARED_SPEC.loader.exec_module(_four_area_shared)
+
 
 REPO_ROOT = _shared.REPO_ROOT
 HAGEN_EXAMPLE_DIR = REPO_ROOT / "examples" / "simulation" / "Hagen_model" / "simulation"
+FOUR_AREA_EXAMPLE_DIR = REPO_ROOT / "examples" / "simulation" / "four_area_cortical_model" / "simulation"
 
 sync_playwright = _shared.sync_playwright
 PlaywrightError = _shared.PlaywrightError
@@ -25,6 +32,7 @@ _attach_test_custom_terminal_reporter = _shared._attach_test_hagen_terminal_repo
 
 
 def _log_test_progress(message):
+    """Emit a namespaced progress message for this test module."""
     text = f"[test_custom_upload] {message}"
     if _shared._CAPTURE_MANAGER is not None:
         with _shared._CAPTURE_MANAGER.global_and_fixture_disabled():
@@ -34,6 +42,7 @@ def _log_test_progress(message):
 
 
 def _hagen_example_input_paths():
+    """Return the Hagen example files used by the custom-upload tests."""
     return {
         "network_params": HAGEN_EXAMPLE_DIR / "params" / "network_params.py",
         "network_py": HAGEN_EXAMPLE_DIR / "python" / "network.py",
@@ -42,9 +51,19 @@ def _hagen_example_input_paths():
     }
 
 
-def _prepare_deterministic_hagen_custom_inputs(root_dir, numpy_seed=123456):
+def _four_area_example_input_paths():
+    """Return the four-area example files used by the custom-upload tests."""
+    return {
+        "network_params": FOUR_AREA_EXAMPLE_DIR / "params" / "network_params.py",
+        "network_py": FOUR_AREA_EXAMPLE_DIR / "python" / "network.py",
+        "simulation_params": FOUR_AREA_EXAMPLE_DIR / "params" / "simulation_params.py",
+        "simulation_py": FOUR_AREA_EXAMPLE_DIR / "python" / "simulation.py",
+    }
+
+
+def _prepare_deterministic_custom_inputs(source_paths, root_dir, numpy_seed=123456):
+    """Copy custom simulation inputs and inject deterministic test runtime settings."""
     root_dir.mkdir(parents=True, exist_ok=True)
-    source_paths = _hagen_example_input_paths()
     input_paths = {}
     for key, source_path in source_paths.items():
         target = root_dir / source_path.name
@@ -55,19 +74,41 @@ def _prepare_deterministic_hagen_custom_inputs(root_dir, numpy_seed=123456):
     simulation_params.write_text(
         simulation_params.read_text(encoding="utf-8")
         + f"\n# Added by WebUI tests for deterministic custom-upload validation.\n"
+        + f"tstop = {_shared.TEST_SIMULATION_TSTOP_MS}\n"
+        + f"dt = {_shared.TEST_SIMULATION_DT_MS}\n"
         + f"numpy_seed = {int(numpy_seed)}\n",
         encoding="utf-8",
     )
     return input_paths
 
 
+def _prepare_deterministic_hagen_custom_inputs(root_dir, numpy_seed=123456):
+    """Copy Hagen example inputs and inject deterministic settings for upload tests."""
+    return _prepare_deterministic_custom_inputs(
+        _hagen_example_input_paths(),
+        root_dir,
+        numpy_seed=numpy_seed,
+    )
+
+
+def _prepare_deterministic_four_area_custom_inputs(root_dir, numpy_seed=123456):
+    """Copy four-area example inputs and inject deterministic settings for upload tests."""
+    return _prepare_deterministic_custom_inputs(
+        _four_area_example_input_paths(),
+        root_dir,
+        numpy_seed=numpy_seed,
+    )
+
+
 def _navigate_to_custom_simulation_form(page, live_webui_server):
+    """Open the custom simulation form and wait for its upload controls to be ready."""
     page.goto(f"{live_webui_server}/simulation/new_sim/custom", wait_until="domcontentloaded")
     page.locator("#custom-simulation-form").wait_for(state="visible")
     page.locator("#network_params_file_input").wait_for(state="attached")
 
 
 def _set_custom_local_uploads(page, input_paths):
+    """Populate the custom simulation form with uploaded local files."""
     page.evaluate(
         """() => {
             [
@@ -94,6 +135,7 @@ def _set_custom_local_uploads(page, input_paths):
 
 
 def _select_custom_server_file_via_modal(page, field_name, file_path):
+    """Choose a server-side file through the custom simulation file-browser modal."""
     card = page.locator(f'.custom-file-card[data-field="{field_name}"]').first
     card.locator(".custom-mode-server-btn").click()
     page.evaluate(
@@ -120,6 +162,7 @@ def _select_custom_server_file_via_modal(page, field_name, file_path):
 
 
 def _set_custom_server_paths(page, input_paths):
+    """Populate the custom simulation form with explicit server-side file paths."""
     field_map = {
         "network_params_file": input_paths["network_params"],
         "network_py_file": input_paths["network_py"],
@@ -143,12 +186,14 @@ def _set_custom_server_paths(page, input_paths):
 
 
 def _submit_custom_simulation(page):
+    """Submit the custom simulation form and return the resulting job id."""
     with page.expect_navigation(url="**/job_status/*", wait_until="domcontentloaded"):
         page.locator("#custom-simulation-form").evaluate("(form) => form.submit()")
     return Path(urllib.parse.urlparse(page.url).path).name
 
 
 def _run_custom_webui_job_with_local_uploads(live_webui_server, pytestconfig, input_paths):
+    """Submit a custom simulation using uploaded local files and wait for completion."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _shared._playwright_temp_environment():
@@ -156,7 +201,7 @@ def _run_custom_webui_job_with_local_uploads(live_webui_server, pytestconfig, in
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -180,6 +225,7 @@ def _run_custom_webui_job_with_local_uploads(live_webui_server, pytestconfig, in
 
 
 def _run_custom_webui_job_with_server_paths(live_webui_server, pytestconfig, input_paths):
+    """Submit a custom simulation using server-side file paths and wait for completion."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _shared._playwright_temp_environment():
@@ -187,7 +233,7 @@ def _run_custom_webui_job_with_server_paths(live_webui_server, pytestconfig, inp
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -211,6 +257,7 @@ def _run_custom_webui_job_with_server_paths(live_webui_server, pytestconfig, inp
 
 
 def _run_python_custom_reference(input_paths, output_dir):
+    """Run the direct Python custom simulation reference using the uploaded Hagen example files."""
     params_dir = output_dir.parent / "params"
     python_dir = output_dir.parent / "python"
     params_dir.mkdir(parents=True, exist_ok=True)
@@ -240,6 +287,15 @@ def _run_python_custom_reference(input_paths, output_dir):
     return output_dir
 
 
+def _custom_output_firing_rate_dfs(output_dir, bin_width_ms=100.0):
+    """Summarize custom simulation outputs using the matching model-specific firing-rate helper."""
+    network_payload = _shared._load_output_pickle(output_dir, "network.pkl")
+    first_network = network_payload[0] if isinstance(network_payload, list) and network_payload else network_payload
+    if isinstance(first_network, dict) and "areas" in first_network:
+        return _four_area_shared._mean_firing_rate_by_bin_dataframes(output_dir, bin_width_ms=bin_width_ms)
+    return _shared._mean_firing_rate_by_bin_dataframes(output_dir, bin_width_ms=bin_width_ms)
+
+
 def _assert_custom_webui_matches_direct_python_reference(
     live_webui_server,
     job_id,
@@ -247,6 +303,7 @@ def _assert_custom_webui_matches_direct_python_reference(
     tmp_path,
     bin_width_ms=100.0,
 ):
+    """Compare custom-simulation WebUI outputs against the direct Python reference outputs."""
     _log_test_progress(f"downloading WebUI results for job {job_id}")
     ui_zip_path = _shared._download_simulation_zip(
         live_webui_server,
@@ -254,10 +311,10 @@ def _assert_custom_webui_matches_direct_python_reference(
         tmp_path / "webui_simulation_results.zip",
     )
     ui_output_dir = _shared._extract_zip(ui_zip_path, tmp_path / "webui_results")
-    webui_firing_rate_dfs = _shared._mean_firing_rate_by_bin_dataframes(ui_output_dir, bin_width_ms=bin_width_ms)
+    webui_firing_rate_dfs = _custom_output_firing_rate_dfs(ui_output_dir, bin_width_ms=bin_width_ms)
 
     python_output_dir = _run_python_custom_reference(input_paths, tmp_path / "python_reference" / "output")
-    python_firing_rate_dfs = _shared._mean_firing_rate_by_bin_dataframes(
+    python_firing_rate_dfs = _custom_output_firing_rate_dfs(
         python_output_dir,
         bin_width_ms=bin_width_ms,
     )
@@ -273,6 +330,7 @@ def _run_custom_simulation_expect_flash(
     configure_page,
     expected_flash_text,
 ):
+    """Submit an invalid custom simulation and return the flashed error message."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _shared._playwright_temp_environment():
@@ -280,7 +338,7 @@ def _run_custom_simulation_expect_flash(
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -307,6 +365,7 @@ def _run_custom_simulation_expect_failed_job(
     pytestconfig,
     input_paths,
 ):
+    """Submit a custom simulation that should fail and return its failed job payload."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _shared._playwright_temp_environment():
@@ -314,7 +373,7 @@ def _run_custom_simulation_expect_failed_job(
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -337,6 +396,7 @@ def _run_custom_simulation_expect_failed_job(
 def test_custom_simulation_local_upload_hagen_example_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig
 ):
+    """Verify that custom simulation local upload hagen example matches direct Python run."""
     _log_test_progress("starting custom simulation local-upload validation against direct Python")
     webui_app_module._clear_simulation_output_folder_all_files()
     input_paths = _prepare_deterministic_hagen_custom_inputs(tmp_path / "local_upload_inputs")
@@ -357,6 +417,7 @@ def test_custom_simulation_local_upload_hagen_example_matches_direct_python_run(
 def test_custom_simulation_server_path_hagen_example_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig
 ):
+    """Verify that custom simulation server path hagen example matches direct Python run."""
     _log_test_progress("starting custom simulation server-path validation against direct Python")
     webui_app_module._clear_simulation_output_folder_all_files()
     input_paths = _prepare_deterministic_hagen_custom_inputs(tmp_path / "server_path_inputs")
@@ -373,9 +434,31 @@ def test_custom_simulation_server_path_hagen_example_matches_direct_python_run(
     )
 
 
+@pytest.mark.slow
+def test_custom_simulation_local_upload_four_area_example_matches_direct_python_run(
+    webui_app_module, live_webui_server, tmp_path, pytestconfig
+):
+    """Verify that custom simulation local upload four area example matches direct Python run."""
+    _log_test_progress("starting custom simulation local-upload four-area validation against direct Python")
+    webui_app_module._clear_simulation_output_folder_all_files()
+    input_paths = _prepare_deterministic_four_area_custom_inputs(tmp_path / "local_upload_four_area_inputs")
+    job_id = _run_custom_webui_job_with_local_uploads(
+        live_webui_server,
+        pytestconfig,
+        input_paths,
+    )
+    _assert_custom_webui_matches_direct_python_reference(
+        live_webui_server,
+        job_id,
+        input_paths,
+        tmp_path,
+    )
+
+
 def test_custom_simulation_server_file_browser_can_select_python_file(
     live_webui_server, pytestconfig
 ):
+    """Verify that custom simulation server file browser can select Python file."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
     file_path = _hagen_example_input_paths()["network_params"]
 
@@ -384,7 +467,7 @@ def test_custom_simulation_server_file_browser_can_select_python_file(
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -406,6 +489,7 @@ def test_custom_simulation_server_file_browser_can_select_python_file(
 def test_custom_simulation_form_requires_all_files_client_side(
     live_webui_server, pytestconfig
 ):
+    """Verify that custom simulation form requires all files client side."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _shared._playwright_temp_environment():
@@ -413,7 +497,7 @@ def test_custom_simulation_form_requires_all_files_client_side(
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -434,11 +518,13 @@ def test_custom_simulation_form_requires_all_files_client_side(
 def test_custom_simulation_rejects_non_python_upload(
     live_webui_server, tmp_path, pytestconfig
 ):
+    """Verify that custom simulation rejects non Python upload."""
     bad_file = tmp_path / "not_python.txt"
     bad_file.write_text("not python", encoding="utf-8")
     input_paths = _hagen_example_input_paths()
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         _set_custom_local_uploads(
             page,
             {
@@ -461,6 +547,7 @@ def test_custom_simulation_rejects_non_python_upload(
 def test_custom_simulation_surfaces_uploaded_script_failure(
     webui_app_module, live_webui_server, tmp_path, pytestconfig
 ):
+    """Verify that custom simulation surfaces uploaded script failure."""
     _log_test_progress("starting custom simulation failing-script scenario")
     webui_app_module._clear_simulation_output_folder_all_files()
     valid_inputs = _hagen_example_input_paths()

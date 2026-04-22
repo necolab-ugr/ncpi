@@ -3,6 +3,16 @@ import subprocess
 import sys
 
 
+def _headless_subprocess_env():
+    """Return a child-process environment that avoids GUI backends in tests/headless runs."""
+    env = os.environ.copy()
+    env["MPLBACKEND"] = "Agg"
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    for key in ("DISPLAY", "WAYLAND_DISPLAY"):
+        env.pop(key, None)
+    return env
+
+
 def run_script(script_path, param_path, output_folder):
     """
     Run a python script with the given parameters.
@@ -31,7 +41,7 @@ def run_script(script_path, param_path, output_folder):
     # Run the script and propagate failures to callers.
     # This ensures orchestrators (e.g. WebUI) can mark jobs as failed.
     cmd = [sys.executable, script_path, param_path, output_folder]
-    result = subprocess.run(cmd, check=False)
+    result = subprocess.run(cmd, check=False, env=_headless_subprocess_env())
     if result.returncode != 0:
         raise RuntimeError(
             f"Script '{os.path.basename(script_path)}' failed with exit code {result.returncode}."

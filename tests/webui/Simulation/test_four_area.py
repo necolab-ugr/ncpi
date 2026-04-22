@@ -39,6 +39,7 @@ _attach_test_four_area_terminal_reporter = _shared._attach_test_hagen_terminal_r
 
 
 def _log_test_progress(message):
+    """Emit a namespaced progress message for this test module."""
     text = f"[test_four_area] {message}"
     if _shared._CAPTURE_MANAGER is not None:
         with _shared._CAPTURE_MANAGER.global_and_fixture_disabled():
@@ -47,7 +48,14 @@ def _log_test_progress(message):
     _shared._write_progress_line(text)
 
 
+def _apply_fast_simulation_runtime_to_page(page):
+    """Override the browser-side runtime fields so tests avoid the long JS preset values."""
+    page.locator('.param-input[data-param="tstop"]').first.fill(str(_shared.TEST_SIMULATION_TSTOP_MS))
+    page.locator('.param-input[data-param="dt"]').first.fill(str(_shared.TEST_SIMULATION_DT_MS))
+
+
 def _four_area_default_grid_values(app_module):
+    """Assemble the four-area defaults expected by the grid-expansion helpers."""
     defaults = {
         key: app_module.FOUR_AREA_DEFAULTS[key]
         for key in app_module.FOUR_AREA_GRID_KEYS
@@ -69,6 +77,7 @@ def _four_area_default_grid_values(app_module):
 
 
 def _mean_firing_rate_by_bin_dataframe_from_payload(times, network, tstop, bin_width_ms=100.0):
+    """Convert one simulation payload into a binned mean firing-rate DataFrame."""
     areas = list(network["areas"])
     populations = list(network["X"])
     population_sizes = {
@@ -109,6 +118,7 @@ def _mean_firing_rate_by_bin_dataframe_from_payload(times, network, tstop, bin_w
 
 
 def _mean_firing_rate_by_bin_dataframes(output_dir, bin_width_ms=100.0):
+    """Build per-trial mean firing-rate DataFrames from a simulation output directory."""
     times_payloads = _shared._coerce_trial_payloads(_shared._load_output_pickle(output_dir, "times.pkl"))
     network_payloads = _shared._coerce_trial_payloads(_shared._load_output_pickle(output_dir, "network.pkl"))
     tstop_payloads = _shared._coerce_trial_payloads(_shared._load_output_pickle(output_dir, "tstop.pkl"))
@@ -131,6 +141,7 @@ def _mean_firing_rate_by_bin_dataframes(output_dir, bin_width_ms=100.0):
 
 
 def _run_python_four_area_reference(app_module, form_data, output_dir):
+    """Run the direct Python four-area reference simulation for comparison with the WebUI output."""
     params_dir = output_dir.parent / "params"
     python_dir = output_dir.parent / "python"
     params_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +180,7 @@ def _run_python_four_area_reference(app_module, form_data, output_dir):
 
 
 def _run_python_four_area_reference_dataframes(app_module, form_data, output_root, bin_width_ms=100.0):
+    """Run the direct Python four-area reference simulation and summarize its outputs."""
     _, expanded_forms = app_module._expand_simulation_forms("four_area", form_data)
     total_trials = len(expanded_forms)
 
@@ -193,6 +205,7 @@ def _run_python_four_area_reference_dataframes(app_module, form_data, output_roo
 
 
 def _independent_parse_four_area_value(raw_value, default):
+    """Parse a four-area form value independently from the WebUI implementation."""
     if raw_value is None:
         return default
     text = str(raw_value).strip()
@@ -208,6 +221,7 @@ def _independent_parse_four_area_value(raw_value, default):
 
 
 def _independent_parse_four_area_grid_candidates(raw_value, default, key):
+    """Parse four-area grid candidates independently from the WebUI implementation."""
     if raw_value is None:
         return [default]
     text = str(raw_value).strip()
@@ -231,6 +245,7 @@ def _independent_parse_four_area_grid_candidates(raw_value, default, key):
 
 
 def _independent_expected_four_area_trials(app_module, form_data):
+    """Derive the expected four-area trial configurations directly from submitted form data."""
     defaults = _four_area_default_grid_values(app_module)
     run_mode = str(form_data.get("sim_run_mode", "single")).strip().lower() or "single"
     repetitions = int(float(str(form_data.get("sim_repetitions", "1")).strip() or "1"))
@@ -296,6 +311,7 @@ def _independent_expected_four_area_trials(app_module, form_data):
 
 
 def _assert_four_area_generated_parameter_files_match_expected(app_module, form_data, captured_param_dirs):
+    """Verify that generated four-area parameter files match the independently derived expectations."""
     expected_trials = _independent_expected_four_area_trials(app_module, form_data)
     assert len(captured_param_dirs) == len(expected_trials), (
         f"Captured {len(captured_param_dirs)} WebUI parameter-file snapshots, "
@@ -317,6 +333,7 @@ def _assert_four_area_generated_parameter_files_match_expected(app_module, form_
 
 
 def _navigate_to_four_area_form(page, live_webui_server):
+    """Navigate to the four-area simulation form and wait for its controls to finish loading."""
     page.goto(live_webui_server, wait_until="domcontentloaded")
     page.locator("a[href='/simulation']").first.click()
     page.wait_for_url(f"{live_webui_server}/simulation", wait_until="domcontentloaded")
@@ -344,10 +361,12 @@ def _navigate_to_four_area_form(page, live_webui_server):
 
 
 def _scale_four_area_parameter(value, factor):
+    """Scale a four-area parameter value while preserving integer semantics when needed."""
     return _shared._scale_hagen_parameter(value, factor)
 
 
 def _build_four_area_alternate_single_values(app_module):
+    """Build alternate single-run four-area values for parameter-override tests."""
     defaults = _four_area_default_grid_values(app_module)
     alternate = {
         param_name: [
@@ -368,6 +387,7 @@ def _build_four_area_alternate_single_values(app_module):
 
 
 def _expected_four_area_form_values(app_module, overrides=None):
+    """Build the expected normalized four-area form values for a submission."""
     expected_values = _four_area_default_grid_values(app_module)
     if overrides:
         expected_values.update(overrides)
@@ -375,6 +395,7 @@ def _expected_four_area_form_values(app_module, overrides=None):
 
 
 def _assert_four_area_form_values(app_module, form_data, overrides=None, ignored_keys=None):
+    """Verify that the normalized submitted four-area form values match expectations."""
     ignored_keys = set(ignored_keys or ())
     ignored_keys.update(FOUR_AREA_RUNTIME_CONTROL_KEYS)
     expected_values = _expected_four_area_form_values(app_module, overrides=overrides)
@@ -389,6 +410,7 @@ def _assert_four_area_form_values(app_module, form_data, overrides=None, ignored
 
 
 def _expanded_four_area_trials(app_module, form_data):
+    """Expand four-area form data into normalized per-run trial configurations."""
     run_mode, expanded_forms = app_module._expand_simulation_forms("four_area", form_data)
     defaults = app_module._simulation_grid_defaults("four_area")
     normalized_trials = [
@@ -399,10 +421,12 @@ def _expanded_four_area_trials(app_module, form_data):
 
 
 def _matrix_to_tuple(matrix):
+    """Convert a nested matrix into a hashable tuple-of-tuples representation."""
     return _shared._matrix_to_tuple(matrix)
 
 
 def _build_four_area_local_j_yx_margin_candidates(default_j_yx):
+    """Build boundary candidate matrices for the four-area local J_YX grid-sweep test."""
     default_matrix = np.array(default_j_yx, dtype=float, copy=False)
     leaf_candidates = [
         (
@@ -418,6 +442,7 @@ def _build_four_area_local_j_yx_margin_candidates(default_j_yx):
 
 
 def _run_four_area_webui_job(live_webui_server, pytestconfig, configure_page):
+    """Use Playwright to submit a four-area simulation job and wait for completion."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _shared._playwright_temp_environment():
@@ -425,7 +450,7 @@ def _run_four_area_webui_job(live_webui_server, pytestconfig, configure_page):
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=_shared.PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -434,6 +459,7 @@ def _run_four_area_webui_job(live_webui_server, pytestconfig, configure_page):
                 page = browser.new_page()
                 _log_test_progress(f"opening four-area form at {live_webui_server}")
                 _navigate_to_four_area_form(page, live_webui_server)
+                _apply_fast_simulation_runtime_to_page(page)
                 _log_test_progress("configuring four-area form")
                 configure_page(page)
                 form_data = _shared._normalized_form_data_from_page(page)
@@ -461,6 +487,7 @@ def _assert_four_area_webui_matches_python_reference(
     expected_trial_count,
     bin_width_ms=100.0,
 ):
+    """Compare four-area WebUI outputs against the direct Python reference outputs."""
     _log_test_progress(f"downloading WebUI results for job {job_id}")
     ui_zip_path = _shared._download_simulation_zip(
         live_webui_server,
@@ -492,6 +519,7 @@ def _assert_four_area_webui_matches_python_reference(
 def test_four_area_default_configuration_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that four area default configuration matches direct Python run."""
     _log_test_progress("starting default four-area WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     captured_param_dirs = _shared._capture_webui_generated_param_files(
@@ -524,6 +552,7 @@ def test_four_area_default_configuration_matches_direct_python_run(
 def test_four_area_alternate_configuration_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that four area alternate configuration matches direct Python run."""
     _log_test_progress("starting alternate-parameter four-area WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     alternate_values = _build_four_area_alternate_single_values(webui_app_module)
@@ -534,6 +563,7 @@ def test_four_area_alternate_configuration_matches_direct_python_run(
     )
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         _shared._apply_hagen_single_parameter_overrides(page, alternate_values)
 
@@ -562,6 +592,7 @@ def test_four_area_alternate_configuration_matches_direct_python_run(
 def test_four_area_alternate_configuration_with_three_repetitions_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that four area alternate configuration with three repetitions matches direct Python run."""
     _log_test_progress("starting alternate-parameter four-area comparison with 3 repetitions")
     webui_app_module._clear_simulation_output_folder_all_files()
     alternate_values = _build_four_area_alternate_single_values(webui_app_module)
@@ -572,6 +603,7 @@ def test_four_area_alternate_configuration_with_three_repetitions_matches_direct
     )
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         _shared._apply_hagen_single_parameter_overrides(page, alternate_values)
         page.locator("#sim-repetitions").fill("3")
@@ -602,6 +634,7 @@ def test_four_area_alternate_configuration_with_three_repetitions_matches_direct
 def test_four_area_local_synaptic_weight_grid_sweep_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that four area local synaptic weight grid sweep matches direct Python run."""
     _log_test_progress("starting four-area local J_YX grid sweep WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     defaults = _four_area_default_grid_values(webui_app_module)
@@ -615,6 +648,7 @@ def test_four_area_local_synaptic_weight_grid_sweep_matches_direct_python_run(
     )
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         page.locator("input[name='sim_run_mode'][value='grid']").check()
         for leaf_index, candidates in enumerate(j_yx_leaf_candidates):

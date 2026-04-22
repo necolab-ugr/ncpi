@@ -51,11 +51,15 @@ CAVALLARI_RECURRENT_GRID_KEYS = (
     "inh_inh_recurrent",
 )
 CAVALLARI_RUNTIME_CONTROL_KEYS = {"local_num_threads"}
+TEST_SIMULATION_TSTOP_MS = 5000.0
+TEST_SIMULATION_DT_MS = 0.2
+PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS = 750
 _TERMINAL_REPORTER = None
 _CAPTURE_MANAGER = None
 
 
 def _write_progress_line(text):
+    """Write a progress line through pytest's terminal reporter or stderr."""
     if _TERMINAL_REPORTER is not None:
         _TERMINAL_REPORTER.write_line(text)
         return
@@ -64,6 +68,7 @@ def _write_progress_line(text):
 
 
 def _log_test_progress(message):
+    """Emit a namespaced progress message for this test module."""
     text = f"[test_cavallari] {message}"
     if _CAPTURE_MANAGER is not None:
         with _CAPTURE_MANAGER.global_and_fixture_disabled():
@@ -73,12 +78,14 @@ def _log_test_progress(message):
 
 
 def _ensure_import_paths():
+    """Ensure the repository and WebUI directories are importable during the tests."""
     for entry in (str(REPO_ROOT), str(WEBUI_DIR)):
         if entry not in sys.path:
             sys.path.insert(0, entry)
 
 
 def _reload_webui_app():
+    """Reload the WebUI app module with fresh module state for the current test module."""
     _ensure_import_paths()
     for module_name in ("webui.app", "compute_utils", "tmp_paths"):
         if module_name in sys.modules:
@@ -88,9 +95,19 @@ def _reload_webui_app():
     return module
 
 
+def _set_fast_simulation_defaults(module):
+    """Reduce default simulation runtime parameters for faster WebUI simulation tests."""
+    for defaults_name in ("HAGEN_DEFAULTS", "CAVALLARI_DEFAULTS", "FOUR_AREA_DEFAULTS"):
+        defaults = getattr(module, defaults_name, None)
+        if isinstance(defaults, dict):
+            defaults["tstop"] = TEST_SIMULATION_TSTOP_MS
+            defaults["dt"] = TEST_SIMULATION_DT_MS
+
+
 @contextmanager
 def _playwright_temp_environment():
     # Keep Playwright browser profile paths short to avoid Chromium socket/path limits.
+    """Temporarily shorten Playwright temp paths to avoid Chromium path-length issues."""
     temp_root = Path("/tmp/pw")
     temp_root.mkdir(parents=True, exist_ok=True)
 
@@ -113,6 +130,7 @@ def _playwright_temp_environment():
 
 
 def _form_data_from_page(page):
+    """Read the current run-simulation form values directly from the page."""
     return page.evaluate(
         """
         () => {
@@ -128,6 +146,7 @@ def _form_data_from_page(page):
 
 
 def _normalized_form_data_from_page(page):
+    """Collect browser-normalized FormData without leaving the current page."""
     return page.evaluate(
         """
         () => {
@@ -154,7 +173,14 @@ def _normalized_form_data_from_page(page):
     )
 
 
+def _apply_fast_simulation_runtime_to_page(page):
+    """Override the browser-side runtime fields so tests avoid the long JS preset values."""
+    _cavallari_param_input(page, "tstop").fill(str(TEST_SIMULATION_TSTOP_MS))
+    _cavallari_param_input(page, "dt").fill(str(TEST_SIMULATION_DT_MS))
+
+
 def _wait_for_job_completion(base_url, job_id, timeout_seconds=1800):
+    """Poll the WebUI job endpoint until the job finishes or times out."""
     status_url = f"{base_url}/status/{job_id}"
     deadline = time.time() + timeout_seconds
     last_payload = None
@@ -187,6 +213,7 @@ def _wait_for_job_completion(base_url, job_id, timeout_seconds=1800):
 
 
 def _download_simulation_zip(base_url, job_id, destination):
+    """Download the simulation-results ZIP for a completed WebUI job."""
     download_url = f"{base_url}/download_results/{job_id}?computation_type=simulation"
     with urllib.request.urlopen(download_url) as response:
         destination.write_bytes(response.read())
@@ -194,6 +221,7 @@ def _download_simulation_zip(base_url, job_id, destination):
 
 
 def _extract_zip(zip_path, destination):
+    """Extract a ZIP archive into the requested destination directory."""
     destination.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(zip_path, "r") as archive:
         archive.extractall(destination)
@@ -201,15 +229,18 @@ def _extract_zip(zip_path, destination):
 
 
 def _load_output_pickle(output_dir, filename):
+    """Load a simulation output pickle file from a result directory."""
     with open(output_dir / filename, "rb") as handle:
         return pickle.load(handle)
 
 
 def _coerce_trial_payloads(payload):
+    """Normalize single-trial and repeated-trial payloads to a list."""
     return payload if isinstance(payload, list) else [payload]
 
 
 def _mean_firing_rate_by_bin_dataframe_from_payload(times, network, tstop, bin_width_ms=100.0):
+    """Convert one simulation payload into a binned mean firing-rate DataFrame."""
     populations = list(network["X"])
     population_sizes = {
         str(population): int(size)
@@ -242,6 +273,7 @@ def _mean_firing_rate_by_bin_dataframe_from_payload(times, network, tstop, bin_w
 
 
 def _mean_firing_rate_by_bin_dataframes(output_dir, bin_width_ms=100.0):
+    """Build per-trial mean firing-rate DataFrames from a simulation output directory."""
     times_payloads = _coerce_trial_payloads(_load_output_pickle(output_dir, "times.pkl"))
     network_payloads = _coerce_trial_payloads(_load_output_pickle(output_dir, "network.pkl"))
     tstop_payloads = _coerce_trial_payloads(_load_output_pickle(output_dir, "tstop.pkl"))
@@ -264,6 +296,7 @@ def _mean_firing_rate_by_bin_dataframes(output_dir, bin_width_ms=100.0):
 
 
 def _prepare_cavallari_python_reference_environment(output_root):
+    """Create the standalone Cavallari reference-run folder structure and inputs."""
     neuron_model_target = output_root / "neuron_model"
     if neuron_model_target.exists():
         return
@@ -271,6 +304,7 @@ def _prepare_cavallari_python_reference_environment(output_root):
 
 
 def _run_python_cavallari_reference(app_module, form_data, output_dir, expected_trial=None):
+    """Run the direct Python Cavallari reference simulation for comparison with the WebUI output."""
     params_dir = output_dir.parent / "params"
     python_dir = output_dir.parent / "python"
     params_dir.mkdir(parents=True, exist_ok=True)
@@ -314,6 +348,7 @@ def _run_python_cavallari_reference(app_module, form_data, output_dir, expected_
 
 
 def _run_python_cavallari_reference_dataframes(app_module, form_data, output_root, bin_width_ms=100.0):
+    """Run the direct Python Cavallari reference simulation and summarize its outputs."""
     _, expanded_forms = app_module._expand_simulation_forms("cavallari", form_data)
     expected_trials = _independent_expected_cavallari_trials(app_module, form_data)
     total_trials = len(expanded_forms)
@@ -343,6 +378,7 @@ def _run_python_cavallari_reference_dataframes(app_module, form_data, output_roo
 
 
 def _independent_grid_range_candidates(spec, key):
+    """Parse a numeric grid-range specification without relying on WebUI helper code."""
     parts = [part.strip() for part in str(spec).split(":")]
     if len(parts) != 3:
         raise ValueError(f"Invalid independent grid range for {key}: {spec!r}")
@@ -367,6 +403,7 @@ def _independent_grid_range_candidates(spec, key):
 
 
 def _independent_parse_cavallari_value(raw_value, default):
+    """Parse a Cavallari form value independently from the WebUI implementation."""
     if raw_value is None:
         return default
     text = str(raw_value).strip()
@@ -382,6 +419,7 @@ def _independent_parse_cavallari_value(raw_value, default):
 
 
 def _independent_parse_cavallari_grid_candidates(raw_value, default, key):
+    """Parse Cavallari grid candidates independently from the WebUI implementation."""
     if raw_value is None:
         return [default]
     text = str(raw_value).strip()
@@ -405,6 +443,7 @@ def _independent_parse_cavallari_grid_candidates(raw_value, default, key):
 
 
 def _independent_values_equal(left, right, tol=1e-12):
+    """Compare nested values recursively while tolerating tiny floating-point differences."""
     if isinstance(left, dict) and isinstance(right, dict):
         if set(left) != set(right):
             return False
@@ -419,6 +458,7 @@ def _independent_values_equal(left, right, tol=1e-12):
 
 
 def _independent_expected_cavallari_trials(app_module, form_data):
+    """Derive the expected Cavallari trial configurations directly from submitted form data."""
     defaults = app_module.CAVALLARI_DEFAULTS
     run_mode = str(form_data.get("sim_run_mode", "single")).strip().lower() or "single"
     repetitions = int(float(str(form_data.get("sim_repetitions", "1")).strip() or "1"))
@@ -539,6 +579,7 @@ def _independent_expected_cavallari_trials(app_module, form_data):
 
 
 def _load_generated_python_namespace(py_path):
+    """Execute a generated Python parameter file and return its public namespace."""
     namespace = {}
     exec(py_path.read_text(encoding="utf-8"), {}, namespace)
     return {
@@ -549,10 +590,12 @@ def _load_generated_python_namespace(py_path):
 
 
 def _capture_webui_generated_param_files(app_module, monkeypatch, capture_root):
+    """Patch the backend runner so each generated parameter-file pair is snapshotted."""
     original_run_process_with_progress = app_module._run_process_with_progress
     captured_param_dirs = []
 
     def wrapped_run_process_with_progress(cmd, cwd, job_status, job_id, estimate_seconds, **kwargs):
+        """Snapshot generated parameter files before delegating to the real process runner."""
         params_dir = Path(cwd) / "params"
         snapshot_dir = capture_root / f"run_{len(captured_param_dirs)}"
         snapshot_dir.mkdir(parents=True, exist_ok=True)
@@ -566,6 +609,7 @@ def _capture_webui_generated_param_files(app_module, monkeypatch, capture_root):
 
 
 def _assert_cavallari_generated_parameter_files_match_expected(app_module, form_data, captured_param_dirs):
+    """Verify that generated Cavallari parameter files match the independently derived expectations."""
     expected_trials = _independent_expected_cavallari_trials(app_module, form_data)
     assert len(captured_param_dirs) == len(expected_trials), (
         f"Captured {len(captured_param_dirs)} WebUI parameter-file snapshots, "
@@ -593,6 +637,7 @@ def _assert_cavallari_generated_parameter_files_match_expected(app_module, form_
 
 
 def _navigate_to_cavallari_form(page, live_webui_server):
+    """Navigate to the Cavallari simulation form and wait for its controls to finish loading."""
     page.goto(live_webui_server, wait_until="domcontentloaded")
 
     page.locator("a[href='/simulation']").first.click()
@@ -623,10 +668,12 @@ def _navigate_to_cavallari_form(page, live_webui_server):
 
 
 def _cavallari_param_input(page, param_name):
+    """Return the locator for a Cavallari parameter input field."""
     return page.locator(f'.param-input[data-param="{param_name}"]').first
 
 
 def _cavallari_single_array_rows(page, param_name):
+    """Return the single-value array input rows for a Cavallari parameter."""
     input_locator = _cavallari_param_input(page, param_name)
     input_locator.wait_for(state="attached")
     return input_locator.locator(
@@ -635,6 +682,7 @@ def _cavallari_single_array_rows(page, param_name):
 
 
 def _cavallari_grid_rows(page, param_name):
+    """Return the grid-control rows for a Cavallari parameter."""
     input_locator = _cavallari_param_input(page, param_name)
     input_locator.wait_for(state="attached")
     return input_locator.locator(
@@ -643,10 +691,12 @@ def _cavallari_grid_rows(page, param_name):
 
 
 def _fill_cavallari_scalar_param(page, param_name, value):
+    """Fill a scalar Cavallari parameter input."""
     _cavallari_param_input(page, param_name).fill(str(value))
 
 
 def _fill_cavallari_array_param(page, param_name, values):
+    """Fill all leaf inputs for an array-valued Cavallari parameter."""
     rows = _cavallari_single_array_rows(page, param_name)
     page.wait_for_function(
         """
@@ -666,6 +716,7 @@ def _fill_cavallari_array_param(page, param_name, values):
 
 
 def _fill_cavallari_grid_scalar_param(page, param_name, start, step, end):
+    """Fill a scalar Cavallari grid-definition row."""
     row = _cavallari_grid_rows(page, param_name).first
     row.wait_for(state="visible")
     row.locator('[data-grid-role="start"]').fill(str(start))
@@ -674,6 +725,7 @@ def _fill_cavallari_grid_scalar_param(page, param_name, start, step, end):
 
 
 def _scale_cavallari_parameter(value, factor):
+    """Scale a Cavallari parameter value while preserving integer semantics when needed."""
     scaled = float(value) * float(factor)
     if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
         return int(round(scaled))
@@ -681,6 +733,7 @@ def _scale_cavallari_parameter(value, factor):
 
 
 def _build_cavallari_alternate_single_values(defaults):
+    """Build alternate single-run Cavallari values for parameter-override tests."""
     alternate = {
         param_name: [
             _scale_cavallari_parameter(value, factor)
@@ -694,6 +747,7 @@ def _build_cavallari_alternate_single_values(defaults):
 
 
 def _apply_cavallari_single_parameter_overrides(page, overrides):
+    """Apply the requested single-run Cavallari parameter overrides in the browser form."""
     for param_name, value in overrides.items():
         if isinstance(value, (list, tuple, np.ndarray)):
             flat_values = np.ravel(value).tolist()
@@ -703,6 +757,7 @@ def _apply_cavallari_single_parameter_overrides(page, overrides):
 
 
 def _expected_cavallari_form_values(app_module, overrides=None):
+    """Build the expected normalized Cavallari form values for a submission."""
     expected_values = {
         key: app_module.CAVALLARI_DEFAULTS[key]
         for key in app_module.CAVALLARI_GRID_KEYS
@@ -714,6 +769,7 @@ def _expected_cavallari_form_values(app_module, overrides=None):
 
 
 def _assert_cavallari_form_values(app_module, form_data, overrides=None, ignored_keys=None):
+    """Verify that the normalized submitted Cavallari form values match expectations."""
     ignored_keys = set(ignored_keys or ())
     ignored_keys.update(CAVALLARI_RUNTIME_CONTROL_KEYS)
     expected_values = _expected_cavallari_form_values(app_module, overrides=overrides)
@@ -728,6 +784,7 @@ def _assert_cavallari_form_values(app_module, form_data, overrides=None, ignored
 
 
 def _expanded_cavallari_trials(app_module, form_data):
+    """Expand Cavallari form data into normalized per-run trial configurations."""
     run_mode, expanded_forms = app_module._expand_simulation_forms("cavallari", form_data)
     defaults = app_module._simulation_grid_defaults("cavallari")
     normalized_trials = [
@@ -738,10 +795,12 @@ def _expanded_cavallari_trials(app_module, form_data):
 
 
 def _recurrent_signature(values):
+    """Build a comparable signature for Cavallari recurrent-weight parameters."""
     return tuple(float(values[key]) for key in CAVALLARI_RECURRENT_GRID_KEYS)
 
 
 def _build_cavallari_recurrent_margin_candidates(defaults):
+    """Build boundary candidate values for the Cavallari recurrent-weight grid sweep."""
     candidates = {}
     for key in CAVALLARI_RECURRENT_GRID_KEYS:
         default_value = defaults[key]
@@ -757,6 +816,7 @@ def _build_cavallari_recurrent_margin_candidates(defaults):
 
 
 def _run_cavallari_webui_job(live_webui_server, pytestconfig, configure_page):
+    """Use Playwright to submit a Cavallari simulation job and wait for completion."""
     show_browser = bool(pytestconfig.getoption("webui_show_browser"))
 
     with _playwright_temp_environment():
@@ -764,7 +824,7 @@ def _run_cavallari_webui_job(live_webui_server, pytestconfig, configure_page):
             try:
                 browser = playwright.chromium.launch(
                     headless=not show_browser,
-                    slow_mo=300 if show_browser else 0,
+                    slow_mo=PLAYWRIGHT_SHOW_BROWSER_SLOW_MO_MS if show_browser else 0,
                 )
             except PlaywrightError as exc:
                 pytest.skip(f"Playwright Chromium is not available: {exc}")
@@ -773,6 +833,7 @@ def _run_cavallari_webui_job(live_webui_server, pytestconfig, configure_page):
                 page = browser.new_page()
                 _log_test_progress(f"opening Cavallari form at {live_webui_server}")
                 _navigate_to_cavallari_form(page, live_webui_server)
+                _apply_fast_simulation_runtime_to_page(page)
                 _log_test_progress("configuring Cavallari form")
                 configure_page(page)
                 form_data = _normalized_form_data_from_page(page)
@@ -800,6 +861,7 @@ def _assert_cavallari_webui_matches_python_reference(
     expected_trial_count,
     bin_width_ms=100.0,
 ):
+    """Compare Cavallari WebUI outputs against the direct Python reference outputs."""
     _log_test_progress(f"downloading WebUI results for job {job_id}")
     ui_zip_path = _download_simulation_zip(
         live_webui_server,
@@ -829,6 +891,7 @@ def _assert_cavallari_webui_matches_python_reference(
 
 @pytest.fixture(scope="module")
 def webui_app_module():
+    """Provide a freshly reloaded WebUI app module for the current test module."""
     if importlib.util.find_spec("nest") is None:
         pytest.skip("NEST is required for the Cavallari web UI simulation test.")
     if sync_playwright is None:
@@ -838,6 +901,7 @@ def webui_app_module():
     monkeypatch.setenv("NCPI_WEBUI_SESSION_ID", f"pytest_webui_simulation_{uuid.uuid4().hex}")
     monkeypatch.delenv("NCPI_WEBUI_SESSION_ROOT", raising=False)
     module = _reload_webui_app()
+    _set_fast_simulation_defaults(module)
     module._clear_simulation_output_folder_all_files()
     yield module
     module._clear_simulation_output_folder_all_files()
@@ -846,6 +910,7 @@ def webui_app_module():
 
 @pytest.fixture(autouse=True)
 def _attach_test_cavallari_terminal_reporter(pytestconfig):
+    """Attach pytest terminal-reporting plugins so progress logs remain visible."""
     global _TERMINAL_REPORTER, _CAPTURE_MANAGER
     previous_reporter = _TERMINAL_REPORTER
     previous_capture_manager = _CAPTURE_MANAGER
@@ -860,6 +925,7 @@ def _attach_test_cavallari_terminal_reporter(pytestconfig):
 
 @pytest.fixture()
 def live_webui_server(webui_app_module, pytestconfig):
+    """Serve the WebUI app on a temporary local HTTP server for a single test."""
     server_port = int(pytestconfig.getoption("webui_port") or 0)
     server = make_server("127.0.0.1", server_port, webui_app_module.app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -875,6 +941,7 @@ def live_webui_server(webui_app_module, pytestconfig):
 def test_cavallari_default_configuration_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that cavallari default configuration matches direct Python run."""
     _log_test_progress("starting default Cavallari WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     captured_param_dirs = _capture_webui_generated_param_files(
@@ -907,6 +974,7 @@ def test_cavallari_default_configuration_matches_direct_python_run(
 def test_cavallari_alternate_configuration_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that cavallari alternate configuration matches direct Python run."""
     _log_test_progress("starting alternate-parameter Cavallari WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     alternate_values = _build_cavallari_alternate_single_values(webui_app_module.CAVALLARI_DEFAULTS)
@@ -917,6 +985,7 @@ def test_cavallari_alternate_configuration_matches_direct_python_run(
     )
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         _apply_cavallari_single_parameter_overrides(page, alternate_values)
 
@@ -945,6 +1014,7 @@ def test_cavallari_alternate_configuration_matches_direct_python_run(
 def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that cavallari alternate configuration with three repetitions matches direct Python run."""
     _log_test_progress("starting alternate-parameter Cavallari comparison with 3 repetitions")
     webui_app_module._clear_simulation_output_folder_all_files()
     alternate_values = _build_cavallari_alternate_single_values(webui_app_module.CAVALLARI_DEFAULTS)
@@ -955,6 +1025,7 @@ def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct
     )
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         _apply_cavallari_single_parameter_overrides(page, alternate_values)
         page.locator("#sim-repetitions").fill("3")
@@ -985,6 +1056,7 @@ def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct
 def test_cavallari_recurrent_weight_grid_sweep_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
+    """Verify that cavallari recurrent weight grid sweep matches direct Python run."""
     _log_test_progress("starting Cavallari recurrent-weight grid sweep WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     recurrent_candidates, expected_recurrent_signatures = _build_cavallari_recurrent_margin_candidates(
@@ -997,6 +1069,7 @@ def test_cavallari_recurrent_weight_grid_sweep_matches_direct_python_run(
     )
 
     def configure_page(page):
+        """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         page.locator("input[name='sim_run_mode'][value='grid']").check()
         for param_name in CAVALLARI_RECURRENT_GRID_KEYS:

@@ -217,6 +217,7 @@ FOUR_AREA_DEFAULTS = {
     "J_IE": 2.020,
     "J_EI": -23.84,
     "J_II": -8.441,
+    "J_YX": [[1.589, 2.020], [-23.84, -8.441]],
     "delay_YX": [[2.520, 1.714], [1.585, 1.149]],
     "tau_syn_YX": [[0.5, 0.5], [0.5, 0.5]],
     "n_ext": [465, 160],
@@ -226,6 +227,9 @@ FOUR_AREA_DEFAULTS = {
     "inter_area_scale": 0.15,
     "inter_area_p": 0.02,
     "inter_area_delay": 10.0,
+    "inter_area.C_YX": [[0.02, 0.02], [0.0, 0.0]],
+    "inter_area.J_YX": [[0.23835, 0.303], [0.0, 0.0]],
+    "inter_area.delay_YX": [[10.0, 10.0], [0.0, 0.0]],
 }
 
 HAGEN_GRID_KEYS = [
@@ -4135,6 +4139,16 @@ def _estimate_duration_seconds(form, defaults, model_type):
     return max(120.0, min(3600.0, estimated))
 
 
+def _headless_subprocess_env():
+    """Return a child-process environment that avoids GUI backends in server/test runs."""
+    env = os.environ.copy()
+    env["MPLBACKEND"] = "Agg"
+    env.setdefault("QT_QPA_PLATFORM", "offscreen")
+    for key in ("DISPLAY", "WAYLAND_DISPLAY"):
+        env.pop(key, None)
+    return env
+
+
 def _run_process_with_progress(
     cmd,
     cwd,
@@ -4167,6 +4181,7 @@ def _run_process_with_progress(
     process = subprocess.Popen(
         cmd,
         cwd=cwd,
+        env=_headless_subprocess_env(),
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
