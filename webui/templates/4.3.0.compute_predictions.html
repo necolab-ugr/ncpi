@@ -51,7 +51,7 @@
         runtime: (window.__webuiRuntime || {}),
         featuresSourceMode: '{{ "auto-detected" if default_feature_file else "upload" }}',
         featuresServerFilePath: '',
-        assetsSourceMode: 'upload',
+        assetsSourceMode: 'server-path',
         assetsServerFolderPath: '',
         assetsModelServerFilePath: '',
         assetsScalerServerFilePath: '',
@@ -210,7 +210,7 @@
                 Load Prediction Assets
             </h2>
             <div class="grid grid-cols-1 gap-6">
-                <input id="model-assets-source" type="hidden" name="model_assets_source" value="upload">
+                <input id="model-assets-source" type="hidden" name="model_assets_source" value="server-path">
                 <input type="hidden" id="assets-upload-mode-hidden" name="assets_upload_mode" value="individual">
                 <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" value="">
                 <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" value="">
@@ -1224,6 +1224,43 @@
         let activeFileHistoryKey = FEATURES_SERVER_FILES_HISTORY_KEY;
         let activeFolderHistoryKey = ASSETS_SERVER_FOLDERS_HISTORY_KEY;
 
+        const dirnameFromPath = (value) => {
+            const normalized = String(value || "").trim().replace(/\\/g, "/");
+            if (!normalized) return "";
+            const idx = normalized.lastIndexOf("/");
+            if (idx <= 0) return normalized;
+            return normalized.slice(0, idx);
+        };
+
+        const getRememberedAssetsServerPath = () => {
+            const candidates = [
+                assetsModelServerFilePathInput.value,
+                assetsScalerServerFilePathInput.value,
+                assetsDensityServerFilePathInput.value,
+                assetsServerFolderInput.value,
+            ];
+            for (const candidate of candidates) {
+                const path = String(candidate || "").trim();
+                if (!path) continue;
+                const dir = dirnameFromPath(path);
+                if (dir) return dir;
+            }
+            const state = getState();
+            const fallback = state ? String(state.assetsServerFolderPath || "").trim() : "";
+            return fallback ? (dirnameFromPath(fallback) || fallback) : "";
+        };
+
+        const rememberAssetsServerPath = (value) => {
+            const remembered = dirnameFromPath(value) || String(value || "").trim();
+            if (!remembered) return;
+            assetsServerFolderInput.value = remembered;
+            syncInputValue(assetsServerFolderInput);
+            const state = getState();
+            if (state) {
+                state.assetsServerFolderPath = remembered;
+            }
+        };
+
         const clearServerFolderInspection = () => {
             const state = getState();
             if (!state) return;
@@ -1568,21 +1605,17 @@
             activeFileTarget = "assets-model";
             activeFileHistoryKey = ASSETS_MODEL_SERVER_FILES_HISTORY_KEY;
             const current = String(assetsModelServerFilePathInput.value || "").trim();
-            const startPath = current && current.includes("/")
-                ? current.slice(0, current.lastIndexOf("/"))
-                : "";
+            const startPath = dirnameFromPath(current) || getRememberedAssetsServerPath();
             try {
                 const selectedPath = await pickNativeServerFile(
                     ASSETS_MODEL_SERVER_FILES_HISTORY_KEY,
                     startPath,
                 );
-                assetsServerFolderInput.value = "";
-                syncInputValue(assetsServerFolderInput);
-                if (state) state.assetsServerFolderPath = "";
                 clearServerFolderInspection();
                 assetsModelServerFilePathInput.value = selectedPath;
                 syncInputValue(assetsModelServerFilePathInput);
                 if (state) state.assetsModelServerFilePath = selectedPath;
+                rememberAssetsServerPath(selectedPath);
                 if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
                 return;
             } catch (error) {
@@ -1592,7 +1625,7 @@
                 }
                 console.debug("Native server picker unavailable, opening in-app browser.", error);
             }
-            await openFileModalAtPath(assetsModelServerFilePathInput.value || "");
+            await openFileModalAtPath(startPath || assetsModelServerFilePathInput.value || "");
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });
 
@@ -1608,21 +1641,17 @@
             activeFileTarget = "assets-scaler";
             activeFileHistoryKey = ASSETS_SCALER_SERVER_FILES_HISTORY_KEY;
             const current = String(assetsScalerServerFilePathInput.value || "").trim();
-            const startPath = current && current.includes("/")
-                ? current.slice(0, current.lastIndexOf("/"))
-                : "";
+            const startPath = dirnameFromPath(current) || getRememberedAssetsServerPath();
             try {
                 const selectedPath = await pickNativeServerFile(
                     ASSETS_SCALER_SERVER_FILES_HISTORY_KEY,
                     startPath,
                 );
-                assetsServerFolderInput.value = "";
-                syncInputValue(assetsServerFolderInput);
-                if (state) state.assetsServerFolderPath = "";
                 clearServerFolderInspection();
                 assetsScalerServerFilePathInput.value = selectedPath;
                 syncInputValue(assetsScalerServerFilePathInput);
                 if (state) state.assetsScalerServerFilePath = selectedPath;
+                rememberAssetsServerPath(selectedPath);
                 if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
                 return;
             } catch (error) {
@@ -1632,7 +1661,7 @@
                 }
                 console.debug("Native server picker unavailable, opening in-app browser.", error);
             }
-            await openFileModalAtPath(assetsScalerServerFilePathInput.value || "");
+            await openFileModalAtPath(startPath || assetsScalerServerFilePathInput.value || "");
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });
 
@@ -1648,21 +1677,17 @@
             activeFileTarget = "assets-density";
             activeFileHistoryKey = ASSETS_DENSITY_SERVER_FILES_HISTORY_KEY;
             const current = String(assetsDensityServerFilePathInput.value || "").trim();
-            const startPath = current && current.includes("/")
-                ? current.slice(0, current.lastIndexOf("/"))
-                : "";
+            const startPath = dirnameFromPath(current) || getRememberedAssetsServerPath();
             try {
                 const selectedPath = await pickNativeServerFile(
                     ASSETS_DENSITY_SERVER_FILES_HISTORY_KEY,
                     startPath,
                 );
-                assetsServerFolderInput.value = "";
-                syncInputValue(assetsServerFolderInput);
-                if (state) state.assetsServerFolderPath = "";
                 clearServerFolderInspection();
                 assetsDensityServerFilePathInput.value = selectedPath;
                 syncInputValue(assetsDensityServerFilePathInput);
                 if (state) state.assetsDensityServerFilePath = selectedPath;
+                rememberAssetsServerPath(selectedPath);
                 if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
                 return;
             } catch (error) {
@@ -1672,7 +1697,7 @@
                 }
                 console.debug("Native server picker unavailable, opening in-app browser.", error);
             }
-            await openFileModalAtPath(assetsDensityServerFilePathInput.value || "");
+            await openFileModalAtPath(startPath || assetsDensityServerFilePathInput.value || "");
             if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
         });
 
@@ -1703,10 +1728,7 @@
                     state.assetsUploadMode = "individual";
                 }
                 modelAssetsSourceInput.value = "server-path";
-                assetsServerFolderInput.value = "";
-                if (state) state.assetsServerFolderPath = "";
                 syncInputValue(modelAssetsSourceInput);
-                syncInputValue(assetsServerFolderInput);
                 clearServerFolderInspection();
                 if (activeFileTarget === "assets-model") {
                     assetsModelServerFilePathInput.value = selectedFilePath;
@@ -1721,6 +1743,7 @@
                     if (state) state.assetsDensityServerFilePath = selectedFilePath;
                     syncInputValue(assetsDensityServerFilePathInput);
                 }
+                rememberAssetsServerPath(selectedFilePath);
                 if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
             }
             closeFileModal();

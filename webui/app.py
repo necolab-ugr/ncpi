@@ -1356,12 +1356,15 @@ def _list_field_potential_detected_files():
                 seen_paths.add(abs_path)
                 rel_name = os.path.relpath(abs_path, root)
                 display_name = os.path.basename(abs_path)
+                entry_label = mode_label
+                if display_name.lower() == "sim_data.pkl":
+                    entry_label = "Simulation metadata"
                 entries.append({
                     "key": f"field_potential::{abs_path}",
                     "name": display_name,
                     "relative_name": rel_name,
                     "source": "field_potential",
-                    "label": mode_label,
+                    "label": entry_label,
                     "path": abs_path,
                 })
     entries.sort(key=lambda item: (item["label"], item["name"]))
@@ -4762,15 +4765,6 @@ def dashboard():
             for name in files:
                 if name.endswith(".pkl"):
                     field_potential_files.append(name)
-    analysis_data_dir = ANALYSIS_DATA_DIR
-    if os.path.isdir(analysis_data_dir):
-        analysis_data_files = sorted(
-            f for f in os.listdir(analysis_data_dir)
-            if (f.endswith(".pkl") or f.endswith(".pickle"))
-            and os.path.isfile(os.path.join(analysis_data_dir, f))
-        )
-    else:
-        analysis_data_files = []
     features_data_files = _list_features_data_files()
     _bootstrap_predictions_data_from_previous_steps()
     predictions_data_files = _list_predictions_data_files()
@@ -4784,8 +4778,6 @@ def dashboard():
         has_features_data=bool(features_data_files),
         predictions_data_files=predictions_data_files,
         has_predictions_data=bool(predictions_data_files),
-        analysis_data_files=analysis_data_files,
-        has_analysis_data=bool(analysis_data_files),
     )
 
 
@@ -7642,12 +7634,68 @@ def _simulation_output_file(name):
 
 
 def _load_simulation_outputs():
+    root = _simulation_output_root()
+    if _get_analysis_selection_mode() == "simulation":
+        analysis_root = _analysis_data_dir(create=False)
+        if os.path.isdir(analysis_root) and any(
+            (name.endswith(".pkl") or name.endswith(".pickle"))
+            and os.path.isfile(os.path.join(analysis_root, name))
+            for name in os.listdir(analysis_root)
+        ):
+            root = analysis_root
+
     required = ["times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"]
-    paths = {name: _simulation_output_file(name) for name in required}
+    paths = {
+        name: (os.path.join(root, name) if os.path.isfile(os.path.join(root, name)) else None)
+        for name in required
+    }
     missing = [name for name, path in paths.items() if path is None]
+
+    def _coerce_sim_payload(payload):
+        if isinstance(payload, list):
+            if not payload:
+                return None
+            first = payload[0]
+            if not isinstance(first, dict):
+                return None
+            required_keys = {"times", "gids", "dt", "tstop", "network"}
+            if not required_keys.issubset(first.keys()):
+                return None
+            return {
+                "times": [item.get("times") for item in payload],
+                "gids": [item.get("gids") for item in payload],
+                "dt": [item.get("dt") for item in payload],
+                "tstop": [item.get("tstop") for item in payload],
+                "network": [item.get("network") for item in payload],
+                "grid_metadata": None,
+            }
+        if not isinstance(payload, dict):
+            return None
+        required_keys = {"times", "gids", "dt", "tstop", "network"}
+        if not required_keys.issubset(payload.keys()):
+            return None
+        return {
+            "times": payload["times"],
+            "gids": payload["gids"],
+            "dt": payload["dt"],
+            "tstop": payload["tstop"],
+            "network": payload["network"],
+            "grid_metadata": payload.get("grid_metadata"),
+        }
+
     if missing:
+        sim_data_path = os.path.join(root, "sim_data.pkl")
+        if os.path.isfile(sim_data_path):
+            try:
+                with open(sim_data_path, "rb") as f:
+                    sim_payload = pickle.load(f)
+                sim_data = _coerce_sim_payload(sim_payload)
+                if sim_data is not None:
+                    return sim_data
+            except Exception:
+                pass
         raise FileNotFoundError(
-            f"Missing simulation output files in {_simulation_output_root()}: {', '.join(missing)}"
+            f"Missing simulation output files in {root}: {', '.join(missing)}"
         )
 
     payload = {}
@@ -7656,7 +7704,7 @@ def _load_simulation_outputs():
             payload[name] = pickle.load(f)
 
     metadata = None
-    metadata_path = _simulation_grid_metadata_path(_simulation_output_root())
+    metadata_path = _simulation_grid_metadata_path(root)
     if metadata_path and os.path.isfile(metadata_path):
         try:
             with open(metadata_path, "rb") as handle:
@@ -7668,7 +7716,7 @@ def _load_simulation_outputs():
     if metadata is None:
         legacy_candidates = ["simulation_grid_metadata.pkl", "simulation_grid_metadata.json"]
         for legacy_name in legacy_candidates:
-            legacy_path = os.path.join(_simulation_output_root(), legacy_name)
+            legacy_path = os.path.join(root, legacy_name)
             if not os.path.isfile(legacy_path):
                 continue
             try:
@@ -7981,11 +8029,6 @@ def _normalize_field_potential_selection_path(path):
     normalized_path = os.path.realpath((path or "").strip())
     if not normalized_path:
         return ""
-    if os.path.basename(normalized_path).lower() != "sim_data.pkl":
-        return normalized_path
-    proxy_path = os.path.join(os.path.dirname(normalized_path), "proxy.pkl")
-    if os.path.isfile(proxy_path):
-        return os.path.realpath(proxy_path)
     return normalized_path
 
 
@@ -8001,7 +8044,7 @@ def _normalize_analysis_selected_key(raw_key):
         _, path = key.split("::", 1)
     except ValueError:
         return ""
-    normalized_path = _normalize_field_potential_selection_path(path)
+    normalized_path = os.path.realpath((path or "").strip())
     if not normalized_path or not os.path.isfile(normalized_path):
         return ""
     return f"field_potential::{normalized_path}"
@@ -8173,6 +8216,281 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
     return series_by_area, dt_ms
 
 
+def _stage_analysis_dataframe_file(source_path=None, upload=None, filename_hint=""):
+    filename = secure_filename(
+        filename_hint
+        or (os.path.basename(source_path) if source_path else (upload.filename if upload else "analysis_dataframe.pkl"))
+    )
+    if not filename:
+        raise ValueError("Invalid dataframe filename.")
+    ext = Path(filename).suffix.lower()
+    if ext not in PICKLE_EXTENSIONS:
+        raise ValueError("Only .pkl/.pickle files are supported.")
+
+    _clear_analysis_data_files()
+    analysis_data_dir = _analysis_data_dir(create=True)
+    temp_path = os.path.join(analysis_data_dir, filename)
+    try:
+        if source_path:
+            shutil.copy2(source_path, temp_path)
+        else:
+            upload.save(temp_path)
+    except OSError as exc:
+        raise ValueError(f"Failed to stage dataframe file: {exc}") from exc
+
+    try:
+        df = compute_utils.read_df_file(temp_path)
+        if not isinstance(df, pd.DataFrame):
+            raise ValueError(
+                "Uploaded file does not contain a pandas dataframe. "
+                "Select simulation or field-potential files instead."
+            )
+        _set_analysis_selection_mode("dataframe")
+        _clear_analysis_selected_simulation_keys()
+        return {
+            "columns": [str(col) for col in df.columns],
+            "filename": filename,
+        }
+    except Exception:
+        try:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        except OSError:
+            pass
+        raise
+
+
+def _analysis_store_simulation_inputs(inputs):
+    analysis_root = _analysis_data_dir(create=True)
+
+    required_name_by_stem = {
+        "times": "times.pkl",
+        "gids": "gids.pkl",
+        "dt": "dt.pkl",
+        "tstop": "tstop.pkl",
+        "network": "network.pkl",
+        "grid_metadata": SIMULATION_GRID_METADATA_FILE,
+    }
+    copied_files = []
+    used_names = {
+        name for name in os.listdir(analysis_root)
+        if os.path.isfile(os.path.join(analysis_root, name))
+    }
+    for item in inputs:
+        safe_name = item["safe_name"]
+        stem = Path(safe_name).stem.lower()
+        preferred_name = required_name_by_stem.get(stem, safe_name)
+        preferred_name = secure_filename(preferred_name)
+        if not preferred_name:
+            continue
+        preferred_stem, preferred_ext = os.path.splitext(preferred_name)
+        preferred_ext = preferred_ext or ".pkl"
+        candidate = preferred_name
+        suffix = 1
+        while candidate in used_names:
+            candidate = f"{preferred_stem}_{suffix}{preferred_ext}"
+            suffix += 1
+        dst_path = os.path.join(analysis_root, candidate)
+        try:
+            if item["source_path"]:
+                shutil.copy2(item["source_path"], dst_path)
+            else:
+                item["upload"].save(dst_path)
+        except OSError:
+            continue
+        if not os.path.isfile(dst_path) or os.path.getsize(dst_path) <= 0:
+            try:
+                if os.path.exists(dst_path):
+                    os.remove(dst_path)
+            except OSError:
+                pass
+            continue
+        used_names.add(candidate)
+        copied_files.append(candidate)
+
+    if not copied_files:
+        raise ValueError("No supported simulation .pkl/.pickle files were uploaded.")
+
+    priority = {
+        "times.pkl": 0,
+        "gids.pkl": 1,
+        "dt.pkl": 2,
+        "tstop.pkl": 3,
+        "network.pkl": 4,
+        SIMULATION_GRID_METADATA_FILE: 5,
+    }
+    copied_files = sorted(copied_files, key=lambda name: (priority.get(name, 1000), name))
+    selected_keys = [f"simulation::{name}" for name in copied_files]
+    selected_items = [{
+        "key": f"simulation::{name}",
+        "name": name,
+        "source": "simulation",
+        "label": "Simulation",
+    } for name in copied_files]
+    return {
+        "copied_files": copied_files,
+        "selected_keys": selected_keys,
+        "selected_items": selected_items,
+    }
+
+
+def _analysis_selected_items_from_keys(selected_keys):
+    items = []
+    seen = set()
+    label_by_type = {
+        "proxy": "Field Potential Proxy",
+        "cdm": "Field Potential Kernel",
+        "lfp": "Field Potential Kernel",
+        "eeg": "Field Potential M/EEG",
+        "meg": "Field Potential M/EEG",
+        "meeg": "Field Potential M/EEG",
+    }
+    for raw_key in (selected_keys or []):
+        key = str(raw_key or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        if key.startswith("simulation::"):
+            try:
+                _, name = key.split("::", 1)
+            except ValueError:
+                continue
+            name = str(name or "").strip()
+            if not name:
+                continue
+            items.append({
+                "key": key,
+                "name": name,
+                "source": "simulation",
+                "label": "Simulation",
+            })
+            continue
+        if key.startswith("field_potential::"):
+            try:
+                _, path = key.split("::", 1)
+            except ValueError:
+                continue
+            path = os.path.realpath((path or "").strip())
+            if not path or not os.path.isfile(path):
+                continue
+            base_name = os.path.basename(path)
+            if base_name.lower() == "sim_data.pkl":
+                label = "Simulation metadata"
+            else:
+                fp_type = _infer_field_potential_type_from_filename(base_name) or "proxy"
+                label = label_by_type.get(fp_type, "Field Potential")
+            items.append({
+                "key": key,
+                "name": base_name,
+                "source": "field_potential",
+                "label": label,
+            })
+    return items
+
+
+def _analysis_store_field_potential_inputs(inputs):
+    label_by_type = {
+        "proxy": "Field Potential Proxy",
+        "cdm": "Field Potential Kernel",
+        "lfp": "Field Potential Kernel",
+        "eeg": "Field Potential M/EEG",
+        "meg": "Field Potential M/EEG",
+        "meeg": "Field Potential M/EEG",
+    }
+
+    selected_keys = []
+    selected_items = []
+    analysis_root = _analysis_data_dir(create=True)
+    used_names = {
+        name for name in os.listdir(analysis_root)
+        if os.path.isfile(os.path.join(analysis_root, name))
+    }
+    for item in inputs:
+        safe_name = item["safe_name"]
+        file_fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
+        output_name = _field_potential_output_name(file_fp_type, safe_name)
+        preferred_name = secure_filename(output_name)
+        if not preferred_name:
+            continue
+        preferred_stem, preferred_ext = os.path.splitext(preferred_name)
+        preferred_ext = preferred_ext or ".pkl"
+        candidate = preferred_name
+        suffix = 1
+        while candidate in used_names:
+            candidate = f"{preferred_stem}_{suffix}{preferred_ext}"
+            suffix += 1
+        used_names.add(candidate)
+        output_path = os.path.join(analysis_root, candidate)
+        if item["source_path"]:
+            shutil.copy2(item["source_path"], output_path)
+        else:
+            item["upload"].save(output_path)
+        key = f"field_potential::{os.path.realpath(output_path)}"
+        selected_keys.append(key)
+        selected_items.append({
+            "key": key,
+            "name": os.path.basename(output_path),
+            "source": "field_potential",
+            "label": label_by_type.get(file_fp_type, "Field Potential"),
+        })
+    return {
+        "selected_keys": selected_keys,
+        "selected_items": selected_items,
+    }
+
+
+def _analysis_collect_upload_inputs(uploads, server_file_paths, server_label):
+    inputs = []
+    for server_path in server_file_paths:
+        source_path = _validate_existing_pickle_file_path(server_path, server_label)
+        safe_name = secure_filename(os.path.basename(source_path))
+        if not safe_name:
+            continue
+        inputs.append({"safe_name": safe_name, "source_path": source_path, "upload": None})
+
+    for upload in uploads:
+        raw_name = os.path.basename(upload.filename or "")
+        safe_name = secure_filename(raw_name)
+        if not safe_name:
+            continue
+        ext = Path(safe_name).suffix.lower()
+        if ext not in PICKLE_EXTENSIONS:
+            continue
+        inputs.append({"safe_name": safe_name, "source_path": None, "upload": upload})
+    return inputs
+
+
+def _analysis_detect_single_input_kind(item):
+    source_path = item.get("source_path")
+    upload = item.get("upload")
+    if source_path:
+        try:
+            loaded = compute_utils.read_df_file(source_path)
+        except Exception:
+            loaded = None
+        if isinstance(loaded, pd.DataFrame):
+            return "dataframe"
+    elif upload is not None:
+        try:
+            if hasattr(upload.stream, "seek"):
+                upload.stream.seek(0)
+            loaded = pd.read_pickle(upload.stream)
+        except Exception:
+            loaded = None
+        finally:
+            try:
+                if hasattr(upload.stream, "seek"):
+                    upload.stream.seek(0)
+            except Exception:
+                pass
+        if isinstance(loaded, pd.DataFrame):
+            return "dataframe"
+
+    if _infer_field_potential_type_from_filename(item.get("safe_name")):
+        return "field_potential"
+    return "simulation"
+
+
 @app.route("/analysis/select_features_file", methods=["POST"])
 def analysis_select_features_file():
     selector = (request.form.get("data_file_key") or request.form.get("features_file") or "").strip()
@@ -8243,6 +8561,158 @@ def analysis_select_features_file():
         return jsonify({"error": str(exc)}), 400
 
 
+@app.route("/analysis/select_all_detected_dataframes", methods=["POST"])
+def analysis_select_all_detected_dataframes():
+    detected_entries = [
+        entry for entry in _list_detected_analysis_data_files()
+        if entry.get("source") not in {"simulation", "field_potential"}
+    ]
+    if not detected_entries:
+        return jsonify({"error": "No detected dataframe files are available."}), 400
+
+    frames = []
+    loaded_names = []
+    for entry in detected_entries:
+        src_path = entry.get("path")
+        if not src_path or not os.path.isfile(src_path):
+            continue
+        try:
+            df = compute_utils.read_df_file(src_path)
+        except Exception as exc:
+            return jsonify({"error": f"Failed to load detected file {entry.get('name')}: {exc}"}), 400
+        if not isinstance(df, pd.DataFrame):
+            return jsonify({"error": f"Detected file is not a pandas dataframe: {entry.get('name')}"}), 400
+
+        frame_use = df.copy()
+        if "_analysis_source_module" not in frame_use.columns:
+            frame_use["_analysis_source_module"] = str(entry.get("label") or entry.get("source") or "detected")
+        if "_analysis_source_file" not in frame_use.columns:
+            frame_use["_analysis_source_file"] = str(entry.get("name") or os.path.basename(src_path))
+        frames.append(frame_use)
+        loaded_names.append(str(entry.get("name") or os.path.basename(src_path)))
+
+    if not frames:
+        return jsonify({"error": "No detected dataframe files were found on disk."}), 404
+
+    combined = pd.concat(frames, ignore_index=True, sort=False)
+    _clear_analysis_data_files()
+    analysis_data_dir = _analysis_data_dir(create=True)
+    dst_name = "detected_analysis_dataframes.pkl"
+    dst_path = os.path.join(analysis_data_dir, dst_name)
+    try:
+        combined.to_pickle(dst_path)
+    except Exception as exc:
+        return jsonify({"error": f"Failed to stage combined detected dataframes: {exc}"}), 500
+
+    _set_analysis_selection_mode("dataframe")
+    _clear_analysis_selected_simulation_keys()
+    return jsonify({
+        "columns": [str(col) for col in combined.columns],
+        "filename": dst_name,
+        "loaded_files": loaded_names,
+        "loaded_count": len(loaded_names),
+        "is_dataframe": True,
+    })
+
+
+@app.route("/analysis/upload_auto", methods=["POST"])
+def analysis_upload_auto():
+    uploads = [f for f in request.files.getlist("analysis_files") if f and f.filename]
+    server_file_paths = _extract_server_file_paths(request.form, "analysis_server_file_path")
+    inputs = _analysis_collect_upload_inputs(uploads, server_file_paths, "Analysis server file")
+    if not inputs:
+        return jsonify({"error": "No supported .pkl/.pickle files were provided."}), 400
+
+    if len(inputs) == 1 and _analysis_detect_single_input_kind(inputs[0]) == "dataframe":
+        item = inputs[0]
+        try:
+            result = _stage_analysis_dataframe_file(
+                source_path=item.get("source_path"),
+                upload=item.get("upload"),
+                filename_hint=item.get("safe_name"),
+            )
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+        result["mode"] = "dataframe"
+        return jsonify(result)
+
+    simulation_inputs = []
+    field_potential_inputs = []
+    for item in inputs:
+        if _analysis_detect_single_input_kind(item) == "field_potential":
+            field_potential_inputs.append(item)
+        else:
+            simulation_inputs.append(item)
+
+    preserve_existing = _get_analysis_selection_mode() == "simulation"
+    existing_selected_keys = _get_analysis_selected_simulation_keys() if preserve_existing else []
+    if not preserve_existing:
+        _clear_analysis_data_files()
+        _clear_analysis_selected_simulation_keys()
+    selected_keys = list(existing_selected_keys)
+    copied_files = []
+    if simulation_inputs:
+        try:
+            sim_result = _analysis_store_simulation_inputs(simulation_inputs)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+        copied_files = sim_result["copied_files"]
+        selected_keys.extend(sim_result["selected_keys"])
+
+    if field_potential_inputs:
+        try:
+            fp_result = _analysis_store_field_potential_inputs(field_potential_inputs)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+        selected_keys.extend(fp_result["selected_keys"])
+
+    selected_keys = list(dict.fromkeys(selected_keys))
+    selected_items = _analysis_selected_items_from_keys(selected_keys)
+
+    if not selected_items:
+        return jsonify({"error": "No supported simulation or field-potential files were uploaded."}), 400
+
+    _set_analysis_selection_mode("simulation")
+    _set_analysis_selected_simulation_keys(selected_keys)
+
+    required = {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"}
+    selected_simulation_names = {
+        str(key).split("::", 1)[1]
+        for key in selected_keys
+        if str(key).startswith("simulation::") and "::" in str(key)
+    }
+    missing_required = sorted(name for name in required if name not in selected_simulation_names)
+
+    simulation_available = False
+    simulation_trials = 0
+    simulation_model = ""
+    simulation_welch_defaults = None
+    try:
+        sim_data = _load_simulation_outputs()
+        simulation_available = True
+        simulation_trials = _simulation_trial_count(sim_data)
+        simulation_model = _simulation_model_type(sim_data)
+        simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
+    except Exception:
+        simulation_available = False
+        simulation_trials = 0
+        simulation_model = ""
+        simulation_welch_defaults = None
+
+    return jsonify({
+        "ok": True,
+        "mode": "simulation",
+        "copied_files": copied_files,
+        "selected_keys": selected_keys,
+        "selected_items": selected_items,
+        "missing_required": missing_required,
+        "simulation_available": simulation_available,
+        "simulation_trials": simulation_trials,
+        "simulation_model": simulation_model,
+        "simulation_welch_defaults": simulation_welch_defaults,
+    })
+
+
 @app.route("/analysis/sync_selected_simulation_files", methods=["POST"])
 def analysis_sync_selected_simulation_files():
     selected_keys = []
@@ -8298,8 +8768,30 @@ def analysis_sync_selected_simulation_files():
     else:
         _clear_analysis_selection_mode()
         _clear_analysis_selected_simulation_keys()
+    simulation_available = False
+    simulation_trials = 0
+    simulation_model = ""
+    simulation_welch_defaults = None
+    try:
+        sim_data = _load_simulation_outputs()
+        simulation_available = True
+        simulation_trials = _simulation_trial_count(sim_data)
+        simulation_model = _simulation_model_type(sim_data)
+        simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
+    except Exception:
+        simulation_available = False
+        simulation_trials = 0
+        simulation_model = ""
+        simulation_welch_defaults = None
 
-    return jsonify({"ok": True, "copied_files": copied_files})
+    return jsonify({
+        "ok": True,
+        "copied_files": copied_files,
+        "simulation_available": simulation_available,
+        "simulation_trials": simulation_trials,
+        "simulation_model": simulation_model,
+        "simulation_welch_defaults": simulation_welch_defaults,
+    })
 
 
 @app.route("/analysis/upload_simulation_files", methods=["POST"])
@@ -8333,21 +8825,12 @@ def analysis_upload_simulation_files():
     if not inputs:
         return jsonify({"error": "No supported simulation .pkl/.pickle files were provided."}), 400
 
-    simulation_root = _simulation_output_root()
-    os.makedirs(simulation_root, exist_ok=True)
-
-    # Replace previous simulation pickle outputs to avoid mixing datasets.
-    for name in os.listdir(simulation_root):
-        lower = name.lower()
-        if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
-            continue
-        path = os.path.join(simulation_root, name)
-        if not os.path.isfile(path):
-            continue
-        try:
-            os.remove(path)
-        except OSError:
-            pass
+    preserve_existing = _get_analysis_selection_mode() == "simulation"
+    existing_selected_keys = _get_analysis_selected_simulation_keys() if preserve_existing else []
+    if not preserve_existing:
+        _clear_analysis_data_files()
+        _clear_analysis_selected_simulation_keys()
+    simulation_root = _analysis_data_dir(create=True)
 
     required_name_by_stem = {
         "times": "times.pkl",
@@ -8358,7 +8841,10 @@ def analysis_upload_simulation_files():
         "grid_metadata": SIMULATION_GRID_METADATA_FILE,
     }
     copied_files = []
-    used_names = set()
+    used_names = {
+        name for name in os.listdir(simulation_root)
+        if os.path.isfile(os.path.join(simulation_root, name))
+    }
     for item in inputs:
         safe_name = item["safe_name"]
 
@@ -8404,13 +8890,19 @@ def analysis_upload_simulation_files():
         SIMULATION_GRID_METADATA_FILE: 5,
     }
     copied_files = sorted(copied_files, key=lambda name: (priority.get(name, 1000), name))
-    selected_keys = [f"simulation::{name}" for name in copied_files]
+    selected_keys = list(existing_selected_keys)
+    selected_keys.extend(f"simulation::{name}" for name in copied_files)
+    selected_keys = list(dict.fromkeys(selected_keys))
     _set_analysis_selection_mode("simulation")
     _set_analysis_selected_simulation_keys(selected_keys)
-    _clear_analysis_data_files()
 
     required = {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"}
-    missing_required = sorted(name for name in required if name not in set(copied_files))
+    selected_simulation_names = {
+        str(key).split("::", 1)[1]
+        for key in selected_keys
+        if str(key).startswith("simulation::") and "::" in str(key)
+    }
+    missing_required = sorted(name for name in required if name not in selected_simulation_names)
 
     simulation_available = False
     simulation_trials = 0
@@ -8432,6 +8924,7 @@ def analysis_upload_simulation_files():
         "ok": True,
         "copied_files": copied_files,
         "selected_keys": selected_keys,
+        "selected_items": _analysis_selected_items_from_keys(selected_keys),
         "missing_required": missing_required,
         "simulation_available": simulation_available,
         "simulation_trials": simulation_trials,
@@ -9488,13 +9981,175 @@ def analysis_plot_topomap():
 
 @app.route("/analysis/plot/simulation", methods=["POST"])
 def analysis_plot_simulation():
+    plot_type = (request.form.get("sim_plot_type") or "raster").strip().lower()
+    selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
+    selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
+
+    allowed_types = {"raster", "firing_rates", "cdm", "cdm_psd"}
+    if plot_type not in allowed_types:
+        return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
+
+    def _coerce_selected_sim_payload(payload):
+        if isinstance(payload, list):
+            if not payload:
+                return None
+            first = payload[0]
+            required_keys = {"times", "gids", "dt", "tstop", "network"}
+            if not isinstance(first, dict) or not required_keys.issubset(first.keys()):
+                return None
+            return {
+                "times": [item.get("times") for item in payload],
+                "gids": [item.get("gids") for item in payload],
+                "dt": [item.get("dt") for item in payload],
+                "tstop": [item.get("tstop") for item in payload],
+                "network": [item.get("network") for item in payload],
+                "grid_metadata": None,
+            }
+        if isinstance(payload, dict):
+            required_keys = {"times", "gids", "dt", "tstop", "network"}
+            if required_keys.issubset(payload.keys()):
+                return {
+                    "times": payload["times"],
+                    "gids": payload["gids"],
+                    "dt": payload["dt"],
+                    "tstop": payload["tstop"],
+                    "network": payload["network"],
+                    "grid_metadata": payload.get("grid_metadata"),
+                }
+        return None
+
+    def _field_potential_trial_count(payload):
+        if isinstance(payload, list):
+            return len(payload)
+        return 1 if payload is not None else 0
+
+    def _field_potential_area_names(payload):
+        common_areas = {"frontal", "parietal", "temporal", "occipital"}
+        names = []
+        seen = set()
+
+        def _push(name):
+            text = str(name or "").strip()
+            if not text:
+                return
+            lowered = text.lower()
+            if lowered in seen:
+                return
+            seen.add(lowered)
+            names.append(text)
+
+        obj = payload[0] if isinstance(payload, list) and payload else payload
+        raw_signals = None
+        data_signal = None
+        if isinstance(obj, pd.DataFrame) and not obj.empty:
+            row = obj.iloc[0]
+            raw_signals = row.get("raw_signals") if "raw_signals" in row else None
+            data_signal = row.get("data") if "data" in row else None
+        elif isinstance(obj, dict):
+            raw_signals = obj.get("raw_signals")
+            data_signal = obj.get("data")
+
+        if isinstance(raw_signals, dict):
+            for signal_key in raw_signals.keys():
+                for candidate in re.findall(r"\(([^()]+)\)", str(signal_key)):
+                    if candidate.strip().lower() in common_areas:
+                        _push(candidate)
+
+        if not names and data_signal is not None:
+            arr = np.asarray(data_signal, dtype=float)
+            if arr.ndim == 2 and 4 in arr.shape:
+                for candidate in ("frontal", "parietal", "temporal", "occipital"):
+                    _push(candidate)
+
+        return names
+
+    def _infer_field_potential_model(payload):
+        return "four_area" if _field_potential_area_names(payload) else "hagen"
+
+    cdm_payload = None
+    cdm_payload_name = ""
+    if plot_type in {"cdm", "cdm_psd"}:
+        if not selected_fp_paths:
+            return _analysis_plot_error(
+                "Field-potential plots require a computed field-potential output file. Select a field-potential file first.",
+                status=400,
+            )
+        loaded_candidates = []
+        for path in selected_fp_paths:
+            try:
+                with open(path, "rb") as f:
+                    loaded_candidates.append((path, pickle.load(f)))
+            except Exception:
+                continue
+        if not loaded_candidates:
+            return _analysis_plot_error(
+                "Unable to load selected field-potential files. Select a valid field-potential output file.",
+                status=400,
+            )
+
+        preferred = None
+        for path, payload in loaded_candidates:
+            name = os.path.basename(path).lower()
+            if "proxy" in name:
+                preferred = (path, payload)
+                break
+        if preferred is None:
+            for path, payload in loaded_candidates:
+                name = os.path.basename(path).lower()
+                if "cdm" in name or "dipole" in name:
+                    preferred = (path, payload)
+                    break
+        if preferred is None:
+            for path, payload in loaded_candidates:
+                name = os.path.basename(path).lower()
+                if name != "sim_data.pkl":
+                    preferred = (path, payload)
+                    break
+        if preferred is None:
+            preferred = loaded_candidates[0]
+
+        cdm_payload_name = os.path.basename(preferred[0])
+        cdm_payload = preferred[1]
+
+    sim_data_error = None
     try:
         sim_data = _load_simulation_outputs()
     except Exception as exc:
-        return _analysis_plot_error(str(exc), status=400)
+        sim_data_error = exc
+        sim_data = None
+        if plot_type in {"cdm", "cdm_psd"}:
+            for raw_key in selected_keys:
+                if not str(raw_key).startswith("field_potential::"):
+                    continue
+                try:
+                    _, raw_path = str(raw_key).split("::", 1)
+                except ValueError:
+                    continue
+                candidate_path = os.path.realpath((raw_path or "").strip())
+                if not candidate_path or not os.path.isfile(candidate_path):
+                    continue
+                if os.path.basename(candidate_path).lower() != "sim_data.pkl":
+                    continue
+                try:
+                    with open(candidate_path, "rb") as f:
+                        payload = pickle.load(f)
+                    sim_data = _coerce_selected_sim_payload(payload)
+                except Exception:
+                    sim_data = None
+                if sim_data is not None:
+                    break
+        if sim_data is None and plot_type not in {"cdm", "cdm_psd"}:
+            return _analysis_plot_error(str(exc), status=400)
 
-    total_trials = _simulation_trial_count(sim_data)
-    model = _simulation_model_type(sim_data)
+    if sim_data is not None:
+        total_trials = _simulation_trial_count(sim_data)
+        model = _simulation_model_type(sim_data)
+    else:
+        total_trials = _field_potential_trial_count(cdm_payload)
+        model = _infer_field_potential_model(cdm_payload)
+        if total_trials <= 0:
+            message = str(sim_data_error) if sim_data_error is not None else "No field-potential trials were detected."
+            return _analysis_plot_error(message, status=400)
 
     def _parse_int(value, default):
         try:
@@ -9514,8 +10169,11 @@ def analysis_plot_simulation():
         return _analysis_plot_error("No trials selected to plot.", status=400)
     trial_indices = list(trial_indices_full_range)
 
-    plot_type = (request.form.get("sim_plot_type") or "raster").strip().lower()
-    available_repeat_indices = _simulation_available_repetition_indices(sim_data, trial_indices_full_range)
+    available_repeat_indices = (
+        _simulation_available_repetition_indices(sim_data, trial_indices_full_range)
+        if sim_data is not None
+        else []
+    )
     sim_repeat_raw = (request.form.get("sim_repeat_index") or "").strip().lower()
     selected_repeat_index = None
     if sim_repeat_raw and sim_repeat_raw not in {"all", "*"}:
@@ -9545,9 +10203,6 @@ def analysis_plot_simulation():
                 f"No trials found for repetition {selected_repeat_index + 1} in the selected trial range.",
                 status=400,
             )
-
-    selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
-    selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
     def _parse_float(value, default):
         try:
             return float(value)
@@ -9563,6 +10218,10 @@ def analysis_plot_simulation():
     freq_max = _parse_float(request.form.get("sim_freq_max"), 200.0)
     if freq_min > freq_max:
         freq_min, freq_max = freq_max, freq_min
+
+    cdm_psd_mode = (request.form.get("sim_cdm_psd_mode") or "separate").strip().lower()
+    if cdm_psd_mode not in {"separate", "average"}:
+        return _analysis_plot_error("PSD mode must be either 'separate' or 'average'.", status=400)
 
     def _parse_optional_int(field_name, label, min_value=0):
         raw = request.form.get(field_name)
@@ -9621,17 +10280,28 @@ def analysis_plot_simulation():
         if not trial_indices:
             return None
         try:
-            trial = _simulation_trial_data(sim_data, trial_indices[0])
-            dt_local = float(trial["dt"])
+            if sim_data is not None:
+                trial = _simulation_trial_data(sim_data, trial_indices[0])
+                dt_local = float(trial["dt"])
+                signal_len = int(max(1, round(float(trial["tstop"]) / max(dt_local, 1e-9))))
+            else:
+                area_arg = areas if model == "four_area" else []
+                series_by_area, dt_fp = _field_potential_payload_to_area_series(
+                    cdm_payload,
+                    model,
+                    area_arg,
+                    trial_indices[0],
+                )
+                target_key = area_arg[0] if area_arg else "global"
+                signal = np.asarray(series_by_area.get(target_key, []), dtype=float)
+                if signal.size == 0 or dt_fp is None:
+                    return None
+                dt_local = float(dt_fp)
+                signal_len = int(signal.size)
             fs = 1000.0 / max(dt_local, 1e-9)
-            signal_len = int(max(1, round(float(trial["tstop"]) / max(dt_local, 1e-9))))
             return _resolve_welch_kwargs(signal_len, fs)
         except Exception:
             return None
-
-    allowed_types = {"raster", "firing_rates", "cdm", "cdm_psd"}
-    if plot_type not in allowed_types:
-        return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
 
     required_by_plot = {
         "raster": {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"},
@@ -9654,50 +10324,25 @@ def analysis_plot_simulation():
                 status=400,
             )
 
-    cdm_payload = None
-    cdm_payload_name = ""
-    if plot_type in {"cdm", "cdm_psd"}:
-        if not selected_fp_paths:
-            return _analysis_plot_error(
-                "Field-potential plots require a computed field-potential output file. Select a field-potential file first.",
-                status=400,
-            )
-        loaded_candidates = []
-        for path in selected_fp_paths:
-            try:
-                with open(path, "rb") as f:
-                    loaded_candidates.append((path, pickle.load(f)))
-            except Exception:
-                continue
-        if not loaded_candidates:
-            return _analysis_plot_error(
-                "Unable to load selected field-potential files. Select a valid field-potential output file.",
-                status=400,
-            )
 
-        preferred = None
-        for path, payload in loaded_candidates:
-            name = os.path.basename(path).lower()
-            if "proxy" in name:
-                preferred = (path, payload)
-                break
-        if preferred is None:
-            for path, payload in loaded_candidates:
-                name = os.path.basename(path).lower()
-                if "cdm" in name or "dipole" in name:
-                    preferred = (path, payload)
-                    break
-        if preferred is None:
-            for path, payload in loaded_candidates:
-                name = os.path.basename(path).lower()
-                if name != "sim_data.pkl":
-                    preferred = (path, payload)
-                    break
-        if preferred is None:
-            preferred = loaded_candidates[0]
+    def _simulation_plot_source_text():
+        if plot_type in {"raster", "firing_rates"}:
+            used_files = sorted(selected_sim_files)
+        elif plot_type in {"cdm", "cdm_psd"}:
+            if cdm_payload_name:
+                used_files = [cdm_payload_name]
+            else:
+                used_files = [os.path.basename(path) for path in selected_fp_paths]
+        else:
+            used_files = []
+        if not used_files:
+            return ""
+        return " Source: " + ", ".join(used_files) + "."
 
-        cdm_payload_name = os.path.basename(preferred[0])
-        cdm_payload = preferred[1]
+    def _plot_trial_title(trial_idx, suffix):
+        if sim_data is not None:
+            return _simulation_trial_plot_title(sim_data, trial_idx, suffix)
+        return f"Trial {trial_idx} {suffix}".strip()
 
     try:
         import matplotlib
@@ -9765,161 +10410,234 @@ def analysis_plot_simulation():
             return y
         return np.interp(ref, x, y, left=np.nan, right=np.nan)
 
+    def _compute_field_potential_psd(trial_idx, area_name=None):
+        area_arg = areas if model == "four_area" else []
+        series_by_area, dt_fp = _field_potential_payload_to_area_series(
+            cdm_payload,
+            model,
+            area_arg,
+            trial_idx,
+        )
+        target_key = area_name if model == "four_area" else "global"
+        cdm = np.asarray(series_by_area.get(target_key, []), dtype=float)
+        if cdm.size < 8:
+            return None, None, None
+        dt_local = None
+        if dt_fp is not None:
+            dt_local = float(dt_fp)
+        elif sim_data is not None:
+            trial = _simulation_trial_data(sim_data, trial_idx)
+            dt_local = float(trial["dt"])
+        if dt_local is None or not np.isfinite(dt_local) or dt_local <= 0.0:
+            return None, None, None
+        fs = 1000.0 / max(dt_local, 1e-9)
+        effective_welch = _resolve_welch_kwargs(cdm.size, fs)
+        freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
+        if psd.size == 0:
+            return None, None, None
+        return np.asarray(freqs, dtype=float), np.asarray(psd, dtype=float), dict(effective_welch)
+
+    def _collect_psd_entries(trial_idx_list, area_name=None):
+        entries = []
+        welch_local = None
+        for trial_idx in trial_idx_list:
+            freqs, psd, effective_welch = _compute_field_potential_psd(trial_idx, area_name=area_name)
+            if freqs is None or psd is None:
+                continue
+            if welch_local is None:
+                welch_local = dict(effective_welch)
+            entries.append({
+                "trial_idx": int(trial_idx),
+                "freqs": freqs,
+                "psd": psd,
+            })
+        return entries, welch_local
+
+    def _average_psd_entries(entries):
+        if not entries:
+            return None, None
+        ref_freqs = None
+        aligned_spectra = []
+        for entry in entries:
+            freqs = np.asarray(entry["freqs"], dtype=float)
+            psd = np.asarray(entry["psd"], dtype=float)
+            if ref_freqs is None:
+                ref_freqs = freqs
+                aligned = psd
+            else:
+                aligned = _align_psd_to_reference(ref_freqs, freqs, psd)
+                if aligned is None:
+                    continue
+            aligned_spectra.append(np.asarray(aligned, dtype=float))
+        if ref_freqs is None or not aligned_spectra:
+            return None, None
+        spectra_matrix = np.vstack(aligned_spectra)
+        if not np.isfinite(spectra_matrix).any():
+            return None, None
+        return ref_freqs, np.nanmean(spectra_matrix, axis=0)
+
     if plot_type == "cdm_psd":
         welch_used = None
-        config_groups = _simulation_group_trials_by_configuration(sim_data, trial_indices)
-        config_count = len(config_groups)
-        areas = _simulation_area_names(sim_data, trial_indices[0]) if model == "four_area" else []
-        if model == "four_area":
-            cols = min(2, max(1, len(areas)))
-            rows = int(math.ceil(len(areas) / cols))
-            fig, axs = plt.subplots(rows, cols, figsize=(5.4 * cols, 4.2 * rows), dpi=160, squeeze=False)
-            flat_ax = axs.ravel()
-            for area_idx, area_name in enumerate(areas):
-                ax = flat_ax[area_idx]
-                plotted = 0
-                for config_idx, config_trials in config_groups.items():
-                    ref_freqs = None
-                    spectra = []
-                    for trial_idx in config_trials:
-                        trial = _simulation_trial_data(sim_data, trial_idx)
-                        series_by_area, dt_fp = _field_potential_payload_to_area_series(
-                            cdm_payload,
-                            model,
-                            areas,
-                            trial_idx,
-                        )
-                        if area_name not in series_by_area:
-                            continue
-                        cdm = np.asarray(series_by_area[area_name], dtype=float)
-                        if cdm.size < 8:
-                            continue
-                        dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
-                        fs = 1000.0 / max(dt_local, 1e-9)
-                        effective_welch = _resolve_welch_kwargs(cdm.size, fs)
-                        if welch_used is None:
-                            welch_used = dict(effective_welch)
-                        freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
-                        if psd.size == 0:
-                            continue
-                        psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
-                        if ref_freqs is None:
-                            ref_freqs = np.asarray(freqs, dtype=float)
-                            aligned = np.asarray(psd_norm, dtype=float)
-                        else:
-                            aligned = _align_psd_to_reference(ref_freqs, freqs, psd_norm)
-                            if aligned is None:
-                                continue
-                        spectra.append(aligned)
-                    if ref_freqs is None or not spectra:
+        areas = (
+            _simulation_area_names(sim_data, trial_indices[0])
+            if (model == "four_area" and sim_data is not None)
+            else (_field_potential_area_names(cdm_payload) if model == "four_area" else [])
+        )
+        if cdm_psd_mode == "average":
+            if model == "four_area":
+                if not areas:
+                    return _analysis_plot_error("Four-area model detected but no areas were found in network parameters.", status=400)
+                cols = min(2, max(1, len(areas)))
+                rows = int(math.ceil(len(areas) / cols))
+                fig, axs = plt.subplots(rows, cols, figsize=(5.4 * cols, 4.2 * rows), dpi=160, squeeze=False)
+                flat_ax = axs.ravel()
+                plotted_any = False
+                for area_idx, area_name in enumerate(areas):
+                    ax = flat_ax[area_idx]
+                    entries, welch_local = _collect_psd_entries(trial_indices, area_name=area_name)
+                    if welch_used is None and welch_local is not None:
+                        welch_used = dict(welch_local)
+                    ref_freqs, mean_psd = _average_psd_entries(entries)
+                    if ref_freqs is None or mean_psd is None:
+                        ax.axis("off")
                         continue
-                    spectra_matrix = np.vstack(spectra)
-                    if not np.isfinite(spectra_matrix).any():
-                        continue
-                    mean_psd = np.nanmean(spectra_matrix, axis=0)
                     mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
                     if not np.any(mask):
+                        ax.axis("off")
                         continue
-                    ax.semilogy(
-                        ref_freqs[mask],
-                        mean_psd[mask],
-                        linewidth=1.0,
-                        label=_simulation_configuration_legend_label(sim_data, config_idx, config_trials),
-                    )
-                    plotted += 1
-                ax.set_title(f"{area_name} PSD")
+                    ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
+                    ax.set_title(f"{area_name} PSD")
+                    ax.set_xlabel("f (Hz)")
+                    ax.set_ylabel("PSD (a.u./Hz)")
+                    ax.grid(alpha=0.2)
+                    plotted_any = True
+                for extra_idx in range(len(areas), len(flat_ax)):
+                    flat_ax[extra_idx].axis("off")
+                if not plotted_any:
+                    plt.close(fig)
+                    return _analysis_plot_error("Unable to compute field-potential power spectra for the selected trials.", status=400)
+                fig.tight_layout()
+            else:
+                fig, ax = plt.subplots(1, 1, figsize=(8, 5), dpi=160)
+                entries, welch_local = _collect_psd_entries(trial_indices, area_name=None)
+                if welch_local is not None:
+                    welch_used = dict(welch_local)
+                ref_freqs, mean_psd = _average_psd_entries(entries)
+                if ref_freqs is None or mean_psd is None:
+                    plt.close(fig)
+                    return _analysis_plot_error("Unable to compute field-potential power spectra for the selected trials.", status=400)
+                mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
+                if not np.any(mask):
+                    plt.close(fig)
+                    return _analysis_plot_error("Selected frequency range does not contain valid PSD values.", status=400)
+                ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
                 ax.set_xlabel("f (Hz)")
                 ax.set_ylabel("PSD (a.u./Hz)")
+                ax.set_title("Mean field-potential power spectrum")
                 ax.grid(alpha=0.2)
-                if plotted and config_count <= 20:
-                    ax.legend(fontsize=7, loc="best")
-            for extra_idx in range(len(areas), len(flat_ax)):
-                flat_ax[extra_idx].axis("off")
-            fig.tight_layout()
+                fig.tight_layout()
             welch_text = welch_used or _fallback_welch_text() or {
                 "nperseg": "auto",
                 "noverlap": "auto",
                 "nfft": "auto",
             }
             subtitle = (
-                f"Field-potential power spectra by area (repetition-averaged per configuration). "
-                f"Model: {model}. Trials {range_start} to {range_end} | configurations={config_count} "
-                f"({freq_min:g}-{freq_max:g} Hz). Source: {cdm_payload_name}. "
+                f"Field-potential power spectra averaged across {len(trial_indices)} selected trial(s). "
+                f"Model: {model}. Trials {range_start} to {range_end} "
+                f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
                 f"noverlap={welch_text.get('noverlap')}, "
                 f"nfft={welch_text.get('nfft')}."
             )
         else:
-            fig, ax = plt.subplots(1, 1, figsize=(8, 5), dpi=160)
-            for config_idx, config_trials in config_groups.items():
-                ref_freqs = None
-                spectra = []
-                for trial_idx in config_trials:
-                    trial = _simulation_trial_data(sim_data, trial_idx)
-                    series_by_area, dt_fp = _field_potential_payload_to_area_series(
-                        cdm_payload,
-                        model,
-                        [],
-                        trial_idx,
-                    )
-                    cdm = np.asarray(series_by_area.get("global", []), dtype=float)
-                    if cdm.size < 8:
-                        continue
-                    dt_local = float(dt_fp) if dt_fp is not None else float(trial["dt"])
-                    fs = 1000.0 / max(dt_local, 1e-9)
-                    effective_welch = _resolve_welch_kwargs(cdm.size, fs)
-                    if welch_used is None:
-                        welch_used = dict(effective_welch)
-                    freqs, psd = ss.welch(cdm, fs=fs, **effective_welch)
-                    if psd.size == 0:
-                        continue
-                    psd_norm = psd / np.sum(psd) if np.sum(psd) > 0 else psd
-                    if ref_freqs is None:
-                        ref_freqs = np.asarray(freqs, dtype=float)
-                        aligned = np.asarray(psd_norm, dtype=float)
-                    else:
-                        aligned = _align_psd_to_reference(ref_freqs, freqs, psd_norm)
-                        if aligned is None:
+            if model == "four_area":
+                if not areas:
+                    return _analysis_plot_error("Four-area model detected but no areas were found in network parameters.", status=400)
+                area_cols = min(2, max(1, len(areas)))
+                area_rows = int(math.ceil(len(areas) / area_cols))
+                total_rows = len(trial_indices) * area_rows
+                fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.0 * area_cols, 3.5 * total_rows), dpi=160, squeeze=False)
+                plotted_any = False
+                for trial_pos, trial_idx in enumerate(trial_indices):
+                    for area_idx, area_name in enumerate(areas):
+                        grid_row = trial_pos * area_rows + (area_idx // area_cols)
+                        grid_col = area_idx % area_cols
+                        ax = axs[grid_row][grid_col]
+                        freqs, psd, welch_local = _compute_field_potential_psd(trial_idx, area_name=area_name)
+                        if welch_used is None and welch_local is not None:
+                            welch_used = dict(welch_local)
+                        if freqs is None or psd is None:
+                            ax.axis("off")
                             continue
-                    spectra.append(aligned)
-                if ref_freqs is None or not spectra:
-                    continue
-                spectra_matrix = np.vstack(spectra)
-                if not np.isfinite(spectra_matrix).any():
-                    continue
-                mean_psd = np.nanmean(spectra_matrix, axis=0)
-                mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
-                if not np.any(mask):
-                    continue
-                ax.semilogy(
-                    ref_freqs[mask],
-                    mean_psd[mask],
-                    linewidth=1.2,
-                    label=_simulation_configuration_legend_label(sim_data, config_idx, config_trials),
-                )
-            ax.set_xlabel("f (Hz)")
-            ax.set_ylabel("PSD (a.u./Hz)")
-            ax.set_title("Field-potential power spectra (repetition-averaged by configuration)")
-            ax.grid(alpha=0.2)
-            if config_count <= 20:
-                ax.legend(fontsize=8, loc="best")
-            fig.tight_layout()
+                        mask = (freqs >= freq_min) & (freqs <= freq_max) & np.isfinite(psd)
+                        if not np.any(mask):
+                            ax.axis("off")
+                            continue
+                        ax.semilogy(freqs[mask], psd[mask], linewidth=1.0, color="C0")
+                        ax.set_xlabel("f (Hz)")
+                        ax.set_ylabel("PSD (a.u./Hz)")
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} PSD"))
+                        ax.grid(alpha=0.2)
+                        plotted_any = True
+                    for extra_idx in range(len(areas), area_rows * area_cols):
+                        grid_row = trial_pos * area_rows + (extra_idx // area_cols)
+                        grid_col = extra_idx % area_cols
+                        axs[grid_row][grid_col].axis("off")
+                if not plotted_any:
+                    plt.close(fig)
+                    return _analysis_plot_error("Unable to compute field-potential power spectra for the selected trials.", status=400)
+                fig.tight_layout()
+            else:
+                n = len(trial_indices)
+                cols = min(3, n)
+                rows = int(math.ceil(n / cols))
+                fig, axs = plt.subplots(rows, cols, figsize=(5.2 * cols, 3.6 * rows), dpi=160, squeeze=False)
+                flat_ax = axs.ravel()
+                plotted_any = False
+                for pos, trial_idx in enumerate(trial_indices):
+                    ax = flat_ax[pos]
+                    freqs, psd, welch_local = _compute_field_potential_psd(trial_idx, area_name=None)
+                    if welch_used is None and welch_local is not None:
+                        welch_used = dict(welch_local)
+                    if freqs is None or psd is None:
+                        ax.axis("off")
+                        continue
+                    mask = (freqs >= freq_min) & (freqs <= freq_max) & np.isfinite(psd)
+                    if not np.any(mask):
+                        ax.axis("off")
+                        continue
+                    ax.semilogy(freqs[mask], psd[mask], linewidth=1.0, color="C0")
+                    ax.set_xlabel("f (Hz)")
+                    ax.set_ylabel("PSD (a.u./Hz)")
+                    ax.set_title(_plot_trial_title(trial_idx, "PSD"))
+                    ax.grid(alpha=0.2)
+                    plotted_any = True
+                for pos in range(len(trial_indices), len(flat_ax)):
+                    flat_ax[pos].axis("off")
+                if not plotted_any:
+                    plt.close(fig)
+                    return _analysis_plot_error("Unable to compute field-potential power spectra for the selected trials.", status=400)
+                fig.tight_layout()
             welch_text = welch_used or _fallback_welch_text() or {
                 "nperseg": "auto",
                 "noverlap": "auto",
                 "nfft": "auto",
             }
             subtitle = (
+                f"Field-potential power spectra plotted separately for {len(trial_indices)} selected trial(s). "
                 f"Model: {model}. Trials {range_start} to {range_end} "
-                f"(repetition-averaged spectra, configurations={config_count}, {freq_min:g}-{freq_max:g} Hz). "
-                f"Source: {cdm_payload_name}. "
+                f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
                 f"noverlap={welch_text.get('noverlap')}, "
                 f"nfft={welch_text.get('nfft')}."
             )
     else:
         if model == "four_area":
-            areas = _simulation_area_names(sim_data, trial_indices[0])
+            areas = (
+                _simulation_area_names(sim_data, trial_indices[0])
+                if sim_data is not None
+                else _field_potential_area_names(cdm_payload)
+            )
             if not areas:
                 return _analysis_plot_error("Four-area model detected but no areas were found in network parameters.", status=400)
             area_cols = min(2, max(1, len(areas)))
@@ -9927,11 +10645,17 @@ def analysis_plot_simulation():
             total_rows = len(trial_indices) * area_rows
             fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.0 * area_cols, 3.3 * total_rows), dpi=160, squeeze=False)
             for trial_pos, trial_idx in enumerate(trial_indices):
-                trial = _simulation_trial_data(sim_data, trial_idx)
-                times = trial["times"]
-                gids = trial["gids"]
-                dt = trial["dt"]
-                tstop = trial["tstop"]
+                if sim_data is not None:
+                    trial = _simulation_trial_data(sim_data, trial_idx)
+                    times = trial["times"]
+                    gids = trial["gids"]
+                    dt = trial["dt"]
+                    tstop = trial["tstop"]
+                else:
+                    times = {}
+                    gids = {}
+                    dt = None
+                    tstop = None
 
                 area_series = None
                 dt_fp = None
@@ -9973,7 +10697,7 @@ def analysis_plot_simulation():
                         ax.set_ylabel("gid")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, f"| {area_name} raster"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} raster"))
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
@@ -9992,20 +10716,22 @@ def analysis_plot_simulation():
                         ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, f"| {area_name} rates"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} rates"))
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
                     elif plot_type == "cdm":
                         cdm = np.asarray(area_series[area_name], dtype=float)
-                        dt_local = float(dt_fp) if dt_fp is not None else float(dt)
+                        dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
+                        if dt_local is None:
+                            continue
                         t_cdm = np.arange(cdm.size, dtype=float) * dt_local
                         mask_t = (t_cdm >= time_start) & (t_cdm <= time_end)
                         ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                         ax.set_ylabel("Field potential (a.u.)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, f"| {area_name} field potential"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} field potential"))
                 # Hide unused cells in this trial's area grid block.
                 for extra_idx in range(len(areas), area_rows * area_cols):
                     grid_row = trial_pos * area_rows + (extra_idx // area_cols)
@@ -10019,11 +10745,17 @@ def analysis_plot_simulation():
             flat_ax = axs.ravel()
             for pos, trial_idx in enumerate(trial_indices):
                 ax = flat_ax[pos]
-                trial = _simulation_trial_data(sim_data, trial_idx)
-                times = trial["times"]
-                gids = trial["gids"]
-                dt = trial["dt"]
-                tstop = trial["tstop"]
+                if sim_data is not None:
+                    trial = _simulation_trial_data(sim_data, trial_idx)
+                    times = trial["times"]
+                    gids = trial["gids"]
+                    dt = trial["dt"]
+                    tstop = trial["tstop"]
+                else:
+                    times = {}
+                    gids = {}
+                    dt = None
+                    tstop = None
 
                 if plot_type == "raster":
                     for pop_i, pop_name in enumerate(sorted(times.keys())):
@@ -10033,7 +10765,7 @@ def analysis_plot_simulation():
                         ax.plot(t[mask_t], g[mask_t], ".", ms=1.0, color=_population_color(pop_name, pop_i), alpha=0.7, label=str(pop_name))
                     ax.set_ylabel("gid")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, "raster"))
+                    ax.set_title(_plot_trial_title(trial_idx, "raster"))
                     if pos == 0:
                         ax.legend(fontsize=7, loc="best")
                     ax.set_xlim(time_start, time_end)
@@ -10045,7 +10777,7 @@ def analysis_plot_simulation():
                         ax.plot(tb[mask_t], rate[mask_t], linewidth=1.0, color=_population_color(pop_name, pop_i), label=str(pop_name))
                     ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, "firing rates"))
+                    ax.set_title(_plot_trial_title(trial_idx, "firing rates"))
                     if pos == 0:
                         ax.legend(fontsize=7, loc="best")
                     ax.set_xlim(time_start, time_end)
@@ -10060,13 +10792,15 @@ def analysis_plot_simulation():
                     cdm = np.asarray(series_by_area.get("global", []), dtype=float)
                     if cdm.size == 0:
                         continue
-                    dt_local = float(dt_fp) if dt_fp is not None else float(dt)
+                    dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
+                    if dt_local is None:
+                        continue
                     t_cdm = np.arange(cdm.size, dtype=float) * dt_local
                     mask_t = (t_cdm >= time_start) & (t_cdm <= time_end)
                     ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                     ax.set_ylabel("Field potential (a.u.)")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(_simulation_trial_plot_title(sim_data, trial_idx, "field potential"))
+                    ax.set_title(_plot_trial_title(trial_idx, "field potential"))
                     ax.set_xlim(time_start, time_end)
 
             for pos in range(len(trial_indices), len(flat_ax)):
@@ -10078,11 +10812,10 @@ def analysis_plot_simulation():
             "firing_rates": "Firing rates",
             "cdm": "Field potential",
         }.get(plot_type, plot_type)
-        selected_info = f" Selected files: {len(selected_keys)}." if selected_keys else ""
-        source_info = f" Source: {cdm_payload_name}." if plot_type == "cdm" and cdm_payload_name else ""
+        source_info = _simulation_plot_source_text()
         subtitle = (
             f"{pretty_name}. Model: {model}. Trials {range_start} to {range_end} "
-            f"({time_start:g}-{time_end:g} ms).{repeat_display_note}{selected_info}{source_info}"
+            f"({time_start:g}-{time_end:g} ms).{repeat_display_note}{source_info}"
         )
 
     output = io.BytesIO()
