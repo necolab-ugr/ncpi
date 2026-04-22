@@ -1,8 +1,10 @@
 import os
 import tempfile
 import uuid
+import json
 
 SESSION_PREFIX = "ncpi_webui_session_"
+SESSION_METADATA_FILENAME = "session.json"
 
 
 def _is_writable_dir(path):
@@ -62,6 +64,37 @@ def _validate_session_root(path):
     return session_root
 
 
+def get_session_metadata(session_root):
+    """Read the file 'session.json' inside session_root and returns a dictionary"""
+    metadata_path = os.path.join(session_root, SESSION_METADATA_FILENAME)
+    if os.path.isfile(metadata_path):
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    return {}
+
+def get_session_display_name(session_root):
+    """Return the display_name if it exists; if it doesn't, return the base name of the folder."""
+    meta = get_session_metadata(session_root)
+    return meta.get("display_name") or os.path.basename(session_root)
+
+
+def save_session_metadata(session_root, metadata):
+    """Save the metadata dictionary in session.json inside session_root."""
+    metadata_path = os.path.join(session_root, SESSION_METADATA_FILENAME)
+    with open(metadata_path, "w", encoding="utf-8") as f:
+        json.dump(metadata, f, indent=2, ensure_ascii=False)
+
+def ensure_session_metadata(session_root):
+    """If session.json doesn't exist, create it with display_name by default (foldername)."""
+    if not os.path.isfile(os.path.join(session_root, SESSION_METADATA_FILENAME)):
+        default_name = os.path.basename(session_root)
+        save_session_metadata(session_root, {"display_name": default_name})
+
+        
+
 def resolve_tmp_root():
     """Resolve the run-scoped temp root for the current webui process."""
     base_root = resolve_tmp_base_root()
@@ -75,6 +108,7 @@ def resolve_tmp_root():
         session_root = _session_root_from_id(base_root, session_id)
 
     os.makedirs(session_root, exist_ok=True)
+    ensure_session_metadata(session_root)
     os.environ["NCPI_WEBUI_SESSION_ID"] = session_id
     os.environ["NCPI_WEBUI_SESSION_ROOT"] = session_root
     return session_root
@@ -108,6 +142,7 @@ def activate_session_root(session_root=None, session_id=None, create=False):
             if not create:
                 raise FileNotFoundError(f"Session folder not found: {target_root}")
             os.makedirs(target_root, exist_ok=True)
+            ensure_session_metadata(target_root)
     else:
         session_id = _sanitize_session_id(session_id or uuid.uuid4().hex)
         target_root = _session_root_from_id(TMP_BASE_ROOT, session_id)

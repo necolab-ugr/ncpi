@@ -4715,7 +4715,7 @@ def _build_saved_session_entries():
             updated_at = 0.0
         entries.append({
             "id": tmp_paths.session_id_from_root(real_root),
-            "name": os.path.basename(real_root),
+            "name": tmp_paths.get_session_display_name(real_root),
             "path": real_root,
             "updated_at": _format_session_timestamp(updated_at),
             "is_active": real_root == active_root,
@@ -4802,6 +4802,29 @@ def load_saved_session():
         return redirect(url_for("saved_sessions"))
 
     return redirect(url_for("saved_sessions", switched=1))
+
+
+@app.route("/sessions/update_name", methods=["POST"])
+def update_session_name():
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Invalid request"}), 400
+
+    session_root = data.get("session_root")
+    new_name = data.get("display_name", "").strip()
+    if not session_root or not new_name:
+        return jsonify({"error": "Missing session_root or display_name"}), 400
+
+    try:
+        # Validate session folder
+        real_root = tmp_paths._validate_session_root(session_root)
+        meta = tmp_paths.get_session_metadata(real_root)
+        meta["display_name"] = new_name
+        tmp_paths.save_session_metadata(real_root, meta)
+        return jsonify({"success": True, "display_name": new_name})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
 
 # Simulation configuration page
 @app.route("/simulation")
