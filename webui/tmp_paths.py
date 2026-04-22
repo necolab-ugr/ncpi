@@ -122,6 +122,8 @@ SESSION_ID = os.environ["NCPI_WEBUI_SESSION_ID"]
 def configure_temp_environment():
     tempfile.tempdir = TMP_ROOT
     os.environ["TMPDIR"] = TMP_ROOT
+    os.environ["TMP"] = TMP_ROOT
+    os.environ["TEMP"] = TMP_ROOT
     return TMP_ROOT
 
 

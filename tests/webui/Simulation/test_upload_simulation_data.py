@@ -4,7 +4,6 @@ import pickle
 import threading
 import urllib.parse
 import urllib.request
-import uuid
 from pathlib import Path
 
 import pytest
@@ -95,20 +94,16 @@ def _submit_local_simulation_upload(page):
 
 
 @pytest.fixture(scope="module")
-def webui_app_module():
+def webui_app_module(_webui_test_session):
     """Provide a freshly reloaded WebUI app module for the current test module."""
     if sync_playwright is None:
         pytest.skip("Playwright is required for the web UI simulation upload tests.")
 
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setenv("NCPI_WEBUI_SESSION_ID", f"pytest_webui_sim_upload_{uuid.uuid4().hex}")
-    monkeypatch.delenv("NCPI_WEBUI_SESSION_ROOT", raising=False)
     module = _shared._reload_webui_app()
     _shared._set_fast_simulation_defaults(module)
     module._clear_simulation_output_folder_all_files()
     yield module
     module._clear_simulation_output_folder_all_files()
-    monkeypatch.undo()
 
 
 @pytest.fixture(autouse=True)

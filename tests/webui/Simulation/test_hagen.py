@@ -8,7 +8,6 @@ import sys
 import tempfile
 import threading
 import time
-import uuid
 import urllib.request
 import zipfile
 from contextlib import contextmanager
@@ -77,6 +76,12 @@ def _ensure_import_paths():
             sys.path.insert(0, entry)
 
 
+def _tmp_paths_module():
+    """Import the WebUI tmp-path helpers after test session env is configured."""
+    _ensure_import_paths()
+    return importlib.import_module("tmp_paths")
+
+
 def _reload_webui_app():
     """Reload the WebUI app module with fresh module state for the current test module."""
     _ensure_import_paths()
@@ -101,8 +106,7 @@ def _set_fast_simulation_defaults(module):
 def _playwright_temp_environment():
     # Keep Playwright browser profile paths short to avoid Chromium socket/path limits.
     """Temporarily shorten Playwright temp paths to avoid Chromium path-length issues."""
-    temp_root = Path("/tmp/pw")
-    temp_root.mkdir(parents=True, exist_ok=True)
+    temp_root = Path(_tmp_paths_module().tmp_subdir("pw", create=True))
 
     original_env = {key: os.environ.get(key) for key in ("TMPDIR", "TMP", "TEMP")}
     original_tempdir = tempfile.tempdir
@@ -840,22 +844,18 @@ def _assert_hagen_webui_matches_python_reference(
 
 
 @pytest.fixture(scope="module")
-def webui_app_module():
+def webui_app_module(_webui_test_session):
     """Provide a freshly reloaded WebUI app module for the current test module."""
     if importlib.util.find_spec("nest") is None:
         pytest.skip("NEST is required for the Hagen web UI simulation test.")
     if sync_playwright is None:
         pytest.skip("Playwright is required for the web UI simulation tests.")
 
-    monkeypatch = pytest.MonkeyPatch()
-    monkeypatch.setenv("NCPI_WEBUI_SESSION_ID", f"pytest_webui_simulation_{uuid.uuid4().hex}")
-    monkeypatch.delenv("NCPI_WEBUI_SESSION_ROOT", raising=False)
     module = _reload_webui_app()
     _set_fast_simulation_defaults(module)
     module._clear_simulation_output_folder_all_files()
     yield module
     module._clear_simulation_output_folder_all_files()
-    monkeypatch.undo()
 
 
 @pytest.fixture(autouse=True)
