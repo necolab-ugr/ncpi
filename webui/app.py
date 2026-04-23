@@ -3074,6 +3074,20 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
     return details
 
 
+def _virtual_field_keys_from_details(details):
+    out = []
+    seen = set()
+    for entry in details or []:
+        if not isinstance(entry, dict):
+            continue
+        key = str(entry.get("field") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(key)
+    return out
+
+
 def _summarize_listed_file_names(listed_file_names):
     cleaned = [str(name or "").replace("\\", "/").strip() for name in (listed_file_names or []) if str(name or "").strip()]
     if not cleaned:
@@ -3123,34 +3137,152 @@ def _summarize_folder_entries(entries):
 
 def _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_spec):
     if not filename_format_spec:
-        return list(folder_contexts or [])
+        return list(folder_contexts or []), {
+            "scope": "file",
+            "matched_count": 0,
+            "total_count": 0,
+            "skipped_names": [],
+        }
     filtered_contexts = []
+    total_count = 0
+    matched_count = 0
+    skipped_names = []
+    filter_scope = "file"
     for context in folder_contexts or []:
         if not isinstance(context, dict):
             continue
         cloned = dict(context)
         selected_entries = list(cloned.get("selected_entries") or [])
         matched_data_files = list(cloned.get("matched_data_files") or [])
-        selected_entries, _ = _filter_named_items_by_filename_format(
-            selected_entries,
-            lambda item: str(item.get("name") or ""),
-            filename_format_spec,
-        )
-        matched_data_files, _ = _filter_named_items_by_filename_format(
-            matched_data_files,
-            lambda item: str(item.get("name") or ""),
-            filename_format_spec,
-        )
+        has_nested_subfolders = bool(cloned.get("has_nested_subfolders"))
+        if has_nested_subfolders:
+            filter_scope = "folder"
+            branch_names = sorted(
+                {
+                    str(item.get("level1_subfolder") or "").strip()
+                    for item in matched_data_files
+                    if str(item.get("level1_subfolder") or "").strip()
+                }
+            )
+            if not branch_names:
+                branch_names = sorted(
+                    {
+                        str(item.get("name") or "").strip()
+                        for item in (cloned.get("all_subfolders") or [])
+                        if str(item.get("name") or "").strip()
+                    }
+                )
+            matched_branch_names, skipped_branch_names = _filter_named_items_by_filename_format(
+                branch_names,
+                lambda item: str(item or ""),
+                filename_format_spec,
+            )
+            total_count += len(branch_names)
+            matched_count += len(matched_branch_names)
+            skipped_names.extend(skipped_branch_names)
+            matched_branch_set = set(matched_branch_names)
+            selected_entries = [
+                item
+                for item in selected_entries
+                if str(item.get("level1_subfolder") or "").strip() in matched_branch_set
+            ]
+            matched_data_files = [
+                item
+                for item in matched_data_files
+                if str(item.get("level1_subfolder") or "").strip() in matched_branch_set
+            ]
+            cloned["all_subfolders"] = [
+                item
+                for item in (cloned.get("all_subfolders") or [])
+                if str(item.get("name") or "").strip() in matched_branch_set
+            ]
+        else:
+            selected_entries, skipped_selected = _filter_named_items_by_filename_format(
+                selected_entries,
+                lambda item: str(item.get("name") or ""),
+                filename_format_spec,
+            )
+            matched_data_files, _ = _filter_named_items_by_filename_format(
+                matched_data_files,
+                lambda item: str(item.get("name") or ""),
+                filename_format_spec,
+            )
+            total_count += len(selected_entries) + len(skipped_selected)
+            matched_count += len(selected_entries)
+            skipped_names.extend(skipped_selected)
         cloned["selected_entries"] = selected_entries
         cloned["matched_data_files"] = matched_data_files
         sample_entry = cloned.get("sample_selected_entry")
-        if not isinstance(sample_entry, dict) or not _matches_filename_format(sample_entry.get("name"), filename_format_spec):
+        if has_nested_subfolders:
+            valid_sample = (
+                isinstance(sample_entry, dict)
+                and str(sample_entry.get("level1_subfolder") or "").strip()
+                and any(
+                    str(item.get("path") or "").strip() == str(sample_entry.get("path") or "").strip()
+                    for item in selected_entries
+                )
+            )
+        else:
+            valid_sample = isinstance(sample_entry, dict) and _matches_filename_format(sample_entry.get("name"), filename_format_spec)
+        if not valid_sample:
             cloned["sample_selected_entry"] = selected_entries[0] if selected_entries else (matched_data_files[0] if matched_data_files else None)
         if cloned["sample_selected_entry"] is None:
             cloned["selected_data_file"] = ""
             cloned["selected_data_pattern"] = ""
         filtered_contexts.append(cloned)
-    return filtered_contexts
+    return filtered_contexts, {
+        "scope": filter_scope,
+        "matched_count": int(matched_count),
+        "total_count": int(total_count),
+        "skipped_names": list(dict.fromkeys([str(item).strip() for item in skipped_names if str(item).strip()])),
+    }
+
+
+def _collect_selected_entries_from_folder_contexts(folder_contexts):
+    collected = []
+    seen_paths = set()
+    for context in folder_contexts or []:
+        if not isinstance(context, dict):
+            continue
+        for entry in (context.get("selected_entries") or []):
+            path = str(entry.get("path") or "").strip() if isinstance(entry, dict) else ""
+            if not path or path in seen_paths:
+                continue
+            seen_paths.add(path)
+            collected.append(entry)
+    collected.sort(key=lambda item: str(item.get("path") or ""))
+    return collected
+
+
+def _filter_selected_entries_by_filename_format(selected_entries, filename_format_spec):
+    rows = [item for item in (selected_entries or []) if isinstance(item, dict)]
+    has_nested_subfolders = any(str(item.get("level1_subfolder") or "").strip() for item in rows)
+    if has_nested_subfolders:
+        level1_names = sorted(
+            {
+                str(item.get("level1_subfolder") or "").strip()
+                for item in rows
+                if str(item.get("level1_subfolder") or "").strip()
+            }
+        )
+        matched_names, skipped_names = _filter_named_items_by_filename_format(
+            level1_names,
+            lambda item: str(item or ""),
+            filename_format_spec,
+        )
+        matched_set = set(matched_names)
+        filtered = [
+            item
+            for item in rows
+            if str(item.get("level1_subfolder") or "").strip() in matched_set
+        ]
+        return filtered, skipped_names, "folder", len(level1_names)
+    filtered, skipped_names = _filter_named_items_by_filename_format(
+        rows,
+        lambda row: str(row.get("name") or ""),
+        filename_format_spec,
+    )
+    return filtered, skipped_names, "file", len(rows)
 
 
 def _filter_empirical_upload_payloads_by_filename_format(payloads, filename_format_spec):
@@ -3214,11 +3346,21 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename
             continue
 
         if filename_format_spec:
-            folder_file_names = [
-                str(item.get("name") or "").strip()
-                for item in rows
-                if str(item.get("name") or "").strip()
-            ]
+            nested_labels = sorted(
+                {
+                    str(item.get("level1_subfolder") or "").strip()
+                    for item in rows
+                    if str(item.get("level1_subfolder") or "").strip()
+                }
+            )
+            if nested_labels:
+                folder_file_names = nested_labels
+            else:
+                folder_file_names = [
+                    str(item.get("name") or "").strip()
+                    for item in rows
+                    if str(item.get("name") or "").strip()
+                ]
         else:
             folder_file_names = [
                 str(item.get("logical_name") or item.get("name") or "")
@@ -3242,11 +3384,21 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename
         for ext, ext_rows in sorted(by_ext.items()):
             sample = ext_rows[0]
             if filename_format_spec:
-                ext_names = [
-                    str(item.get("name") or "").strip()
-                    for item in ext_rows
-                    if str(item.get("name") or "").strip()
-                ]
+                nested_ext_labels = sorted(
+                    {
+                        str(item.get("level1_subfolder") or "").strip()
+                        for item in ext_rows
+                        if str(item.get("level1_subfolder") or "").strip()
+                    }
+                )
+                if nested_ext_labels:
+                    ext_names = nested_ext_labels
+                else:
+                    ext_names = [
+                        str(item.get("name") or "").strip()
+                        for item in ext_rows
+                        if str(item.get("name") or "").strip()
+                    ]
             else:
                 ext_names = [
                     str(item.get("logical_name") or item.get("name") or "").strip()
@@ -7046,7 +7198,10 @@ def features_parser_inspect():
     uploads = [f for f in request.files.getlist("file") if f and f.filename]
     _metadata_server_paths_raw = [p.strip() for p in request.form.getlist("metadata_server_path") if p.strip()]
     filename_format_raw = (request.form.get("parser_filename_format") or "").strip()
-    filename_format_spec = _parse_filename_format_spec(filename_format_raw)
+    try:
+        filename_format_spec = _parse_filename_format_spec(filename_format_raw)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
     inspect_path = None
     cleanup_paths = []
     name_candidates = list(listed_file_names)
@@ -7082,30 +7237,33 @@ def features_parser_inspect():
                 data_file_selection_map=empirical_data_file_selections,
             )
             if filename_format_spec:
-                all_entry_count = len(folder_entries)
-                folder_entries, skipped_names = _filter_named_items_by_filename_format(
-                    folder_entries,
-                    lambda row: str(row.get("name") or ""),
+                folder_contexts, folder_filter_stats = _filter_folder_contexts_by_filename_format(
+                    folder_contexts,
                     filename_format_spec,
                 )
-                folder_contexts = _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_spec)
+                folder_entries = _collect_selected_entries_from_folder_contexts(folder_contexts)
                 if not folder_entries:
                     raise ValueError(
-                        f"No files match filename format '{filename_format_spec['raw']}'."
+                        f"No files or first-level folders match filename format '{filename_format_spec['raw']}'."
                     )
                 folder_summaries, extension_summaries = _summarize_folder_entries(folder_entries)
+                skipped_names = folder_filter_stats.get("skipped_names") or []
                 skipped_count = len(skipped_names)
                 if skipped_count > 0:
-                    matched_count = len(folder_entries)
+                    matched_count = int(folder_filter_stats.get("matched_count") or 0)
+                    total_count = int(folder_filter_stats.get("total_count") or 0)
+                    scope = str(folder_filter_stats.get("scope") or "file")
+                    target_label = "first-level folder(s)" if scope == "folder" else "file(s)"
                     filename_filter_stats = {
                         "matched_count": int(matched_count),
                         "skipped_count": int(skipped_count),
                         "skipped_examples": skipped_names[:8],
                         "tokens": list(filename_format_spec.get("tokens") or []),
+                        "scope": scope,
                     }
                     filename_filter_warning = (
-                        f"Filename format filter matched {matched_count} of {all_entry_count} files; "
-                        f"skipped {skipped_count} non-matching file(s)."
+                        f"Filename format filter matched {matched_count} of {total_count} {target_label}; "
+                        f"skipped {skipped_count} non-matching {target_label}."
                     )
             use_prefix = len(folder_summaries) > 1
             for row in folder_entries:
@@ -7157,30 +7315,33 @@ def features_parser_inspect():
                 data_file_selection_map=simulation_data_file_selections,
             )
             if filename_format_spec:
-                all_entry_count = len(folder_entries)
-                folder_entries, skipped_names = _filter_named_items_by_filename_format(
-                    folder_entries,
-                    lambda row: str(row.get("name") or ""),
+                folder_contexts, folder_filter_stats = _filter_folder_contexts_by_filename_format(
+                    folder_contexts,
                     filename_format_spec,
                 )
-                folder_contexts = _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_spec)
+                folder_entries = _collect_selected_entries_from_folder_contexts(folder_contexts)
                 if not folder_entries:
                     raise ValueError(
-                        f"No files match filename format '{filename_format_spec['raw']}'."
+                        f"No files or first-level folders match filename format '{filename_format_spec['raw']}'."
                     )
                 folder_summaries, extension_summaries = _summarize_folder_entries(folder_entries)
+                skipped_names = folder_filter_stats.get("skipped_names") or []
                 skipped_count = len(skipped_names)
                 if skipped_count > 0:
-                    matched_count = len(folder_entries)
+                    matched_count = int(folder_filter_stats.get("matched_count") or 0)
+                    total_count = int(folder_filter_stats.get("total_count") or 0)
+                    scope = str(folder_filter_stats.get("scope") or "file")
+                    target_label = "first-level folder(s)" if scope == "folder" else "file(s)"
                     filename_filter_stats = {
                         "matched_count": int(matched_count),
                         "skipped_count": int(skipped_count),
                         "skipped_examples": skipped_names[:8],
                         "tokens": list(filename_format_spec.get("tokens") or []),
+                        "scope": scope,
                     }
                     filename_filter_warning = (
-                        f"Filename format filter matched {matched_count} of {all_entry_count} files; "
-                        f"skipped {skipped_count} non-matching file(s)."
+                        f"Filename format filter matched {matched_count} of {total_count} {target_label}; "
+                        f"skipped {skipped_count} non-matching {target_label}."
                     )
             use_prefix = len(folder_summaries) > 1
             for row in folder_entries:
@@ -7300,9 +7461,9 @@ def features_parser_inspect():
                         f"Filename format filter matched {len(matched_names)} of {raw_count} files; "
                         f"skipped {len(skipped_names)} non-matching file(s)."
                     )
-            elif not folder_entries:
+            else:
                 raise ValueError(
-                    f"No files match filename format '{filename_format_spec['raw']}'."
+                    f"No files or first-level folders match filename format '{filename_format_spec['raw']}'."
                 )
 
         if folder_entries:
@@ -7454,6 +7615,11 @@ def features_parser_inspect():
                 "fs_hint_hz": fs_hint_hz,
                 "fs_hint_note": fs_hint_note,
             }
+            virtual_keys = _virtual_field_keys_from_details(description.get("virtual_field_details") or [])
+            if virtual_keys:
+                description["candidate_fields"] = list(dict.fromkeys(
+                    list(description.get("candidate_fields") or []) + virtual_keys
+                ))
             if candidate_field_folders and len(folder_summaries) > 1:
                 field_labels = {}
                 for field_name in combined_candidates:
@@ -11254,18 +11420,19 @@ def start_computation_redirect(computation_type):
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     if filename_format_spec:
-                        selected_entries, skipped_names = _filter_named_items_by_filename_format(
+                        selected_entries, skipped_names, filter_scope, _total_count = _filter_selected_entries_by_filename_format(
                             selected_entries,
-                            lambda row: str(row.get("name") or ""),
                             filename_format_spec,
                         )
                         if skipped_names:
+                            target_label = "first-level subfolder(s)" if filter_scope == "folder" else "file(s)"
                             filename_format_filter_warnings.append(
-                                f"Filename format filter skipped {len(skipped_names)} simulation file(s)."
+                                f"Filename format filter skipped {len(skipped_names)} simulation {target_label}."
                             )
                             app.logger.warning(
-                                "[compute %s] simulation filename format filtered files: matched=%d skipped=%d",
+                                "[compute %s] simulation filename format filtered %s: matched=%d skipped=%d",
                                 job_id,
+                                target_label,
                                 len(selected_entries),
                                 len(skipped_names),
                             )
@@ -11275,11 +11442,15 @@ def start_computation_redirect(computation_type):
                             )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
-                        logical_name = _prefixed_file_name(
-                            entry["name"],
-                            entry.get("folder_name"),
-                            apply_prefix=use_prefix,
-                        )
+                        nested_label = str(entry.get("level1_subfolder") or "").strip()
+                        if filename_format_spec and nested_label:
+                            logical_name = nested_label
+                        else:
+                            logical_name = _prefixed_file_name(
+                                entry["name"],
+                                entry.get("folder_name"),
+                                apply_prefix=use_prefix,
+                            )
                         empirical_upload_paths.append({
                             "name": logical_name,
                             "ext": entry["extension"],
@@ -11478,18 +11649,19 @@ def start_computation_redirect(computation_type):
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     if filename_format_spec:
-                        selected_entries, skipped_names = _filter_named_items_by_filename_format(
+                        selected_entries, skipped_names, filter_scope, _total_count = _filter_selected_entries_by_filename_format(
                             selected_entries,
-                            lambda row: str(row.get("name") or ""),
                             filename_format_spec,
                         )
                         if skipped_names:
+                            target_label = "first-level subfolder(s)" if filter_scope == "folder" else "file(s)"
                             filename_format_filter_warnings.append(
-                                f"Filename format filter skipped {len(skipped_names)} empirical file(s)."
+                                f"Filename format filter skipped {len(skipped_names)} empirical {target_label}."
                             )
                             app.logger.warning(
-                                "[compute %s] empirical filename format filtered files: matched=%d skipped=%d",
+                                "[compute %s] empirical filename format filtered %s: matched=%d skipped=%d",
                                 job_id,
+                                target_label,
                                 len(selected_entries),
                                 len(skipped_names),
                             )
@@ -11499,11 +11671,15 @@ def start_computation_redirect(computation_type):
                             )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
-                        logical_name = _prefixed_file_name(
-                            entry["name"],
-                            entry.get("folder_name"),
-                            apply_prefix=use_prefix,
-                        )
+                        nested_label = str(entry.get("level1_subfolder") or "").strip()
+                        if filename_format_spec and nested_label:
+                            logical_name = nested_label
+                        else:
+                            logical_name = _prefixed_file_name(
+                                entry["name"],
+                                entry.get("folder_name"),
+                                apply_prefix=use_prefix,
+                            )
                         empirical_upload_paths.append({
                             "name": logical_name,
                             "ext": entry["extension"],

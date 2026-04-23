@@ -414,7 +414,6 @@
                 delete this.uploads['empirical-files'];
                 this.empiricalUploadSummary = '';
                 this.empiricalListedFileNames = [];
-                this.parserFilenameFormat = '';
             },
             clearSimulationUploadInput() {
                 const input = document.getElementById('data-file');
@@ -422,7 +421,6 @@
                 delete this.uploads['data-file'];
                 this.simulationListedFileNames = [];
                 this.simulationLocalFiles = [];
-                this.parserFilenameFormat = '';
             },
             setSimulationSourceMode(mode) {
                 const nextMode = mode === 'upload' ? 'upload' : 'server-path';
@@ -1117,6 +1115,32 @@
                 const value = String(this.parserFilenameFormat || '').trim();
                 if (value) formData.append('parser_filename_format', value);
             },
+            async parseJsonFromResponse(response, defaultErrorMessage) {
+                const fallback = String(defaultErrorMessage || 'Request failed.');
+                const status = Number(response?.status || 0);
+                const rawBody = await response.text();
+                let payload = {};
+                if (rawBody) {
+                    try {
+                        payload = JSON.parse(rawBody);
+                    } catch (_err) {
+                        if (status >= 400) {
+                            throw new Error(`${fallback} (HTTP ${status})`);
+                        }
+                        throw new Error('Server returned an invalid response format.');
+                    }
+                }
+                if (!response.ok) {
+                    const fromPayload = payload && typeof payload === 'object' ? String(payload.error || '').trim() : '';
+                    throw new Error(fromPayload || `${fallback} (HTTP ${status || 'error'})`);
+                }
+                return payload && typeof payload === 'object' ? payload : {};
+            },
+            isFilenameFormatMatchError(message) {
+                const token = String(message || '').toLowerCase();
+                return token.includes('filename format')
+                    && (token.includes('no files') || token.includes('no files or first-level folders'));
+            },
             async applyFilenameFormatAndReinspect() {
                 this.submitError = '';
                 this.parserError = '';
@@ -1158,6 +1182,10 @@
                         await this.inspectParserSource('', inspectCandidate);
                     }
                 }
+            },
+            async clearFilenameFormatAndReinspect() {
+                this.parserFilenameFormat = '';
+                await this.applyFilenameFormatAndReinspect();
             },
             parserFolderSummaries() {
                 return Array.isArray(this.parserInfo?.folder_summaries) ? this.parserInfo.folder_summaries : [];
@@ -1626,7 +1654,16 @@
                     return;
                 }
                 this.parserLoading = true;
-                this.parserInfo = null;
+                const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
+                const previousSimulationFileCount = this.simulationFileCount;
+                const previousSimulationSampleName = this.simulationSampleName;
+                const previousSimulationInspectedSamples = Array.isArray(this.simulationInspectedSamples)
+                    ? [...this.simulationInspectedSamples]
+                    : [];
+                const previousFolderPaths = Array.isArray(this.simulationFolderPaths)
+                    ? [...this.simulationFolderPaths]
+                    : [];
+                const previousFolderPath = String(this.simulationFolderPath || '').trim();
                 try {
                     this.simulationSourceMode = 'server-path';
                     this.clearSimulationUploadInput();
@@ -1646,8 +1683,7 @@
                         method: 'POST',
                         body: formData,
                     });
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect simulation outputs folder.');
+                    const payload = await this.parseJsonFromResponse(response, 'Failed to inspect simulation outputs folder.');
                     this.parserInfo = payload;
                     this._baseParserInfo = payload;
                     this.syncDataFileSelectionsFromPayload(payload, 'simulation');
@@ -1684,12 +1720,26 @@
                 } catch (error) {
                     const message = error.message || 'Failed to inspect simulation outputs folder.';
                     this.parserError = message;
+                    if (this.isFilenameFormatMatchError(message)) {
+                        this.parserInfo = null;
+                        this._baseParserInfo = null;
+                        this.simulationFileCount = previousSimulationFileCount;
+                        this.simulationSampleName = previousSimulationSampleName;
+                        this.simulationInspectedSamples = previousSimulationInspectedSamples;
+                        this.simulationFolderPaths = previousFolderPaths;
+                        this.simulationFolderPath = previousFolderPath;
+                        return;
+                    }
+                    this.parserInfo = previousParserInfo;
+                    this._baseParserInfo = previousParserInfo;
                     this.simulationFolderExtensionError = this.isMultipleFolderExtensionError(message)
                         ? 'Warning: in this folder there is more than one type of file extension. Please, select a folder that contains files with the same file extension.'
                         : message;
-                    this.simulationFileCount = 0;
-                    this.simulationSampleName = '';
-                    this.simulationInspectedSamples = [];
+                    this.simulationFileCount = previousSimulationFileCount;
+                    this.simulationSampleName = previousSimulationSampleName;
+                    this.simulationInspectedSamples = previousSimulationInspectedSamples;
+                    this.simulationFolderPaths = previousFolderPaths;
+                    this.simulationFolderPath = previousFolderPath;
                 } finally {
                     this.parserLoading = false;
                 }
@@ -1711,7 +1761,10 @@
                     return;
                 }
                 this.parserLoading = true;
-                this.parserInfo = null;
+                const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
+                const previousEmpiricalFileCount = this.empiricalFileCount;
+                const previousEmpiricalSampleName = this.empiricalSampleName;
+                const previousEmpiricalFolderPath = String(this.empiricalFolderPath || '').trim();
                 this.empiricalSubfolderSelections = {};
                 try {
                     this.empiricalSourceMode = 'server-path';
@@ -1731,8 +1784,7 @@
                         method: 'POST',
                         body: formData,
                     });
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect empirical folder.');
+                    const payload = await this.parseJsonFromResponse(response, 'Failed to inspect empirical folder.');
                     this.parserInfo = payload;
                     this._baseParserInfo = payload
                     this.syncDataFileSelectionsFromPayload(payload, 'empirical');
@@ -1745,9 +1797,21 @@
                     }
 
                 } catch (error) {
-                    this.parserError = error.message || 'Failed to inspect empirical folder.';
-                    this.empiricalFileCount = 0;
-                    this.empiricalSampleName = '';
+                    const message = error.message || 'Failed to inspect empirical folder.';
+                    this.parserError = message;
+                    if (this.isFilenameFormatMatchError(message)) {
+                        this.parserInfo = null;
+                        this._baseParserInfo = null;
+                        this.empiricalFileCount = previousEmpiricalFileCount;
+                        this.empiricalSampleName = previousEmpiricalSampleName;
+                        this.empiricalFolderPath = previousEmpiricalFolderPath;
+                        return;
+                    }
+                    this.parserInfo = previousParserInfo;
+                    this._baseParserInfo = previousParserInfo;
+                    this.empiricalFileCount = previousEmpiricalFileCount;
+                    this.empiricalSampleName = previousEmpiricalSampleName;
+                    this.empiricalFolderPath = previousEmpiricalFolderPath;
                 } finally {
                     this.parserLoading = false;
                 }
@@ -1911,7 +1975,7 @@
             async inspectParserSource(existingPath, file) {
                 this.parserLoading = true;
                 this.parserError = '';
-                this.parserInfo = null;
+                const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
                 const formData = new FormData();
                 if (existingPath) formData.append('existing_data_path', existingPath);
                 if (file) formData.append('file', file);
@@ -1930,8 +1994,7 @@
                         method: 'POST',
                         body: formData,
                     });
-                    const payload = await response.json();
-                    if (!response.ok) throw new Error(payload.error || 'Failed to inspect data source.');
+                    const payload = await this.parseJsonFromResponse(response, 'Failed to inspect data source.');
                     this.parserInfo = payload;
                     this._baseParserInfo = payload;
                     this.applyParserDefaults(payload);
@@ -1940,7 +2003,12 @@
                         await this.inspectAllAdditionalFiles();
                     }
                 } catch (error) {
-                    this.parserError = error.message || 'Failed to inspect data source.';
+                    const message = error.message || 'Failed to inspect data source.';
+                    this.parserError = message;
+                    if (this.isFilenameFormatMatchError(message)) {
+                        this.parserInfo = null;
+                        this._baseParserInfo = null;
+                    }
                 } finally {
                     this.parserLoading = false;
                 }
@@ -3073,6 +3141,42 @@
                     </div>
                 </div>
 
+                    <div x-show="hasAnyData() && !parserInfo" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-3">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined text-primary">rule_settings</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Filename format filter</h3>
+                        </div>
+                        <p class="text-xs text-gray-500 dark:text-gray-400">
+                            You can change the format and inspect again, or return to automatic detection.
+                        </p>
+                        <label class="text-sm block">
+                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
+                            <input
+                                type="text"
+                                name="parser_filename_format"
+                                x-model="parserFilenameFormat"
+                                placeholder="$id$_comp_reject.mat"
+                                @keydown.enter.prevent="applyFilenameFormatAndReinspect()"
+                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                            >
+                        </label>
+                        <div class="flex flex-wrap gap-2">
+                            <button
+                                type="button"
+                                @click="applyFilenameFormatAndReinspect()"
+                                class="px-2 py-1 rounded border border-primary/40 bg-white dark:bg-[#191e33] text-primary text-[11px] font-semibold hover:bg-primary/10">
+                                Inspect
+                            </button>
+                            <button
+                                type="button"
+                                @click="clearFilenameFormatAndReinspect()"
+                                class="px-2 py-1 rounded border border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-gray-700 dark:text-gray-300 text-[11px] font-semibold hover:bg-gray-50 dark:hover:bg-[#222a45]">
+                                Use automatic detection
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-red-700 dark:text-red-300" x-show="parserError" x-text="parserError"></p>
+                    </div>
+
                     <template x-if="hasAnyData() && parserInfo && (((parserInfo.folder_summaries || []).length > 0) || ((parserInfo.extension_summaries || []).length > 0) || ((parserInfo.extension_profiles || []).length > 0))">
                     <div class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-4">
                         <div class="flex items-center gap-2">
@@ -3093,7 +3197,7 @@
                                 >
                             </label>
                             <p class="text-[11px] text-gray-500 dark:text-gray-400">
-                                Use literal text + tokens between <code>$...$</code>. Only files matching this format are used for file-based auto-mapping and parsing.
+                                Use literal text + tokens between <code>$...$</code>. In nested datasets, this is applied to first-level folder names; otherwise it is applied to file names.
                             </p>
                             <div class="flex flex-wrap gap-2">
                                 <template x-for="token in parserFilenameFormatTokens()" :key="'filename-format-token-'+token">
@@ -3108,7 +3212,13 @@
                                     type="button"
                                     @click="applyFilenameFormatAndReinspect()"
                                     class="px-2 py-1 rounded border border-primary/40 bg-white dark:bg-[#191e33] text-primary text-[11px] font-semibold hover:bg-primary/10">
-                                    Apply format
+                                    Inspect
+                                </button>
+                                <button
+                                    type="button"
+                                    @click="clearFilenameFormatAndReinspect()"
+                                    class="px-2 py-1 rounded border border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-gray-700 dark:text-gray-300 text-[11px] font-semibold hover:bg-gray-50 dark:hover:bg-[#222a45]">
+                                    Use automatic detection
                                 </button>
                             </div>
                             <p class="text-[11px] text-amber-700 dark:text-amber-300" x-show="parserInfo.filename_format_warning" x-text="parserInfo.filename_format_warning"></p>
