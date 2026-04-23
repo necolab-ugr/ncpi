@@ -33,7 +33,7 @@ async function editSessionName(btn) {
 {% endblock %}
 
 {% block content %}
-<section class="mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 sm:px-6 lg:px-8">
+<section class="grid mx-auto flex w-full max-w-6xl flex-col gap-8 px-4 sm:px-6 lg:px-8">
     <div class="rounded-3xl border border-gray-200/70 bg-white/90 p-6 shadow-sm dark:border-white/10 dark:bg-white/5">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div class="space-y-3">
@@ -43,9 +43,16 @@ async function editSessionName(btn) {
                     Select one of the saved webui session folders to make it the active temporary workspace for the current Flask process.
                 </p>
             </div>
-            <div class="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm dark:border-primary/30 dark:bg-primary/10">
-                <p class="font-semibold text-gray-900 dark:text-white">Active session</p>
-                <p class="mt-1 break-all text-gray-700 dark:text-gray-200">{{ active_session_root }}</p>
+            <div class="flex flex-col gap-4">
+                <div class="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm dark:border-primary/30 dark:bg-primary/10">
+                    <p class="font-semibold text-gray-900 dark:text-white">Active session</p>
+                    <p class="mt-1 break-all text-gray-700 dark:text-gray-200">{{ active_session_root }}</p>
+                </div>
+                <button id="deleteAllSessionsBtn" type="button"
+                    class="self-start inline-flex items-center gap-2 rounded-2xl border border-red-300 bg-white px-4 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300 dark:hover:bg-red-900/40">
+                    <span class="material-symbols-outlined text-lg">delete</span>
+                    Delete all sessions
+                </button>
             </div>
         </div>
     </div>
@@ -67,7 +74,7 @@ async function editSessionName(btn) {
         {% for entry in session_entries %}
         <article class="rounded-3xl border {% if entry.is_active %}border-primary/50 bg-primary/5 dark:border-primary/40 dark:bg-primary/10{% else %}border-gray-200/70 bg-white dark:border-white/10 dark:bg-white/5{% endif %} p-6 shadow-sm transition-colors">
             <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div class="space-y-3">
+                <div class="space-y-3 flex-1">
                     <div class="flex flex-wrap items-center gap-3">
                         <div class="flex items-center gap-2">
                             <h2 class="session-display-name text-xl font-semibold text-gray-900 dark:text-white">{{ entry.name }}</h2>
@@ -107,19 +114,29 @@ async function editSessionName(btn) {
                         </div>
                     </dl>
                 </div>
-                <form action="{{ url_for('load_saved_session') }}" method="post" class="shrink-0">
-                    <input type="hidden" name="session_root" value="{{ entry.path }}">
-                    <button
-                        type="submit"
-                        class="inline-flex min-w-44 items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition-colors {% if entry.is_active or has_running_jobs %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% else %}bg-primary text-white hover:bg-blue-700{% endif %}"
-                        {% if entry.is_active or has_running_jobs %}disabled{% endif %}>
-                        {% if entry.is_active %}
-                        Current session
-                        {% else %}
-                        Load this folder
-                        {% endif %}
+                <div class="flex gap-2 shrink-0 w-56">
+                    <form action="{{ url_for('load_saved_session') }}" method="post" class="w-full">
+                        <input type="hidden" name="session_root" value="{{ entry.path }}">
+                        <button
+                            type="submit"
+                            class="inline-flex min-w-44 items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition-colors w-full {% if entry.is_active or has_running_jobs %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% else %}bg-primary text-white hover:bg-blue-700{% endif %}"
+                            {% if entry.is_active or has_running_jobs %}disabled{% endif %}>
+                            {% if entry.is_active %}
+                            Current session
+                            {% else %}
+                            Load this folder
+                            {% endif %}
+                        </button>
+                    </form>
+                    {% if not entry.is_active %}
+                    <button type="button" 
+                        onclick='openDeleteModal("{{ entry.path }}", "{{ entry.name | e }}", false)'
+                        class="inline-flex items-center justify-center rounded-2xl px-3 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
+                        {% if entry.is_active %}disabled title="Cannot delete active session"{% endif %}>
+                        <span class="material-symbols-outlined">delete</span>
                     </button>
-                </form>
+                    {% endif %}
+                </div>
             </div>
         </article>
         {% endfor %}
@@ -132,5 +149,99 @@ async function editSessionName(btn) {
         </p>
     </div>
     {% endif %}
+
+    <!-- Delete and Delete All Modal -->
+    <div id="confirmDeleteModal" 
+        class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 px-4"
+        role="dialog" aria-modal="true">
+        <div class="w-full max-w-lg rounded-xl border border-red-300 bg-white p-6 shadow-2xl dark:border-red-700/80 dark:bg-slate-900">
+            <div class="flex items-start gap-3">
+                <span class="material-symbols-outlined text-3xl text-red-600 dark:text-red-400">warning</span>
+                <div>
+                    <h3 id="modalTitle" class="text-lg font-bold text-red-700 dark:text-red-300">
+                        Confirm Deletion
+                    </h3>
+                    <p id="modalMessage" class="mt-2 text-sm text-slate-700 dark:text-slate-200">
+                        Are you sure you want to delete this session?
+                    </p>
+                    <p id="modalExtraInfo" class="mt-2 text-sm font-medium text-red-600 dark:text-red-400"></p>
+                </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+                <button id="cancelModalBtn" type="button"
+                    class="rounded-md border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">
+                    Cancel
+                </button>
+                <form id="modalForm" method="post">
+                    <input type="hidden" name="session_root" id="modalSessionRoot" value="">
+                    <button type="submit"
+                        class="rounded-md border border-red-700 bg-red-600 px-3 py-2 text-sm font-semibold text-white hover:bg-red-700">
+                        Delete
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
 </section>
+
+{% endblock %}
+{% block scripts %}
+
+<script>
+const modal = document.getElementById('confirmDeleteModal');
+const modalTitle = document.getElementById('modalTitle');
+const modalMessage = document.getElementById('modalMessage');
+const modalExtraInfo = document.getElementById('modalExtraInfo');
+const modalForm = document.getElementById('modalForm');
+const modalSessionRoot = document.getElementById('modalSessionRoot');
+const cancelBtn = document.getElementById('cancelModalBtn');
+const deleteAllBtn = document.getElementById('deleteAllSessionsBtn');
+
+// Open modal
+function openDeleteModal(sessionRoot, sessionName, isDeleteAll = false) {
+    if (isDeleteAll) {
+        modalTitle.textContent = 'Delete all sessions?';
+        modalMessage.textContent = 'This will permanently delete all inactive session folders and their contents.';
+        modalExtraInfo.textContent = 'The currently active session will be kept.';
+        modalForm.action = "{{ url_for('delete_all_sessions') }}";
+        modalSessionRoot.value = ''; 
+    } else {
+        modalTitle.textContent = 'Delete session?';
+        modalMessage.textContent = `Are you sure you want to delete the session "${sessionName}"?`;
+        modalExtraInfo.textContent = 'This action cannot be undone. All data in this session will be lost.';
+        modalForm.action = "{{ url_for('delete_session') }}";
+        modalSessionRoot.value = sessionRoot;
+    }
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+// Open modal to delete all sessions
+deleteAllBtn.addEventListener('click', () => {
+    openDeleteModal(null, null, true);
+});
+
+// Close with cancel button
+cancelBtn.addEventListener('click', () => {
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+});
+
+// Close when clicking outside the window
+modal.addEventListener('click', (e) => {
+    if (e.target === modal) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+});
+
+// Optional: Close with 'Escape'
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) {
+        modal.classList.add('hidden');
+        modal.classList.remove('flex');
+    }
+});
+</script>
+
 {% endblock %}
