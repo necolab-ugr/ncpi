@@ -1033,6 +1033,11 @@
                     || key.startsWith('__file_extracted_chain_')
                     || key.startsWith('__file_token_');
             },
+            parserIsTokenField(field) {
+                const key = String(field || '').trim();
+                if (!key) return false;
+                return key.startsWith('__file_token_');
+            },
             parserIsFileExtractedField(field) {
                 const key = String(field || '').trim();
                 if (!key) return false;
@@ -1068,6 +1073,9 @@
                 return out;
             },
             parserFieldOptionStyle(field) {
+                if (this.parserIsTokenField(field)) {
+                    return this.parserTokenOptionStyle();
+                }
                 return this.parserIsVirtualField(field)
                     ? this.parserVirtualOptionStyle()
                     : this.parserDataframeOptionStyle();
@@ -1080,6 +1088,9 @@
             },
             parserVirtualOptionStyle() {
                 return 'color: #b45309; font-weight: 600;';
+            },
+            parserTokenOptionStyle() {
+                return 'color: #0e7490; font-weight: 700;';
             },
             parserNeutralOptionStyle() {
                 return 'color: #6b7280;';
