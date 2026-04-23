@@ -1049,6 +1049,30 @@
                 const fields = Array.isArray(this.parserInfo?.candidate_fields) ? this.parserInfo.candidate_fields : [];
                 return fields.filter((field) => !this.parserIsFileExtractedField(field));
             },
+            parserFsSourceCandidates() {
+                const base = this.parserCandidateFieldsWithoutFileExtracted()
+                    .map((field) => String(field || '').trim())
+                    .filter((field) => field.length > 0);
+                const out = [];
+                const seen = new Set();
+                for (const field of base) {
+                    if (seen.has(field)) continue;
+                    seen.add(field);
+                    out.push(field);
+                }
+                const samplingTokenField = this.parserFilenameTokenField('sampling_frequency');
+                const allCandidates = Array.isArray(this.parserInfo?.candidate_fields)
+                    ? this.parserInfo.candidate_fields.map((field) => String(field || '').trim())
+                    : [];
+                if (
+                    samplingTokenField &&
+                    allCandidates.includes(samplingTokenField) &&
+                    !seen.has(samplingTokenField)
+                ) {
+                    out.push(samplingTokenField);
+                }
+                return out;
+            },
             parserChannelNameSourceCandidates() {
                 const base = this.parserCandidateFieldsWithoutFileExtracted()
                     .map((field) => String(field || '').trim())
@@ -1097,23 +1121,18 @@
             },
             parserFilenameFormatTokens() {
                 return [
-                    '$id$',
                     '$subject_id$',
                     '$group$',
                     '$condition$',
                     '$species$',
-                    '$session$',
-                    '$ses$',
-                    '$run$',
-                    '$trial$',
-                    '$task$',
-                    '$state$',
                     '$recording_type$',
-                    '$site$',
-                    '$cohort$',
-                    '$date$',
-                    '$time$',
+                    '$sampling_frequency$',
                 ];
+            },
+            parserFilenameTokenField(tokenName) {
+                const token = String(tokenName || '').trim().toLowerCase();
+                if (!token) return '';
+                return `__file_token_${token}__`;
             },
             insertFilenameFormatToken(token) {
                 const clean = String(token || '').trim();
@@ -1860,6 +1879,22 @@
                 const dataFileCandidates = this.parserDataFileCandidateFields();
                 const defaults = payload?.defaults || {};
                 const dataCandidates = this.parserDataLocatorCandidates();
+                const candidateSet = new Set(
+                    (Array.isArray(payload?.candidate_fields) ? payload.candidate_fields : [])
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0)
+                );
+                const formatTokens = new Set(
+                    (Array.isArray(payload?.filename_format_tokens) ? payload.filename_format_tokens : [])
+                        .map((token) => String(token || '').trim().toLowerCase())
+                        .filter((token) => token.length > 0)
+                );
+                const resolveMappedTokenField = (tokenName) => {
+                    const token = String(tokenName || '').trim().toLowerCase();
+                    if (!token || !formatTokens.has(token)) return '';
+                    const field = this.parserFilenameTokenField(token);
+                    return candidateSet.has(field) ? field : '';
+                };
                 const autoData = this.autoPickCandidateField(['lfp', 'eeg', 'meg', 'ecog', 'signal', 'data'], dataCandidates);
                 const autoFs = this.autoPickCandidateField(
                     ['fs', 'sfreq', 'freq', 'frequency', 'sampling_rate', 'sampling_frequency'],
@@ -1926,6 +1961,28 @@
                 } else {
                     this.parserChNamesSource = '__autocomplete__';
                     this.parserChNamesLocator = '';
+                }
+
+                // Auto-assign parser dropdowns from explicit filename tokens when present.
+                const tokenSubjectField = resolveMappedTokenField('subject_id');
+                if (tokenSubjectField) this.parserMetadataSubjectIdSource = tokenSubjectField;
+                const tokenGroupField = resolveMappedTokenField('group');
+                if (tokenGroupField) this.parserMetadataGroupSource = tokenGroupField;
+                const tokenSpeciesField = resolveMappedTokenField('species');
+                if (tokenSpeciesField) this.parserMetadataSpeciesSource = tokenSpeciesField;
+                const tokenConditionField = resolveMappedTokenField('condition');
+                if (tokenConditionField) this.parserMetadataConditionSource = tokenConditionField;
+                const tokenRecordingTypeField = resolveMappedTokenField('recording_type');
+                if (tokenRecordingTypeField) {
+                    this.parserRecordingTypeSource = tokenRecordingTypeField;
+                    this.parserRecordingTypeLocator = tokenRecordingTypeField;
+                    this.parserRecordingType = '';
+                }
+                const tokenSamplingFrequencyField = resolveMappedTokenField('sampling_frequency');
+                if (tokenSamplingFrequencyField) {
+                    this.parserFsSource = tokenSamplingFrequencyField;
+                    this.parserFsLocator = tokenSamplingFrequencyField;
+                    this.parserFsManual = '';
                 }
 
                 const allowedChSources = new Set(this.parserChannelNameSourceCandidates().map((field) => String(field)));
@@ -3558,7 +3615,8 @@
                                     Menu colors:
                                     <span style="color: #0f766e;">data fields</span>,
                                     <span style="color: #1d4ed8; font-weight: 600;">manual entries</span>,
-                                    <span style="color: #b45309; font-weight: 600;">file-extracted fields</span>.
+                                    <span style="color: #b45309; font-weight: 600;">file-extracted fields</span>,
+                                    <span style="color: #0e7490; font-weight: 700;">token fields</span>.
                                 </p>
 
                                 <div x-show="resolvedDataSourceKind() === 'pipeline' || resolvedDataSourceKind() === 'new-simulation'" class="space-y-4">
@@ -3655,7 +3713,7 @@
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
-                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'pipeline-fs-source-'+field">
+                                                <template x-for="field in parserFsSourceCandidates()" :key="'pipeline-fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
@@ -3961,7 +4019,7 @@
                                             <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
-                                                <template x-for="field in parserCandidateFieldsWithoutFileExtracted()" :key="'fs-source-'+field">
+                                                <template x-for="field in parserFsSourceCandidates()" :key="'fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
