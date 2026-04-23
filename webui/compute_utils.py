@@ -297,6 +297,8 @@ _PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
 _FOLD_PROGRESS_RE = re.compile(r"Fold\s+(\d+)\s*/\s*(\d+)")
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
+FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
 
 
@@ -339,6 +341,105 @@ def _resolve_file_extracted_value(file_name, locator):
     if index >= len(chains):
         return None
     return chains[index]
+
+
+_FILENAME_FORMAT_TOKEN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+
+def _file_token_locator_name(locator):
+    if not isinstance(locator, str):
+        return None
+    raw = str(locator).strip()
+    if not raw.startswith(FILE_TOKEN_VIRTUAL_FIELD_PREFIX):
+        return None
+    token = raw[len(FILE_TOKEN_VIRTUAL_FIELD_PREFIX):]
+    if token.endswith(FILE_TOKEN_VIRTUAL_FIELD_SUFFIX):
+        token = token[: -len(FILE_TOKEN_VIRTUAL_FIELD_SUFFIX)]
+    token = token.strip().lower()
+    if not token or not _FILENAME_FORMAT_TOKEN_NAME_RE.fullmatch(token):
+        return None
+    return token
+
+
+def _parse_filename_format_spec(raw_format):
+    value = str(raw_format or "").strip()
+    if not value:
+        return None
+    parts = []
+    tokens = []
+    seen = set()
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch != "$":
+            parts.append(("literal", ch))
+            i += 1
+            continue
+        j = value.find("$", i + 1)
+        if j < 0:
+            raise ValueError("Invalid filename format: missing closing '$'.")
+        token_raw = value[i + 1:j].strip()
+        if not token_raw:
+            raise ValueError("Invalid filename format: empty token '$$' is not allowed.")
+        token = token_raw.lower()
+        if not _FILENAME_FORMAT_TOKEN_NAME_RE.fullmatch(token):
+            raise ValueError(
+                f"Invalid filename format token '{token_raw}'. Use letters/numbers/underscore and start with a letter."
+            )
+        if token in seen:
+            raise ValueError(f"Invalid filename format: token '{token_raw}' is duplicated.")
+        seen.add(token)
+        tokens.append(token)
+        parts.append(("token", token))
+        i = j + 1
+    if not tokens:
+        raise ValueError("Filename format must include at least one token, e.g. $id$.")
+
+    regex_parts = []
+    group_map = []
+    token_idx = 0
+    for kind, value_part in parts:
+        if kind == "literal":
+            regex_parts.append(re.escape(value_part))
+            continue
+        group_name = f"tok{token_idx}"
+        token_idx += 1
+        group_map.append((group_name, value_part))
+        regex_parts.append(f"(?P<{group_name}>.+?)")
+    return {
+        "raw": value,
+        "tokens": tokens,
+        "group_map": group_map,
+        "regex": re.compile("^" + "".join(regex_parts) + "$"),
+    }
+
+
+def _extract_filename_format_tokens(file_name, format_spec):
+    if not format_spec:
+        return None
+    basename = os.path.basename(str(file_name or "").strip())
+    if not basename:
+        return None
+    matcher = format_spec.get("regex")
+    if matcher is None:
+        return None
+    match = matcher.fullmatch(basename)
+    if not match:
+        return None
+    out = {}
+    for group_name, token_name in (format_spec.get("group_map") or []):
+        out[str(token_name)] = str(match.group(group_name) or "").strip()
+    return out
+
+
+def _resolve_file_token_value(file_name, locator, filename_format_spec):
+    token = _file_token_locator_name(locator)
+    if not token:
+        return None
+    extracted = _extract_filename_format_tokens(file_name, filename_format_spec)
+    if not extracted:
+        return None
+    return extracted.get(token)
 
 
 class _JobOutputCapture(io.TextIOBase):
@@ -1963,6 +2064,10 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             # Keep progress at 0 during data loading/preparation.
             job_status[job_id]["progress"] = 0
         _append_job_output(job_status, job_id, "Loading data for features...")
+        for warning in (params.get("filename_format_filter_warnings") or []):
+            message = str(warning or "").strip()
+            if message:
+                _append_job_output(job_status, job_id, f"Warning: {message}")
 
         prepared_df = params.get("prepared_features_df")
         if isinstance(prepared_df, pd.DataFrame):
@@ -1974,6 +2079,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 raise ValueError("Missing parser configuration for empirical uploads.")
             from ncpi.EphysDatasetParser import EphysDatasetParser
             parser = EphysDatasetParser(parse_cfg)
+            filename_format_spec = _parse_filename_format_spec(params.get("parser_filename_format"))
             metadata_locators = (
                 dict(parse_cfg.fields.metadata or {})
                 if getattr(parse_cfg, "fields", None) is not None
@@ -1987,6 +2093,16 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             for meta_key, locator in metadata_locators.items():
                 if _file_extracted_chain_index(locator) is not None:
                     file_extracted_metadata_fields[str(meta_key)] = str(locator)
+            file_token_metadata_fields = {}
+            for meta_key, locator in metadata_locators.items():
+                if _file_token_locator_name(locator) is not None:
+                    file_token_metadata_fields[str(meta_key)] = str(locator)
+            if file_token_metadata_fields and not filename_format_spec:
+                fields = ", ".join(sorted(file_token_metadata_fields.keys()))
+                raise ValueError(
+                    "Filename format is required because metadata fields use filename token locators: "
+                    f"{fields}."
+                )
 
             empirical_uploads = list(params.get("empirical_upload_paths") or [])
 
@@ -2132,6 +2248,15 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 if file_extracted_metadata_fields:
                     for col_name, locator in file_extracted_metadata_fields.items():
                         parsed[col_name] = _resolve_file_extracted_value(name, locator)
+                if file_token_metadata_fields:
+                    for col_name, locator in file_token_metadata_fields.items():
+                        token_value = _resolve_file_token_value(name, locator, filename_format_spec)
+                        if token_value is None:
+                            token_name = _file_token_locator_name(locator) or locator
+                            raise ValueError(
+                                f"File '{name}' does not match filename format for token '{token_name}'."
+                            )
+                        parsed[col_name] = token_value
                 parsed_frames.append(parsed)
 
                 # Do not advance global progress bar during data loading.
