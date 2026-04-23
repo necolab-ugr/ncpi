@@ -77,15 +77,15 @@
     </div>
     {% endif %}
 
-    <!-- DataFrame explorer (shown when finished and preview data is available) -->
-    <div x-show="computationType !== 'simulation' && status === 'finished' && (previewColumns.length > 0 || previewError)"
+    <div x-show="status === 'finished' && (previewColumns.length > 0 || previewItems.length > 0 || previewError)"
          class="w-full mt-6 space-y-3">
         <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-xs text-text-light-secondary dark:text-[#929bc9]">
             <span class="font-semibold lowercase tracking-wide">result explorer</span>
-            <span x-show="previewTotalRows !== null" class="text-[11px]" x-text="previewSummaryText()"></span>
+            <span x-show="previewKind === 'dataframe' && previewTotalRows !== null" class="text-[11px]" x-text="previewSummaryText()"></span>
+            <span x-show="previewKind === 'summary' && previewSummaryLabel" class="text-[11px]" x-text="previewSummaryLabel"></span>
         </div>
 
-        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div x-show="previewKind === 'dataframe'" class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div class="text-xs text-slate-500 dark:text-slate-400">
                 Click a column name to sort ascending/descending.
             </div>
@@ -103,7 +103,52 @@
         <div x-show="previewLoading" class="text-xs text-slate-500 dark:text-slate-400">Loading table...</div>
         <div x-show="previewError" class="text-xs text-red-500 dark:text-red-400" x-text="previewError"></div>
 
-        <div x-show="previewColumns.length > 0" class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+        <div x-show="previewKind === 'summary' && previewItems.length > 0" class="space-y-3">
+            <template x-for="item in previewItems" :key="item.key || item.name">
+                <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 space-y-2">
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400" x-text="item.label || 'Result'"></p>
+                            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100 break-all" x-text="item.name"></p>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-600 dark:text-slate-300" x-show="item.inspection && item.inspection.summary" x-text="item.inspection.summary"></p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" x-show="item.inspection && item.inspection.detail_summary" x-text="item.inspection.detail_summary"></p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" x-show="item.inspection && item.inspection.top_level_type">
+                        <span x-text="'Top level: ' + (item.inspection.top_level_type || '')"></span>
+                        <template x-if="item.inspection && item.inspection.top_level_shape !== null">
+                            <span x-text="' · shape ' + JSON.stringify(item.inspection.top_level_shape)"></span>
+                        </template>
+                        <template x-if="item.inspection && item.inspection.top_level_detail">
+                            <span x-text="' · ' + item.inspection.top_level_detail"></span>
+                        </template>
+                    </p>
+                    <div x-show="item.inspection && item.inspection.field_details && item.inspection.field_details.length > 0"
+                         class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                        <table class="min-w-full text-xs">
+                            <thead class="bg-slate-50 dark:bg-slate-800">
+                                <tr>
+                                    <th class="px-3 py-1.5 text-left font-semibold">Field</th>
+                                    <th class="px-3 py-1.5 text-left font-semibold">Type</th>
+                                    <th class="px-3 py-1.5 text-left font-semibold">Shape</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="field in (item.inspection && item.inspection.field_details ? item.inspection.field_details.slice(0, 8) : [])" :key="item.name + '-' + field.field">
+                                    <tr class="border-t border-slate-100 dark:border-slate-800">
+                                        <td class="px-3 py-1.5 font-mono align-top" x-text="field.field"></td>
+                                        <td class="px-3 py-1.5 align-top" x-text="field.python_type || 'Unknown'"></td>
+                                        <td class="px-3 py-1.5 align-top" x-text="field.shape !== null ? JSON.stringify(field.shape) : '—'"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <div x-show="previewKind === 'dataframe' && previewColumns.length > 0" class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
             <table class="min-w-full text-xs font-mono">
                 <thead class="bg-slate-100 dark:bg-slate-800 sticky top-0">
                     <tr>
@@ -138,7 +183,7 @@
             </table>
         </div>
 
-        <div x-show="previewColumns.length > 0" class="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+        <div x-show="previewKind === 'dataframe' && previewColumns.length > 0" class="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
             <span x-text="previewPageLabel()"></span>
             <div class="flex items-center gap-2">
                 <button type="button" @click="changePreviewPage(-1)" :disabled="previewPage <= 1 || previewLoading"
@@ -250,6 +295,9 @@ document.addEventListener('alpine:init', () => {
         meegSensorsCompleted: 0,
         previewColumns: [],
         previewRows: [],
+        previewItems: [],
+        previewKind: '',
+        previewSummaryLabel: '',
         previewTotalRows: null,
         previewTotalCols: null,
         previewPage: 1,
@@ -328,20 +376,7 @@ document.addEventListener('alpine:init', () => {
                         this.error = null;
                         this.cancelling = false;
                         this.progress = 100; // Finalize display
-                        if (this.computationType !== 'simulation') {
-                            this.fetchPreview();
-                        } else {
-                            this.previewColumns = [];
-                            this.previewRows = [];
-                            this.previewTotalRows = null;
-                            this.previewTotalCols = null;
-                            this.previewPage = 1;
-                            this.previewTotalPages = 1;
-                            this.previewSortCol = '';
-                            this.previewSortDir = 'asc';
-                            this.previewLoading = false;
-                            this.previewError = null;
-                        }
+                        this.fetchPreview();
                         // Polling stops automatically here as it doesn't set a new timeout
 
                     } else if (data.status === 'cancelled') {
@@ -441,6 +476,9 @@ document.addEventListener('alpine:init', () => {
                     this.previewError = data.error;
                     return;
                 }
+                this.previewKind = data.kind || 'dataframe';
+                this.previewSummaryLabel = data.summary_text || '';
+                this.previewItems = data.items || [];
                 this.previewColumns = data.columns || [];
                 this.previewRows = data.rows || [];
                 this.previewTotalRows = data.total_rows;
@@ -450,6 +488,18 @@ document.addEventListener('alpine:init', () => {
                 this.previewTotalPages = Number(data.total_pages || 1);
                 this.previewSortCol = data.sort_col || '';
                 this.previewSortDir = data.sort_dir || 'asc';
+                if (this.previewKind !== 'dataframe') {
+                    this.previewColumns = [];
+                    this.previewRows = [];
+                    this.previewTotalRows = null;
+                    this.previewTotalCols = null;
+                    this.previewPage = 1;
+                    this.previewTotalPages = 1;
+                    this.previewSortCol = '';
+                    this.previewSortDir = 'asc';
+                } else {
+                    this.previewItems = [];
+                }
             } catch (e) {
                 if (requestId !== this.previewRequestId) return;
                 this.previewError = e && e.message ? e.message : 'Could not load preview.';

@@ -1128,6 +1128,24 @@ def _write_simulation_grid_metadata(output_dir, metadata):
     return metadata_path
 
 
+def _rewrite_pickle_as_single_scenario_list(path):
+    if not path or not os.path.isfile(path):
+        raise FileNotFoundError(f"Simulation output file not found: {path}")
+    with open(path, "rb") as handle:
+        payload = pickle.load(handle)
+    with open(path, "wb") as handle:
+        pickle.dump([payload], handle)
+
+
+def _normalize_simulation_output_files_as_lists(output_dir, file_names):
+    normalized = []
+    for name in file_names or []:
+        path = os.path.join(output_dir, name)
+        _rewrite_pickle_as_single_scenario_list(path)
+        normalized.append(path)
+    return normalized
+
+
 def _ensure_sequence(value, name):
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"'{name}' must be a list or tuple.")
@@ -1369,6 +1387,205 @@ def _list_field_potential_detected_files():
                 })
     entries.sort(key=lambda item: (item["label"], item["name"]))
     return entries
+
+
+def _list_simulation_detected_files():
+    entries = []
+    simulation_root = SIMULATION_DATA_DIR
+    if not os.path.isdir(simulation_root):
+        return entries
+
+    label_map = {
+        "times.pkl": "Spike times",
+        "gids.pkl": "Spike gids",
+        "dt.pkl": "Simulation dt",
+        "tstop.pkl": "Simulation tstop",
+        "network.pkl": "Network metadata",
+        "sim_data.pkl": "Combined simulation payload",
+        "population_sizes.pkl": "Population sizes",
+        "vm.pkl": "Membrane potentials",
+        "ampa.pkl": "AMPA currents",
+        "gaba.pkl": "GABA currents",
+        "exc_state_events.pkl": "Excitatory state events",
+    }
+    for name in sorted(os.listdir(simulation_root)):
+        if Path(name).suffix.lower() not in PICKLE_EXTENSIONS:
+            continue
+        abs_path = os.path.realpath(os.path.join(simulation_root, name))
+        if not os.path.isfile(abs_path):
+            continue
+        entries.append({
+            "key": f"simulation::{name}",
+            "name": name,
+            "label": label_map.get(name.lower(), "Simulation output"),
+            "path": abs_path,
+        })
+    return entries
+
+
+def _describe_saved_result_source(path):
+    try:
+        with open(path, "rb") as handle:
+            source_obj = pickle.load(handle)
+    except Exception as exc:
+        return {
+            "summary": f"Failed to inspect file: {exc}",
+            "detail_summary": "",
+            "field_details": [],
+            "error": str(exc),
+        }
+
+    top_summary = _summarize_value_for_ui(source_obj)
+    payload = {
+        "summary": "",
+        "detail_summary": "",
+        "field_details": [],
+        "top_level_type": top_summary.get("python_type") or "",
+        "top_level_shape": top_summary.get("shape"),
+        "top_level_detail": top_summary.get("detail") or "",
+        "error": None,
+    }
+
+    if isinstance(source_obj, (list, tuple)):
+        count = len(source_obj)
+        payload["summary"] = f"List with {count} simulation scenario(s)."
+        if count == 0:
+            payload["detail_summary"] = "The file is empty."
+            return payload
+
+        sample = source_obj[0]
+        sample_summary = _summarize_value_for_ui(sample)
+        sample_shape = sample_summary.get("shape")
+        sample_shape_text = f", shape={sample_shape}" if sample_shape is not None else ""
+        payload["detail_summary"] = (
+            f"Per-scenario payload sample: {sample_summary.get('python_type') or type(sample).__name__}"
+            f"{sample_shape_text}."
+        )
+
+        if isinstance(sample, pd.DataFrame):
+            try:
+                normalized = _describe_parser_source(path)
+            except Exception:
+                normalized = None
+            if normalized:
+                payload["detail_summary"] = normalized.get("summary") or payload["detail_summary"]
+                payload["field_details"] = list(normalized.get("field_details") or [])
+            return payload
+
+        if isinstance(sample, MappingABC):
+            candidate_fields = [str(k) for k in sample.keys() if not str(k).startswith("__")]
+            payload["field_details"] = _describe_source_fields_for_ui(sample, candidate_fields, "field")
+            return payload
+
+        if isinstance(sample, np.ndarray):
+            payload["field_details"] = _describe_source_fields_for_ui(sample, ["__self__"], "field")
+            return payload
+
+        return payload
+
+    try:
+        normalized = _describe_parser_source(path)
+    except Exception:
+        normalized = None
+    if normalized:
+        payload["summary"] = normalized.get("summary") or ""
+        payload["detail_summary"] = payload["top_level_detail"]
+        payload["field_details"] = list(normalized.get("field_details") or [])
+    else:
+        payload["summary"] = (
+            f"{payload['top_level_type']}"
+            + (f" with shape {payload['top_level_shape']}" if payload["top_level_shape"] is not None else "")
+            + "."
+        )
+    return payload
+
+
+def _attach_result_inspection(entries):
+    enriched = []
+    for entry in entries or []:
+        item = dict(entry)
+        path = item.get("path")
+        if path:
+            item["inspection"] = _describe_saved_result_source(path)
+        else:
+            item["inspection"] = {
+                "summary": "",
+                "detail_summary": "",
+                "field_details": [],
+                "top_level_type": "",
+                "top_level_shape": None,
+                "top_level_detail": "",
+                "error": None,
+            }
+        enriched.append(item)
+    return enriched
+
+
+def _simulation_output_label_for_name(name):
+    label_map = {
+        "times.pkl": "Spike times",
+        "gids.pkl": "Spike gids",
+        "dt.pkl": "Simulation dt",
+        "tstop.pkl": "Simulation tstop",
+        "network.pkl": "Network metadata",
+        "sim_data.pkl": "Combined simulation payload",
+        "population_sizes.pkl": "Population sizes",
+        "vm.pkl": "Membrane potentials",
+        "ampa.pkl": "AMPA currents",
+        "gaba.pkl": "GABA currents",
+        "exc_state_events.pkl": "Excitatory state events",
+    }
+    return label_map.get(str(name or "").lower(), "Simulation output")
+
+
+def _result_summary_entries_for_job(status, computation_type):
+    result_path = status.get("results")
+    entries = []
+
+    def _append_file_entry(path, label):
+        entries.append({
+            "key": f"result::{os.path.realpath(path)}",
+            "name": os.path.basename(path),
+            "label": label,
+            "path": os.path.realpath(path),
+        })
+
+    if computation_type == "simulation" and result_path and os.path.isdir(result_path):
+        for name in sorted(os.listdir(result_path)):
+            if Path(name).suffix.lower() not in PICKLE_EXTENSIONS:
+                continue
+            path = os.path.join(result_path, name)
+            if os.path.isfile(path):
+                _append_file_entry(path, _simulation_output_label_for_name(name))
+        return _attach_result_inspection(entries)
+
+    if computation_type in {"field_potential_proxy", "field_potential_kernel", "field_potential_meeg"}:
+        root = result_path if result_path and os.path.isdir(result_path) else os.path.dirname(str(result_path or ""))
+        if root and os.path.isdir(root):
+            for name in sorted(os.listdir(root)):
+                if Path(name).suffix.lower() not in PICKLE_EXTENSIONS:
+                    continue
+                path = os.path.join(root, name)
+                if not os.path.isfile(path):
+                    continue
+                lower = name.lower()
+                if computation_type == "field_potential_proxy":
+                    label = "Simulation metadata" if lower == "sim_data.pkl" else "Field Potential Proxy"
+                elif computation_type == "field_potential_kernel":
+                    if lower == "kernels.pkl":
+                        label = "Kernel dictionary"
+                    elif lower == "probe_outputs.pkl":
+                        label = "Combined probe outputs"
+                    else:
+                        label = "Field Potential Kernel"
+                else:
+                    label = "Field Potential M/EEG"
+                _append_file_entry(path, label)
+        return _attach_result_inspection(entries)
+
+    if result_path and os.path.isfile(result_path):
+        _append_file_entry(result_path, computation_type.replace("_", " ").title())
+    return _attach_result_inspection(entries)
 
 
 def _list_detected_analysis_data_files():
@@ -2666,6 +2883,19 @@ def _summarize_value_for_ui(value):
         summary["shape"] = [int(value.shape[0])]
         sample = value.dropna()
         if not sample.empty:
+            stacked_shapes = []
+            stackable = True
+            for item in sample.tolist():
+                arr = np.asarray(item).squeeze()
+                if arr.ndim == 0:
+                    stackable = False
+                    break
+                stacked_shapes.append(tuple(int(dim) for dim in arr.shape))
+            if stackable and stacked_shapes and len(set(stacked_shapes)) == 1:
+                effective_shape = [int(len(value))] + list(stacked_shapes[0])
+                summary["shape"] = effective_shape
+                summary["detail"] = f"stackable ndarray, effective shape={effective_shape}"
+                return summary
             inner = _summarize_value_for_ui(sample.iloc[0])
             if inner.get("python_type"):
                 summary["detail"] = f"sample: {inner['python_type']}"
@@ -3340,13 +3570,39 @@ def _coerce_trial_dataframe_sequence(source_obj):
     return pd.concat(frames, ignore_index=True)
 
 
+def _stack_array_like_source(source_obj):
+    if isinstance(source_obj, np.ndarray):
+        if source_obj.dtype != object:
+            return source_obj
+        if source_obj.ndim == 1 and source_obj.size > 0:
+            try:
+                return np.stack([np.asarray(item).squeeze() for item in source_obj.tolist()], axis=0)
+            except Exception:
+                return source_obj
+        return source_obj
+
+    if isinstance(source_obj, (list, tuple)):
+        if not source_obj:
+            return np.asarray(source_obj)
+        if all(isinstance(item, pd.DataFrame) for item in source_obj):
+            return source_obj
+        values = [np.asarray(item).squeeze() for item in source_obj]
+        try:
+            return np.stack(values, axis=0)
+        except Exception:
+            return np.asarray(values, dtype=object)
+
+    return source_obj
+
+
 def _load_features_source(path):
     ext = os.path.splitext(str(path))[1].lower()
     if ext in {".xlsx", ".xls", ".feather"}:
         loaded = compute_utils.read_df_file(path)
     else:
         loaded = _load_parser_source(path)
-    return _coerce_trial_dataframe_sequence(loaded)
+    loaded = _coerce_trial_dataframe_sequence(loaded)
+    return _stack_array_like_source(loaded)
 
 
 def _load_uploaded_source_in_memory(upload):
@@ -3362,10 +3618,10 @@ def _load_uploaded_source_in_memory(upload):
     if ext in {".pkl", ".pickle"}:
         bio = io.BytesIO(raw)
         try:
-            return pd.read_pickle(bio)
+            return _stack_array_like_source(_coerce_trial_dataframe_sequence(pd.read_pickle(bio)))
         except Exception:
             bio.seek(0)
-            return pickle.load(bio)
+            return _stack_array_like_source(_coerce_trial_dataframe_sequence(pickle.load(bio)))
 
     if ext == ".json":
         try:
@@ -3375,7 +3631,7 @@ def _load_uploaded_source_in_memory(upload):
 
     if ext == ".npy":
         bio = io.BytesIO(raw)
-        return np.load(bio, allow_pickle=True)
+        return _stack_array_like_source(np.load(bio, allow_pickle=True))
 
     if ext == ".csv":
         return pd.read_csv(io.BytesIO(raw))
@@ -3432,6 +3688,7 @@ def _copy_canonical_fields(base_fields, **overrides):
         "long_channel_col": base_fields.long_channel_col,
         "long_value_col": base_fields.long_value_col,
         "long_time_col": base_fields.long_time_col,
+        "array_axes": base_fields.array_axes,
     }
     payload.update(overrides)
     return CanonicalFields(**payload)
@@ -3459,24 +3716,21 @@ def _extract_dataframe_data_column(df, column_name):
         raise ValueError(f"Data column '{column_name}' is empty.")
 
     if len(series) == 1:
-        return series.iloc[0]
+        return np.asarray(series.iloc[0])
 
     if pd.api.types.is_numeric_dtype(series):
         return series.to_numpy()
 
-    arrays = []
-    for value in series.tolist():
-        arr = np.asarray(value).squeeze()
-        if arr.ndim == 0:
-            return series.iloc[0]
-        if arr.ndim != 1:
-            return series.iloc[0]
-        arrays.append(arr)
-
-    lengths = {arr.shape[0] for arr in arrays}
-    if len(lengths) == 1:
-        return np.vstack(arrays)
-    return series.iloc[0]
+    values = [np.asarray(value).squeeze() for value in series.tolist()]
+    if any(arr.ndim == 0 for arr in values):
+        return np.asarray(values)
+    shapes = {tuple(int(dim) for dim in arr.shape) for arr in values}
+    if len(shapes) == 1:
+        try:
+            return np.stack(values, axis=0)
+        except Exception:
+            pass
+    return np.asarray(values, dtype=object)
 
 
 def _extract_dataframe_scalar_column(df, column_name):
@@ -3527,6 +3781,11 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
 
     data_value = _extract_dataframe_data_column(df, fields.data)
     mapped = {"data": data_value}
+    preserve_rowwise_metadata = (
+        isinstance(data_value, np.ndarray)
+        and data_value.ndim > 1
+        and data_value.shape[0] == len(df)
+    )
 
     fs_value = None
     if isinstance(fields.fs, str):
@@ -3563,8 +3822,11 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
     metadata = {}
     for key, locator in (fields.metadata or {}).items():
         if isinstance(locator, str) and locator in df.columns:
-            series = df[locator].dropna()
-            metadata[key] = series.iloc[0] if not series.empty else None
+            if preserve_rowwise_metadata:
+                metadata[key] = df[locator].tolist()
+            else:
+                series = df[locator].dropna()
+                metadata[key] = series.iloc[0] if not series.empty else None
         else:
             metadata[key] = locator
 
@@ -3573,6 +3835,7 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
         fs="fs" if "fs" in mapped else None,
         ch_names="ch_names",
         metadata=metadata,
+        array_axes=fields.array_axes,
     )
     mapped_cfg = _copy_parse_config(parse_cfg, fields=mapped_fields)
     return mapped, mapped_cfg
@@ -4912,18 +5175,12 @@ def simulation():
 
 @app.route("/simulation/upload_sim")
 def upload_sim():
-    simulation_data_dir = SIMULATION_DATA_DIR
-    if os.path.isdir(simulation_data_dir):
-        simulation_pkl_files = sorted(
-            f for f in os.listdir(simulation_data_dir)
-            if Path(f).suffix.lower() in PICKLE_EXTENSIONS and os.path.isfile(os.path.join(simulation_data_dir, f))
-        )
-    else:
-        simulation_pkl_files = []
+    simulation_entries = _attach_result_inspection(_list_simulation_detected_files())
     return render_template(
         "1.1.0.upload_sim.html",
-        simulation_pkl_files=simulation_pkl_files,
-        has_simulation_pkl=bool(simulation_pkl_files),
+        simulation_entries=simulation_entries,
+        simulation_pkl_files=[entry["name"] for entry in simulation_entries],
+        has_simulation_pkl=bool(simulation_entries),
     )
 
 @app.route("/upload_sim_files", methods=["POST"])
@@ -5412,7 +5669,12 @@ def _simulation_computation(job_id, job_status, params):
 
             if total_runs == 1:
                 for name in trial_files:
-                    shutil.copy2(os.path.join(trial_output_dir, name), os.path.join(output_dir, name))
+                    src = os.path.join(trial_output_dir, name)
+                    dst = os.path.join(output_dir, name)
+                    with open(src, "rb") as handle:
+                        payload = pickle.load(handle)
+                    with open(dst, "wb") as handle:
+                        pickle.dump([payload], handle)
             else:
                 for name in generated_files:
                     src = os.path.join(trial_output_dir, name)
@@ -5499,6 +5761,14 @@ def _simulation_computation_custom(job_id, job_status, params):
         output_dir = SIMULATION_DATA_DIR
         os.makedirs(output_dir, exist_ok=True)
         _clear_simulation_grid_metadata_file(output_dir)
+        for name in os.listdir(output_dir):
+            if name.endswith(".pkl"):
+                path = os.path.join(output_dir, name)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
 
         example_script_path = os.path.join(temp_run_dir, "example_model_simulation.py")
         repo_root = _repo_root
@@ -5532,6 +5802,14 @@ def _simulation_computation_custom(job_id, job_status, params):
         if returncode != 0:
             error_msg = output_text or "Unknown error"
             raise RuntimeError(error_msg)
+
+        trial_files = sorted(
+            name for name in os.listdir(output_dir)
+            if name.endswith(".pkl") and os.path.isfile(os.path.join(output_dir, name))
+        )
+        if not trial_files:
+            raise RuntimeError("No .pkl simulation outputs were produced.")
+        _normalize_simulation_output_files_as_lists(output_dir, trial_files)
 
         job_status[job_id].update({
             "status": "finished",
@@ -5728,7 +6006,7 @@ def field_potential():
 
 @app.route("/field_potential/load")
 def field_potential_load():
-    field_potential_entries = _list_field_potential_detected_files()
+    field_potential_entries = _attach_result_inspection(_list_field_potential_detected_files())
     return render_template(
         "2.1.0.field_potential_load.html",
         field_potential_entries=field_potential_entries,
@@ -7706,6 +7984,9 @@ def _load_simulation_outputs():
     }
     missing = [name for name, path in paths.items() if path is None]
 
+    def _as_scenario_list(value):
+        return value if isinstance(value, list) else [value]
+
     def _coerce_sim_payload(payload):
         if isinstance(payload, list):
             if not payload:
@@ -7717,11 +7998,11 @@ def _load_simulation_outputs():
             if not required_keys.issubset(first.keys()):
                 return None
             return {
-                "times": [item.get("times") for item in payload],
-                "gids": [item.get("gids") for item in payload],
-                "dt": [item.get("dt") for item in payload],
-                "tstop": [item.get("tstop") for item in payload],
-                "network": [item.get("network") for item in payload],
+                "times": _as_scenario_list([item.get("times") for item in payload]),
+                "gids": _as_scenario_list([item.get("gids") for item in payload]),
+                "dt": _as_scenario_list([item.get("dt") for item in payload]),
+                "tstop": _as_scenario_list([item.get("tstop") for item in payload]),
+                "network": _as_scenario_list([item.get("network") for item in payload]),
                 "grid_metadata": None,
             }
         if not isinstance(payload, dict):
@@ -7730,11 +8011,11 @@ def _load_simulation_outputs():
         if not required_keys.issubset(payload.keys()):
             return None
         return {
-            "times": payload["times"],
-            "gids": payload["gids"],
-            "dt": payload["dt"],
-            "tstop": payload["tstop"],
-            "network": payload["network"],
+            "times": _as_scenario_list(payload["times"]),
+            "gids": _as_scenario_list(payload["gids"]),
+            "dt": _as_scenario_list(payload["dt"]),
+            "tstop": _as_scenario_list(payload["tstop"]),
+            "network": _as_scenario_list(payload["network"]),
             "grid_metadata": payload.get("grid_metadata"),
         }
 
@@ -7788,11 +8069,11 @@ def _load_simulation_outputs():
                 continue
 
     return {
-        "times": payload["times.pkl"],
-        "gids": payload["gids.pkl"],
-        "dt": payload["dt.pkl"],
-        "tstop": payload["tstop.pkl"],
-        "network": payload["network.pkl"],
+        "times": _as_scenario_list(payload["times.pkl"]),
+        "gids": _as_scenario_list(payload["gids.pkl"]),
+        "dt": _as_scenario_list(payload["dt.pkl"]),
+        "tstop": _as_scenario_list(payload["tstop.pkl"]),
+        "network": _as_scenario_list(payload["network.pkl"]),
         "grid_metadata": metadata,
     }
 
@@ -12298,19 +12579,41 @@ def preview_results(job_id):
     status = job_status.get(job_id)
     if not status or status.get("status") != "finished" or not status.get("results"):
         return jsonify({"error": "Results not available"}), 404
+    computation_type = status.get("computation_type") or request.args.get("computation_type") or ""
     try:
         path = status["results"]
+        if computation_type == "simulation" and os.path.isdir(path):
+            items = _result_summary_entries_for_job(status, computation_type)
+            return jsonify({
+                "kind": "summary",
+                "summary_text": f"{len(items)} result file(s)",
+                "items": items,
+            })
+
         ext = os.path.splitext(str(path))[1].lower()
         if ext in {".pkl", ".pickle"}:
-            df = pd.read_pickle(path)
+            obj = pd.read_pickle(path)
         elif ext == ".parquet":
-            df = pd.read_parquet(path)
+            obj = pd.read_parquet(path)
         elif ext == ".csv":
-            df = pd.read_csv(path)
+            obj = pd.read_csv(path)
         else:
-            df = pd.read_pickle(path)
-        if not isinstance(df, pd.DataFrame):
-            return jsonify({"error": "Result is not a DataFrame"}), 400
+            obj = pd.read_pickle(path)
+        if not isinstance(obj, pd.DataFrame):
+            items = _result_summary_entries_for_job(status, computation_type)
+            if not items and os.path.isfile(path):
+                items = _attach_result_inspection([{
+                    "key": f"result::{os.path.realpath(path)}",
+                    "name": os.path.basename(path),
+                    "label": computation_type.replace("_", " ").title() or "Result",
+                    "path": os.path.realpath(path),
+                }])
+            return jsonify({
+                "kind": "summary",
+                "summary_text": f"{len(items)} result file(s)" if len(items) != 1 else "1 result file",
+                "items": items,
+            })
+        df = obj
 
         # Query controls
         page_raw = request.args.get("page", 1)
@@ -12397,6 +12700,7 @@ def preview_results(job_id):
         for col in preview.columns:
             preview[col] = preview[col].map(_format_preview_value)
         return jsonify({
+            "kind": "dataframe",
             "columns": list(preview.columns),
             "rows": preview.values.tolist(),
             "total_rows": total_rows,

@@ -1439,6 +1439,62 @@ def _extract_signal_and_meta_from_source(obj):
     return obj, meta
 
 
+def _signal_time_length(value):
+    if isinstance(value, MappingABC):
+        lengths = [_signal_time_length(item) for item in value.values()]
+        lengths = [length for length in lengths if length is not None]
+        return min(lengths) if lengths else None
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return None
+    if arr.ndim == 0:
+        return None
+    return int(arr.shape[-1])
+
+
+def _clip_signal_time_length(value, length):
+    if isinstance(value, MappingABC):
+        return {key: _clip_signal_time_length(item, length) for key, item in value.items()}
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return value
+    if arr.ndim == 0:
+        return value
+    slicer = [slice(None)] * arr.ndim
+    slicer[-1] = slice(0, int(length))
+    clipped = arr[tuple(slicer)]
+    return np.array(clipped, copy=True)
+
+
+def _clip_trial_dataframe_payloads(payloads, signal_columns=("data",)):
+    payload_list = [frame.copy() for frame in list(payloads or []) if isinstance(frame, pd.DataFrame)]
+    if not payload_list:
+        return payload_list, None
+
+    min_length = None
+    for frame in payload_list:
+        for col in signal_columns:
+            if col not in frame.columns:
+                continue
+            for value in frame[col].tolist():
+                length = _signal_time_length(value)
+                if length is None:
+                    continue
+                min_length = length if min_length is None else min(min_length, length)
+
+    if min_length is None:
+        return payload_list, None
+
+    for frame in payload_list:
+        for col in signal_columns:
+            if col not in frame.columns:
+                continue
+            frame[col] = frame[col].map(lambda value: _clip_signal_time_length(value, min_length))
+    return payload_list, int(min_length)
+
+
 def _sum_signal_dict(signal_dict):
     total = None
     for value in signal_dict.values():
@@ -3537,6 +3593,17 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
 
+        trial_proxy_payloads, clipped_length = _clip_trial_dataframe_payloads(
+            trial_proxy_payloads,
+            signal_columns=("data",),
+        )
+        if clipped_length is not None:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Clipped proxy time-series to common minimum length {clipped_length} samples across trials.",
+            )
+
         output_root = _field_potential_output_dir("proxy")
         os.makedirs(output_root, exist_ok=True)
         # Keep canonical short filenames for proxy outputs.
@@ -3552,15 +3619,9 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         proxy_path = os.path.join(output_root, 'proxy.pkl')
 
         with open(sim_data_path, 'wb') as f:
-            pickle.dump(
-                trial_sim_payloads if trial_count > 1 else trial_sim_payloads[0],
-                f,
-            )
+            pickle.dump(trial_sim_payloads, f)
         with open(proxy_path, "wb") as f:
-            pickle.dump(
-                trial_proxy_payloads if trial_count > 1 else trial_proxy_payloads[0],
-                f,
-            )
+            pickle.dump(trial_proxy_payloads, f)
 
         _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {output_root}")
         _announce_saved_output_folders(job_status, job_id, "field_potential_proxy", output_root)
@@ -3994,9 +4055,30 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed kernel convolution trial {trial_idx + 1}/{trial_count}.")
 
+        clipped_reported = False
+        for probe_name in probe_names:
+            clipped_payloads, clipped_length = _clip_trial_dataframe_payloads(
+                probe_trial_payloads[probe_name],
+                signal_columns=("data", "raw_signals"),
+            )
+            probe_trial_payloads[probe_name] = clipped_payloads
+            if clipped_length is not None and not clipped_reported:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    f"Clipped kernel field-potential time-series to common minimum length {clipped_length} samples across trials.",
+                )
+                clipped_reported = True
+        if multi_probe_trial_payloads:
+            multi_probe_trial_payloads, _ = _clip_trial_dataframe_payloads(
+                multi_probe_trial_payloads,
+                signal_columns=("data", "raw_signals"),
+            )
+
         kernels_path = os.path.join(output_root, "kernels.pkl")
+        kernel_payload = kernels_for_save if kernels_for_save is not None else kernels
         with open(kernels_path, "wb") as f:
-            pickle.dump(kernels_for_save if kernels_for_save is not None else kernels, f)
+            pickle.dump([kernel_payload for _ in range(trial_count)], f)
         _append_job_output(job_status, job_id, f"Saved kernels to {kernels_path}")
 
         for probe_name in probe_names:
@@ -4007,7 +4089,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             output_path = os.path.join(output_root, output_name)
             payload = probe_trial_payloads[probe_name]
             with open(output_path, "wb") as f:
-                pickle.dump(payload if trial_count > 1 else payload[0], f)
+                pickle.dump(payload, f)
             output_paths[probe_name] = output_path
             _append_job_output(job_status, job_id, f"Saved probe output to {output_path}")
 
@@ -4017,10 +4099,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         else:
             combined_path = os.path.join(output_root, "probe_outputs.pkl")
             with open(combined_path, "wb") as f:
-                pickle.dump(
-                    multi_probe_trial_payloads if trial_count > 1 else multi_probe_trial_payloads[0],
-                    f,
-                )
+                pickle.dump(multi_probe_trial_payloads, f)
             results_path = combined_path
             _append_job_output(job_status, job_id, f"Saved combined probe outputs to {combined_path}")
 
@@ -4319,7 +4398,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     pass
         meeg_path = os.path.join(output_root, "meeg.pkl")
         with open(meeg_path, "wb") as f:
-            pickle.dump(trial_payloads if trial_count > 1 else trial_payloads[0], f)
+            pickle.dump(trial_payloads, f)
 
         _append_job_output(job_status, job_id, f"Saved M/EEG to {meeg_path}")
         _announce_saved_output_folders(job_status, job_id, "field_potential_meeg", output_root, meeg_path)

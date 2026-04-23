@@ -143,6 +143,43 @@ def test_parse_dict_like_3d_epochs() -> None:
     assert set(df["sensor"].unique().tolist()) == {"A", "B", "C"}
 
 
+@pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
+def test_parse_dict_like_stacked_samples_with_epochs_axis() -> None:
+    samples = np.array(
+        [
+            [1.0, 2.0, 3.0],
+            [4.0, 5.0, 6.0],
+            [7.0, 8.0, 9.0],
+        ]
+    )
+    payload = {
+        "data": samples,
+        "fs": 20.0,
+        "subject_ids": ["S01", "S02", "S03"],
+        "group": ["A", "B", "C"],
+    }
+
+    cfg = ParseConfig(
+        fields=CanonicalFields(
+            data="data",
+            fs="fs",
+            ch_names=["proxy"],
+            array_axes={"epochs": 0, "samples": 1},
+            metadata={"subject_id": "subject_ids", "group": "group"},
+        )
+    )
+    df = EphysDatasetParser(cfg).parse(payload)
+
+    _assert_df_contract(df)
+    assert len(df) == 3
+    assert df["sensor"].tolist() == ["proxy", "proxy", "proxy"]
+    assert df["epoch"].tolist() == [0, 1, 2]
+    assert df["subject_id"].tolist() == ["S01", "S02", "S03"]
+    assert df["group"].tolist() == ["A", "B", "C"]
+    assert np.allclose(df.iloc[0]["data"], np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(df.iloc[1]["data"], np.array([4.0, 5.0, 6.0]))
+
+
 # -------------------------
 # ndarray parsing
 # -------------------------

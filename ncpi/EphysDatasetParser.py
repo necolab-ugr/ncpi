@@ -755,9 +755,9 @@ class EphysDatasetParser:
         arr = np.asarray(data)
         if arr.dtype == object and arr.ndim == 1 and arr.size > 0:
             try:
-                inner = np.asarray(arr[0])
-                if inner.ndim == 2:
-                    arr = np.stack([np.asarray(a) for a in arr], axis=0)
+                stacked = np.stack([np.asarray(a).squeeze() for a in arr.tolist()], axis=0)
+                if stacked.ndim >= 2:
+                    arr = stacked
             except Exception:
                 pass
 
@@ -768,14 +768,44 @@ class EphysDatasetParser:
 
         if arr.ndim == 2:
             ax = f.array_axes
-            if ax and "channels" in ax and "samples" in ax:
-                # Explicit axis mapping: transpose to (channels, samples)
-                ch_ax = int(ax["channels"])
+            if ax and "samples" in ax:
                 sa_ax = int(ax["samples"])
-                arr2 = arr.transpose(ch_ax, sa_ax)
-                n_ch, n_time = arr2.shape
-                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
-                return [self._row_from_series(meta, labels[i], epoch_val, arr2[i, :], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
+                if "channels" in ax:
+                    # Explicit axis mapping: transpose to (channels, samples)
+                    ch_ax = int(ax["channels"])
+                    arr2 = arr.transpose(ch_ax, sa_ax)
+                    n_ch, n_time = arr2.shape
+                    labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                    return [self._row_from_series(meta, labels[i], epoch_val, arr2[i, :], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
+                if "epochs" in ax or "ids" in ax:
+                    outer_role = "epochs" if "epochs" in ax else "ids"
+                    outer_ax = int(ax[outer_role])
+                    arr2 = arr.transpose(outer_ax, sa_ax)
+                    n_outer, _ = arr2.shape
+                    sensor_name = str(ch_names[0]) if isinstance(ch_names, list) and ch_names else "ch0"
+                    subject_ids = _subject_ids_for_axis(meta, n_outer) if outer_role == "ids" else None
+                    rows = []
+                    for idx in range(n_outer):
+                        meta_i = {
+                            key: self._metadata_row_value(str(key), value, idx, n_outer)
+                            for key, value in meta.items()
+                        }
+                        if subject_ids is not None:
+                            meta_i["subject_id"] = subject_ids[idx]
+                        rows.append(
+                            self._row_from_series(
+                                meta_i,
+                                sensor_name,
+                                idx if outer_role == "epochs" else epoch_val,
+                                arr2[idx, :],
+                                fs,
+                                data_domain,
+                                freqs,
+                                spectral_kind,
+                                source_file,
+                            )
+                        )
+                    return rows
 
             # Infer orientation:
             # - If ch_names provided, align to whichever axis matches len(ch_names)
@@ -826,6 +856,42 @@ class EphysDatasetParser:
                 for e in range(n_ep):
                     for i, ch in enumerate(labels):
                         rows.append(self._row_from_series(meta, ch, e, arr3[e, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+            if ax and "channels" in ax and "samples" in ax and "ids" in ax:
+                id_ax = int(ax["ids"])
+                ch_ax = int(ax["channels"])
+                sa_ax = int(ax["samples"])
+                arr3 = arr.transpose(id_ax, ch_ax, sa_ax)
+                n_ids, n_ch, _ = arr3.shape
+                labels = ch_names if isinstance(ch_names, list) and len(ch_names) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = {
+                        key: self._metadata_row_value(str(key), value, sid, n_ids)
+                        for key, value in meta.items()
+                    }
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for i, ch in enumerate(labels):
+                        rows.append(self._row_from_series(meta_i, ch, epoch_val, arr3[sid, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+            if ax and "epochs" in ax and "samples" in ax and "ids" in ax:
+                id_ax = int(ax["ids"])
+                ep_ax = int(ax["epochs"])
+                sa_ax = int(ax["samples"])
+                arr3 = arr.transpose(id_ax, ep_ax, sa_ax)
+                n_ids, n_ep, _ = arr3.shape
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                sensor_name = str(ch_names[0]) if isinstance(ch_names, list) and ch_names else "ch0"
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = {
+                        key: self._metadata_row_value(str(key), value, sid, n_ids)
+                        for key, value in meta.items()
+                    }
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for e in range(n_ep):
+                        rows.append(self._row_from_series(meta_i, sensor_name, e, arr3[sid, e, :], fs, data_domain, freqs, spectral_kind, source_file))
                 return rows
 
             # heuristics: treat first axis as epochs
@@ -964,19 +1030,56 @@ class EphysDatasetParser:
             return self._normalize_subject_id_list(base_meta.get("subject_id", None), n_ids)
 
         a = np.asarray(arr)
+        if a.dtype == object and a.ndim == 1 and a.size > 0:
+            try:
+                stacked = np.stack([np.asarray(item).squeeze() for item in a.tolist()], axis=0)
+                if stacked.ndim >= 2:
+                    a = stacked
+            except Exception:
+                pass
         if a.ndim == 1:
             ch = labels[0] if labels else "ch0"
             return [self._row_from_series(meta, ch, None, a, fs, data_domain, freqs, spectral_kind, source_file)]
 
         if a.ndim == 2:
             ax = f.array_axes
-            if ax and "channels" in ax and "samples" in ax:
-                ch_ax = int(ax["channels"])
+            if ax and "samples" in ax:
                 sa_ax = int(ax["samples"])
-                a2 = a.transpose(ch_ax, sa_ax)
-                n_ch = a2.shape[0]
-                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
-                return [self._row_from_series(meta, labels2[i], None, a2[i, :], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
+                if "channels" in ax:
+                    ch_ax = int(ax["channels"])
+                    a2 = a.transpose(ch_ax, sa_ax)
+                    n_ch = a2.shape[0]
+                    labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                    return [self._row_from_series(meta, labels2[i], None, a2[i, :], fs, data_domain, freqs, spectral_kind, source_file) for i in range(n_ch)]
+                if "epochs" in ax or "ids" in ax:
+                    outer_role = "epochs" if "epochs" in ax else "ids"
+                    outer_ax = int(ax[outer_role])
+                    a2 = a.transpose(outer_ax, sa_ax)
+                    n_outer, _ = a2.shape
+                    sensor_name = labels[0] if labels else "ch0"
+                    subject_ids = _subject_ids_for_axis(meta, n_outer) if outer_role == "ids" else None
+                    rows = []
+                    for idx in range(n_outer):
+                        meta_i = {
+                            key: self._metadata_row_value(str(key), value, idx, n_outer)
+                            for key, value in meta.items()
+                        }
+                        if subject_ids is not None:
+                            meta_i["subject_id"] = subject_ids[idx]
+                        rows.append(
+                            self._row_from_series(
+                                meta_i,
+                                sensor_name,
+                                idx if outer_role == "epochs" else None,
+                                a2[idx, :],
+                                fs,
+                                data_domain,
+                                freqs,
+                                spectral_kind,
+                                source_file,
+                            )
+                        )
+                    return rows
             # assume (time, channels) by default for non-MNE numpy
             n_time, n_ch = a.shape
             labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
@@ -995,6 +1098,42 @@ class EphysDatasetParser:
                 for e in range(n_ep):
                     for i in range(n_ch):
                         rows.append(self._row_from_series(meta, labels2[i], e, a3[e, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+            if ax and "channels" in ax and "samples" in ax and "ids" in ax:
+                id_ax = int(ax["ids"])
+                ch_ax = int(ax["channels"])
+                sa_ax = int(ax["samples"])
+                a3 = a.transpose(id_ax, ch_ax, sa_ax)
+                n_ids, n_ch = a3.shape[0], a3.shape[1]
+                labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = {
+                        key: self._metadata_row_value(str(key), value, sid, n_ids)
+                        for key, value in meta.items()
+                    }
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for i in range(n_ch):
+                        rows.append(self._row_from_series(meta_i, labels2[i], None, a3[sid, i, :], fs, data_domain, freqs, spectral_kind, source_file))
+                return rows
+            if ax and "epochs" in ax and "samples" in ax and "ids" in ax:
+                id_ax = int(ax["ids"])
+                ep_ax = int(ax["epochs"])
+                sa_ax = int(ax["samples"])
+                a3 = a.transpose(id_ax, ep_ax, sa_ax)
+                n_ids, n_ep = a3.shape[0], a3.shape[1]
+                subject_ids = _subject_ids_for_axis(meta, n_ids)
+                sensor_name = labels[0] if labels else "ch0"
+                rows = []
+                for sid in range(n_ids):
+                    meta_i = {
+                        key: self._metadata_row_value(str(key), value, sid, n_ids)
+                        for key, value in meta.items()
+                    }
+                    meta_i["subject_id"] = subject_ids[sid]
+                    for e in range(n_ep):
+                        rows.append(self._row_from_series(meta_i, sensor_name, e, a3[sid, e, :], fs, data_domain, freqs, spectral_kind, source_file))
                 return rows
             # assume (epochs, time, channels)
             n_ep, n_time, n_ch = a.shape
@@ -1373,6 +1512,25 @@ class EphysDatasetParser:
             return [self._coerce_subject_id_token(item) for item in arr.reshape(-1).tolist()]
         return self._coerce_subject_id_token(value)
 
+    def _metadata_row_value(self, key: str, value: Any, index: int, total: int) -> Any:
+        if key == "subject_id":
+            values = self._normalize_subject_id_list(value, total)
+            return values[index] if index < len(values) else None
+
+        if isinstance(value, (list, tuple, np.ndarray)):
+            try:
+                arr = np.asarray(value, dtype=object)
+            except Exception:
+                return value
+            if arr.ndim == 0:
+                return arr.item() if hasattr(arr, "item") else value
+            flat = arr.reshape(-1).tolist()
+            if len(flat) == total:
+                return flat[index]
+            if len(flat) > 0:
+                return flat[0]
+        return value
+
     def _resolve_metadata(self, obj: Any) -> dict:
         out: dict = {}
         HAS_PANDAS = tools.ensure_module("pandas")
@@ -1383,20 +1541,24 @@ class EphysDatasetParser:
             try:
                 v = self._resolve(obj, loc)
 
-                # If the metadata is a list (as a result of multiple structures), take the first element to obtain a groupable scalar
-                v = self._extract_first_if_list(v)
+                if str(k) != "subject_id" and isinstance(v, list) and len(v) == 1:
+                    # Collapse singleton list metadata but preserve aligned per-row sequences.
+                    v = v[0]
 
                 # If metadata resolves to a pandas Series (e.g., df["group"]),
                 # reduce it to a scalar if it's constant across rows.
                 if HAS_PANDAS:
                     import pandas as pd  # type: ignore
                     if isinstance(v, pd.Series):
-                        # If constant (including all-NaN), take the first value
-                        if v.nunique(dropna=False) <= 1:
-                            v = v.iloc[0] if len(v) > 0 else None
-                        else:
-                            # Non-constant metadata column: keep as list (or raise, your choice)
+                        if str(k) == "subject_id":
                             v = v.to_list()
+                        else:
+                            # If constant (including all-NaN), take the first value
+                            if v.nunique(dropna=False) <= 1:
+                                v = v.iloc[0] if len(v) > 0 else None
+                            else:
+                                # Non-constant metadata column: keep as list (or raise, your choice)
+                                v = v.to_list()
                 if str(k) == "subject_id":
                     v = self._coerce_subject_id_metadata_value(v)
 

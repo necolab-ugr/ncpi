@@ -148,17 +148,61 @@
                             {% if has_simulation_pkl %}
                             <p class="text-sm font-bold text-green-600 dark:text-green-500">Status: Files detected</p>
                             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Simulation output files are ready.</p>
-                            <div class="mt-2 w-full min-w-0 text-xs text-slate-500 dark:text-slate-400">
-                                {% for filename in simulation_pkl_files %}
-                                <div class="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2 py-0.5">
-                                    <span class="min-w-0 break-all" title="{{ filename }}">{{ filename }}</span>
-                                    <form action="{{ url_for('remove_simulation_file') }}" method="POST" class="ml-1 shrink-0">
-                                        <input type="hidden" name="filename" value="{{ filename }}">
-                                        <button type="submit" class="inline-flex items-center gap-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
-                                            <span class="material-symbols-outlined text-sm">delete</span>
-                                            Remove
-                                        </button>
-                                    </form>
+                            <div class="mt-3 space-y-3 text-xs text-slate-500 dark:text-slate-400">
+                                {% for entry in simulation_entries %}
+                                <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white/70 dark:bg-slate-900/40 p-3">
+                                    <div class="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-2">
+                                        <div class="min-w-0">
+                                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{{ entry.label }}</p>
+                                            <p class="min-w-0 break-all font-medium text-slate-700 dark:text-slate-200" title="{{ entry.name }}">{{ entry.name }}</p>
+                                        </div>
+                                        <form action="{{ url_for('remove_simulation_file') }}" method="POST" class="ml-1 shrink-0">
+                                            <input type="hidden" name="filename" value="{{ entry.name }}">
+                                            <button type="submit" class="inline-flex items-center gap-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                                                <span class="material-symbols-outlined text-sm">delete</span>
+                                                Remove
+                                            </button>
+                                        </form>
+                                    </div>
+                                    {% if entry.inspection %}
+                                    <div class="mt-2 space-y-2">
+                                        {% if entry.inspection.summary %}
+                                        <p class="text-[11px] text-slate-600 dark:text-slate-300">{{ entry.inspection.summary }}</p>
+                                        {% endif %}
+                                        {% if entry.inspection.detail_summary %}
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400">{{ entry.inspection.detail_summary }}</p>
+                                        {% endif %}
+                                        {% if entry.inspection.top_level_type %}
+                                        <p class="text-[11px] text-slate-500 dark:text-slate-400">
+                                            Top level: {{ entry.inspection.top_level_type }}
+                                            {% if entry.inspection.top_level_shape is not none %} · shape {{ entry.inspection.top_level_shape }}{% endif %}
+                                            {% if entry.inspection.top_level_detail %} · {{ entry.inspection.top_level_detail }}{% endif %}
+                                        </p>
+                                        {% endif %}
+                                        {% if entry.inspection.field_details %}
+                                        <div class="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-700">
+                                            <table class="min-w-full divide-y divide-slate-200 dark:divide-slate-700">
+                                                <thead class="bg-slate-50 dark:bg-slate-800/80">
+                                                    <tr>
+                                                        <th class="px-2 py-1.5 text-left font-semibold">Field</th>
+                                                        <th class="px-2 py-1.5 text-left font-semibold">Type</th>
+                                                        <th class="px-2 py-1.5 text-left font-semibold">Shape</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                                                    {% for field in entry.inspection.field_details[:6] %}
+                                                    <tr>
+                                                        <td class="px-2 py-1.5 font-mono align-top">{{ field.field }}</td>
+                                                        <td class="px-2 py-1.5 align-top">{{ field.python_type or "Unknown" }}</td>
+                                                        <td class="px-2 py-1.5 align-top">{{ field.shape if field.shape is not none else "—" }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endif %}
                                 </div>
                                 {% endfor %}
                             </div>
