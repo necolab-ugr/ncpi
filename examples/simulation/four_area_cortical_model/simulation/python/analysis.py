@@ -78,6 +78,41 @@ def get_mean_spike_rate(times, transient, tstop):
     return times.size / (tstop - transient) * 1000
 
 
+def _pairwise_population_cdm(cdm_signals, populations):
+    """Map pairwise CDM kernels to population-pair keys for arbitrary labels."""
+    pairwise = {}
+    for post in populations:
+        for pre in populations:
+            source_key = f"{pre}:{post}"
+            target_key = f"{post}{pre}"
+            pairwise[target_key] = ss.decimate(
+                cdm_signals[source_key],
+                q=10,
+                zero_phase=True,
+            )
+    return pairwise
+
+
+def _sum_pairwise_cdm(cdm_data, populations):
+    """Sum all pairwise CDM contributions for the provided population labels."""
+    total = None
+    for post in populations:
+        for pre in populations:
+            key = f"{post}{pre}"
+            signal = np.asarray(cdm_data[key], dtype=float)
+            if total is None:
+                total = np.zeros_like(signal, dtype=float)
+            if signal.size != total.size:
+                n = min(signal.size, total.size)
+                if n > 0:
+                    total[:n] += signal[:n]
+                continue
+            total += signal
+    if total is None:
+        return np.array([], dtype=float)
+    return total
+
+
 if __name__ == "__main__":
     # Read the script file path from sys.argv[1]
     script_path = sys.argv[1]
@@ -211,25 +246,12 @@ if __name__ == "__main__":
             scale=dt / 1000.0,
         )
 
-        cdm_data = dict(EE=[], EI=[], IE=[], II=[])
-        for X in P_X:
-            for Y in P_X:
-                key = f'{Y}:{X}'
-                cdm_data[f'{X}{Y}'] = ss.decimate(
-                    cdm_signals[key],
-                    q=10,
-                    zero_phase=True
-                )
+        cdm_data = _pairwise_population_cdm(cdm_signals, P_X)
 
         area_cdm[area] = cdm_data
 
         # Total CDM for spectra
-        cdm_total = (
-            np.asarray(cdm_data['EE']) +
-            np.asarray(cdm_data['EI']) +
-            np.asarray(cdm_data['IE']) +
-            np.asarray(cdm_data['II'])
-        )
+        cdm_total = _sum_pairwise_cdm(cdm_data, P_X)
 
         # Match reference snippet: treat each trial as an entry; here we have one "trial"
         cdm_trials = [cdm_total]

@@ -310,6 +310,11 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const seen = new Set();
         const options = [];
+        const displayLabelForInput = (input, fallback) => {
+            const labelNode = input.closest('label')?.querySelector('span');
+            const text = String(labelNode?.textContent || '').trim().replace(/\s+/g, ' ');
+            return text || fallback;
+        };
         const inputs = Array.from(elements.form.querySelectorAll('.param-input'))
             .filter(input => {
                 const paramName = input.dataset.param || input.name || '';
@@ -329,7 +334,10 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!isArrayKind || rows.length <= 1) {
                 if (!seen.has(paramName)) {
                     seen.add(paramName);
-                    options.push({ value: paramName, label: paramName });
+                    options.push({
+                        value: paramName,
+                        label: displayLabelForInput(input, paramName)
+                    });
                 }
                 return;
             }
@@ -342,7 +350,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 seen.add(token);
                 const leafLabel = describeLeafLabel(paramName, path, index, true);
-                options.push({ value: token, label: `${paramName} - ${leafLabel}` });
+                options.push({
+                    value: token,
+                    label: `${displayLabelForInput(input, paramName)} - ${leafLabel}`
+                });
             });
         });
 

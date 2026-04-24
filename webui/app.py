@@ -8906,12 +8906,19 @@ def _load_simulation_outputs():
             required_keys = {"times", "gids", "dt", "tstop", "network"}
             if not required_keys.issubset(first.keys()):
                 return None
+            population_sizes_values = [item.get("population_sizes") for item in payload]
+            population_sizes_payload = (
+                _as_scenario_list(population_sizes_values)
+                if any(value is not None for value in population_sizes_values)
+                else None
+            )
             return {
                 "times": _as_scenario_list([item.get("times") for item in payload]),
                 "gids": _as_scenario_list([item.get("gids") for item in payload]),
                 "dt": _as_scenario_list([item.get("dt") for item in payload]),
                 "tstop": _as_scenario_list([item.get("tstop") for item in payload]),
                 "network": _as_scenario_list([item.get("network") for item in payload]),
+                "population_sizes": population_sizes_payload,
                 "grid_metadata": None,
             }
         if not isinstance(payload, dict):
@@ -8919,12 +8926,18 @@ def _load_simulation_outputs():
         required_keys = {"times", "gids", "dt", "tstop", "network"}
         if not required_keys.issubset(payload.keys()):
             return None
+        population_sizes_payload = payload.get("population_sizes")
         return {
             "times": _as_scenario_list(payload["times"]),
             "gids": _as_scenario_list(payload["gids"]),
             "dt": _as_scenario_list(payload["dt"]),
             "tstop": _as_scenario_list(payload["tstop"]),
             "network": _as_scenario_list(payload["network"]),
+            "population_sizes": (
+                _as_scenario_list(population_sizes_payload)
+                if population_sizes_payload is not None
+                else None
+            ),
             "grid_metadata": payload.get("grid_metadata"),
         }
 
@@ -8970,6 +8983,7 @@ def _load_simulation_outputs():
                         "dt": [0.0625] * proxy_trial_count,   # Default dt value
                         "tstop": [12000.0] * proxy_trial_count,  # Default tstop value
                         "network": {"model": "hagen"} if proxy_trial_count > 0 else {},  # Model detected from proxy context
+                        "population_sizes": [None] * proxy_trial_count,
                         "grid_metadata": None,
                         "_from_proxy_data": True,  # Tag to indicate this came from proxy
                     }
@@ -8992,6 +9006,11 @@ def _load_simulation_outputs():
                         elif isinstance(sim_data["network"], list):
                             last_net = sim_data["network"][-1] if sim_data["network"] else {"model": "hagen"}
                             sim_data["network"].extend([last_net] * diff)
+                        if isinstance(sim_data.get("population_sizes"), list):
+                            last_sizes = sim_data["population_sizes"][-1] if sim_data["population_sizes"] else None
+                            sim_data["population_sizes"].extend([last_sizes] * diff)
+                        elif "population_sizes" not in sim_data:
+                            sim_data["population_sizes"] = [None] * proxy_trial_count
                     return sim_data
             except Exception:
                 pass
@@ -9007,6 +9026,14 @@ def _load_simulation_outputs():
     for name, path in paths.items():
         with open(path, "rb") as f:
             payload[name] = pickle.load(f)
+    population_sizes_payload = None
+    population_sizes_path = os.path.join(root, "population_sizes.pkl")
+    if os.path.isfile(population_sizes_path):
+        try:
+            with open(population_sizes_path, "rb") as f:
+                population_sizes_payload = _as_scenario_list(pickle.load(f))
+        except Exception:
+            population_sizes_payload = None
 
     metadata = None
     metadata_path = _simulation_grid_metadata_path(root)
@@ -9043,6 +9070,7 @@ def _load_simulation_outputs():
         "dt": _as_scenario_list(payload["dt.pkl"]),
         "tstop": _as_scenario_list(payload["tstop.pkl"]),
         "network": _as_scenario_list(payload["network.pkl"]),
+        "population_sizes": population_sizes_payload,
         "grid_metadata": metadata,
     }
 
@@ -9095,6 +9123,7 @@ def _simulation_trial_data(sim_data, trial_idx):
     gids_all = sim_data["gids"]
     dt_all = sim_data["dt"]
     tstop_all = sim_data["tstop"]
+    population_sizes_all = sim_data.get("population_sizes")
     trial_count = _simulation_trial_count(sim_data)
     if trial_idx < 0 or trial_idx >= trial_count:
         raise IndexError(f"Trial index {trial_idx} out of bounds for {trial_count} trial(s).")
@@ -9110,6 +9139,7 @@ def _simulation_trial_data(sim_data, trial_idx):
         "dt": float(_pick(dt_all)),
         "tstop": float(_pick(tstop_all)),
         "network": _pick(sim_data["network"]),
+        "population_sizes": _pick(population_sizes_all) if population_sizes_all is not None else None,
     }
 
 
@@ -9290,12 +9320,101 @@ def _simulation_configuration_legend_label(sim_data, configuration_index, trial_
     return base
 
 
-def _population_color(name, idx):
-    if str(name).upper().startswith("E"):
+def _population_color(name, idx, total_populations=None):
+    if total_populations in {None, 2} and str(name).upper().startswith("E"):
         return "C0"
-    if str(name).upper().startswith("I"):
+    if total_populations in {None, 2} and str(name).upper().startswith("I"):
         return "C1"
     return f"C{idx % 10}"
+
+
+def _simulation_population_sizes_for_plot(population_sizes, area_name=None):
+    if not isinstance(population_sizes, dict):
+        return {}
+
+    def _normalize_size_map(raw):
+        if not isinstance(raw, dict):
+            return {}
+        normalized = {}
+        for key, value in raw.items():
+            try:
+                size = float(value)
+            except (TypeError, ValueError):
+                continue
+            if not np.isfinite(size) or size <= 0.0:
+                continue
+            normalized[str(key)] = size
+        return normalized
+
+    if area_name is not None and isinstance(population_sizes.get(area_name), dict):
+        return _normalize_size_map(population_sizes.get(area_name))
+
+    # Area-structured payload ({area: {population: size}}): aggregate by population.
+    if any(isinstance(val, dict) for val in population_sizes.values()):
+        aggregated = {}
+        for area_payload in population_sizes.values():
+            if not isinstance(area_payload, dict):
+                continue
+            for key, value in _normalize_size_map(area_payload).items():
+                aggregated[key] = aggregated.get(key, 0.0) + float(value)
+        return aggregated
+
+    return _normalize_size_map(population_sizes)
+
+
+def _population_order_for_plot(times_by_population, gids_by_population, population_sizes=None):
+    ordered = []
+    seen = set()
+
+    def _append(name):
+        text = str(name or "").strip()
+        if not text or text in seen:
+            return
+        seen.add(text)
+        ordered.append(text)
+
+    if isinstance(population_sizes, dict):
+        for pop_name in population_sizes.keys():
+            _append(pop_name)
+    if isinstance(times_by_population, dict):
+        for pop_name in times_by_population.keys():
+            _append(pop_name)
+    if isinstance(gids_by_population, dict):
+        for pop_name in gids_by_population.keys():
+            _append(pop_name)
+    if not ordered:
+        return []
+
+    gid_mins = {}
+    if isinstance(gids_by_population, dict):
+        for pop_name in ordered:
+            try:
+                gids = np.asarray(gids_by_population.get(pop_name, []), dtype=float)
+            except Exception:
+                continue
+            if gids.size == 0:
+                continue
+            finite = gids[np.isfinite(gids)]
+            if finite.size == 0:
+                continue
+            gid_mins[pop_name] = float(np.min(finite))
+
+    with_gid = [name for name in ordered if name in gid_mins]
+    without_gid = [name for name in ordered if name not in gid_mins]
+    with_gid.sort(key=lambda name: gid_mins[name])
+    return with_gid + without_gid
+
+
+def _population_colors_for_plot(times_by_population, gids_by_population, population_sizes=None):
+    ordered = _population_order_for_plot(times_by_population, gids_by_population, population_sizes=population_sizes)
+    total = len(ordered)
+    colors = {}
+    for idx, name in enumerate(ordered):
+        preferred = _population_color(name, idx, total_populations=total)
+        if preferred in colors.values():
+            preferred = f"C{idx % 10}"
+        colors[name] = preferred
+    return ordered, colors
 
 
 def _spike_rate(times, dt, tstop):
@@ -12193,11 +12312,13 @@ def analysis_plot_simulation():
                     gids = trial["gids"]
                     dt = trial["dt"]
                     tstop = trial["tstop"]
+                    population_sizes = trial.get("population_sizes")
                 else:
                     times = {}
                     gids = {}
                     dt = None
                     tstop = None
+                    population_sizes = None
 
                 area_series = None
                 dt_fp = None
@@ -12223,16 +12344,30 @@ def analysis_plot_simulation():
                     if plot_type == "raster":
                         area_times = times.get(area_name, {})
                         area_gids = gids.get(area_name, {})
-                        for pop_i, pop_name in enumerate(sorted(area_times.keys())):
-                            t = np.asarray(area_times[pop_name])
-                            g = np.asarray(area_gids.get(pop_name, []))
+                        area_population_sizes = _simulation_population_sizes_for_plot(
+                            population_sizes,
+                            area_name=area_name,
+                        )
+                        population_names, population_colors = _population_colors_for_plot(
+                            area_times,
+                            area_gids,
+                            population_sizes=area_population_sizes,
+                        )
+                        for pop_name in population_names:
+                            t = np.asarray(area_times.get(pop_name, []), dtype=float)
+                            g = np.asarray(area_gids.get(pop_name, []), dtype=float)
+                            n = min(t.size, g.size)
+                            if n <= 0:
+                                continue
+                            t = t[:n]
+                            g = g[:n]
                             mask_t = (t >= time_start) & (t <= time_end)
                             ax.plot(
                                 t[mask_t],
                                 g[mask_t],
                                 ".",
                                 ms=0.9,
-                                color=_population_color(pop_name, pop_i),
+                                color=population_colors.get(pop_name, "0.3"),
                                 alpha=0.7,
                                 label=str(pop_name),
                             )
@@ -12245,14 +12380,24 @@ def analysis_plot_simulation():
 
                     elif plot_type == "firing_rates":
                         area_times = times.get(area_name, {})
-                        for pop_i, pop_name in enumerate(sorted(area_times.keys())):
-                            tb, rate = _spike_rate(area_times[pop_name], dt, tstop)
+                        area_gids = gids.get(area_name, {})
+                        area_population_sizes = _simulation_population_sizes_for_plot(
+                            population_sizes,
+                            area_name=area_name,
+                        )
+                        population_names, population_colors = _population_colors_for_plot(
+                            area_times,
+                            area_gids,
+                            population_sizes=area_population_sizes,
+                        )
+                        for pop_name in population_names:
+                            tb, rate = _spike_rate(area_times.get(pop_name, []), dt, tstop)
                             mask_t = (tb >= time_start) & (tb <= time_end)
                             ax.plot(
                                 tb[mask_t],
                                 rate[mask_t],
                                 linewidth=1.0,
-                                color=_population_color(pop_name, pop_i),
+                                color=population_colors.get(pop_name, "0.3"),
                                 label=str(pop_name),
                             )
                         ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
@@ -12293,18 +12438,39 @@ def analysis_plot_simulation():
                     gids = trial["gids"]
                     dt = trial["dt"]
                     tstop = trial["tstop"]
+                    population_sizes = trial.get("population_sizes")
                 else:
                     times = {}
                     gids = {}
                     dt = None
                     tstop = None
+                    population_sizes = None
 
                 if plot_type == "raster":
-                    for pop_i, pop_name in enumerate(sorted(times.keys())):
-                        t = np.asarray(times[pop_name])
-                        g = np.asarray(gids[pop_name])
+                    population_sizes_map = _simulation_population_sizes_for_plot(population_sizes)
+                    population_names, population_colors = _population_colors_for_plot(
+                        times,
+                        gids,
+                        population_sizes=population_sizes_map,
+                    )
+                    for pop_name in population_names:
+                        t = np.asarray(times.get(pop_name, []), dtype=float)
+                        g = np.asarray(gids.get(pop_name, []), dtype=float)
+                        n = min(t.size, g.size)
+                        if n <= 0:
+                            continue
+                        t = t[:n]
+                        g = g[:n]
                         mask_t = (t >= time_start) & (t <= time_end)
-                        ax.plot(t[mask_t], g[mask_t], ".", ms=1.0, color=_population_color(pop_name, pop_i), alpha=0.7, label=str(pop_name))
+                        ax.plot(
+                            t[mask_t],
+                            g[mask_t],
+                            ".",
+                            ms=1.0,
+                            color=population_colors.get(pop_name, "0.3"),
+                            alpha=0.7,
+                            label=str(pop_name),
+                        )
                     ax.set_ylabel("gid")
                     ax.set_xlabel("t (ms)")
                     ax.set_title(_plot_trial_title(trial_idx, "raster"))
@@ -12313,10 +12479,22 @@ def analysis_plot_simulation():
                     ax.set_xlim(time_start, time_end)
 
                 elif plot_type == "firing_rates":
-                    for pop_i, pop_name in enumerate(sorted(times.keys())):
-                        tb, rate = _spike_rate(times[pop_name], dt, tstop)
+                    population_sizes_map = _simulation_population_sizes_for_plot(population_sizes)
+                    population_names, population_colors = _population_colors_for_plot(
+                        times,
+                        gids,
+                        population_sizes=population_sizes_map,
+                    )
+                    for pop_name in population_names:
+                        tb, rate = _spike_rate(times.get(pop_name, []), dt, tstop)
                         mask_t = (tb >= time_start) & (tb <= time_end)
-                        ax.plot(tb[mask_t], rate[mask_t], linewidth=1.0, color=_population_color(pop_name, pop_i), label=str(pop_name))
+                        ax.plot(
+                            tb[mask_t],
+                            rate[mask_t],
+                            linewidth=1.0,
+                            color=population_colors.get(pop_name, "0.3"),
+                            label=str(pop_name),
+                        )
                     ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                     ax.set_xlabel("t (ms)")
                     ax.set_title(_plot_trial_title(trial_idx, "firing rates"))

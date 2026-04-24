@@ -353,21 +353,86 @@ def _resolve_chunking_config(module):
     return simulate_in_chunks, chunk_ms
 
 
+def _resolve_population_names(lif_params):
+    """Resolve excitatory/inhibitory population labels from saved LIF params."""
+    raw_names = lif_params.get("X")
+    if not isinstance(raw_names, (list, tuple)) or len(raw_names) < 2:
+        return "E", "I"
+    exc_name = str(raw_names[0])
+    inh_name = str(raw_names[1])
+    if exc_name == inh_name:
+        raise ValueError(
+            "lif_params['X'] must contain two distinct population names (exc, inh)."
+        )
+    return exc_name, inh_name
+
+
+def _resolve_neuron_param_pair(lif_params, exc_name, inh_name):
+    """Return excitatory/inhibitory neuron parameter dicts from flexible key layouts."""
+    neuron_params = lif_params.get("neuron_params")
+    if not isinstance(neuron_params, dict):
+        raise KeyError("lif_params['neuron_params'] must be a dict.")
+
+    exc_params = neuron_params.get(exc_name)
+    inh_params = neuron_params.get(inh_name)
+    if isinstance(exc_params, dict) and isinstance(inh_params, dict):
+        return exc_params, inh_params
+
+    exc_params = neuron_params.get("E")
+    inh_params = neuron_params.get("I")
+    if isinstance(exc_params, dict) and isinstance(inh_params, dict):
+        return exc_params, inh_params
+
+    dict_values = [value for value in neuron_params.values() if isinstance(value, dict)]
+    if len(dict_values) >= 2:
+        return dict_values[0], dict_values[1]
+
+    available_keys = sorted(str(key) for key in neuron_params.keys())
+    raise KeyError(
+        "Unable to resolve excitatory/inhibitory neuron parameter dictionaries from "
+        f"lif_params['neuron_params'] keys: {available_keys}"
+    )
+
+
 def _check_spike_output_size(times, gids, lif_params, tstop, max_mean_population_spike_rate_hz):
     """Reject simulations with excessive population firing before writing spike pickles."""
     duration_seconds = float(tstop) / 1000.0
     if duration_seconds <= 0:
         raise ValueError(f"tstop must be positive, got {tstop}.")
 
-    population_sizes = dict(zip(lif_params["X"], lif_params["N_X"]))
-    spike_counts = {X: int(np.asarray(times[X]).size) for X in lif_params["X"]}
+    raw_population_names = lif_params.get("X")
+    if isinstance(raw_population_names, (list, tuple)) and raw_population_names:
+        population_names = [str(name) for name in raw_population_names]
+    else:
+        population_names = [str(name) for name in times.keys()]
+
+    missing_times = [name for name in population_names if name not in times]
+    missing_gids = [name for name in population_names if name not in gids]
+    if missing_times or missing_gids:
+        raise KeyError(
+            "Missing population spike payloads. "
+            f"missing times={missing_times}, missing gids={missing_gids}, "
+            f"available times keys={sorted(str(key) for key in times.keys())}, "
+            f"available gids keys={sorted(str(key) for key in gids.keys())}."
+        )
+
+    raw_population_sizes = lif_params.get("N_X")
+    if not isinstance(raw_population_sizes, (list, tuple)) or len(raw_population_sizes) < len(population_names):
+        raise ValueError(
+            "lif_params['N_X'] must provide one population size per entry in lif_params['X']."
+        )
+    population_sizes = {
+        name: float(raw_population_sizes[idx])
+        for idx, name in enumerate(population_names)
+    }
+    spike_counts = {name: int(np.asarray(times[name]).size) for name in population_names}
     mean_rates_hz = {
-        X: spike_counts[X] / (duration_seconds * float(population_sizes[X]))
-        for X in lif_params["X"]
+        name: spike_counts[name] / (duration_seconds * float(population_sizes[name]))
+        for name in population_names
     }
     raw_spike_bytes = sum(
-        np.asarray(times[X]).nbytes + np.asarray(gids[X]).nbytes
-        for X in lif_params["X"]
+        np.asarray(times[name]).nbytes + np.asarray(gids[name]).nbytes
+        for name in population_names
     )
 
     print(
@@ -401,7 +466,9 @@ def _check_spike_output_size(times, gids, lif_params, tstop, max_mean_population
 def _default_network_payload(lif_params, module):
     """Build Cavallari network constructor inputs from stored LIF parameters."""
     network_params = lif_params["network_params"]
-    neuron_params = [lif_params["neuron_params"]["E"], lif_params["neuron_params"]["I"]]
+    exc_name, inh_name = _resolve_population_names(lif_params)
+    exc_params, inh_params = _resolve_neuron_param_pair(lif_params, exc_name, inh_name)
+    neuron_params = [exc_params, inh_params]
     simulation_params = {
         "simtime": float(module.tstop),
         "simstep": float(module.dt),
@@ -497,6 +564,44 @@ def _finalize_spikes(acc):
     return finalized
 
 
+def _extract_population_spikes(data_s, population_names):
+    """Build per-population spike time and gid payloads from recorder events."""
+    if not isinstance(population_names, (list, tuple)) or len(population_names) < 2:
+        raise ValueError("population_names must contain two entries (exc, inh).")
+    if not isinstance(data_s, list) or len(data_s) < 2:
+        raise ValueError("data_s must contain two spike-recorder event payloads.")
+
+    exc_name = str(population_names[0])
+    inh_name = str(population_names[1])
+
+    def _events(idx):
+        payload = data_s[idx]
+        if isinstance(payload, dict):
+            return payload
+        if isinstance(payload, (list, tuple)) and payload:
+            first = payload[0]
+            if isinstance(first, dict):
+                return first
+        return {}
+
+    exc_events = _events(0)
+    inh_events = _events(1)
+
+    times = _finalize_spikes(
+        {
+            exc_name: [np.asarray(exc_events.get("times", []), dtype=float)],
+            inh_name: [np.asarray(inh_events.get("times", []), dtype=float)],
+        }
+    )
+    gids = _finalize_spikes(
+        {
+            exc_name: [np.asarray(exc_events.get("senders", []), dtype=int)],
+            inh_name: [np.asarray(inh_events.get("senders", []), dtype=int)],
+        }
+    )
+    return times, gids
+
+
 def _load_module(module_path):
     """Load a Python simulation-parameter file as a module."""
     script_dir = os.path.dirname(module_path)
@@ -530,6 +635,7 @@ if __name__ == "__main__":
     output_dir = sys.argv[2]
     with open(os.path.join(output_dir, "network.pkl"), "rb") as f:
         lif_params = pickle.load(f)
+    population_names = list(_resolve_population_names(lif_params))
 
     # Convert the stored payload into the constructor format used here.
     (
@@ -585,18 +691,7 @@ if __name__ == "__main__":
         data_s.append(nest.GetStatus(net.spikes[i], keys="events"))
 
     # Format spike times and gids by population.
-    times = _finalize_spikes(
-        {
-            "E": [np.asarray(data_s[0][0]["times"], dtype=float)],
-            "I": [np.asarray(data_s[1][0]["times"], dtype=float)],
-        }
-    )
-    gids = _finalize_spikes(
-        {
-            "E": [np.asarray(data_s[0][0]["senders"], dtype=int)],
-            "I": [np.asarray(data_s[1][0]["senders"], dtype=int)],
-        }
-    )
+    times, gids = _extract_population_spikes(data_s, population_names)
 
     # Preserve population ids needed by downstream analysis.
     population_ids = {
@@ -643,7 +738,7 @@ if __name__ == "__main__":
                 "To_be_measured": analysis_params["To_be_measured"],
                 "intervals": intervals,
                 "population_ids": population_ids,
-                "spike_streams": ["E", "I"],
+                "spike_streams": list(population_names),
             },
             f,
         )
