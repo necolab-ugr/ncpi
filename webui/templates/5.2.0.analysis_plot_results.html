@@ -20,9 +20,26 @@
     </div>
 
     {% if error %}
+    {% if error_popup_redirect_url %}
+    <div id="analysis-error-popup" class="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+        <div class="w-full max-w-xl rounded-xl border border-red-200 dark:border-red-900/40 bg-white dark:bg-slate-900 p-5 shadow-xl">
+            <h2 class="text-lg font-semibold text-red-700 dark:text-red-300">Plotting error</h2>
+            <p class="mt-3 text-sm text-slate-700 dark:text-slate-200">{{ error }}</p>
+            <div class="mt-5 flex justify-end">
+                <button
+                    id="analysis-error-popup-accept"
+                    type="button"
+                    class="inline-flex items-center justify-center h-10 px-4 rounded-lg bg-primary text-white text-sm font-semibold hover:bg-primary/90 transition-colors">
+                    Accept
+                </button>
+            </div>
+        </div>
+    </div>
+    {% else %}
     <div class="mt-6 rounded-lg border border-red-200 dark:border-red-900/40 bg-red-50 dark:bg-red-900/20 p-4 text-sm text-red-700 dark:text-red-200">
         {{ error }}
     </div>
+    {% endif %}
     {% else %}
     {% if simulation_repeat_controls %}
     <div class="mt-6 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
@@ -79,6 +96,22 @@
 {{ super() }}
 <script>
     (function() {
+        const errorAcceptBtn = document.getElementById("analysis-error-popup-accept");
+        if (errorAcceptBtn) {
+            const redirectUrl = "{{ error_popup_redirect_url or '' }}";
+            const redirectToAnalysis = () => {
+                if (!redirectUrl) return;
+                window.location.href = redirectUrl;
+            };
+            errorAcceptBtn.addEventListener("click", redirectToAnalysis);
+            window.addEventListener("keydown", (event) => {
+                if (event.key === "Enter" || event.key === "Escape") {
+                    redirectToAnalysis();
+                }
+            });
+            return;
+        }
+
         const img = document.getElementById("plot-image");
         const wait = document.getElementById("plot-wait");
         if (!img || !wait) return;

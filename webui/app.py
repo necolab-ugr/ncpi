@@ -12,6 +12,7 @@ import sys
 import inspect
 import re
 import traceback
+import functools
 from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -8781,6 +8782,21 @@ def analysis():
     analysis_data_files = _list_analysis_data_files()
     selection_mode = _get_analysis_selection_mode()
     preselected_simulation_keys = _get_analysis_selected_simulation_keys() if selection_mode == "simulation" else []
+    preselected_simulation_items = []
+    if selection_mode == "simulation":
+        preselected_simulation_items = _analysis_selected_items_from_keys(preselected_simulation_keys)
+        if not preselected_simulation_items and analysis_data_files:
+            analysis_root = _analysis_data_dir(create=False)
+            inferred_keys = []
+            for name in analysis_data_files:
+                fp_type = _infer_field_potential_type_from_filename(name)
+                if fp_type:
+                    path = os.path.realpath(os.path.join(analysis_root, name))
+                    inferred_keys.append(f"field_potential::{path}")
+                else:
+                    inferred_keys.append(f"simulation::{name}")
+            preselected_simulation_keys = inferred_keys
+            preselected_simulation_items = _analysis_selected_items_from_keys(inferred_keys)
     if selection_mode == "simulation":
         has_analysis_dataframe = False
     elif selection_mode == "dataframe":
@@ -8823,6 +8839,7 @@ def analysis():
         has_predictions_data=bool(predictions_data_files),
         detected_data_files=detected_data_files,
         preselected_simulation_keys=preselected_simulation_keys,
+        preselected_simulation_items=preselected_simulation_items,
         simulation_available=simulation_available,
         is_full_simulation=is_full_simulation,
         simulation_trials=simulation_trials,
@@ -10247,18 +10264,37 @@ def analysis_upload_simulation_files():
     })
 
 
-def _analysis_plot_error(message, status=400, log_output=""):
+def _analysis_plot_error(message, status=400, log_output="", **extra_context):
+    context = {
+        "title": "Analysis plot",
+        "subtitle": "Plotting failed.",
+        "error": message,
+        "image_data": None,
+        "log_output": log_output,
+    }
+    if extra_context:
+        context.update(extra_context)
     return (
-        render_template(
-            "5.2.0.analysis_plot_results.html",
-            title="Analysis plot",
-            subtitle="Plotting failed.",
-            error=message,
-            image_data=None,
-            log_output=log_output,
-        ),
+        render_template("5.2.0.analysis_plot_results.html", **context),
         status,
     )
+
+
+def _analysis_plot_route_guard(plot_name):
+    def _decorate(func):
+        @functools.wraps(func)
+        def _wrapped(*args, **kwargs):
+            try:
+                return func(*args, **kwargs)
+            except Exception as exc:
+                app.logger.exception("Unhandled %s plotting error", plot_name)
+                return _analysis_plot_error(
+                    f"{plot_name} plotting failed: {exc}",
+                    status=500,
+                    error_popup_redirect_url=url_for("analysis"),
+                )
+        return _wrapped
+    return _decorate
 
 
 def _analysis_default_plot_filename(title):
@@ -10434,12 +10470,19 @@ def analysis_column_values():
 
 
 @app.route("/analysis/plot/boxplot", methods=["POST"])
+@_analysis_plot_route_guard("Boxplot")
 def analysis_plot_boxplot():
     log_buffer = io.StringIO()
     def _log(message):
         print(message, file=log_buffer)
-    def _plot_error(message, status=400):
-        return _analysis_plot_error(message, status=status, log_output=log_buffer.getvalue())
+    def _plot_error(message, status=400, popup_redirect_url=None):
+        redirect_target = popup_redirect_url if popup_redirect_url is not None else url_for("analysis")
+        return _analysis_plot_error(
+            message,
+            status=status,
+            log_output=log_buffer.getvalue(),
+            error_popup_redirect_url=redirect_target,
+        )
 
     data_path = _analysis_data_path()
     if data_path is None:
@@ -10621,9 +10664,22 @@ def analysis_plot_boxplot():
         except (TypeError, ValueError):
             return None
 
+    def _cohen_result_df(results, group_value, control_value):
+        if not isinstance(results, dict) or not results:
+            return None
+        direct_key = f"{group_value}vs{control_value}"
+        if direct_key in results:
+            return results.get(direct_key)
+        target_norm = re.sub(r"\s+", "", str(direct_key)).lower()
+        for key, value in results.items():
+            key_norm = re.sub(r"\s+", "", str(key)).lower()
+            if key_norm == target_norm:
+                return value
+        return None
+
     def _add_cohen_bar(ax, d_map, control_value, group_values):
         if not d_map:
-            return
+            return 0
         labels = []
         values = []
         for g in group_values:
@@ -10640,7 +10696,15 @@ def analysis_plot_boxplot():
             labels.append(str(g))
             values.append(float(val))
         if not values:
-            return
+            inset = ax.inset_axes([1.12, 0.10, 0.30, 0.80], transform=ax.transAxes)
+            inset.set_facecolor("white")
+            inset.patch.set_alpha(0.95)
+            inset.text(0.5, 0.5, "No valid\nCohen's d", ha="center", va="center", fontsize=7)
+            inset.set_xticks([])
+            inset.set_yticks([])
+            for spine in inset.spines.values():
+                spine.set_visible(False)
+            return 0
         inset = ax.inset_axes([1.12, 0.10, 0.30, 0.80], transform=ax.transAxes)
         inset.set_facecolor("white")
         inset.patch.set_alpha(0.95)
@@ -10655,6 +10719,7 @@ def analysis_plot_boxplot():
         inset.grid(False)
         for spine in inset.spines.values():
             spine.set_visible(False)
+        return len(values)
 
     positions = np.arange(1, len(groups) + 1)
     boxplot_kwargs = dict(
@@ -10667,6 +10732,33 @@ def analysis_plot_boxplot():
         capprops=dict(color="black", linewidth=line_width),
         boxprops=dict(linewidth=line_width, facecolor=box_facecolor),
     )
+
+    def _set_category_ticks(ax, group_positions, group_values, max_visible_labels=4):
+        if group_positions is None or group_values is None:
+            ax.set_xticks([])
+            return
+        n_groups = len(group_values)
+        if n_groups == 0:
+            ax.set_xticks([])
+            return
+        if n_groups <= max_visible_labels:
+            idx = np.arange(n_groups, dtype=int)
+        else:
+            idx = np.linspace(0, n_groups - 1, num=max_visible_labels)
+            idx = np.unique(np.round(idx).astype(int))
+            if idx.size == 0 or idx[0] != 0:
+                idx = np.insert(idx, 0, 0)
+            if idx[-1] != n_groups - 1:
+                idx = np.append(idx, n_groups - 1)
+            if idx.size > max_visible_labels:
+                idx = idx[:max_visible_labels - 1]
+                if idx[-1] != n_groups - 1:
+                    idx = np.append(idx, n_groups - 1)
+        selected_positions = [group_positions[int(i)] for i in idx]
+        selected_labels = [str(group_values[int(i)]) for i in idx]
+        ax.set_xticks(selected_positions)
+        ax.set_xticklabels(selected_labels)
+
     colormap = None
     if colormap_name:
         name = str(colormap_name).strip().lower()
@@ -10718,6 +10810,7 @@ def analysis_plot_boxplot():
                     data_index=-1,
                     group_col=group_col,
                     sensor_col=sensor_col,
+                    min_n=2,
                     drop_zeros=False,
                 )
             except Exception as exc:
@@ -10726,8 +10819,7 @@ def analysis_plot_boxplot():
             for g in groups:
                 if g == control_group_value:
                     continue
-                key = f"{g}vs{control_group_value}"
-                comp_df = results.get(key)
+                comp_df = _cohen_result_df(results, g, control_group_value)
                 if comp_df is None or comp_df.empty:
                     cohen_map[g] = np.nan
                     continue
@@ -10736,6 +10828,9 @@ def analysis_plot_boxplot():
                     cohen_map[g] = comp_df["d"].iloc[0]
                 else:
                     cohen_map[g] = row["d"].iloc[0]
+            valid_count = int(sum(0 if pd.isna(v) else 1 for v in cohen_map.values()))
+            total_count = max(0, len(groups) - 1)
+            _log(f"Cohen's d (scalar): valid comparisons {valid_count}/{total_count}.")
 
         positions = np.arange(1, len(groups) + 1)
         data_plot = [grouped_values[g] for g in groups]
@@ -10752,8 +10847,7 @@ def analysis_plot_boxplot():
                 patch.set_facecolor((color[0], color[1], color[2], colormap_alpha))
         if show_cohend and cohen_map:
             _add_cohen_bar(ax, cohen_map, control_group_value, groups)
-        ax.set_xticks(positions)
-        ax.set_xticklabels([str(g) for g in groups])
+        _set_category_ticks(ax, positions, groups, max_visible_labels=4)
         ax.set_xlabel(group_col)
         ax.set_ylabel(value_col)
         ax.set_title(f"{value_col} by {group_col}")
@@ -10767,7 +10861,7 @@ def analysis_plot_boxplot():
                 continue
             arr = _coerce_vector(v, vector_len)
             if arr is None:
-                return _analysis_plot_error(
+                return _plot_error(
                     f'Value column "{value_col}" must contain arrays/lists of length {vector_len}.'
                 )
             grouped_arrays[g].append(arr)
@@ -10806,6 +10900,7 @@ def analysis_plot_boxplot():
                         data_index=dim,
                         group_col=group_col,
                         sensor_col=sensor_col,
+                        min_n=2,
                         drop_zeros=False,
                     )
                 except Exception as exc:
@@ -10814,8 +10909,7 @@ def analysis_plot_boxplot():
                 for g in groups:
                     if g == control_group_value:
                         continue
-                    key = f"{g}vs{control_group_value}"
-                    comp_df = results.get(key)
+                    comp_df = _cohen_result_df(results, g, control_group_value)
                     if comp_df is None or comp_df.empty:
                         d_map[g] = np.nan
                         continue
@@ -10825,6 +10919,9 @@ def analysis_plot_boxplot():
                     else:
                         d_map[g] = row["d"].iloc[0]
                 cohen_maps.append(d_map)
+                valid_count = int(sum(0 if pd.isna(v) else 1 for v in d_map.values()))
+                total_count = max(0, len(groups) - 1)
+                _log(f"Cohen's d (dim {dim}): valid comparisons {valid_count}/{total_count}.")
 
         import math
 
@@ -10859,8 +10956,7 @@ def analysis_plot_boxplot():
                         patch.set_facecolor((color[0], color[1], color[2], colormap_alpha))
                 if show_cohend and cohen_maps:
                     _add_cohen_bar(ax, cohen_maps[dim], control_group_value, groups)
-                ax.set_xticks(positions)
-                ax.set_xticklabels([str(g) for g in groups])
+                _set_category_ticks(ax, positions, groups, max_visible_labels=4)
             else:
                 ax.text(0.5, 0.5, "No data", ha="center", va="center")
                 ax.set_xticks([])
@@ -10888,12 +10984,19 @@ def analysis_plot_boxplot():
 
 
 @app.route("/analysis/plot/topomap", methods=["POST"])
+@_analysis_plot_route_guard("Topomap")
 def analysis_plot_topomap():
     log_buffer = io.StringIO()
     def _log(message):
         print(message, file=log_buffer)
-    def _plot_error(message, status=400):
-        return _analysis_plot_error(message, status=status, log_output=log_buffer.getvalue())
+    def _plot_error(message, status=400, popup_redirect_url=None):
+        redirect_target = popup_redirect_url if popup_redirect_url is not None else url_for("analysis")
+        return _analysis_plot_error(
+            message,
+            status=status,
+            log_output=log_buffer.getvalue(),
+            error_popup_redirect_url=redirect_target,
+        )
 
     data_path = _analysis_data_path()
     if data_path is None:
@@ -10919,7 +11022,10 @@ def analysis_plot_topomap():
 
     sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
     if sensor_col is None:
-        return _plot_error("Sensor/channel column not found. Expected a column like 'sensor' or 'Sensor'.")
+        return _plot_error(
+            "Sensor/channel column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
+            popup_redirect_url=url_for("analysis"),
+        )
 
     value_col = request.form.get("topomap_value_col")
     if not value_col:
@@ -11247,7 +11353,24 @@ def analysis_plot_topomap():
                 )
             except Exception as exc:
                 plt.close(fig)
-                return _plot_error(f"Topomap plotting failed: {exc}")
+                message = f"Topomap plotting failed: {exc}"
+                lower = message.lower()
+                sensor_info_missing = any(
+                    token in lower
+                    for token in (
+                        "sensor",
+                        "electrode",
+                        "channel",
+                        "montage",
+                        "digitization",
+                        "position",
+                        "ch_names",
+                    )
+                )
+                return _plot_error(
+                    message,
+                    popup_redirect_url=url_for("analysis") if sensor_info_missing else None,
+                )
             if show_colorbar:
                 fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(label)
@@ -11458,6 +11581,12 @@ def analysis_plot_simulation():
     if not trial_indices_full_range:
         return _analysis_plot_error("No trials selected to plot.", status=400)
     trial_indices = list(trial_indices_full_range)
+    cdm_psd_mode = (request.form.get("sim_cdm_psd_mode") or "separate").strip().lower()
+    if cdm_psd_mode not in {"separate", "average", "average_by_configuration"}:
+        return _analysis_plot_error(
+            "PSD mode must be one of 'separate', 'average', or 'average_by_configuration'.",
+            status=400,
+        )
 
     available_repeat_indices = (
         _simulation_available_repetition_indices(sim_data, trial_indices_full_range)
@@ -11483,7 +11612,14 @@ def analysis_plot_simulation():
                 status=400,
             )
 
-    if plot_type in {"raster", "firing_rates", "cdm"} and selected_repeat_index is not None:
+    repeat_selection_applies = (
+        selected_repeat_index is not None
+        and (
+            plot_type in {"raster", "firing_rates", "cdm"}
+            or (plot_type == "cdm_psd" and cdm_psd_mode == "separate")
+        )
+    )
+    if repeat_selection_applies:
         trial_indices = [
             idx for idx in trial_indices_full_range
             if _simulation_trial_repeat_index(sim_data, idx) == selected_repeat_index
@@ -11508,13 +11644,6 @@ def analysis_plot_simulation():
     freq_max = _parse_float(request.form.get("sim_freq_max"), 200.0)
     if freq_min > freq_max:
         freq_min, freq_max = freq_max, freq_min
-
-    cdm_psd_mode = (request.form.get("sim_cdm_psd_mode") or "separate").strip().lower()
-    if cdm_psd_mode not in {"separate", "average", "average_by_configuration"}:
-        return _analysis_plot_error(
-            "PSD mode must be one of 'separate', 'average', or 'average_by_configuration'.",
-            status=400,
-        )
 
     def _parse_optional_int(field_name, label, min_value=0):
         raw = request.form.get(field_name)
@@ -11646,9 +11775,13 @@ def analysis_plot_simulation():
         return _analysis_plot_error(f"Plot dependencies are unavailable: {exc}", status=500)
 
     import math
+    show_repeat_selector = (
+        plot_type in {"raster", "firing_rates", "cdm"}
+        or (plot_type == "cdm_psd" and cdm_psd_mode == "separate")
+    )
     simulation_repeat_controls = None
     repeat_display_note = ""
-    if plot_type in {"raster", "firing_rates", "cdm"} and available_repeat_indices:
+    if show_repeat_selector and available_repeat_indices:
         repeat_display_note = (
             f" Repetition shown: {selected_repeat_index + 1}."
             if selected_repeat_index is not None
@@ -11662,6 +11795,7 @@ def analysis_plot_simulation():
             "sim_time_end",
             "sim_freq_min",
             "sim_freq_max",
+            "sim_cdm_psd_mode",
             "sim_welch_nperseg",
             "sim_welch_noverlap",
             "sim_welch_nfft",
@@ -12034,7 +12168,7 @@ def analysis_plot_simulation():
             subtitle = (
                 f"Field-potential power spectra plotted separately for {len(trial_indices)} selected trial(s). "
                 f"Model: {model}. Trials {range_start} to {range_end} "
-                f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
+                f"({freq_min:g}-{freq_max:g} Hz).{repeat_display_note}{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
                 f"noverlap={welch_text.get('noverlap')}, "
                 f"nfft={welch_text.get('nfft')}."

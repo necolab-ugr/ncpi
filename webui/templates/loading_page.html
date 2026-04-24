@@ -144,6 +144,13 @@
                             </tbody>
                         </table>
                     </div>
+                    <p class="text-[11px] text-amber-700 dark:text-amber-300"
+                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 0">
+                        Field details are based on the first sample examined when the result contains sample collections.
+                    </p>
+                    <p class="text-[11px] text-amber-700 dark:text-amber-300"
+                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 8"
+                       x-text="'Showing first 8 fields out of ' + item.inspection.field_details.length + '.'"></p>
                 </div>
             </template>
         </div>
