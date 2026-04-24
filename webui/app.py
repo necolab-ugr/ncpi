@@ -12481,15 +12481,10 @@ def start_computation_redirect(computation_type):
 
         selected_method = (request.form.get("select-method") or "").strip()
         app.logger.warning("[compute %s] features selected_method=%s", job_id, selected_method)
-        valid_feature_methods = {"catch22", "specparam", "dfa", "fEI", "hctsa", "power_spectrum_parameterization", "fei"}
+        valid_feature_methods = {"catch22", "specparam"}
         if selected_method not in valid_feature_methods:
             flash('Select a valid features method before computing.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
-        if selected_method == "hctsa":
-            hctsa_folder = (request.form.get("hctsa_folder") or "").strip()
-            if not hctsa_folder:
-                flash('hctsa_folder is required for hctsa.', 'error')
-                return redirect(request.referrer or url_for('features_methods'))
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
         app.logger.warning("[compute %s] features data_source_kind=%s", job_id, data_source_kind)

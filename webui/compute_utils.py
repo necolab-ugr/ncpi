@@ -1743,12 +1743,8 @@ def _extract_feature_samples(df):
 
 
 def _normalize_feature_method_name(raw_method):
-    mapping = {
-        "power_spectrum_parameterization": "specparam",
-        "fei": "fEI",
-    }
     method = (raw_method or "").strip()
-    return mapping.get(method, method)
+    return method
 
 
 def _resolve_sampling_frequency(params, key, df, label):
@@ -1803,108 +1799,15 @@ def _build_feature_method_params(method, params, df):
         if thresholds:
             method_params["metric_thresholds"] = thresholds
 
-    elif method == "dfa":
-        method_params["normalize"] = _parse_bool_param(params, "dfa_normalize", default=False)
-        method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "dfa_sampling_frequency", df, "DFA")
-        fit_interval = _parse_range_pair(params, "dfa_fit_min", "dfa_fit_max")
-        compute_interval = _parse_range_pair(params, "dfa_compute_min", "dfa_compute_max")
-        if fit_interval is not None:
-            method_params["fit_interval"] = fit_interval
-        if compute_interval is not None:
-            method_params["compute_interval"] = compute_interval
-        method_params["overlap"] = _parse_bool_param(params, "dfa_overlap", default=True)
-
-        dfa_mode = _get_param(params, "dfa_analysis_mode", "envelope")
-        if dfa_mode == "frequency_range":
-            method_params["frequency_range"] = _parse_range_pair(params, "dfa_frequency_min", "dfa_frequency_max")
-            if method_params["frequency_range"] is None:
-                raise ValueError("DFA frequency_range mode requires min/max frequency values.")
-        elif dfa_mode == "spectrum_range":
-            method_params["spectrum_range"] = _parse_range_pair(params, "dfa_spectrum_min", "dfa_spectrum_max")
-            if method_params["spectrum_range"] is None:
-                raise ValueError("DFA spectrum_range mode requires min/max frequency values.")
-        else:
-            if fit_interval is None or compute_interval is None:
-                raise ValueError("DFA envelope mode requires fit_interval and compute_interval.")
-
-        bad_idxes = _parse_idx_list_param(params, "dfa_bad_idxes")
-        if bad_idxes is not None:
-            method_params["bad_idxes"] = bad_idxes
-
-        method_params["input_is_envelope"] = _parse_bool_param(params, "dfa_input_is_envelope", default=True)
-        filter_kwargs = _parse_dict_param(params, "dfa_filter_kwargs")
-        if filter_kwargs:
-            method_params["filter_kwargs"] = filter_kwargs
-        trim_seconds = _parse_float_param(params, "dfa_trim_seconds", default=None)
-        if trim_seconds is not None:
-            method_params["trim_seconds"] = float(trim_seconds)
-        hilbert_n_fft = _parse_int_param(params, "dfa_hilbert_n_fft", default=None)
-        if hilbert_n_fft is not None:
-            method_params["hilbert_n_fft"] = int(hilbert_n_fft)
-
-    elif method == "fEI":
-        method_params["normalize"] = _parse_bool_param(params, "fei_normalize", default=False)
-        method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "fei_sampling_frequency", df, "fEI")
-        window_size_sec = _parse_float_param(params, "fei_window_size_sec", default=None)
-        if window_size_sec is None:
-            raise ValueError("fEI requires window_size_sec.")
-        method_params["window_size_sec"] = float(window_size_sec)
-        method_params["window_overlap"] = _parse_float_param(params, "fei_window_overlap", default=0.0)
-        dfa_value = _parse_float_param(params, "fei_dfa_value", default=None)
-        if dfa_value is not None:
-            method_params["dfa_value"] = float(dfa_value)
-        dfa_threshold = _parse_float_param(params, "fei_dfa_threshold", default=0.6)
-        method_params["dfa_threshold"] = float(dfa_threshold)
-
-        dfa_fit_interval = _parse_range_pair(params, "fei_dfa_fit_min", "fei_dfa_fit_max")
-        dfa_compute_interval = _parse_range_pair(params, "fei_dfa_compute_min", "fei_dfa_compute_max")
-        if dfa_fit_interval is not None:
-            method_params["dfa_fit_interval"] = dfa_fit_interval
-        if dfa_compute_interval is not None:
-            method_params["dfa_compute_interval"] = dfa_compute_interval
-        method_params["dfa_overlap"] = _parse_bool_param(params, "fei_dfa_overlap", default=True)
-
-        fei_mode = _get_param(params, "fei_analysis_mode", "envelope")
-        if fei_mode == "frequency_range":
-            method_params["frequency_range"] = _parse_range_pair(params, "fei_frequency_min", "fei_frequency_max")
-            if method_params["frequency_range"] is None:
-                raise ValueError("fEI frequency_range mode requires min/max frequency values.")
-        elif fei_mode == "spectrum_range":
-            method_params["spectrum_range"] = _parse_range_pair(params, "fei_spectrum_min", "fei_spectrum_max")
-            if method_params["spectrum_range"] is None:
-                raise ValueError("fEI spectrum_range mode requires min/max frequency values.")
-        else:
-            if dfa_value is None and (dfa_fit_interval is None or dfa_compute_interval is None):
-                raise ValueError("fEI envelope mode requires dfa intervals unless dfa_value is provided.")
-
-        bad_idxes = _parse_idx_list_param(params, "fei_bad_idxes")
-        if bad_idxes is not None:
-            method_params["bad_idxes"] = bad_idxes
-        method_params["input_is_envelope"] = _parse_bool_param(params, "fei_input_is_envelope", default=True)
-        filter_kwargs = _parse_dict_param(params, "fei_filter_kwargs")
-        if filter_kwargs:
-            method_params["filter_kwargs"] = filter_kwargs
-        trim_seconds = _parse_float_param(params, "fei_trim_seconds", default=None)
-        if trim_seconds is not None:
-            method_params["trim_seconds"] = float(trim_seconds)
-        hilbert_n_fft = _parse_int_param(params, "fei_hilbert_n_fft", default=None)
-        if hilbert_n_fft is not None:
-            method_params["hilbert_n_fft"] = int(hilbert_n_fft)
-
-    elif method == "hctsa":
-        hctsa_folder = _get_param(params, "hctsa_folder", None)
-        if not hctsa_folder:
-            raise ValueError("hctsa_folder is required for hctsa.")
-        method_params["hctsa_folder"] = hctsa_folder
-
     else:
-        raise ValueError(f"Unsupported features method '{method}'.")
+        raise ValueError(
+            f"Unsupported features method '{method}'. Only 'catch22' and 'specparam' are available in webui."
+        )
 
     return method_params, {
         "n_jobs": n_jobs,
         "chunksize": chunksize,
         "start_method": start_method,
-        "hctsa_return_meta": _parse_bool_param(params, "hctsa_return_meta", default=False),
     }
 
 
@@ -2344,89 +2247,74 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         features = ncpi.Features(method=method, params=method_params)
         _append_job_output(job_status, job_id, "Starting feature extraction...")
 
-        if method == "hctsa" and exec_opts["hctsa_return_meta"]:
-            _append_job_output(job_status, job_id, "Running hctsa feature extraction...")
-            hctsa_result = features.hctsa(
-                samples,
-                hctsa_folder=method_params["hctsa_folder"],
-                workers=exec_opts["n_jobs"],
-                return_meta=True,
+        sig = inspect.signature(features.compute_features)
+        supports_progress = "progress_callback" in sig.parameters
+        progress_state = {
+            "callback_seen": False,
+            "running": True,
+            "last_heartbeat_log": time.time(),
+        }
+
+        def _on_feature_progress(completed, total, pct):
+            if total <= 0:
+                return
+            progress_state["callback_seen"] = True
+            mapped = int(max(0, min(99, float(pct))))
+            if job_id in job_status:
+                # Follow ncpi compute_features progress directly.
+                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), mapped)
+
+        def _on_feature_log(message):
+            _append_job_output(job_status, job_id, str(message))
+
+        if not supports_progress:
+            _append_job_output(
+                job_status,
+                job_id,
+                "Warning: compute_features progress callbacks are unavailable in this ncpi version."
             )
-            if job_id in job_status:
-                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
-            output_df = df.copy()
-            output_df["Features"] = hctsa_result["features"]
-            output_df["hctsa_num_valid_features"] = int(hctsa_result["num_valid_features"])
-            output_df["hctsa_num_total_features"] = int(hctsa_result["num_total_features"])
-        else:
-            sig = inspect.signature(features.compute_features)
-            supports_progress = "progress_callback" in sig.parameters
-            progress_state = {
-                "callback_seen": False,
-                "running": True,
-                "last_heartbeat_log": time.time(),
-            }
 
-            def _on_feature_progress(completed, total, pct):
-                if total <= 0:
-                    return
-                progress_state["callback_seen"] = True
-                mapped = int(max(0, min(99, float(pct))))
+        if job_id in job_status:
+            job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 10)
+
+        def _feature_progress_heartbeat():
+            while progress_state["running"]:
+                time.sleep(2.0)
+                if not progress_state["running"]:
+                    break
+                # If callbacks are working, trust them and stop synthetic progress updates.
+                if progress_state["callback_seen"]:
+                    continue
                 if job_id in job_status:
-                    # Follow ncpi compute_features progress directly.
-                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), mapped)
+                    current = int(job_status[job_id].get("progress", 0))
+                    if current < 95:
+                        job_status[job_id]["progress"] = current + 1
+                now = time.time()
+                if now - progress_state["last_heartbeat_log"] >= 15.0:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Feature extraction is still running..."
+                    )
+                    progress_state["last_heartbeat_log"] = now
 
-            def _on_feature_log(message):
-                _append_job_output(job_status, job_id, str(message))
-
-            if not supports_progress:
-                _append_job_output(
-                    job_status,
-                    job_id,
-                    "Warning: compute_features progress callbacks are unavailable in this ncpi version."
-                )
-
-            if job_id in job_status:
-                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 10)
-
-            def _feature_progress_heartbeat():
-                while progress_state["running"]:
-                    time.sleep(2.0)
-                    if not progress_state["running"]:
-                        break
-                    # If callbacks are working, trust them and stop synthetic progress updates.
-                    if progress_state["callback_seen"]:
-                        continue
-                    if job_id in job_status:
-                        current = int(job_status[job_id].get("progress", 0))
-                        if current < 95:
-                            job_status[job_id]["progress"] = current + 1
-                    now = time.time()
-                    if now - progress_state["last_heartbeat_log"] >= 15.0:
-                        _append_job_output(
-                            job_status,
-                            job_id,
-                            "Feature extraction is still running..."
-                        )
-                        progress_state["last_heartbeat_log"] = now
-
-            heartbeat_thread = threading.Thread(target=_feature_progress_heartbeat, daemon=True)
-            heartbeat_thread.start()
-            try:
-                computed = _compute_features_with_compat(
-                    features_obj=features,
-                    samples=samples,
-                    exec_opts=exec_opts,
-                    progress_callback=_on_feature_progress,
-                    log_callback=_on_feature_log,
-                )
-            finally:
-                progress_state["running"] = False
-                heartbeat_thread.join(timeout=0.2)
-            if job_id in job_status:
-                job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
-            output_df = df.copy()
-            output_df["Features"] = computed
+        heartbeat_thread = threading.Thread(target=_feature_progress_heartbeat, daemon=True)
+        heartbeat_thread.start()
+        try:
+            computed = _compute_features_with_compat(
+                features_obj=features,
+                samples=samples,
+                exec_opts=exec_opts,
+                progress_callback=_on_feature_progress,
+                log_callback=_on_feature_log,
+            )
+        finally:
+            progress_state["running"] = False
+            heartbeat_thread.join(timeout=0.2)
+        if job_id in job_status:
+            job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 99)
+        output_df = df.copy()
+        output_df["Features"] = computed
 
         _append_job_output(job_status, job_id, "Attaching computed features to dataframe.")
         output_df["FeatureMethod"] = method
