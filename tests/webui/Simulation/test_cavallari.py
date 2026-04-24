@@ -913,8 +913,6 @@ def webui_app_module(_webui_test_session):
     """Provide a freshly reloaded WebUI app module for the current test module."""
     if importlib.util.find_spec("nest") is None:
         pytest.skip("NEST is required for the Cavallari web UI simulation test.")
-    if sync_playwright is None:
-        pytest.skip("Playwright is required for the web UI simulation tests.")
 
     module = _reload_webui_app()
     _set_fast_simulation_defaults(module)
@@ -950,6 +948,35 @@ def live_webui_server(webui_app_module, pytestconfig):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_cavallari_joint_grid_group_zips_grouped_parameters(webui_app_module):
+    """Verify that grouped Cavallari parameters advance together instead of forming a Cartesian product."""
+    expected_signatures = [
+        (0.178, 0.233),
+        (0.356, 0.466),
+    ]
+    form_data = {
+        "sim_run_mode": "grid",
+        "sim_repetitions": "1",
+        "exc_exc_recurrent": "grid=0.178:0.356:0.178",
+        "exc_inh_recurrent": "grid=[0.233, 0.466]",
+        "sim_joint_groups": json.dumps([["exc_exc_recurrent", "exc_inh_recurrent"]]),
+    }
+
+    run_mode, expanded_forms, normalized_trials = _expanded_cavallari_trials(webui_app_module, form_data)
+    assert run_mode == "grid"
+    assert len(expanded_forms) == 2
+    assert [
+        (float(trial["exc_exc_recurrent"]), float(trial["exc_inh_recurrent"]))
+        for trial in normalized_trials
+    ] == expected_signatures
+
+    grid_metadata = webui_app_module._build_simulation_grid_metadata("cavallari", run_mode, expanded_forms)
+    assert grid_metadata is not None
+    assert grid_metadata["joint_groups"] == [["exc_exc_recurrent", "exc_inh_recurrent"]]
+    assert grid_metadata["changed_keys"] == ["exc_exc_recurrent", "exc_inh_recurrent"]
+    assert grid_metadata["configuration_count"] == 2
 
 
 @pytest.mark.slow

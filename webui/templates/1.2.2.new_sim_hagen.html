@@ -201,9 +201,33 @@
         </div>
     </section>
 
+    <section id="grid-mode-help" class="hidden mx-4 mb-2 rounded-2xl border border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-900/60">
+        <div class="flex flex-col gap-2">
+            <h3 class="text-base font-semibold text-slate-900 dark:text-white">Joint sweep groups</h3>
+            <p class="text-sm text-slate-600 dark:text-slate-300">
+                Keep the current per-parameter sweep controls below. Add a group only when selected parameters should use the same candidate index together instead of forming a Cartesian product.
+            </p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">
+                Example: if `J_YX` has 3 candidates and `nu_ext` has 3 candidates in the same group, the sweep runs 3 linked configurations, not 9 combinations.
+            </p>
+        </div>
+        <div id="joint-groups-container" class="mt-4 flex flex-col gap-3"></div>
+        <div class="mt-4 flex items-center justify-between gap-3">
+            <p class="text-xs text-slate-500 dark:text-slate-400">Each grouped parameter must define the same number of candidates.</p>
+            <button
+                id="add-joint-group-button"
+                type="button"
+                class="inline-flex items-center justify-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100 dark:border-slate-700 dark:bg-[#191e33] dark:text-white dark:hover:bg-slate-800"
+            >
+                Add joint group
+            </button>
+        </div>
+    </section>
+
     <!-- Container where input parameters will be appended with their default values -->
     <div id="parameter-container">
     </div>
+    <input type="hidden" id="sim-joint-groups" name="sim_joint_groups" value="" />
 
     <!-- Action buttons -->
     <div class="flex justify-between items-center gap-4 p-4 mt-6">
@@ -274,6 +298,6 @@
     {{ super() }} <!-- import base.html scripts -->
 
     <!-- Simulation-specific JavaScript -->
-    <script src="{{ url_for('static', filename='js/simulation_Brunel.js', v='20260311-2') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulation_Hagen.js', v='20260424-1') }}"></script>
 
 {% endblock %} > 

@@ -185,14 +185,16 @@
                                                         <th class="px-2 py-1.5 text-left font-semibold">Field</th>
                                                         <th class="px-2 py-1.5 text-left font-semibold">Type</th>
                                                         <th class="px-2 py-1.5 text-left font-semibold">Shape</th>
+                                                        <th class="px-2 py-1.5 text-left font-semibold">Detail</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                                                    {% for field in entry.inspection.field_details[:6] %}
+                                                    {% for field in entry.inspection.field_details %}
                                                     <tr>
                                                         <td class="px-2 py-1.5 font-mono align-top">{{ field.field }}</td>
                                                         <td class="px-2 py-1.5 align-top">{{ field.python_type or "Unknown" }}</td>
                                                         <td class="px-2 py-1.5 align-top">{{ field.shape if field.shape is not none else "—" }}</td>
+                                                        <td class="px-2 py-1.5 align-top">{{ field.detail or "—" }}</td>
                                                     </tr>
                                                     {% endfor %}
                                                 </tbody>
@@ -227,7 +229,7 @@
                         <span class="material-symbols-outlined text-primary shrink-0">grid_on</span>
                         <div>
                             <h5 class="text-sm font-bold mb-1">Data Structure</h5>
-                            <p class="text-sm text-slate-500 dark:text-slate-400">Output files from field potential calculations should be saved as .pkl files (for example: <code>kernel_approx_cdm.pkl</code>, <code>proxy.pkl</code>).</p>
+                            <p class="text-sm text-slate-500 dark:text-slate-400">Output files from field potential calculations should be saved as .pkl files (for example: <code>cdm.pkl</code>, <code>meeg.pkl</code>, <code>proxy.pkl</code>).</p>
                         </div>
                     </div>
                 </div>

@@ -848,8 +848,6 @@ def webui_app_module(_webui_test_session):
     """Provide a freshly reloaded WebUI app module for the current test module."""
     if importlib.util.find_spec("nest") is None:
         pytest.skip("NEST is required for the Hagen web UI simulation test.")
-    if sync_playwright is None:
-        pytest.skip("Playwright is required for the web UI simulation tests.")
 
     module = _reload_webui_app()
     _set_fast_simulation_defaults(module)
@@ -885,6 +883,49 @@ def live_webui_server(webui_app_module, pytestconfig):
     finally:
         server.shutdown()
         thread.join(timeout=5)
+
+
+def test_hagen_joint_grid_group_zips_grouped_parameters(webui_app_module):
+    """Verify that grouped Hagen parameters advance together instead of forming a Cartesian product."""
+    grouped_j_yx_candidates = [
+        [[1.0, 2.0], [3.0, 4.0]],
+        [[10.0, 20.0], [30.0, 40.0]],
+    ]
+    form_data = {
+        "sim_run_mode": "grid",
+        "sim_repetitions": "1",
+        "J_YX": f"grid={grouped_j_yx_candidates!r}",
+        "nu_ext": "grid=40:80:40",
+        "sim_joint_groups": json.dumps([["J_YX", "nu_ext"]]),
+    }
+
+    run_mode, expanded_forms, normalized_trials = _expanded_hagen_trials(webui_app_module, form_data)
+    assert run_mode == "grid"
+    assert len(expanded_forms) == 2
+    assert [_matrix_to_tuple(trial["J_YX"]) for trial in normalized_trials] == [
+        _matrix_to_tuple(matrix) for matrix in grouped_j_yx_candidates
+    ]
+    assert [float(trial["nu_ext"]) for trial in normalized_trials] == [40.0, 80.0]
+
+    grid_metadata = webui_app_module._build_simulation_grid_metadata("hagen", run_mode, expanded_forms)
+    assert grid_metadata is not None
+    assert grid_metadata["joint_groups"] == [["J_YX", "nu_ext"]]
+    assert grid_metadata["changed_keys"] == ["J_YX", "nu_ext"]
+    assert grid_metadata["configuration_count"] == 2
+
+
+def test_hagen_joint_grid_group_requires_matching_candidate_counts(webui_app_module):
+    """Reject grouped Hagen parameters when the candidate counts differ."""
+    form_data = {
+        "sim_run_mode": "grid",
+        "sim_repetitions": "1",
+        "J_ext": "grid=29.89:89.67:29.89",
+        "nu_ext": "grid=40:80:40",
+        "sim_joint_groups": json.dumps([["J_ext", "nu_ext"]]),
+    }
+
+    with pytest.raises(ValueError, match="same number of candidates"):
+        webui_app_module._expand_simulation_forms("hagen", form_data)
 
 
 @pytest.mark.slow

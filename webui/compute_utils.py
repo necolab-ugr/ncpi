@@ -1503,6 +1503,7 @@ def _first_numeric_from_column(df, column_name):
 
 def _extract_signal_and_meta_from_source(obj):
     meta = {"dt_ms": None, "decimation_factor": 1, "fs_hz": None}
+    dipole_probe_priority = ("CurrentDipoleMoment", "KernelApproxCurrentDipoleMoment")
 
     if isinstance(obj, pd.DataFrame):
         dt_ms = _first_numeric_from_column(obj, "dt_ms")
@@ -1532,10 +1533,46 @@ def _extract_signal_and_meta_from_source(obj):
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
         if "data" in obj.columns and not obj.empty:
-            return obj["data"].iloc[0], meta
+            selected_row = obj.iloc[0]
+            if "probe" in obj.columns:
+                for probe_name in dipole_probe_priority:
+                    matched = obj[obj["probe"] == probe_name]
+                    if not matched.empty:
+                        selected_row = matched.iloc[0]
+                        break
+            return selected_row.get("data"), meta
         if not obj.empty:
             return obj.iloc[0, 0], meta
         return None, meta
+
+    if isinstance(obj, MappingABC):
+        probe_outputs = obj.get("probe_outputs")
+        if isinstance(probe_outputs, MappingABC) and probe_outputs:
+            for probe_name in dipole_probe_priority:
+                candidate = probe_outputs.get(probe_name)
+                if candidate is not None:
+                    return _extract_signal_and_meta_from_source(candidate)
+            first_candidate = next(iter(probe_outputs.values()))
+            return _extract_signal_and_meta_from_source(first_candidate)
+
+        dt_ms = _safe_float(obj.get("dt_ms"))
+        decimation_factor = _safe_float(obj.get("decimation_factor"))
+        fs_hz = _safe_float(obj.get("fs_hz"))
+        metadata = obj.get("metadata")
+        if isinstance(metadata, MappingABC):
+            if dt_ms is None:
+                dt_ms = _safe_float(metadata.get("dt_ms"))
+            if decimation_factor is None:
+                decimation_factor = _safe_float(metadata.get("decimation_factor"))
+            if fs_hz is None:
+                fs_hz = _safe_float(metadata.get("fs_hz"))
+        if decimation_factor is None or decimation_factor <= 0:
+            decimation_factor = 1
+        meta["dt_ms"] = dt_ms
+        meta["decimation_factor"] = int(decimation_factor)
+        meta["fs_hz"] = fs_hz
+        if "data" in obj:
+            return obj.get("data"), meta
 
     return obj, meta
 
@@ -3669,7 +3706,6 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         _append_job_output(job_status, job_id, "Computing proxy with ncpi.FieldPotential.compute_proxy...")
         potential = ncpi.FieldPotential()
-        trial_sim_payloads = []
         trial_proxy_payloads = []
         for trial_idx in range(trial_count):
             if method == "FR":
@@ -3713,7 +3749,6 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             if trial_count > 1:
                 row["trial_index"] = int(trial_idx)
 
-            trial_sim_payloads.append(trial_sim_data)
             trial_proxy_payloads.append(pd.DataFrame([row]))
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
@@ -3740,15 +3775,12 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 except OSError:
                     pass
 
-        sim_data_path = os.path.join(output_root, 'sim_data.pkl')
         proxy_path = os.path.join(output_root, 'proxy.pkl')
 
-        with open(sim_data_path, 'wb') as f:
-            pickle.dump(trial_sim_payloads, f)
         with open(proxy_path, "wb") as f:
             pickle.dump(trial_proxy_payloads, f)
 
-        _append_job_output(job_status, job_id, f"Saved sim_data.pkl and proxy.pkl to {output_root}")
+        _append_job_output(job_status, job_id, f"Saved proxy.pkl to {output_root}")
         _announce_saved_output_folders(job_status, job_id, "field_potential_proxy", output_root)
         job_status[job_id].update({
                 "status": "finished",
@@ -4020,15 +4052,9 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         scale = float(scale_val) if scale_val not in (None, "") else 1.0
         aggregate_val = params.get("cdm_aggregate")
         aggregate = aggregate_val if aggregate_val else None
-        probe_output_map = {
-            "KernelApproxCurrentDipoleMoment": "kernel_approx_cdm.pkl",
-            "CurrentDipoleMoment": "current_dipole_moment.pkl",
-            "GaussCylinderPotential": "gauss_cylinder_potential.pkl",
-        }
 
         kernels_for_save = None
         probe_trial_payloads = {probe_name: [] for probe_name in probe_names}
-        multi_probe_trial_payloads = []
         logged_area_detected = False
         logged_scaling_applied = False
         logged_scaling_warning = False
@@ -4036,7 +4062,6 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         logged_population_flattened = False
         logged_population_aggregated = False
 
-        output_paths = {}
         fs_hz = (1000.0 / float(cdm_dt)) if float(cdm_dt) > 0 else None
         for trial_idx in range(trial_count):
             spike_times_trial_raw = _pick_trial_item(spike_times_raw, trial_idx)
@@ -4146,7 +4171,6 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             if kernels_for_save is None:
                 kernels_for_save = kernels_for_convolution
 
-            trial_rows = []
             for probe_name in probe_names:
                 cdm_signals = potential.compute_cdm_lfp_from_kernels(
                     kernels_for_convolution,
@@ -4174,9 +4198,6 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     row["trial_index"] = int(trial_idx)
                 payload_df = pd.DataFrame([row])
                 probe_trial_payloads[probe_name].append(payload_df)
-                trial_rows.append(row)
-            if len(probe_names) > 1:
-                multi_probe_trial_payloads.append(pd.DataFrame(trial_rows))
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed kernel convolution trial {trial_idx + 1}/{trial_count}.")
 
@@ -4194,11 +4215,6 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     f"Clipped kernel field-potential time-series to common minimum length {clipped_length} samples across trials.",
                 )
                 clipped_reported = True
-        if multi_probe_trial_payloads:
-            multi_probe_trial_payloads, _ = _clip_trial_dataframe_payloads(
-                multi_probe_trial_payloads,
-                signal_columns=("data", "raw_signals"),
-            )
 
         kernels_path = os.path.join(output_root, "kernels.pkl")
         kernel_payload = kernels_for_save if kernels_for_save is not None else kernels
@@ -4206,27 +4222,54 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             pickle.dump([kernel_payload for _ in range(trial_count)], f)
         _append_job_output(job_status, job_id, f"Saved kernels to {kernels_path}")
 
-        for probe_name in probe_names:
-            output_name = probe_output_map.get(probe_name)
-            if not output_name:
-                safe_probe = "".join(ch.lower() if ch.isalnum() else "_" for ch in probe_name).strip("_")
-                output_name = f"{safe_probe or 'probe_output'}.pkl"
-            output_path = os.path.join(output_root, output_name)
-            payload = probe_trial_payloads[probe_name]
-            with open(output_path, "wb") as f:
-                pickle.dump(payload, f)
-            output_paths[probe_name] = output_path
-            _append_job_output(job_status, job_id, f"Saved probe output to {output_path}")
+        def _row_dict_from_trial_payload(payload):
+            if isinstance(payload, pd.DataFrame):
+                if payload.empty:
+                    return {}
+                return dict(payload.iloc[0].to_dict())
+            if isinstance(payload, MappingABC):
+                return dict(payload)
+            return {"data": payload}
 
-        results_path = None
-        if len(probe_names) == 1:
-            results_path = next(iter(output_paths.values()))
-        else:
-            combined_path = os.path.join(output_root, "probe_outputs.pkl")
-            with open(combined_path, "wb") as f:
-                pickle.dump(multi_probe_trial_payloads, f)
-            results_path = combined_path
-            _append_job_output(job_status, job_id, f"Saved combined probe outputs to {combined_path}")
+        cdm_path = os.path.join(output_root, "cdm.pkl")
+        cdm_trial_payloads = []
+        preferred_probe_order = (
+            "CurrentDipoleMoment",
+            "KernelApproxCurrentDipoleMoment",
+            "GaussCylinderPotential",
+        )
+        for trial_idx in range(trial_count):
+            probe_outputs = {}
+            for probe_name in probe_names:
+                trial_payload = _pick_trial_item(probe_trial_payloads.get(probe_name, []), trial_idx)
+                row_payload = _row_dict_from_trial_payload(trial_payload)
+                if row_payload:
+                    probe_outputs[probe_name] = row_payload
+
+            if not probe_outputs:
+                cdm_trial_payloads.append({})
+                continue
+
+            selected_probe = None
+            for probe_name in preferred_probe_order:
+                if probe_name in probe_outputs:
+                    selected_probe = probe_name
+                    break
+            if selected_probe is None:
+                selected_probe = next(iter(probe_outputs.keys()))
+
+            selected_payload = dict(probe_outputs[selected_probe])
+            selected_payload["probe"] = selected_probe
+            selected_payload["probe_outputs"] = probe_outputs
+            selected_payload["probe_order"] = list(probe_outputs.keys())
+            if trial_count > 1:
+                selected_payload.setdefault("trial_index", int(trial_idx))
+            cdm_trial_payloads.append(selected_payload)
+
+        with open(cdm_path, "wb") as f:
+            pickle.dump(cdm_trial_payloads, f)
+        _append_job_output(job_status, job_id, f"Saved unified CDM/LFP outputs to {cdm_path}")
+        results_path = cdm_path
 
         _announce_saved_output_folders(job_status, job_id, "field_potential_kernel", output_root, results_path)
         job_status[job_id].update({
@@ -4248,24 +4291,19 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         file_paths = params.get("file_paths", {})
 
         cdm_path = file_paths.get("meeg_cdm_file")
+        if cdm_path and os.path.exists(cdm_path):
+            cdm_name = os.path.basename(cdm_path).lower()
+            if not (cdm_name == "cdm.pkl" or cdm_name.endswith("_cdm.pkl")):
+                raise ValueError("M/EEG input must be cdm.pkl generated by the Field Potential kernel module.")
         if not cdm_path or not os.path.exists(cdm_path):
             preferred = []
             for kernel_root in _field_potential_kernel_search_roots():
-                direct_cdm = os.path.join(kernel_root, "current_dipole_moment.pkl")
+                direct_cdm = os.path.join(kernel_root, "cdm.pkl")
                 if os.path.isfile(direct_cdm):
                     preferred.append(direct_cdm)
-                preferred.extend(glob.glob(os.path.join(kernel_root, "*", "current_dipole_moment.pkl")))
+                preferred.extend(glob.glob(os.path.join(kernel_root, "*", "cdm.pkl")))
             if preferred:
                 cdm_path = max(preferred, key=os.path.getmtime)
-            else:
-                fallback = []
-                for kernel_root in _field_potential_kernel_search_roots():
-                    direct_kernel_approx = os.path.join(kernel_root, "kernel_approx_cdm.pkl")
-                    if os.path.isfile(direct_kernel_approx):
-                        fallback.append(direct_kernel_approx)
-                    fallback.extend(glob.glob(os.path.join(kernel_root, "*", "kernel_approx_cdm.pkl")))
-                if fallback:
-                    cdm_path = max(fallback, key=os.path.getmtime)
         if not cdm_path or not os.path.exists(cdm_path):
             raise FileNotFoundError("CDM input is required (upload .pkl or compute kernels first).")
         CDM_obj = read_file(cdm_path)

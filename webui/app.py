@@ -138,6 +138,7 @@ PICKLE_EXTENSIONS = {".pkl", ".pickle"}
 MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
 MAX_SIMULATION_GRID_COMBINATIONS = 256
 GRID_PREFIX = "grid="
+SIMULATION_JOINT_GROUPS_FIELD = "sim_joint_groups"
 SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
 SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
 NATIVE_PATH_PICKER_ENABLED = str(os.environ.get("NCPI_ENABLE_NATIVE_PATH_PICKER", "0")).strip().lower() in {"1", "true", "yes", "on"}
@@ -903,6 +904,77 @@ def _parse_grid_candidates(form, key, default):
     return coerced, True
 
 
+def _parse_simulation_joint_groups(form, allowed_keys):
+    raw = _get_form_value(form, SIMULATION_JOINT_GROUPS_FIELD)
+    if raw is None or raw == "":
+        return []
+
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError("Invalid joint sweep group definition.") from exc
+
+    if not isinstance(parsed, list):
+        raise ValueError("Joint sweep groups must be a list of parameter lists.")
+
+    allowed = {str(key) for key in allowed_keys}
+    groups = []
+    used = set()
+    for group_index, entry in enumerate(parsed, start=1):
+        if not isinstance(entry, list):
+            raise ValueError(f"Joint sweep group {group_index} must be a list of parameter names.")
+
+        members = []
+        seen_in_group = set()
+        for raw_key in entry:
+            key = str(raw_key).strip()
+            if not key:
+                continue
+            if key not in allowed:
+                raise ValueError(f"Joint sweep group {group_index} contains unsupported parameter '{key}'.")
+            if key in seen_in_group:
+                raise ValueError(f"Joint sweep group {group_index} contains duplicate parameter '{key}'.")
+            if key in used:
+                raise ValueError(f"Parameter '{key}' cannot belong to more than one joint sweep group.")
+            seen_in_group.add(key)
+            members.append(key)
+
+        if not members:
+            continue
+        if len(members) < 2:
+            raise ValueError(f"Joint sweep group {group_index} must contain at least two parameters.")
+
+        used.update(members)
+        groups.append(members)
+
+    return groups
+
+
+def _build_joint_group_dimensions(candidate_lists, joint_groups):
+    dimensions = []
+    for group_index, group_keys in enumerate(joint_groups, start=1):
+        lengths = [len(candidate_lists[key]) for key in group_keys]
+        group_size = lengths[0] if lengths else 0
+        if any(length != group_size for length in lengths[1:]):
+            members_text = ", ".join(group_keys)
+            raise ValueError(
+                f"Joint sweep group {group_index} requires the same number of candidates for all members "
+                f"({members_text})."
+            )
+        zipped_candidates = []
+        for candidate_index in range(group_size):
+            zipped_candidates.append({
+                key: candidate_lists[key][candidate_index]
+                for key in group_keys
+            })
+        dimensions.append({
+            "kind": "joint_group",
+            "keys": list(group_keys),
+            "candidates": zipped_candidates,
+        })
+    return dimensions
+
+
 def _simulation_grid_defaults(model_type):
     if model_type == "hagen":
         defaults = {
@@ -993,13 +1065,38 @@ def _expand_simulation_forms(model_type, form):
 
     grid_defaults = _simulation_grid_defaults(model_type)
     ordered_keys = list(grid_defaults.keys())
+    joint_groups = _parse_simulation_joint_groups(form, ordered_keys)
+    grouped_keys = {key for group in joint_groups for key in group}
 
     candidate_lists = {}
     combinations = 1
     for key in ordered_keys:
         candidates, _ = _parse_grid_candidates(form, key, grid_defaults[key])
         candidate_lists[key] = candidates
-        combinations *= len(candidates)
+
+    dimensions = []
+    inserted_groups = set()
+    group_by_member = {
+        key: group_idx
+        for group_idx, group in enumerate(joint_groups)
+        for key in group
+    }
+    joint_dimensions = _build_joint_group_dimensions(candidate_lists, joint_groups)
+    for key in ordered_keys:
+        if key in grouped_keys:
+            group_idx = group_by_member[key]
+            if group_idx in inserted_groups:
+                continue
+            inserted_groups.add(group_idx)
+            dimensions.append(joint_dimensions[group_idx])
+            combinations *= len(joint_dimensions[group_idx]["candidates"])
+            continue
+        dimensions.append({
+            "kind": "parameter",
+            "keys": [key],
+            "candidates": candidate_lists[key],
+        })
+        combinations *= len(candidate_lists[key])
 
     total = combinations * repetitions
 
@@ -1010,15 +1107,20 @@ def _expand_simulation_forms(model_type, form):
         )
 
     expanded_forms = []
-    for combo_index, combo in enumerate(product(*(candidate_lists[key] for key in ordered_keys))):
+    dimension_candidates = [dimension["candidates"] for dimension in dimensions]
+    for combo_index, combo in enumerate(product(*dimension_candidates)):
         for repeat_index in range(repetitions):
             trial_form = dict(form)
             trial_form["sim_run_mode"] = "grid"
             trial_form["sim_repetitions"] = str(repetitions)
             trial_form["sim_combo_index"] = str(combo_index)
             trial_form["sim_repeat_index"] = str(repeat_index)
-            for key, value in zip(ordered_keys, combo):
-                trial_form[key] = _to_form_value(value)
+            for dimension, value in zip(dimensions, combo):
+                if dimension["kind"] == "joint_group":
+                    for key in dimension["keys"]:
+                        trial_form[key] = _to_form_value(value[key])
+                    continue
+                trial_form[dimension["keys"][0]] = _to_form_value(value)
             expanded_forms.append(trial_form)
 
     if not expanded_forms:
@@ -1053,6 +1155,7 @@ def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
         return None
     defaults = _simulation_grid_defaults(model_type)
     ordered_keys = list(defaults.keys())
+    joint_groups = _parse_simulation_joint_groups(run_forms[0], ordered_keys) if run_forms else []
     trial_values = [_normalize_simulation_form_values(form, defaults) for form in run_forms]
     if not trial_values:
         return None
@@ -1099,6 +1202,7 @@ def _build_simulation_grid_metadata(model_type, run_mode, run_forms):
         "trial_count": len(trial_values),
         "configuration_count": configuration_count,
         "repetitions_per_configuration": int(repetitions),
+        "joint_groups": [list(group) for group in joint_groups],
         "changed_keys": changed_keys,
         "trials": trials,
     }
@@ -1166,24 +1270,25 @@ def _infer_field_potential_type_from_filename(filename):
     if not lower_name:
         return None
 
-    if lower_name.startswith("proxy") or "proxy" in lower_name:
+    if lower_name == "proxy.pkl":
         return "proxy"
-    if lower_name in {"kernel_approx_cdm.pkl", "current_dipole_moment.pkl"} or "cdm" in lower_name:
+    if lower_name == "kernels.pkl":
+        return "kernel"
+    if lower_name == "cdm.pkl":
         return "cdm"
-    if lower_name in {"gauss_cylinder_potential.pkl", "probe_outputs.pkl", "lfp.pkl"} or "lfp" in lower_name:
-        return "lfp"
-    if lower_name == "eeg.pkl" or "eeg" in lower_name:
-        return "eeg"
-    if lower_name == "meg.pkl" or "meg" in lower_name:
-        return "meg"
     if lower_name == "meeg.pkl":
         return "meeg"
     return None
 
 
 def _field_potential_output_name(fp_type, safe_name):
-    # Preserve user-provided names for precomputed load-data uploads.
-    return safe_name
+    canonical = {
+        "proxy": "proxy.pkl",
+        "kernel": "kernels.pkl",
+        "cdm": "cdm.pkl",
+        "meeg": "meeg.pkl",
+    }
+    return canonical.get(str(fp_type or "").strip().lower(), safe_name)
 
 
 def _features_data_dir(create=False):
@@ -1356,35 +1461,41 @@ def _list_field_potential_detected_files():
         root_label = os.path.basename(root)
         if "proxy" in root_label:
             mode_label = "Field Potential Proxy"
+            allowed_names = {"proxy.pkl"}
         elif "kernel" in root_label:
             mode_label = "Field Potential Kernel"
+            allowed_names = {"kernels.pkl", "cdm.pkl"}
         elif "meeg" in root_label:
             mode_label = "Field Potential M/EEG"
+            allowed_names = {"meeg.pkl"}
         else:
             mode_label = "Field Potential"
+            allowed_names = set()
 
         for current_root, _, files in os.walk(root):
             for name in files:
                 lower = name.lower()
                 if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
                     continue
+                if allowed_names and lower not in allowed_names:
+                    continue
                 abs_path = os.path.realpath(os.path.join(current_root, name))
                 if not os.path.isfile(abs_path):
                     continue
                 if abs_path in seen_paths:
                     continue
+                if os.path.basename(abs_path).lower() == "sim_data.pkl":
+                    # Legacy proxy metadata payload; keep hidden from field-potential picks.
+                    continue
                 seen_paths.add(abs_path)
                 rel_name = os.path.relpath(abs_path, root)
                 display_name = os.path.basename(abs_path)
-                entry_label = mode_label
-                if display_name.lower() == "sim_data.pkl":
-                    entry_label = "Simulation metadata"
                 entries.append({
                     "key": f"field_potential::{abs_path}",
                     "name": display_name,
                     "relative_name": rel_name,
                     "source": "field_potential",
-                    "label": entry_label,
+                    "label": mode_label,
                     "path": abs_path,
                 })
     entries.sort(key=lambda item: (item["label"], item["name"]))
@@ -1425,6 +1536,96 @@ def _list_simulation_detected_files():
     return entries
 
 
+def _field_detail_from_value(field_name, value, origin="field"):
+    summarized = _summarize_value_for_ui(value)
+    return {
+        "field": str(field_name or "").strip(),
+        "origin": str(origin or "field"),
+        "python_type": summarized.get("python_type") or "",
+        "dtype": summarized.get("dtype") or "",
+        "shape": summarized.get("shape"),
+        "detail": summarized.get("detail") or "",
+    }
+
+
+def _describe_dataframe_fields_for_ui(frame):
+    if not isinstance(frame, pd.DataFrame):
+        return []
+    columns = [str(col) for col in frame.columns]
+    return _describe_source_fields_for_ui(frame, columns, "dataframe")
+
+
+def _describe_mapping_fields_for_ui(mapping_obj, ordered_keys=None):
+    if not isinstance(mapping_obj, MappingABC):
+        return []
+
+    keys = []
+    seen = set()
+    for key in ordered_keys or []:
+        token = str(key or "").strip()
+        if not token or token.startswith("__") or token in seen or token not in mapping_obj:
+            continue
+        seen.add(token)
+        keys.append(token)
+    for key in mapping_obj.keys():
+        token = str(key or "").strip()
+        if not token or token.startswith("__") or token in seen:
+            continue
+        seen.add(token)
+        keys.append(token)
+
+    details = []
+    for key in keys:
+        try:
+            value = mapping_obj[key]
+        except Exception:
+            value = None
+        details.append(_field_detail_from_value(key, value))
+    return details
+
+
+def _describe_saved_result_fields(source_obj):
+    if isinstance(source_obj, pd.DataFrame):
+        return _describe_dataframe_fields_for_ui(source_obj)
+
+    if isinstance(source_obj, MappingABC):
+        return _describe_mapping_fields_for_ui(source_obj)
+
+    if isinstance(source_obj, np.ndarray):
+        return [_field_detail_from_value("__self__", source_obj)]
+
+    if isinstance(source_obj, (list, tuple)):
+        if not source_obj:
+            return []
+        if all(isinstance(item, pd.DataFrame) for item in source_obj):
+            return _describe_dataframe_fields_for_ui(source_obj[0])
+
+        sample = source_obj[0]
+        if isinstance(sample, MappingABC):
+            details = _describe_mapping_fields_for_ui(sample)
+            for item in details:
+                item["field"] = f"sample.{item['field']}"
+            return details
+
+        return [_field_detail_from_value("sample", sample)]
+
+    return []
+
+
+def _looks_like_simulation_grid_metadata(source_obj):
+    if not isinstance(source_obj, MappingABC):
+        return False
+    required_keys = {
+        "run_mode",
+        "trial_count",
+        "configuration_count",
+        "repetitions_per_configuration",
+        "changed_keys",
+        "trials",
+    }
+    return required_keys.issubset(set(source_obj.keys()))
+
+
 def _describe_saved_result_source(path):
     try:
         with open(path, "rb") as handle:
@@ -1448,9 +1649,51 @@ def _describe_saved_result_source(path):
         "error": None,
     }
 
+    if _looks_like_simulation_grid_metadata(source_obj):
+        trial_count = source_obj.get("trial_count")
+        configuration_count = source_obj.get("configuration_count")
+        repetitions = source_obj.get("repetitions_per_configuration")
+        changed_keys = [
+            str(item).strip()
+            for item in (source_obj.get("changed_keys") or [])
+            if str(item).strip()
+        ]
+        ordered_keys = [
+            "version",
+            "model_type",
+            "run_mode",
+            "trial_count",
+            "configuration_count",
+            "repetitions_per_configuration",
+            "changed_keys",
+            "trials",
+        ]
+        payload["summary"] = (
+            f"Simulation grid metadata: {trial_count} trial(s) across {configuration_count} configuration(s)."
+        )
+        changed_text = ", ".join(changed_keys) if changed_keys else "none"
+        payload["detail_summary"] = (
+            f"Changed keys: {changed_text}. Repetitions per configuration: {repetitions}."
+        )
+        payload["field_details"] = _describe_mapping_fields_for_ui(source_obj, ordered_keys=ordered_keys)
+        return payload
+
+    if isinstance(source_obj, pd.DataFrame):
+        payload["summary"] = f"DataFrame with {source_obj.shape[0]} rows and {source_obj.shape[1]} columns."
+        payload["detail_summary"] = payload["top_level_detail"]
+        payload["field_details"] = _describe_dataframe_fields_for_ui(source_obj)
+        return payload
+
+    if isinstance(source_obj, MappingABC):
+        top_keys = [str(key) for key in source_obj.keys() if not str(key).startswith("__")]
+        payload["summary"] = f"Mapping with {len(top_keys)} top-level keys."
+        payload["detail_summary"] = payload["top_level_detail"]
+        payload["field_details"] = _describe_mapping_fields_for_ui(source_obj)
+        return payload
+
     if isinstance(source_obj, (list, tuple)):
         count = len(source_obj)
-        payload["summary"] = f"List with {count} simulation scenario(s)."
+        payload["summary"] = f"Sequence with {count} item(s)."
         if count == 0:
             payload["detail_summary"] = "The file is empty."
             return payload
@@ -1460,29 +1703,20 @@ def _describe_saved_result_source(path):
         sample_shape = sample_summary.get("shape")
         sample_shape_text = f", shape={sample_shape}" if sample_shape is not None else ""
         payload["detail_summary"] = (
-            f"Per-scenario payload sample: {sample_summary.get('python_type') or type(sample).__name__}"
-            f"{sample_shape_text}."
+            f"Sample item: {sample_summary.get('python_type') or type(sample).__name__}{sample_shape_text}."
         )
+        if all(isinstance(item, pd.DataFrame) for item in source_obj):
+            payload["summary"] = f"Sequence with {count} trial DataFrame(s)."
+            payload["detail_summary"] = (
+                f"Sample DataFrame: {sample.shape[0]} rows x {sample.shape[1]} columns."
+            )
+        payload["field_details"] = _describe_saved_result_fields(source_obj)
+        return payload
 
-        if isinstance(sample, pd.DataFrame):
-            try:
-                normalized = _describe_parser_source(path)
-            except Exception:
-                normalized = None
-            if normalized:
-                payload["detail_summary"] = normalized.get("summary") or payload["detail_summary"]
-                payload["field_details"] = list(normalized.get("field_details") or [])
-            return payload
-
-        if isinstance(sample, MappingABC):
-            candidate_fields = [str(k) for k in sample.keys() if not str(k).startswith("__")]
-            payload["field_details"] = _describe_source_fields_for_ui(sample, candidate_fields, "field")
-            return payload
-
-        if isinstance(sample, np.ndarray):
-            payload["field_details"] = _describe_source_fields_for_ui(sample, ["__self__"], "field")
-            return payload
-
+    if isinstance(source_obj, np.ndarray):
+        payload["summary"] = f"NumPy array with shape {list(source_obj.shape)}."
+        payload["detail_summary"] = payload["top_level_detail"]
+        payload["field_details"] = _describe_saved_result_fields(source_obj)
         return payload
 
     try:
@@ -1493,12 +1727,13 @@ def _describe_saved_result_source(path):
         payload["summary"] = normalized.get("summary") or ""
         payload["detail_summary"] = payload["top_level_detail"]
         payload["field_details"] = list(normalized.get("field_details") or [])
-    else:
-        payload["summary"] = (
-            f"{payload['top_level_type']}"
-            + (f" with shape {payload['top_level_shape']}" if payload["top_level_shape"] is not None else "")
-            + "."
-        )
+        return payload
+
+    payload["summary"] = (
+        f"{payload['top_level_type']}"
+        + (f" with shape {payload['top_level_shape']}" if payload["top_level_shape"] is not None else "")
+        + "."
+    )
     return payload
 
 
@@ -1571,16 +1806,24 @@ def _result_summary_entries_for_job(status, computation_type):
                 if not os.path.isfile(path):
                     continue
                 lower = name.lower()
+                if lower == "sim_data.pkl":
+                    continue
                 if computation_type == "field_potential_proxy":
-                    label = "Simulation metadata" if lower == "sim_data.pkl" else "Field Potential Proxy"
+                    if lower != "proxy.pkl":
+                        continue
+                    label = "Field Potential Proxy"
                 elif computation_type == "field_potential_kernel":
+                    if lower not in {"kernels.pkl", "cdm.pkl"}:
+                        continue
                     if lower == "kernels.pkl":
                         label = "Kernel dictionary"
-                    elif lower == "probe_outputs.pkl":
-                        label = "Combined probe outputs"
+                    elif lower == "cdm.pkl":
+                        label = "CDM/LFP output"
                     else:
                         label = "Field Potential Kernel"
                 else:
+                    if lower != "meeg.pkl":
+                        continue
                     label = "Field Potential M/EEG"
                 _append_file_entry(path, label)
         return _attach_result_inspection(entries)
@@ -2646,19 +2889,16 @@ def _collect_feature_pipeline_inputs():
                 # - M/EEG outputs
                 # Exclude intermediate kernel objects (e.g., kernels.pkl).
                 if source_key == "proxy":
-                    if not lower_name.startswith("proxy"):
+                    if lower_name != "proxy.pkl":
                         continue
                 elif source_key == "kernel":
                     allowed_kernel_outputs = {
-                        "kernel_approx_cdm.pkl",
-                        "current_dipole_moment.pkl",
-                        "gauss_cylinder_potential.pkl",
-                        "probe_outputs.pkl",
+                        "cdm.pkl",
                     }
                     if lower_name not in allowed_kernel_outputs:
                         continue
                 elif source_key == "meeg":
-                    if lower_name not in {"meeg.pkl", "eeg.pkl", "meg.pkl", "lfp.pkl"}:
+                    if lower_name != "meeg.pkl":
                         continue
                 else:
                     continue
@@ -3097,13 +3337,42 @@ def _summarize_value_for_ui(value):
     if isinstance(value, (list, tuple)):
         summary["python_type"] = type(value).__name__
         summary["shape"] = [len(value)]
-        if value:
-            inner = _summarize_value_for_ui(value[0])
-            summary["detail"] = f"length {len(value)}, first item: {inner['python_type']}"
-            if inner.get("shape") is not None:
-                summary["detail"] += f" shape={inner['shape']}"
-        else:
+        if not value:
             summary["detail"] = "empty sequence"
+            return summary
+
+        scalar_types = (str, bytes, int, float, bool, np.integer, np.floating, np.bool_)
+        preview_values = []
+        scalar_only = True
+        for item in value[:6]:
+            if item is None or isinstance(item, scalar_types):
+                preview_values.append(repr(item))
+                continue
+            scalar_only = False
+            break
+        if scalar_only:
+            preview = ", ".join(preview_values)
+            if len(value) > len(preview_values):
+                preview += ", ..."
+            label = "item" if len(value) == 1 else "items"
+            summary["detail"] = f"{len(value)} {label} ({preview})" if preview else f"{len(value)} {label}"
+            return summary
+
+        first_item = value[0]
+        if isinstance(first_item, MappingABC):
+            sample_keys = [str(key) for key in list(first_item.keys())[:6]]
+            preview = ", ".join(sample_keys)
+            if len(first_item) > len(sample_keys):
+                preview += ", ..."
+            summary["detail"] = (
+                f"{len(value)} items, sample keys ({preview})" if preview else f"{len(value)} mapping items"
+            )
+            return summary
+
+        inner = _summarize_value_for_ui(first_item)
+        summary["detail"] = f"length {len(value)}, first item: {inner['python_type']}"
+        if inner.get("shape") is not None:
+            summary["detail"] += f" shape={inner['shape']}"
         return summary
 
     if isinstance(value, (str, bytes)):
@@ -6511,14 +6780,11 @@ def field_potential_load_precomputed():
     source_mode = (request.form.get("precomputed_fp_source_mode") or "upload").strip().lower()
     uploads = [file for file in request.files.getlist("precomputed_fp_file") if file and file.filename]
     server_file_paths = _extract_server_file_paths(request.form, "precomputed_fp_server_file_path")
-    fp_type = (request.form.get("precomputed_fp_type") or "").strip().lower()
 
     destination_roots = {
         "proxy": FIELD_POTENTIAL_PROXY_DIR,
+        "kernel": FIELD_POTENTIAL_KERNEL_DIR,
         "cdm": FIELD_POTENTIAL_KERNEL_DIR,
-        "lfp": FIELD_POTENTIAL_KERNEL_DIR,
-        "eeg": FIELD_POTENTIAL_MEEG_DIR,
-        "meg": FIELD_POTENTIAL_MEEG_DIR,
         "meeg": FIELD_POTENTIAL_MEEG_DIR,
     }
 
@@ -6562,9 +6828,13 @@ def field_potential_load_precomputed():
 
     for item in inputs:
         safe_name = item["safe_name"]
-        file_fp_type = fp_type or (_infer_field_potential_type_from_filename(safe_name) or "proxy")
-        if file_fp_type not in destination_roots:
-            file_fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
+        file_fp_type = _infer_field_potential_type_from_filename(safe_name)
+        if not file_fp_type:
+            flash(
+                f"Unsupported field-potential filename '{safe_name}'. Use one of proxy.pkl, kernels.pkl, cdm.pkl, or meeg.pkl.",
+                "error",
+            )
+            return redirect(request.referrer or url_for("field_potential_load"))
 
         output_root = destination_roots[file_fp_type]
         output_name = _field_potential_output_name(file_fp_type, safe_name)
@@ -6631,22 +6901,14 @@ def field_potential_kernel():
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
     kernel_output_root = FIELD_POTENTIAL_KERNEL_DIR
     preferred_cdm = []
-    for fname in ("kernel_approx_cdm.pkl", "current_dipole_moment.pkl"):
+    for fname in ("cdm.pkl",):
         direct_path = os.path.join(kernel_output_root, fname)
         if os.path.isfile(direct_path):
             preferred_cdm.append(direct_path)
         preferred_cdm.extend(glob.glob(os.path.join(kernel_output_root, "*", fname)))
-    fallback_cdm = []
-    for fname in ("gauss_cylinder_potential.pkl",):
-        direct_path = os.path.join(kernel_output_root, fname)
-        if os.path.isfile(direct_path):
-            fallback_cdm.append(direct_path)
-        fallback_cdm.extend(glob.glob(os.path.join(kernel_output_root, "*", fname)))
     default_cdm_path = None
     if preferred_cdm:
         default_cdm_path = max(preferred_cdm, key=os.path.getmtime)
-    elif fallback_cdm:
-        default_cdm_path = max(fallback_cdm, key=os.path.getmtime)
     default_meeg = {
         "cdm": default_cdm_path,
         "cdm_exists": bool(default_cdm_path and os.path.exists(default_cdm_path)),
@@ -8533,17 +8795,20 @@ def analysis():
         for entry in _list_detected_analysis_data_files()
     ]
     simulation_available = False
+    is_full_simulation = False
     simulation_trials = 0
     simulation_model = ""
     simulation_welch_defaults = None
     try:
         sim_data = _load_simulation_outputs()
         simulation_available = True
+        is_full_simulation = not sim_data.get("_from_proxy_data", False)
         simulation_trials = _simulation_trial_count(sim_data)
         simulation_model = _simulation_model_type(sim_data)
         simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
     except Exception:
         simulation_available = False
+        is_full_simulation = False
         simulation_trials = 0
         simulation_model = ""
         simulation_welch_defaults = None
@@ -8559,6 +8824,7 @@ def analysis():
         detected_data_files=detected_data_files,
         preselected_simulation_keys=preselected_simulation_keys,
         simulation_available=simulation_available,
+        is_full_simulation=is_full_simulation,
         simulation_trials=simulation_trials,
         simulation_model=simulation_model,
         simulation_welch_defaults=simulation_welch_defaults,
@@ -8645,17 +8911,77 @@ def _load_simulation_outputs():
             "grid_metadata": payload.get("grid_metadata"),
         }
 
+    def _infer_trial_count_from_proxy_data(proxy_path):
+        """Infer trial count when loading field potential proxy data."""
+        try:
+            with open(proxy_path, "rb") as f:
+                proxy_payload = pickle.load(f)
+            # proxy.pkl can be a list of trial data or a single trial
+            if isinstance(proxy_payload, list) and proxy_payload:
+                return len(proxy_payload)
+            return 1
+        except Exception:
+            return 1
+
     if missing:
         sim_data_path = os.path.join(root, "sim_data.pkl")
+        proxy_pkl_path = os.path.join(root, "proxy.pkl")
+        
+        sim_data = None
+        # Try to load sim_data.pkl if it exists
         if os.path.isfile(sim_data_path):
             try:
                 with open(sim_data_path, "rb") as f:
                     sim_payload = pickle.load(f)
                 sim_data = _coerce_sim_payload(sim_payload)
-                if sim_data is not None:
+            except Exception:
+                pass
+        
+        # Fallback/Supplement: if we have proxy.pkl (field potential data), use it to infer trial count
+        # This handles the case where proxy.pkl is selected alongside incomplete sim_data.pkl
+        if os.path.isfile(proxy_pkl_path):
+            try:
+                proxy_trial_count = _infer_trial_count_from_proxy_data(proxy_pkl_path)
+                
+                if sim_data is None:
+                    # Create a minimal but valid simulation output structure from proxy data
+                    # This allows trial count and model detection to work properly
+                    # We use placeholder data that will still allow UI to work
+                    return {
+                        "times": [{}] * proxy_trial_count,  # Dict placeholder to avoid issues
+                        "gids": [{}] * proxy_trial_count,   # Dict placeholder to avoid issues
+                        "dt": [0.0625] * proxy_trial_count,   # Default dt value
+                        "tstop": [12000.0] * proxy_trial_count,  # Default tstop value
+                        "network": {"model": "hagen"} if proxy_trial_count > 0 else {},  # Model detected from proxy context
+                        "grid_metadata": None,
+                        "_from_proxy_data": True,  # Tag to indicate this came from proxy
+                    }
+                else:
+                    # If sim_data exists but has fewer trials than proxy, extend it
+                    current_trials = _simulation_trial_count(sim_data)
+                    if current_trials < proxy_trial_count:
+                        diff = proxy_trial_count - current_trials
+                        sim_data["times"].extend([{}] * diff)
+                        sim_data["gids"].extend([{}] * diff)
+                        
+                        # Use last available dt/tstop or defaults
+                        last_dt = sim_data["dt"][-1] if sim_data["dt"] else 0.0625
+                        last_tstop = sim_data["tstop"][-1] if sim_data["tstop"] else 12000.0
+                        sim_data["dt"].extend([last_dt] * diff)
+                        sim_data["tstop"].extend([last_tstop] * diff)
+                        
+                        if not sim_data.get("network"):
+                            sim_data["network"] = [{"model": "hagen"}] * proxy_trial_count
+                        elif isinstance(sim_data["network"], list):
+                            last_net = sim_data["network"][-1] if sim_data["network"] else {"model": "hagen"}
+                            sim_data["network"].extend([last_net] * diff)
                     return sim_data
             except Exception:
                 pass
+
+        if sim_data is not None:
+            return sim_data
+        
         raise FileNotFoundError(
             f"Missing simulation output files in {root}: {', '.join(missing)}"
         )
@@ -9301,10 +9627,8 @@ def _analysis_selected_items_from_keys(selected_keys):
     seen = set()
     label_by_type = {
         "proxy": "Field Potential Proxy",
+        "kernel": "Kernel dictionary",
         "cdm": "Field Potential Kernel",
-        "lfp": "Field Potential Kernel",
-        "eeg": "Field Potential M/EEG",
-        "meg": "Field Potential M/EEG",
         "meeg": "Field Potential M/EEG",
     }
     for raw_key in (selected_keys or []):
@@ -9336,11 +9660,10 @@ def _analysis_selected_items_from_keys(selected_keys):
             if not path or not os.path.isfile(path):
                 continue
             base_name = os.path.basename(path)
-            if base_name.lower() == "sim_data.pkl":
-                label = "Simulation metadata"
-            else:
-                fp_type = _infer_field_potential_type_from_filename(base_name) or "proxy"
-                label = label_by_type.get(fp_type, "Field Potential")
+            fp_type = _infer_field_potential_type_from_filename(base_name)
+            if not fp_type:
+                continue
+            label = label_by_type.get(fp_type, "Field Potential")
             items.append({
                 "key": key,
                 "name": base_name,
@@ -9353,36 +9676,26 @@ def _analysis_selected_items_from_keys(selected_keys):
 def _analysis_store_field_potential_inputs(inputs):
     label_by_type = {
         "proxy": "Field Potential Proxy",
+        "kernel": "Kernel dictionary",
         "cdm": "Field Potential Kernel",
-        "lfp": "Field Potential Kernel",
-        "eeg": "Field Potential M/EEG",
-        "meg": "Field Potential M/EEG",
         "meeg": "Field Potential M/EEG",
     }
 
     selected_keys = []
     selected_items = []
     analysis_root = _analysis_data_dir(create=True)
-    used_names = {
-        name for name in os.listdir(analysis_root)
-        if os.path.isfile(os.path.join(analysis_root, name))
-    }
     for item in inputs:
         safe_name = item["safe_name"]
-        file_fp_type = _infer_field_potential_type_from_filename(safe_name) or "proxy"
+        file_fp_type = _infer_field_potential_type_from_filename(safe_name)
+        if not file_fp_type:
+            raise ValueError(
+                f"Unsupported field-potential filename '{safe_name}'. Use one of proxy.pkl, kernels.pkl, cdm.pkl, or meeg.pkl."
+            )
         output_name = _field_potential_output_name(file_fp_type, safe_name)
         preferred_name = secure_filename(output_name)
         if not preferred_name:
             continue
-        preferred_stem, preferred_ext = os.path.splitext(preferred_name)
-        preferred_ext = preferred_ext or ".pkl"
-        candidate = preferred_name
-        suffix = 1
-        while candidate in used_names:
-            candidate = f"{preferred_stem}_{suffix}{preferred_ext}"
-            suffix += 1
-        used_names.add(candidate)
-        output_path = os.path.join(analysis_root, candidate)
+        output_path = os.path.join(analysis_root, preferred_name)
         if item["source_path"]:
             shutil.copy2(item["source_path"], output_path)
         else:
@@ -9423,6 +9736,20 @@ def _analysis_collect_upload_inputs(uploads, server_file_paths, server_label):
 
 
 def _analysis_detect_single_input_kind(item):
+    known_simulation_files = {
+        "times.pkl",
+        "gids.pkl",
+        "dt.pkl",
+        "tstop.pkl",
+        "network.pkl",
+        "population_sizes.pkl",
+        "vm.pkl",
+        "ampa.pkl",
+        "gaba.pkl",
+        "exc_state_events.pkl",
+        "sim_data.pkl",
+        SIMULATION_GRID_METADATA_FILE,
+    }
     source_path = item.get("source_path")
     upload = item.get("upload")
     if source_path:
@@ -9448,9 +9775,12 @@ def _analysis_detect_single_input_kind(item):
         if isinstance(loaded, pd.DataFrame):
             return "dataframe"
 
-    if _infer_field_potential_type_from_filename(item.get("safe_name")):
+    safe_name = str(item.get("safe_name") or "").strip()
+    if _infer_field_potential_type_from_filename(safe_name):
         return "field_potential"
-    return "simulation"
+    if safe_name.lower() in known_simulation_files:
+        return "simulation"
+    return "unsupported"
 
 
 @app.route("/analysis/select_features_file", methods=["POST"])
@@ -9585,7 +9915,8 @@ def analysis_upload_auto():
     if not inputs:
         return jsonify({"error": "No supported .pkl/.pickle files were provided."}), 400
 
-    if len(inputs) == 1 and _analysis_detect_single_input_kind(inputs[0]) == "dataframe":
+    first_kind = _analysis_detect_single_input_kind(inputs[0]) if len(inputs) == 1 else None
+    if len(inputs) == 1 and first_kind == "dataframe":
         item = inputs[0]
         try:
             result = _stage_analysis_dataframe_file(
@@ -9601,10 +9932,19 @@ def analysis_upload_auto():
     simulation_inputs = []
     field_potential_inputs = []
     for item in inputs:
-        if _analysis_detect_single_input_kind(item) == "field_potential":
+        detected_kind = _analysis_detect_single_input_kind(item)
+        if detected_kind == "field_potential":
             field_potential_inputs.append(item)
-        else:
+        elif detected_kind == "simulation":
             simulation_inputs.append(item)
+        elif detected_kind == "unsupported":
+            safe_name = str(item.get("safe_name") or "").strip() or "unknown"
+            return jsonify({
+                "error": (
+                    f"Unsupported file '{safe_name}'. Accepted field-potential files are "
+                    "proxy.pkl, kernels.pkl, cdm.pkl, and meeg.pkl."
+                )
+            }), 400
 
     preserve_existing = _get_analysis_selection_mode() == "simulation"
     existing_selected_keys = _get_analysis_selected_simulation_keys() if preserve_existing else []
@@ -9646,17 +9986,20 @@ def analysis_upload_auto():
     missing_required = sorted(name for name in required if name not in selected_simulation_names)
 
     simulation_available = False
+    is_full_simulation = False
     simulation_trials = 0
     simulation_model = ""
     simulation_welch_defaults = None
     try:
         sim_data = _load_simulation_outputs()
         simulation_available = True
+        is_full_simulation = not sim_data.get("_from_proxy_data", False)
         simulation_trials = _simulation_trial_count(sim_data)
         simulation_model = _simulation_model_type(sim_data)
         simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
     except Exception:
         simulation_available = False
+        is_full_simulation = False
         simulation_trials = 0
         simulation_model = ""
         simulation_welch_defaults = None
@@ -9669,6 +10012,7 @@ def analysis_upload_auto():
         "selected_items": selected_items,
         "missing_required": missing_required,
         "simulation_available": simulation_available,
+        "is_full_simulation": is_full_simulation,
         "simulation_trials": simulation_trials,
         "simulation_model": simulation_model,
         "simulation_welch_defaults": simulation_welch_defaults,
@@ -9731,17 +10075,20 @@ def analysis_sync_selected_simulation_files():
         _clear_analysis_selection_mode()
         _clear_analysis_selected_simulation_keys()
     simulation_available = False
+    is_full_simulation = False
     simulation_trials = 0
     simulation_model = ""
     simulation_welch_defaults = None
     try:
         sim_data = _load_simulation_outputs()
         simulation_available = True
+        is_full_simulation = not sim_data.get("_from_proxy_data", False)
         simulation_trials = _simulation_trial_count(sim_data)
         simulation_model = _simulation_model_type(sim_data)
         simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
     except Exception:
         simulation_available = False
+        is_full_simulation = False
         simulation_trials = 0
         simulation_model = ""
         simulation_welch_defaults = None
@@ -9750,6 +10097,7 @@ def analysis_sync_selected_simulation_files():
         "ok": True,
         "copied_files": copied_files,
         "simulation_available": simulation_available,
+        "is_full_simulation": is_full_simulation,
         "simulation_trials": simulation_trials,
         "simulation_model": simulation_model,
         "simulation_welch_defaults": simulation_welch_defaults,
@@ -9867,17 +10215,20 @@ def analysis_upload_simulation_files():
     missing_required = sorted(name for name in required if name not in selected_simulation_names)
 
     simulation_available = False
+    is_full_simulation = False
     simulation_trials = 0
     simulation_model = ""
     simulation_welch_defaults = None
     try:
         sim_data = _load_simulation_outputs()
         simulation_available = True
+        is_full_simulation = not sim_data.get("_from_proxy_data", False)
         simulation_trials = _simulation_trial_count(sim_data)
         simulation_model = _simulation_model_type(sim_data)
         simulation_welch_defaults = _simulation_default_welch_preview(sim_data)
     except Exception:
         simulation_available = False
+        is_full_simulation = False
         simulation_trials = 0
         simulation_model = ""
         simulation_welch_defaults = None
@@ -9889,6 +10240,7 @@ def analysis_upload_simulation_files():
         "selected_items": _analysis_selected_items_from_keys(selected_keys),
         "missing_required": missing_required,
         "simulation_available": simulation_available,
+        "is_full_simulation": is_full_simulation,
         "simulation_trials": simulation_trials,
         "simulation_model": simulation_model,
         "simulation_welch_defaults": simulation_welch_defaults,
@@ -11052,23 +11404,20 @@ def analysis_plot_simulation():
         preferred = None
         for path, payload in loaded_candidates:
             name = os.path.basename(path).lower()
-            if "proxy" in name:
+            if name == "proxy.pkl":
                 preferred = (path, payload)
                 break
         if preferred is None:
             for path, payload in loaded_candidates:
                 name = os.path.basename(path).lower()
-                if "cdm" in name or "dipole" in name:
+                if name == "cdm.pkl":
                     preferred = (path, payload)
                     break
         if preferred is None:
-            for path, payload in loaded_candidates:
-                name = os.path.basename(path).lower()
-                if name != "sim_data.pkl":
-                    preferred = (path, payload)
-                    break
-        if preferred is None:
-            preferred = loaded_candidates[0]
+            return _analysis_plot_error(
+                "Field-potential plots require proxy.pkl or cdm.pkl. Select one of these files first.",
+                status=400,
+            )
 
         cdm_payload_name = os.path.basename(preferred[0])
         cdm_payload = preferred[1]
@@ -11079,27 +11428,6 @@ def analysis_plot_simulation():
     except Exception as exc:
         sim_data_error = exc
         sim_data = None
-        if plot_type in {"cdm", "cdm_psd"}:
-            for raw_key in selected_keys:
-                if not str(raw_key).startswith("field_potential::"):
-                    continue
-                try:
-                    _, raw_path = str(raw_key).split("::", 1)
-                except ValueError:
-                    continue
-                candidate_path = os.path.realpath((raw_path or "").strip())
-                if not candidate_path or not os.path.isfile(candidate_path):
-                    continue
-                if os.path.basename(candidate_path).lower() != "sim_data.pkl":
-                    continue
-                try:
-                    with open(candidate_path, "rb") as f:
-                        payload = pickle.load(f)
-                    sim_data = _coerce_selected_sim_payload(payload)
-                except Exception:
-                    sim_data = None
-                if sim_data is not None:
-                    break
         if sim_data is None and plot_type not in {"cdm", "cdm_psd"}:
             return _analysis_plot_error(str(exc), status=400)
 
@@ -11182,8 +11510,11 @@ def analysis_plot_simulation():
         freq_min, freq_max = freq_max, freq_min
 
     cdm_psd_mode = (request.form.get("sim_cdm_psd_mode") or "separate").strip().lower()
-    if cdm_psd_mode not in {"separate", "average"}:
-        return _analysis_plot_error("PSD mode must be either 'separate' or 'average'.", status=400)
+    if cdm_psd_mode not in {"separate", "average", "average_by_configuration"}:
+        return _analysis_plot_error(
+            "PSD mode must be one of 'separate', 'average', or 'average_by_configuration'.",
+            status=400,
+        )
 
     def _parse_optional_int(field_name, label, min_value=0):
         raw = request.form.get(field_name)
@@ -11440,6 +11771,24 @@ def analysis_plot_simulation():
 
     if plot_type == "cdm_psd":
         welch_used = None
+        configuration_groups = []
+        if cdm_psd_mode == "average_by_configuration":
+            if sim_data is None:
+                return _analysis_plot_error(
+                    "Configuration-averaged PSD requires simulation metadata with configuration indices.",
+                    status=400,
+                )
+            grouped = _simulation_group_trials_by_configuration(sim_data, trial_indices)
+            configuration_groups = [
+                (int(cfg_idx), grouped[cfg_idx])
+                for cfg_idx in sorted(grouped.keys())
+                if grouped[cfg_idx]
+            ]
+            if not configuration_groups:
+                return _analysis_plot_error(
+                    "No configurations were found in the selected trial range.",
+                    status=400,
+                )
         areas = (
             _simulation_area_names(sim_data, trial_indices[0])
             if (model == "four_area" and sim_data is not None)
@@ -11506,6 +11855,103 @@ def analysis_plot_simulation():
             subtitle = (
                 f"Field-potential power spectra averaged across {len(trial_indices)} selected trial(s). "
                 f"Model: {model}. Trials {range_start} to {range_end} "
+                f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
+                f"Welch: nperseg={welch_text.get('nperseg')}, "
+                f"noverlap={welch_text.get('noverlap')}, "
+                f"nfft={welch_text.get('nfft')}."
+            )
+        elif cdm_psd_mode == "average_by_configuration":
+            if model == "four_area":
+                if not areas:
+                    return _analysis_plot_error("Four-area model detected but no areas were found in network parameters.", status=400)
+                area_cols = min(2, max(1, len(areas)))
+                area_rows = int(math.ceil(len(areas) / area_cols))
+                total_rows = len(configuration_groups) * area_rows
+                fig, axs = plt.subplots(
+                    total_rows,
+                    area_cols,
+                    figsize=(5.0 * area_cols, 3.5 * total_rows),
+                    dpi=160,
+                    squeeze=False,
+                )
+                plotted_any = False
+                for cfg_pos, (cfg_idx, cfg_trial_indices) in enumerate(configuration_groups):
+                    cfg_label = _simulation_configuration_legend_label(sim_data, cfg_idx, cfg_trial_indices)
+                    for area_idx, area_name in enumerate(areas):
+                        grid_row = cfg_pos * area_rows + (area_idx // area_cols)
+                        grid_col = area_idx % area_cols
+                        ax = axs[grid_row][grid_col]
+                        entries, welch_local = _collect_psd_entries(cfg_trial_indices, area_name=area_name)
+                        if welch_used is None and welch_local is not None:
+                            welch_used = dict(welch_local)
+                        ref_freqs, mean_psd = _average_psd_entries(entries)
+                        if ref_freqs is None or mean_psd is None:
+                            ax.axis("off")
+                            continue
+                        mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
+                        if not np.any(mask):
+                            ax.axis("off")
+                            continue
+                        ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
+                        ax.set_title(f"{cfg_label} | {area_name} PSD")
+                        ax.set_xlabel("f (Hz)")
+                        ax.set_ylabel("PSD (a.u./Hz)")
+                        ax.grid(alpha=0.2)
+                        plotted_any = True
+                    for extra_idx in range(len(areas), area_rows * area_cols):
+                        grid_row = cfg_pos * area_rows + (extra_idx // area_cols)
+                        grid_col = extra_idx % area_cols
+                        axs[grid_row][grid_col].axis("off")
+                if not plotted_any:
+                    plt.close(fig)
+                    return _analysis_plot_error(
+                        "Unable to compute configuration-averaged field-potential power spectra for the selected trials.",
+                        status=400,
+                    )
+                fig.tight_layout()
+            else:
+                n = len(configuration_groups)
+                cols = min(3, n)
+                rows = int(math.ceil(n / cols))
+                fig, axs = plt.subplots(rows, cols, figsize=(5.2 * cols, 3.6 * rows), dpi=160, squeeze=False)
+                flat_ax = axs.ravel()
+                plotted_any = False
+                for pos, (cfg_idx, cfg_trial_indices) in enumerate(configuration_groups):
+                    ax = flat_ax[pos]
+                    entries, welch_local = _collect_psd_entries(cfg_trial_indices, area_name=None)
+                    if welch_used is None and welch_local is not None:
+                        welch_used = dict(welch_local)
+                    ref_freqs, mean_psd = _average_psd_entries(entries)
+                    if ref_freqs is None or mean_psd is None:
+                        ax.axis("off")
+                        continue
+                    mask = (ref_freqs >= freq_min) & (ref_freqs <= freq_max) & np.isfinite(mean_psd)
+                    if not np.any(mask):
+                        ax.axis("off")
+                        continue
+                    ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
+                    ax.set_xlabel("f (Hz)")
+                    ax.set_ylabel("PSD (a.u./Hz)")
+                    ax.set_title(_simulation_configuration_legend_label(sim_data, cfg_idx, cfg_trial_indices))
+                    ax.grid(alpha=0.2)
+                    plotted_any = True
+                for pos in range(len(configuration_groups), len(flat_ax)):
+                    flat_ax[pos].axis("off")
+                if not plotted_any:
+                    plt.close(fig)
+                    return _analysis_plot_error(
+                        "Unable to compute configuration-averaged field-potential power spectra for the selected trials.",
+                        status=400,
+                    )
+                fig.tight_layout()
+            welch_text = welch_used or _fallback_welch_text() or {
+                "nperseg": "auto",
+                "noverlap": "auto",
+                "nfft": "auto",
+            }
+            subtitle = (
+                f"Field-potential power spectra averaged within each configuration across repetitions/trials. "
+                f"Model: {model}. {len(configuration_groups)} configuration(s) from trials {range_start} to {range_end} "
                 f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
                 f"noverlap={welch_text.get('noverlap')}, "
@@ -12959,7 +13405,7 @@ def start_computation_redirect(computation_type):
                 if computation_type in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
                     continue
                 continue
-            unique_filename = f"{computation_type}_{file_key}_{i}_{job_id}_{file.filename}" # E.g. features_ data_file_ 0_ 444961cc-5b72-43fc-b87e-3f4c8304ecdd_ df_inputIn_features_lfp.pkl
+            unique_filename = f"{computation_type}_{file_key}_{i}_{job_id}_{file.filename}" # E.g. features_data_file_0_<job_id>_df_input_features_cdm.pkl
             file_path = os.path.join(module_upload_dir, unique_filename)
             file.save(file_path)
             # Save dictionary with file_key: file_path

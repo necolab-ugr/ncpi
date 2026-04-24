@@ -1,4 +1,4 @@
-// static/js/simulation_Brunel.js
+// static/js/simulation_Hagen.js
 document.addEventListener('DOMContentLoaded', function() {
     const simulationOnlyParams = new Set(['tstop', 'dt', 'local_num_threads']);
     const fixedGridParams = new Set(['X', 'model']);
@@ -34,6 +34,9 @@ document.addEventListener('DOMContentLoaded', function() {
         runModeInputs: document.querySelectorAll('input[name="sim_run_mode"]'),
         buttonLabel: document.getElementById('run-simulation-button-label'),
         gridHelp: document.getElementById('grid-mode-help'),
+        jointGroupsContainer: document.getElementById('joint-groups-container'),
+        addJointGroupButton: document.getElementById('add-joint-group-button'),
+        jointGroupsInput: document.getElementById('sim-joint-groups'),
         repetitionsInput: document.getElementById('sim-repetitions'),
         useNumpySeedInput: document.getElementById('sim-use-numpy-seed'),
         numpySeedInput: document.getElementById('sim-numpy-seed')
@@ -242,6 +245,275 @@ document.addEventListener('DOMContentLoaded', function() {
         }, [[]]);
     }
 
+    function leafPathKey(path) {
+        if (!Array.isArray(path) || path.length === 0) {
+            return '';
+        }
+        return path.map(part => String(part)).join('.');
+    }
+
+    function makeJointToken(paramName, path) {
+        const key = leafPathKey(path);
+        return key ? `${paramName}::${key}` : paramName;
+    }
+
+    function parseJointToken(token) {
+        const raw = String(token || '').trim();
+        if (!raw) {
+            return { paramName: '', pathKey: '' };
+        }
+        const sepIndex = raw.indexOf('::');
+        if (sepIndex < 0) {
+            return { paramName: raw, pathKey: '' };
+        }
+        const paramName = raw.slice(0, sepIndex).trim();
+        const pathKey = raw.slice(sepIndex + 2).trim();
+        return { paramName, pathKey };
+    }
+
+    function sweepableParamNames() {
+        if (!elements.form) {
+            return [];
+        }
+        return Array.from(elements.form.querySelectorAll('.param-input'))
+            .map(input => input.dataset.param || input.name || '')
+            .filter(paramName => paramName && !simulationOnlyParams.has(paramName) && !fixedGridParams.has(paramName));
+    }
+
+    function sweepableParamOptions() {
+        if (!elements.form) {
+            return [];
+        }
+        const seen = new Set();
+        const options = [];
+        const inputs = Array.from(elements.form.querySelectorAll('.param-input'))
+            .filter(input => {
+                const paramName = input.dataset.param || input.name || '';
+                return paramName && !simulationOnlyParams.has(paramName) && !fixedGridParams.has(paramName);
+            });
+
+        inputs.forEach(input => {
+            const paramName = input.dataset.param || input.name || '';
+            const controls = input.parentElement
+                ? input.parentElement.querySelector('.grid-parameter-controls')
+                : null;
+            const isArrayKind = controls && (controls.dataset.gridKind || 'scalar') === 'array';
+            const rows = controls
+                ? Array.from(controls.querySelectorAll('[data-grid-row="1"]'))
+                : [];
+
+            if (!isArrayKind || rows.length <= 1) {
+                if (!seen.has(paramName)) {
+                    seen.add(paramName);
+                    options.push({ value: paramName, label: paramName });
+                }
+                return;
+            }
+
+            rows.forEach((row, index) => {
+                const path = JSON.parse(row.dataset.path || '[]');
+                const token = makeJointToken(paramName, path);
+                if (seen.has(token)) {
+                    return;
+                }
+                seen.add(token);
+                const leafLabel = describeLeafLabel(paramName, path, index, true);
+                options.push({ value: token, label: `${paramName} - ${leafLabel}` });
+            });
+        });
+
+        return options;
+    }
+
+    function jointGroupCards() {
+        if (!elements.jointGroupsContainer) {
+            return [];
+        }
+        return Array.from(elements.jointGroupsContainer.querySelectorAll('[data-joint-group-card="1"]'));
+    }
+
+    function readJointGroupSelection(card) {
+        const select = card?.querySelector('[data-joint-group-select="1"]');
+        if (!select) {
+            return [];
+        }
+        return Array.from(select.selectedOptions).map(option => option.value);
+    }
+
+    function syncJointGroupsInput(groups) {
+        if (!elements.jointGroupsInput) {
+            return;
+        }
+        elements.jointGroupsInput.value = JSON.stringify(groups);
+    }
+
+    function refreshJointGroupsUi() {
+        const cards = jointGroupCards();
+        const selections = cards.map(card => readJointGroupSelection(card));
+        const globallySelected = new Set(selections.flat());
+        const options = sweepableParamOptions();
+
+        cards.forEach((card, index) => {
+            const title = card.querySelector('[data-joint-group-title="1"]');
+            if (title) {
+                title.textContent = `Group ${index + 1}`;
+            }
+            const summary = card.querySelector('[data-joint-group-summary="1"]');
+            if (summary) {
+                const count = selections[index].length;
+                summary.textContent = count > 0 ? `${count} parameter(s) selected` : 'Select at least two parameters';
+            }
+
+            const select = card.querySelector('[data-joint-group-select="1"]');
+            if (!select) {
+                return;
+            }
+            const ownSelection = new Set(selections[index]);
+            const fragment = document.createDocumentFragment();
+            options.forEach(option => {
+                const node = document.createElement('option');
+                node.value = option.value;
+                node.textContent = option.label;
+                node.selected = ownSelection.has(option.value);
+                node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
+                fragment.appendChild(node);
+            });
+            select.replaceChildren(fragment);
+        });
+
+        syncJointGroupsInput(
+            selections.filter(group => group.length > 0)
+        );
+    }
+
+    function addJointGroupCard(selectedValues = []) {
+        if (!elements.jointGroupsContainer) {
+            return null;
+        }
+        const card = document.createElement('div');
+        card.dataset.jointGroupCard = '1';
+        card.className = 'rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#141a2d]';
+        card.innerHTML = `
+            <div class="flex items-start justify-between gap-3">
+                <div class="flex flex-col gap-1">
+                    <h4 class="text-sm font-semibold text-slate-900 dark:text-white" data-joint-group-title="1"></h4>
+                    <p class="text-xs text-slate-500 dark:text-slate-400" data-joint-group-summary="1"></p>
+                </div>
+                <button
+                    type="button"
+                    class="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800"
+                    data-remove-joint-group="1"
+                >
+                    Remove
+                </button>
+            </div>
+            <label class="mt-3 flex flex-col gap-2">
+                <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Grouped parameters</span>
+                <select
+                    multiple
+                    size="8"
+                    class="form-input min-h-[12rem] rounded-lg border-slate-300 bg-background-light text-sm text-slate-900 dark:border-slate-700 dark:bg-[#191e33] dark:text-white"
+                    data-joint-group-select="1"
+                ></select>
+            </label>
+            <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">Use Ctrl/Cmd-click to select multiple parameters.</p>
+        `;
+        elements.jointGroupsContainer.appendChild(card);
+
+        const select = card.querySelector('[data-joint-group-select="1"]');
+        if (select) {
+            const selectedSet = new Set(selectedValues);
+            sweepableParamOptions().forEach(option => {
+                const node = document.createElement('option');
+                node.value = option.value;
+                node.textContent = option.label;
+                node.selected = selectedSet.has(option.value);
+                select.appendChild(node);
+            });
+            select.addEventListener('change', refreshJointGroupsUi);
+        }
+        const removeButton = card.querySelector('[data-remove-joint-group="1"]');
+        if (removeButton) {
+            removeButton.addEventListener('click', () => {
+                card.remove();
+                refreshJointGroupsUi();
+            });
+        }
+        refreshJointGroupsUi();
+        return card;
+    }
+
+    function normalizeJointGroupsInput() {
+        const groups = jointGroupCards()
+            .map(card => readJointGroupSelection(card))
+            .filter(group => group.length > 0);
+
+        const seenGroupTokens = new Set();
+        const seenBackendParams = new Set();
+        const seenLeafTokens = new Set();
+        const backendGroups = [];
+        const leafGroupsByParam = new Map();
+
+        for (let index = 0; index < groups.length; index += 1) {
+            const group = groups[index];
+            if (group.length < 2) {
+                return { ok: false, message: `Joint sweep group ${index + 1} must contain at least two parameters.` };
+            }
+
+            const parsedGroup = group.map(parseJointToken);
+            const groupHasLeafTokens = parsedGroup.some(item => item.pathKey !== '');
+            if (groupHasLeafTokens) {
+                const paramNames = new Set(parsedGroup.map(item => item.paramName));
+                if (paramNames.size !== 1) {
+                    return { ok: false, message: `Joint sweep group ${index + 1} with leaf targets must belong to a single parameter.` };
+                }
+                if (parsedGroup.some(item => !item.pathKey)) {
+                    return { ok: false, message: `Joint sweep group ${index + 1} cannot mix a whole parameter with leaf targets.` };
+                }
+                const paramName = parsedGroup[0].paramName;
+                const leafPathKeys = parsedGroup.map(item => item.pathKey);
+                const localLeafSet = new Set();
+                for (const token of group) {
+                    if (seenGroupTokens.has(token)) {
+                        return { ok: false, message: `Parameter "${token}" cannot belong to more than one joint sweep group.` };
+                    }
+                    seenGroupTokens.add(token);
+                    if (seenLeafTokens.has(token)) {
+                        return { ok: false, message: `Leaf target "${token}" cannot belong to more than one joint sweep group.` };
+                    }
+                    seenLeafTokens.add(token);
+                }
+                for (const key of leafPathKeys) {
+                    if (localLeafSet.has(key)) {
+                        return { ok: false, message: `Joint sweep group ${index + 1} contains duplicate leaf targets.` };
+                    }
+                    localLeafSet.add(key);
+                }
+                if (!leafGroupsByParam.has(paramName)) {
+                    leafGroupsByParam.set(paramName, []);
+                }
+                leafGroupsByParam.get(paramName).push(leafPathKeys);
+                continue;
+            }
+
+            const backendGroup = parsedGroup.map(item => item.paramName);
+            for (const paramName of backendGroup) {
+                if (seenGroupTokens.has(paramName)) {
+                    return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
+                }
+                if (seenBackendParams.has(paramName)) {
+                    return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
+                }
+                seenGroupTokens.add(paramName);
+                seenBackendParams.add(paramName);
+            }
+            backendGroups.push(backendGroup);
+        }
+
+        syncJointGroupsInput(backendGroups);
+        return { ok: true, groups, backendGroups, leafGroupsByParam };
+    }
+
     function addGridControls(input, preset) {
         const initial = (preset !== undefined && preset !== null) ? preset : (input.value || '');
         const parsed = parseStructured(initial);
@@ -343,10 +615,11 @@ document.addEventListener('DOMContentLoaded', function() {
         return { ok: true };
     }
 
-    function normalizeGridInput(input) {
+    function normalizeGridInput(input, leafJointGroups = []) {
         const controls = input.parentElement.querySelector('.grid-parameter-controls');
+        const paramName = input.dataset.param || input.name || '';
         if (!controls) {
-            return { ok: true };
+            return { ok: true, candidateCount: 1, candidateCountsByToken: { [paramName]: 1 } };
         }
 
         const kind = controls.dataset.gridKind || 'scalar';
@@ -369,7 +642,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const rangeSpec = `grid=${start}:${end}:${step}`;
                 ensureInputCanCarryValue(input, rangeSpec);
                 input.value = rangeSpec;
-                return { ok: true };
+                const range = buildNumericRange(startNum, endNum, stepNum);
+                const count = range ? range.length : 0;
+                return { ok: true, candidateCount: count, candidateCountsByToken: { [paramName]: count } };
             }
             if (isNumeric && stepNum === 0 && startNum !== endNum) {
                 return { ok: false, message: `Parameter "${input.name}": step cannot be 0 when start and end differ.` };
@@ -378,13 +653,18 @@ document.addEventListener('DOMContentLoaded', function() {
                 return { ok: false, message: `Parameter "${input.name}": non-numeric values must use start=end and step=0.` };
             }
             input.value = start;
-            return { ok: true };
+            return { ok: true, candidateCount: 1, candidateCountsByToken: { [paramName]: 1 } };
         }
 
         const baseValue = parseStructured(controls.dataset.baseValue || input.value || '');
         const leaves = collectLeaves(baseValue);
         const candidatePerLeaf = [];
         const startStructure = JSON.parse(JSON.stringify(baseValue));
+        const leafTokenByIndex = leaves.map(leaf => makeJointToken(paramName, leaf.path));
+        const leafPathToIndex = new Map();
+        leaves.forEach((leaf, idx) => {
+            leafPathToIndex.set(leafPathKey(leaf.path), idx);
+        });
 
         for (let idx = 0; idx < rows.length; idx += 1) {
             const row = rows[idx];
@@ -418,29 +698,75 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        const totalCombos = candidatePerLeaf.reduce((acc, arr) => acc * arr.length, 1);
+        const groupedLeafIndices = new Set();
+        const dimensions = [];
+        for (let groupIndex = 0; groupIndex < leafJointGroups.length; groupIndex += 1) {
+            const group = leafJointGroups[groupIndex] || [];
+            if (!Array.isArray(group) || group.length === 0) {
+                continue;
+            }
+            const indices = [];
+            for (const pathKey of group) {
+                if (!leafPathToIndex.has(pathKey)) {
+                    return { ok: false, message: `Joint sweep group references an unknown leaf in "${paramName}".` };
+                }
+                const idx = leafPathToIndex.get(pathKey);
+                if (groupedLeafIndices.has(idx)) {
+                    return { ok: false, message: `Leaf ${pathKey} in "${paramName}" belongs to more than one joint sweep group.` };
+                }
+                groupedLeafIndices.add(idx);
+                indices.push(idx);
+            }
+            const expected = candidatePerLeaf[indices[0]] ? candidatePerLeaf[indices[0]].length : 1;
+            const mismatch = indices.find(idx => (candidatePerLeaf[idx] ? candidatePerLeaf[idx].length : 1) !== expected);
+            if (mismatch !== undefined) {
+                return { ok: false, message: `Joint sweep group in "${paramName}" must use the same number of candidates across grouped leaves.` };
+            }
+            dimensions.push({ type: 'group', indices, size: expected });
+        }
+        for (let idx = 0; idx < candidatePerLeaf.length; idx += 1) {
+            if (groupedLeafIndices.has(idx)) {
+                continue;
+            }
+            dimensions.push({ type: 'leaf', index: idx, size: candidatePerLeaf[idx].length });
+        }
+
+        const totalCombos = dimensions.reduce((acc, dim) => acc * dim.size, 1);
         if (totalCombos > 256) {
             return { ok: false, message: `Parameter "${input.name}" expands to ${totalCombos} combinations (max 256).` };
         }
+
+        const candidateCountsByToken = { [paramName]: totalCombos };
+        leafTokenByIndex.forEach((token, idx) => {
+            candidateCountsByToken[token] = candidatePerLeaf[idx].length;
+        });
 
         if (totalCombos === 1) {
             const singleValue = toPythonLiteral(startStructure);
             ensureInputCanCarryValue(input, singleValue);
             input.value = singleValue;
-            return { ok: true };
+            return { ok: true, candidateCount: 1, candidateCountsByToken };
         }
 
-        const combos = cartesianProduct(candidatePerLeaf).map(comboValues => {
+        const dimensionChoices = dimensions.map(dim => Array.from({ length: dim.size }, (_, idx) => idx));
+        const combos = cartesianProduct(dimensionChoices).map(choiceVector => {
             const out = JSON.parse(JSON.stringify(startStructure));
-            leaves.forEach((leaf, idx) => {
-                setAtPath(out, leaf.path, comboValues[idx]);
+            choiceVector.forEach((choice, dimIndex) => {
+                const dim = dimensions[dimIndex];
+                if (dim.type === 'group') {
+                    dim.indices.forEach(leafIdx => {
+                        setAtPath(out, leaves[leafIdx].path, candidatePerLeaf[leafIdx][choice]);
+                    });
+                    return;
+                }
+                setAtPath(out, leaves[dim.index].path, candidatePerLeaf[dim.index][choice]);
             });
             return out;
         });
         const comboSpec = `grid=${toPythonLiteral(combos)}`;
         ensureInputCanCarryValue(input, comboSpec);
         input.value = comboSpec;
-        return { ok: true };
+        return { ok: true, candidateCount: totalCombos, candidateCountsByToken };
     }
     
     // Function to create parameter section
@@ -485,6 +811,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Initialize UI
     createParameterSection();
     refreshLeafLabels();
+    refreshJointGroupsUi();
 
     if (elements.container) {
         elements.container.addEventListener('keydown', (event) => {
@@ -580,6 +907,11 @@ document.addEventListener('DOMContentLoaded', function() {
     elements.runModeInputs.forEach(input => {
         input.addEventListener('change', updateModeUi);
     });
+    if (elements.addJointGroupButton) {
+        elements.addJointGroupButton.addEventListener('click', () => {
+            addJointGroupCard();
+        });
+    }
     if (elements.useNumpySeedInput) {
         elements.useNumpySeedInput.addEventListener('change', updateSeedUi);
     }
@@ -621,18 +953,44 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             if (!isGrid) {
+                syncJointGroupsInput([]);
                 return;
             }
+
+            const jointGroupResult = normalizeJointGroupsInput();
+            if (!jointGroupResult.ok) {
+                event.preventDefault();
+                window.alert(jointGroupResult.message);
+                return;
+            }
+
+            const gridCandidateCounts = new Map();
 
             for (const input of params) {
                 const paramName = input.dataset.param || input.name;
                 if (simulationOnlyParams.has(paramName) || fixedGridParams.has(paramName)) {
                     continue;
                 }
-                const result = normalizeGridInput(input);
+                const leafGroupsForParam = jointGroupResult.leafGroupsByParam.get(paramName) || [];
+                const result = normalizeGridInput(input, leafGroupsForParam);
                 if (!result.ok) {
                     event.preventDefault();
                     window.alert(result.message);
+                    return;
+                }
+                gridCandidateCounts.set(paramName, Number(result.candidateCount || 1));
+                Object.entries(result.candidateCountsByToken || {}).forEach(([token, count]) => {
+                    gridCandidateCounts.set(token, Number(count || 1));
+                });
+            }
+
+            for (let index = 0; index < jointGroupResult.groups.length; index += 1) {
+                const group = jointGroupResult.groups[index];
+                const expectedCount = gridCandidateCounts.get(group[0]) || 1;
+                const mismatch = group.find(token => (gridCandidateCounts.get(token) || 1) !== expectedCount);
+                if (mismatch) {
+                    event.preventDefault();
+                    window.alert(`Joint sweep group ${index + 1} must use the same number of candidates for all parameters.`);
                     return;
                 }
             }

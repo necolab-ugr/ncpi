@@ -1,5 +1,6 @@
 import ast
 import importlib.util
+import json
 from itertools import product
 from pathlib import Path
 from urllib.parse import urlparse
@@ -514,6 +515,35 @@ def _assert_four_area_webui_matches_python_reference(
         _log_test_progress(f"comparing trial {trial_index}/{expected_trial_count}")
         pd.testing.assert_frame_equal(webui_df, python_df)
     _log_test_progress("WebUI and Python outputs match")
+
+
+def test_four_area_joint_grid_group_zips_grouped_parameters(webui_app_module):
+    """Verify that grouped four-area parameters advance together instead of forming a Cartesian product."""
+    expected_pairs = [
+        (1.589, 2.02),
+        (3.178, 4.04),
+    ]
+    form_data = {
+        "sim_run_mode": "grid",
+        "sim_repetitions": "1",
+        "J_EE": "grid=1.589:3.178:1.589",
+        "J_IE": "grid=[2.02, 4.04]",
+        "sim_joint_groups": json.dumps([["J_EE", "J_IE"]]),
+    }
+
+    run_mode, expanded_forms, normalized_trials = _expanded_four_area_trials(webui_app_module, form_data)
+    assert run_mode == "grid"
+    assert len(expanded_forms) == 2
+    assert [
+        (float(trial["J_EE"]), float(trial["J_IE"]))
+        for trial in normalized_trials
+    ] == expected_pairs
+
+    grid_metadata = webui_app_module._build_simulation_grid_metadata("four_area", run_mode, expanded_forms)
+    assert grid_metadata is not None
+    assert grid_metadata["joint_groups"] == [["J_EE", "J_IE"]]
+    assert grid_metadata["changed_keys"] == ["J_EE", "J_IE"]
+    assert grid_metadata["configuration_count"] == 2
 
 
 @pytest.mark.slow

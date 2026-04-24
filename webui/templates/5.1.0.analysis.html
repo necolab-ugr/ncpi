@@ -100,6 +100,7 @@
             preselectedSimulationKeys: (window.__preselectedSimulationKeys || []),
             simulationWelchDefaults: (window.__simulationWelchDefaults || null),
             simulationAvailable: {{ 'true' if simulation_available else 'false' }},
+            isFullSimulation: {{ 'true' if is_full_simulation else 'false' }},
             simulationTrials: {{ simulation_trials | int }},
             simulationModel: {{ simulation_model | tojson | forceescape }},
             simPlotType: 'raster',
@@ -433,7 +434,7 @@
                 if (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd') {
                     return this.canPlotFieldPotentialOutputs();
                 }
-                return this.simulationAvailable;
+                return this.isFullSimulation;
             },
             async syncSelectedSimulationFilesOnServer() {
                 if (this.detectedSimulationSyncTimer !== null) {
@@ -458,12 +459,17 @@
                         throw new Error(data.error || 'Failed to sync selected simulation files.');
                     }
                     this.simulationAvailable = !!data.simulation_available;
+                    this.isFullSimulation = !!data.is_full_simulation;
+                    const oldTrials = this.simulationTrials;
                     this.simulationTrials = Number.isFinite(Number(data.simulation_trials))
                         ? Number(data.simulation_trials)
                         : this.simulationTrials;
+                    if (this.simulationTrials !== oldTrials) {
+                        this.simTrialEnd = Math.max(0, this.simulationTrials - 1);
+                    }
                     this.simulationModel = data.simulation_model || this.simulationModel;
                     this.simulationWelchDefaults = data.simulation_welch_defaults || null;
-                    if (!this.simulationAvailable && this.hasSelectedFieldPotentialFile() && this.simPlotType !== 'cdm' && this.simPlotType !== 'cdm_psd') {
+                    if (!this.isFullSimulation && this.hasSelectedFieldPotentialFile() && this.simPlotType !== 'cdm' && this.simPlotType !== 'cdm_psd') {
                         this.simPlotType = 'cdm';
                     }
                     this.hasExistingData = false;
@@ -832,15 +838,20 @@
                 this.topomapLastGroupColumn = '';
 
                 this.simulationAvailable = !!data.simulation_available;
+                this.isFullSimulation = !!data.is_full_simulation;
+                const oldTrials = this.simulationTrials;
                 this.simulationTrials = Number.isFinite(Number(data.simulation_trials))
                     ? Number(data.simulation_trials)
                     : this.simulationTrials;
+                if (this.simulationTrials !== oldTrials) {
+                    this.simTrialEnd = Math.max(0, this.simulationTrials - 1);
+                }
                 this.simulationModel = data.simulation_model || this.simulationModel;
                 this.simulationWelchDefaults = data.simulation_welch_defaults || null;
 
                 if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
                     this.simPlotType = 'raster';
-                } else if (!this.simulationAvailable && this.canPlotFieldPotentialOutputs() && this.simPlotType !== 'cdm' && this.simPlotType !== 'cdm_psd') {
+                } else if (!this.isFullSimulation && this.canPlotFieldPotentialOutputs() && this.simPlotType !== 'cdm' && this.simPlotType !== 'cdm_psd') {
                     this.simPlotType = 'cdm';
                 }
 
@@ -1108,9 +1119,14 @@
                 this.topomapLastGroupColumn = '';
 
                 this.simulationAvailable = !!data.simulation_available;
+                this.isFullSimulation = !!data.is_full_simulation;
+                const oldTrials = this.simulationTrials;
                 this.simulationTrials = Number.isFinite(Number(data.simulation_trials))
                     ? Number(data.simulation_trials)
                     : this.simulationTrials;
+                if (this.simulationTrials !== oldTrials) {
+                    this.simTrialEnd = Math.max(0, this.simulationTrials - 1);
+                }
                 this.simulationModel = data.simulation_model || this.simulationModel;
                 this.simulationWelchDefaults = data.simulation_welch_defaults || null;
 
@@ -1976,8 +1992,15 @@
                             Plot raster spikes, firing rates, field potentials, or power spectra of field potentials.
                         </p>
 
-                        <div x-show="!hasSelectedFieldPotentialFile() && !simulationAvailable" class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
-                            Raster and firing-rate plots require detected simulation output files. Select a field-potential file to enable field-potential plots, or add the full simulation outputs for spike-based plots.
+                        <div x-show="!isFullSimulation || !hasSelectedFieldPotentialFile()" class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+                            <p x-show="!isFullSimulation">
+                                Raster and firing-rate plots require full simulation output files (like times.pkl).
+                                <span x-show="hasSelectedFieldPotentialFile()">Only field potential plots are available with the current selection.</span>
+                                <span x-show="!hasSelectedFieldPotentialFile()">Select simulation outputs to enable spike-based plots.</span>
+                            </p>
+                            <p x-show="isFullSimulation && !hasSelectedFieldPotentialFile()" class="mt-1">
+                                Select a field-potential file to enable field-potential and power spectra plots.
+                            </p>
                         </div>
 
                         <div x-show="canUseSimulationOutputsConfig()" class="mt-6 grid grid-cols-1 gap-x-6 gap-y-6 sm:grid-cols-6">
@@ -1985,17 +2008,11 @@
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-plot-type">Plot type</label>
                                 <select id="sim-plot-type" name="sim_plot_type" x-model="simPlotType"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm">
-                                    <option value="raster" :disabled="!simulationAvailable">Raster plot of spikes</option>
-                                    <option value="firing_rates" :disabled="!simulationAvailable">Firing rates</option>
+                                    <option value="raster" :disabled="!isFullSimulation">Raster plot of spikes</option>
+                                    <option value="firing_rates" :disabled="!isFullSimulation">Firing rates</option>
                                     <option value="cdm" :disabled="!canPlotFieldPotentialOutputs()">Field potential</option>
                                     <option value="cdm_psd" :disabled="!canPlotFieldPotentialOutputs()">Power spectra of field potentials</option>
                                 </select>
-                                <p x-show="!hasSelectedFieldPotentialFile()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                                    Select at least one field-potential output file to enable field potential and spectra plots.
-                                </p>
-                                <p x-show="hasSelectedFieldPotentialFile() && !simulationAvailable && canPlotFieldPotentialOutputs()" class="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                                    Spike/rate plots are unavailable for this selection, but field-potential plots can still be generated from the selected field-potential files.
-                                </p>
                             </div>
                             <div class="sm:col-span-3">
                                 <p class="mt-7 text-xs text-slate-500 dark:text-slate-400">
@@ -2039,9 +2056,10 @@
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm">
                                     <option value="separate">Plot each selected trial separately</option>
                                     <option value="average">Average across all selected trials</option>
+                                    <option value="average_by_configuration">Average repetitions within each configuration</option>
                                 </select>
                                 <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                                    Separate matches the trial-by-trial layout used by spikes and field-potential plots. Average computes one Welch PSD per selected trial and then averages those spectra across all selected trials, repetitions, and configurations.
+                                    Separate matches the trial-by-trial layout used by spikes and field-potential plots. Average computes one Welch PSD per selected trial and then averages those spectra across all selected trials, repetitions, and configurations. Average repetitions within each configuration computes one PSD per trial, averages those PSDs inside each configuration, and plots one curve/panel per configuration.
                                 </p>
                             </div>
                             <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
