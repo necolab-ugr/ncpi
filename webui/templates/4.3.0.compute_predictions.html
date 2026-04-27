@@ -49,7 +49,7 @@
     id="compute-predictions-root"
     x-data="{
         runtime: (window.__webuiRuntime || {}),
-        featuresSourceMode: '{{ "auto-detected" if default_feature_file else "upload" }}',
+        featuresSourceMode: '{{ "auto-detected" if default_feature_file else "server-path" }}',
         featuresServerFilePath: '',
         assetsSourceMode: 'server-path',
         assetsServerFolderPath: '',
@@ -139,7 +139,7 @@
             <div class="grid grid-cols-1 gap-6">
                 <div>
                     <input id="existing-features-file" type="hidden" name="existing_features_file" value="{{ default_feature_file | default('') }}">
-                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="{{ 'auto-detected' if default_feature_file else 'upload' }}">
+                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="{{ 'auto-detected' if default_feature_file else 'server-path' }}">
                     <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="">
                     <input id="file-upload-features" class="hidden" name="features_predict_file" type="file" />
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -237,7 +237,7 @@
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Assets Selection Mode</label>
                     <div class="flex flex-col sm:flex-row gap-3">
                         <label class="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
-                            <input id="assets-mode-individual" type="radio" class="text-primary focus:ring-primary" x-model="assetsUploadMode" value="individual">
+                            <input id="assets-mode-individual" type="radio" class="text-primary focus:ring-primary" x-model="assetsUploadMode" value="individual" checked>
                             Individual files
                         </label>
                         <label class="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
@@ -298,8 +298,8 @@
                         <div id="assets-model-drop-zone"
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
-                                <button id="assets-model-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
-                                <button id="assets-model-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server upload</button>
+                                <button id="assets-model-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300">Local upload</button>
+                                <button id="assets-model-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">Server upload</button>
                                 <button id="assets-model-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                             </div>
                             <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
@@ -333,8 +333,8 @@
                         <div id="assets-scaler-drop-zone"
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
-                                <button id="assets-scaler-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
-                                <button id="assets-scaler-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server upload</button>
+                                <button id="assets-scaler-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300">Local upload</button>
+                                <button id="assets-scaler-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">Server upload</button>
                                 <button id="assets-scaler-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                             </div>
                             <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
@@ -368,8 +368,8 @@
                         <div id="assets-density-drop-zone"
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
-                                <button id="assets-density-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
-                                <button id="assets-density-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server upload</button>
+                                <button id="assets-density-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300">Local upload</button>
+                                <button id="assets-density-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">Server upload</button>
                                 <button id="assets-density-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                             </div>
                             <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
