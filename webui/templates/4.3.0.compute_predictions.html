@@ -1507,8 +1507,10 @@
             fileModal.classList.remove("hidden");
             fileModal.classList.add("flex");
             const current = String(currentSelectionPath || "").trim();
-            const startPath = current && current.includes("/")
-                ? current.slice(0, current.lastIndexOf("/"))
+            const normalizedCurrent = current.replace(/\\/g, "/");
+            const looksLikeFilePath = /\/[^/]+\.[^/]+$/.test(normalizedCurrent);
+            const startPath = normalizedCurrent
+                ? (looksLikeFilePath ? normalizedCurrent.slice(0, normalizedCurrent.lastIndexOf("/")) : normalizedCurrent)
                 : "";
             selectedFilePath = current;
             await loadServerFiles(startPath);
