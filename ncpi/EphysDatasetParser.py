@@ -87,6 +87,15 @@ def _require_h5py(context: str = "") -> None:
         raise ImportError(msg)
 
 
+def _require_pyedflib(context: str = "") -> None:
+    if not tools.ensure_module("pyedflib"):
+        msg = "pyEDFlib is required"
+        if context:
+            msg += f" for {context}"
+        msg += " but is not installed."
+        raise ImportError(msg)
+
+
 def _is_matlab_v73_error(exc: Exception) -> bool:
     return "please use hdf reader for matlab v7.3 files" in str(exc or "").lower()
 
@@ -216,6 +225,144 @@ def _load_mat_with_fallback(path: Path) -> Any:
                 f"scipy: {scipy_exc}; h5py: {exc}"
             )
         raise
+
+
+def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
+    _require_pyedflib("EDF .edf loading")
+    import pyedflib  # type: ignore
+
+    def _as_text(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="ignore").strip()
+        return str(value).strip()
+
+    def _safe_reader_call(reader: Any, method_name: str) -> Any:
+        fn = getattr(reader, method_name, None)
+        if callable(fn):
+            try:
+                return fn()
+            except Exception:
+                return None
+        return None
+
+    reader = pyedflib.EdfReader(str(path))
+    try:
+        n_signals = int(getattr(reader, "signals_in_file", 0) or 0)
+        if n_signals <= 0:
+            raise ValueError(f"EDF file '{path}' does not contain readable signals.")
+
+        labels_raw = _safe_reader_call(reader, "getSignalLabels") or []
+        ch_names = [
+            (_as_text(labels_raw[i]) if i < len(labels_raw) else "") or f"ch{i}"
+            for i in range(n_signals)
+        ]
+
+        sample_freqs = np.asarray(_safe_reader_call(reader, "getSampleFrequencies"), dtype=float).reshape(-1)
+        if sample_freqs.size != n_signals:
+            raise ValueError(
+                f"EDF file '{path}' returned {sample_freqs.size} sample-frequency values for {n_signals} channels."
+            )
+        if not np.isfinite(sample_freqs).all() or float(sample_freqs[0]) <= 0:
+            raise ValueError(f"EDF file '{path}' contains invalid sample-frequency values.")
+
+        fs = float(sample_freqs[0])
+        if np.any(np.abs(sample_freqs - fs) > 1e-9):
+            unique_freqs = sorted({float(v) for v in sample_freqs.tolist()})
+            raise ValueError(
+                f"EDF file '{path}' contains mixed sampling frequencies across channels: {unique_freqs}. "
+                "A single shared frequency is required."
+            )
+
+        n_samples_arr = np.asarray(_safe_reader_call(reader, "getNSamples"), dtype=int).reshape(-1)
+        if n_samples_arr.size != n_signals:
+            raise ValueError(
+                f"EDF file '{path}' returned {n_samples_arr.size} sample-count values for {n_signals} channels."
+            )
+        if np.any(n_samples_arr <= 0):
+            raise ValueError(f"EDF file '{path}' contains non-positive sample counts.")
+        if np.any(n_samples_arr != int(n_samples_arr[0])):
+            unique_counts = sorted({int(v) for v in n_samples_arr.tolist()})
+            raise ValueError(
+                f"EDF file '{path}' contains inconsistent sample counts across channels: {unique_counts}."
+            )
+
+        n_samples = int(n_samples_arr[0])
+        data = np.empty((n_signals, n_samples), dtype=float)
+        for ch_idx in range(n_signals):
+            sig = np.asarray(reader.readSignal(ch_idx), dtype=float).reshape(-1)
+            if sig.size != n_samples:
+                raise ValueError(
+                    f"EDF file '{path}' channel {ch_idx} has {sig.size} samples, expected {n_samples}."
+                )
+            data[ch_idx, :] = sig
+
+        start_dt = _safe_reader_call(reader, "getStartdatetime")
+        recording_start = start_dt.isoformat() if start_dt is not None and hasattr(start_dt, "isoformat") else None
+
+        annotations: list[Dict[str, Any]] = []
+        raw_annotations = _safe_reader_call(reader, "readAnnotations")
+        if isinstance(raw_annotations, tuple) and len(raw_annotations) >= 3:
+            onsets, durations, descriptions = raw_annotations[0], raw_annotations[1], raw_annotations[2]
+            for onset, duration, description in zip(onsets, durations, descriptions):
+                try:
+                    onset_val = float(onset)
+                except Exception:
+                    onset_val = None
+                try:
+                    duration_val = float(duration)
+                except Exception:
+                    duration_val = None
+                annotations.append(
+                    {
+                        "onset_s": onset_val,
+                        "duration_s": duration_val,
+                        "description": _as_text(description),
+                    }
+                )
+
+        header = {}
+        header_fields = {
+            "patient_code": "getPatientCode",
+            "patient_name": "getPatientName",
+            "admin_code": "getAdmincode",
+            "technician": "getTechnician",
+            "equipment": "getEquipment",
+            "recording_additional": "getRecordingAdditional",
+            "patient_additional": "getPatientAdditional",
+            "gender": "getGender",
+            "birthdate": "getBirthdate",
+        }
+        for key, method_name in header_fields.items():
+            value = _safe_reader_call(reader, method_name)
+            value_text = _as_text(value)
+            if value_text:
+                header[key] = value_text
+
+        subject_id = header.get("patient_code") or header.get("patient_name")
+        duration_s = float(n_samples) / fs
+        out: Dict[str, Any] = {
+            "__source_format__": "edf",
+            "data": data,
+            "fs": fs,
+            "ch_names": ch_names,
+            "time": np.arange(n_samples, dtype=float) / fs,
+            "duration_s": duration_s,
+            "recording_start": recording_start,
+            "n_channels": int(n_signals),
+            "n_samples": int(n_samples),
+            "annotations": annotations,
+            "header": header,
+        }
+        if subject_id:
+            out["subject_id"] = subject_id
+        return out
+    finally:
+        try:
+            reader.close()
+        except Exception:
+            pass
 
 
 # ---- Locators -------------------------------------------------------------
@@ -365,7 +512,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat, .set, .tsv paths
+      - .npy, .json, .mat, .set, .edf, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -456,6 +603,9 @@ class EphysDatasetParser:
                 import mne  # type: ignore
 
                 return mne.io.read_raw_eeglab(str(path), preload=self.config.preload), source_file
+
+            if suffix == ".edf":
+                return _load_edf_with_pyedflib(path), source_file
 
             if suffix in (".csv", ".parquet", ".tsv"):
                 if not tools.ensure_module("pandas"):
