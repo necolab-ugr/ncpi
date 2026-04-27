@@ -127,7 +127,7 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".tsv"
+    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".edf", ".tsv"
 }
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
@@ -4708,6 +4708,49 @@ def _describe_parser_source(path):
         data_guess = defaults.get("data")
         resolved_data = _resolve_locator_value(source_obj, data_guess)
         sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
+        source_format = str(source_obj.get("__source_format__") or "").strip().lower()
+        if source_format == "edf":
+            fs_val = source_obj.get("fs")
+            try:
+                fs_float = float(fs_val) if fs_val is not None else None
+            except Exception:
+                fs_float = None
+            duration_val = source_obj.get("duration_s")
+            try:
+                duration_float = float(duration_val) if duration_val is not None else None
+            except Exception:
+                duration_float = None
+            ann_count = len(source_obj.get("annotations") or [])
+            n_channels = source_obj.get("n_channels")
+            if isinstance(n_channels, (int, float)):
+                try:
+                    n_channels = int(n_channels)
+                except Exception:
+                    n_channels = sensor_count
+            else:
+                n_channels = sensor_count
+            summary_parts = ["EDF recording"]
+            if isinstance(n_channels, int) and n_channels > 0:
+                summary_parts.append(f"{n_channels} channels")
+            if fs_float is not None and np.isfinite(fs_float) and fs_float > 0:
+                summary_parts.append(f"{fs_float:g} Hz")
+            if duration_float is not None and np.isfinite(duration_float) and duration_float > 0:
+                summary_parts.append(f"{duration_float:.3f}s")
+            summary_parts.append(f"{ann_count} annotation(s)")
+            payload = {
+                "source_type": "edf",
+                "candidate_fields": candidate_fields,
+                "top_keys": top_keys,
+                "defaults": defaults,
+                "summary": " · ".join(summary_parts) + ".",
+                "sensor_count_estimate": n_channels if isinstance(n_channels, int) else sensor_count,
+                "multi_sensor_detected": bool((n_channels if isinstance(n_channels, int) else sensor_count) and (n_channels if isinstance(n_channels, int) else sensor_count) > 1),
+                "fs_hint_hz": fs_float,
+                "fs_hint_note": f"Sampling rate from EDF header: {fs_float:g} Hz." if fs_float else None,
+            }
+            payload["field_details"] = _describe_source_fields_for_ui(source_obj, candidate_fields, "field")
+            payload["manual_field_details"] = _manual_field_details_for_ui()
+            return payload
         payload = {
             "source_type": "mapping",
             "candidate_fields": candidate_fields,
