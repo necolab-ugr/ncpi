@@ -127,7 +127,7 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".edf", ".tsv"
+    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".tsv"
 }
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
@@ -2194,6 +2194,9 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
     extension_counts = defaultdict(int)
     folder_contexts = []
     selection_map = data_file_selection_map if isinstance(data_file_selection_map, dict) else {}
+    skipped_unreadable_paths = defaultdict(list)
+    skipped_unreadable_by_ext = defaultdict(lambda: defaultdict(int))
+    skipped_broken_symlink_paths = defaultdict(list)
 
     for folder_idx, root in enumerate(roots, start=1):
         folder_name = _folder_display_name(root, fallback_index=folder_idx)
@@ -2224,6 +2227,12 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                 if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                     continue
                 full_path = os.path.join(current_root, name)
+                if not os.path.isfile(full_path):
+                    skipped_unreadable_paths[root].append(full_path)
+                    skipped_unreadable_by_ext[root][ext or "(no extension)"] += 1
+                    if os.path.islink(full_path):
+                        skipped_broken_symlink_paths[root].append(full_path)
+                    continue
                 rel_path = _to_posix_relpath(os.path.relpath(full_path, root))
                 rel_parts = [token for token in rel_path.split("/") if token]
                 file_depth = max(0, len(rel_parts) - 1)
@@ -2552,6 +2561,26 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                 for item in selected_entries
             ]
 
+        if skipped_unreadable_paths.get(root):
+            ext_parts = []
+            for _ext, _count in sorted(skipped_unreadable_by_ext.get(root, {}).items()):
+                ext_parts.append(f"{_ext} ({_count})")
+            ext_text = ", ".join(ext_parts) if ext_parts else "supported extensions"
+            broken_links = skipped_broken_symlink_paths.get(root, [])
+            if broken_links:
+                example_link = str(broken_links[0])
+                structure_warnings.append(
+                    "Some candidate files were skipped because they are not readable regular files "
+                    f"(detected: {ext_text}). "
+                    f"Broken symlink example: {example_link}. "
+                    "If this dataset uses git-annex/datalad links, fetch the file contents first."
+                )
+            else:
+                structure_warnings.append(
+                    "Some candidate files were skipped because they are not readable regular files "
+                    f"(detected: {ext_text})."
+                )
+
         folder_summaries.append({
             "folder_path": root,
             "folder_name": folder_name,
@@ -2570,15 +2599,31 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
             "selected_data_extension": selected_data_extension,
             "matched_data_files": matched_data_files,
             "selected_entries": selected_entries,
+            "all_entries": list(folder_entries),
             "sample_selected_entry": selected_sample_entry,
             "all_subfolders": all_subfolders,
             "structure_warnings": structure_warnings,
+            "skipped_unreadable_paths": list(skipped_unreadable_paths.get(root, []))[:20],
         })
 
     entries.sort(key=lambda item: item["path"])
 
     if not entries:
         joined = ", ".join(roots)
+        unreadable_count = sum(len(v) for v in skipped_unreadable_paths.values())
+        if unreadable_count > 0:
+            sample_unreadable = []
+            for root in roots:
+                sample_unreadable.extend(skipped_unreadable_paths.get(root, []))
+                if len(sample_unreadable) >= 5:
+                    break
+            sample_text = ", ".join(sample_unreadable[:5])
+            raise ValueError(
+                f"No supported readable {kind_label.lower()} files found in selected folder(s): {joined}. "
+                f"Detected {unreadable_count} path(s) that are not regular readable files"
+                + (f" (e.g., {sample_text})" if sample_text else "")
+                + "."
+            )
         raise ValueError(f"No supported {kind_label.lower()} files found in selected folder(s): {joined}")
 
     return entries, folder_summaries, dict(sorted(extension_counts.items())), folder_contexts
@@ -2679,11 +2724,14 @@ def _parse_filename_format_spec(raw_format):
         group_map.append((group_name, value_part))
         regex_parts.append(f"(?P<{group_name}>.+?)")
 
+    has_explicit_extension = bool(re.search(r"\.[A-Za-z0-9]+$", value))
+
     return {
         "raw": value,
         "tokens": token_names,
         "group_map": group_map,
         "regex": re.compile("^" + "".join(regex_parts) + "$"),
+        "has_explicit_extension": has_explicit_extension,
     }
 
 
@@ -2696,13 +2744,22 @@ def _extract_filename_format_tokens(file_name, format_spec):
     matcher = format_spec.get("regex")
     if matcher is None:
         return None
-    match = matcher.fullmatch(basename)
-    if not match:
-        return None
-    out = {}
-    for group_name, token_name in (format_spec.get("group_map") or []):
-        out[str(token_name)] = str(match.group(group_name) or "").strip()
-    return out
+    has_explicit_extension = bool(format_spec.get("has_explicit_extension"))
+    candidates = [basename]
+    if not has_explicit_extension:
+        stem = Path(basename).stem
+        if stem and stem != basename:
+            candidates.append(stem)
+
+    for candidate in candidates:
+        match = matcher.fullmatch(candidate)
+        if not match:
+            continue
+        out = {}
+        for group_name, token_name in (format_spec.get("group_map") or []):
+            out[str(token_name)] = str(match.group(group_name) or "").strip()
+        return out
+    return None
 
 
 def _matches_filename_format(file_name, format_spec):
@@ -3656,64 +3713,25 @@ def _filter_folder_contexts_by_filename_format(folder_contexts, filename_format_
         if not isinstance(context, dict):
             continue
         cloned = dict(context)
-        selected_entries = list(cloned.get("selected_entries") or [])
-        matched_data_files = list(cloned.get("matched_data_files") or [])
+        # When a filename format is explicitly provided, it takes precedence over
+        # Data Source Selection. Filter against all discovered files in the folder.
+        all_entries = list(cloned.get("all_entries") or [])
+        selected_entries = all_entries
+        matched_data_files = all_entries
         has_nested_subfolders = bool(cloned.get("has_nested_subfolders"))
-        if has_nested_subfolders:
-            filter_scope = "folder"
-            branch_names = sorted(
-                {
-                    str(item.get("level1_subfolder") or "").strip()
-                    for item in matched_data_files
-                    if str(item.get("level1_subfolder") or "").strip()
-                }
-            )
-            if not branch_names:
-                branch_names = sorted(
-                    {
-                        str(item.get("name") or "").strip()
-                        for item in (cloned.get("all_subfolders") or [])
-                        if str(item.get("name") or "").strip()
-                    }
-                )
-            matched_branch_names, skipped_branch_names = _filter_named_items_by_filename_format(
-                branch_names,
-                lambda item: str(item or ""),
-                filename_format_spec,
-            )
-            total_count += len(branch_names)
-            matched_count += len(matched_branch_names)
-            skipped_names.extend(skipped_branch_names)
-            matched_branch_set = set(matched_branch_names)
-            selected_entries = [
-                item
-                for item in selected_entries
-                if str(item.get("level1_subfolder") or "").strip() in matched_branch_set
-            ]
-            matched_data_files = [
-                item
-                for item in matched_data_files
-                if str(item.get("level1_subfolder") or "").strip() in matched_branch_set
-            ]
-            cloned["all_subfolders"] = [
-                item
-                for item in (cloned.get("all_subfolders") or [])
-                if str(item.get("name") or "").strip() in matched_branch_set
-            ]
-        else:
-            selected_entries, skipped_selected = _filter_named_items_by_filename_format(
-                selected_entries,
-                lambda item: str(item.get("name") or ""),
-                filename_format_spec,
-            )
-            matched_data_files, _ = _filter_named_items_by_filename_format(
-                matched_data_files,
-                lambda item: str(item.get("name") or ""),
-                filename_format_spec,
-            )
-            total_count += len(selected_entries) + len(skipped_selected)
-            matched_count += len(selected_entries)
-            skipped_names.extend(skipped_selected)
+        selected_entries, skipped_selected = _filter_named_items_by_filename_format(
+            selected_entries,
+            lambda item: str(item.get("name") or ""),
+            filename_format_spec,
+        )
+        matched_data_files, _ = _filter_named_items_by_filename_format(
+            matched_data_files,
+            lambda item: str(item.get("name") or ""),
+            filename_format_spec,
+        )
+        total_count += len(selected_entries) + len(skipped_selected)
+        matched_count += len(selected_entries)
+        skipped_names.extend(skipped_selected)
         cloned["selected_entries"] = selected_entries
         cloned["matched_data_files"] = matched_data_files
         sample_entry = cloned.get("sample_selected_entry")
@@ -3758,34 +3776,93 @@ def _collect_selected_entries_from_folder_contexts(folder_contexts):
     return collected
 
 
+def _expand_entries_for_filename_format_scope(
+    source_entries,
+    selected_path_set,
+    folder_contexts,
+    subfolder_filter_map=None,
+):
+    selected_paths = set(str(path or "").strip() for path in (selected_path_set or set()) if str(path or "").strip())
+    if not selected_paths:
+        return []
+
+    out = []
+    for entry in source_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        folder_path = str(entry.get("folder_path") or "").strip()
+        if folder_path not in selected_paths:
+            continue
+        out.append(entry)
+
+    filter_map = subfolder_filter_map if isinstance(subfolder_filter_map, dict) else {}
+    if filter_map:
+        filtered = []
+        for entry in out:
+            folder_path = str(entry.get("folder_path") or "").strip()
+            included = filter_map.get(folder_path, [])
+            if not included:
+                filtered.append(entry)
+                continue
+            sub_name = str(entry.get("level1_subfolder") or "").strip()
+            if not sub_name or sub_name in included:
+                filtered.append(entry)
+        out = filtered
+
+    out.sort(key=lambda item: str(item.get("path") or ""))
+    return out
+
+
+def _expand_entries_for_selected_extensions_scope(
+    source_entries,
+    selected_path_set,
+    selected_extensions,
+    subfolder_filter_map=None,
+):
+    selected_paths = set(str(path or "").strip() for path in (selected_path_set or set()) if str(path or "").strip())
+    wanted_exts = set(str(ext or "").strip().lower() for ext in (selected_extensions or []) if str(ext or "").strip())
+    if not selected_paths or not wanted_exts:
+        return []
+
+    out = []
+    for entry in source_entries or []:
+        if not isinstance(entry, dict):
+            continue
+        folder_path = str(entry.get("folder_path") or "").strip()
+        if folder_path not in selected_paths:
+            continue
+        entry_ext = str(entry.get("extension") or "").strip().lower()
+        if entry_ext not in wanted_exts:
+            continue
+        out.append(entry)
+
+    filter_map = subfolder_filter_map if isinstance(subfolder_filter_map, dict) else {}
+    if filter_map:
+        filtered = []
+        for entry in out:
+            folder_path = str(entry.get("folder_path") or "").strip()
+            included = filter_map.get(folder_path, [])
+            if not included:
+                filtered.append(entry)
+                continue
+            sub_name = str(entry.get("level1_subfolder") or "").strip()
+            if not sub_name or sub_name in included:
+                filtered.append(entry)
+        out = filtered
+
+    out.sort(key=lambda item: str(item.get("path") or ""))
+    return out
+
+
 def _filter_selected_entries_by_filename_format(selected_entries, filename_format_spec):
     rows = [item for item in (selected_entries or []) if isinstance(item, dict)]
-    has_nested_subfolders = any(str(item.get("level1_subfolder") or "").strip() for item in rows)
-    if has_nested_subfolders:
-        level1_names = sorted(
-            {
-                str(item.get("level1_subfolder") or "").strip()
-                for item in rows
-                if str(item.get("level1_subfolder") or "").strip()
-            }
-        )
-        matched_names, skipped_names = _filter_named_items_by_filename_format(
-            level1_names,
-            lambda item: str(item or ""),
-            filename_format_spec,
-        )
-        matched_set = set(matched_names)
-        filtered = [
-            item
-            for item in rows
-            if str(item.get("level1_subfolder") or "").strip() in matched_set
-        ]
-        return filtered, skipped_names, "folder", len(level1_names)
     filtered, skipped_names = _filter_named_items_by_filename_format(
         rows,
         lambda row: str(row.get("name") or ""),
         filename_format_spec,
     )
+    # Even for nested folder layouts (e.g., BIDS), filename-format filtering
+    # should operate on every candidate file name, not only top-level subfolder names.
     return filtered, skipped_names, "file", len(rows)
 
 
@@ -3850,21 +3927,12 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename
             continue
 
         if filename_format_spec:
-            nested_labels = sorted(
-                {
-                    str(item.get("level1_subfolder") or "").strip()
-                    for item in rows
-                    if str(item.get("level1_subfolder") or "").strip()
-                }
-            )
-            if nested_labels:
-                folder_file_names = nested_labels
-            else:
-                folder_file_names = [
-                    str(item.get("name") or "").strip()
-                    for item in rows
-                    if str(item.get("name") or "").strip()
-                ]
+            # Filename-format filtering is file-based even for nested datasets (e.g., BIDS).
+            folder_file_names = [
+                str(item.get("name") or "").strip()
+                for item in rows
+                if str(item.get("name") or "").strip()
+            ]
         else:
             folder_file_names = [
                 str(item.get("logical_name") or item.get("name") or "")
@@ -4251,8 +4319,10 @@ def _resolve_locator_value(obj, locator):
     parser = EphysDatasetParser(ParseConfig())
     try:
         return parser._resolve(obj, locator)
-    except Exception as e:
-        traceback.print_exc()
+    except Exception:
+        # Locator probing during parser inspection is best-effort:
+        # unresolved optional paths (e.g. info.subject_info.his_id when subject_info is None)
+        # should not spam server logs with full tracebacks.
         return None
 
 
@@ -4666,12 +4736,32 @@ def _describe_parser_source(path):
             sfreq = float(getattr(source_obj.info, "sfreq", 0))
         except Exception:
             sfreq = None
+        duration_s = None
+        try:
+            if hasattr(source_obj, "n_times") and sfreq and float(sfreq) > 0:
+                duration_s = float(getattr(source_obj, "n_times", 0)) / float(sfreq)
+        except Exception:
+            duration_s = None
+        bads_count = 0
+        try:
+            bads_count = len(getattr(source_obj.info, "bads", []) or [])
+        except Exception:
+            bads_count = 0
         mne_candidates = [
             "get_data",
             "ch_names",
             "info.sfreq",
             "info.subject_info",
+            "info.subject_info.his_id",
+            "info.subject_info.id",
             "info.description",
+            "info.meas_date",
+            "info.line_freq",
+            "info.lowpass",
+            "info.highpass",
+            "info.bads",
+            "info.experimenter",
+            "info.device_info",
         ]
         mne_defaults = {
             "data": "get_data",
@@ -4686,6 +4776,9 @@ def _describe_parser_source(path):
         summary_parts = [f"MNE {type(source_obj).__name__}", f"{n_ch} channels"]
         if sfreq:
             summary_parts.append(f"{sfreq:g} Hz")
+        if duration_s and np.isfinite(duration_s) and duration_s > 0:
+            summary_parts.append(f"{duration_s:.3f}s")
+        summary_parts.append(f"{bads_count} bad channel(s)")
         payload = {
             "source_type": "mne_raw",
             "candidate_fields": mne_candidates,
@@ -7879,7 +7972,7 @@ def features_parser_inspect():
                 folder_entries = _collect_selected_entries_from_folder_contexts(folder_contexts)
                 if not folder_entries:
                     raise ValueError(
-                        f"No files or first-level folders match filename format '{filename_format_spec['raw']}'."
+                        f"No files match filename format '{filename_format_spec['raw']}'."
                     )
                 folder_summaries, extension_summaries = _summarize_folder_entries(folder_entries)
                 skipped_names = folder_filter_stats.get("skipped_names") or []
@@ -7957,7 +8050,7 @@ def features_parser_inspect():
                 folder_entries = _collect_selected_entries_from_folder_contexts(folder_contexts)
                 if not folder_entries:
                     raise ValueError(
-                        f"No files or first-level folders match filename format '{filename_format_spec['raw']}'."
+                        f"No files match filename format '{filename_format_spec['raw']}'."
                     )
                 folder_summaries, extension_summaries = _summarize_folder_entries(folder_entries)
                 skipped_names = folder_filter_stats.get("skipped_names") or []
@@ -8098,7 +8191,7 @@ def features_parser_inspect():
                     )
             else:
                 raise ValueError(
-                    f"No files or first-level folders match filename format '{filename_format_spec['raw']}'."
+                    f"No files match filename format '{filename_format_spec['raw']}'."
                 )
 
         if folder_entries:
@@ -13248,6 +13341,12 @@ def start_computation_redirect(computation_type):
                 cfg_started = time.perf_counter()
                 parse_cfg = _build_parse_config_from_form(request.form)
                 filename_format_spec = _parse_filename_format_spec(request.form.get("parser_filename_format"))
+                app.logger.warning(
+                    "[compute %s] simulation filename_format raw=%r parsed=%s",
+                    job_id,
+                    (request.form.get("parser_filename_format") or ""),
+                    "yes" if filename_format_spec else "no",
+                )
                 _validate_parse_cfg_filename_token_locators(parse_cfg, request.form)
                 app.logger.warning(
                     "[compute %s] simulation parser config built in %.1f ms",
@@ -13286,6 +13385,41 @@ def start_computation_redirect(computation_type):
                         selected_data_entries.extend(list(context.get("selected_entries") or []))
                     if selected_data_entries:
                         selected_entries = selected_data_entries
+                    if not filename_format_spec:
+                        nested_selected_exts = {
+                            str(context.get("selected_data_extension") or "").strip().lower()
+                            for context in folder_contexts
+                            if str(context.get("folder_path") or "").strip() in selected_path_set
+                            and bool(context.get("has_nested_subfolders"))
+                            and str(context.get("selected_data_extension") or "").strip()
+                        }
+                        if nested_selected_exts:
+                            expanded_auto_entries = _expand_entries_for_selected_extensions_scope(
+                                source_entries,
+                                selected_path_set,
+                                nested_selected_exts,
+                            )
+                            if expanded_auto_entries:
+                                selected_entries = expanded_auto_entries
+                    app.logger.warning(
+                        "[compute %s] simulation entries baseline selected=%d source_total=%d",
+                        job_id,
+                        len(selected_entries),
+                        len(source_entries),
+                    )
+                    if filename_format_spec:
+                        expanded_entries = _expand_entries_for_filename_format_scope(
+                            source_entries,
+                            selected_path_set,
+                            folder_contexts,
+                        )
+                        if expanded_entries:
+                            selected_entries = expanded_entries
+                        app.logger.warning(
+                            "[compute %s] simulation entries expanded=%d",
+                            job_id,
+                            len(selected_entries),
+                        )
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     if filename_format_spec:
@@ -13311,15 +13445,11 @@ def start_computation_redirect(computation_type):
                             )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
-                        nested_label = str(entry.get("level1_subfolder") or "").strip()
-                        if filename_format_spec and nested_label:
-                            logical_name = nested_label
-                        else:
-                            logical_name = _prefixed_file_name(
-                                entry["name"],
-                                entry.get("folder_name"),
-                                apply_prefix=use_prefix,
-                            )
+                        logical_name = _prefixed_file_name(
+                            entry["name"],
+                            entry.get("folder_name"),
+                            apply_prefix=use_prefix,
+                        )
                         empirical_upload_paths.append({
                             "name": logical_name,
                             "ext": entry["extension"],
@@ -13462,6 +13592,12 @@ def start_computation_redirect(computation_type):
                 cfg_started = time.perf_counter()
                 parse_cfg = _build_parse_config_from_form(request.form)
                 filename_format_spec = _parse_filename_format_spec(request.form.get("parser_filename_format"))
+                app.logger.warning(
+                    "[compute %s] empirical filename_format raw=%r parsed=%s",
+                    job_id,
+                    (request.form.get("parser_filename_format") or ""),
+                    "yes" if filename_format_spec else "no",
+                )
                 _validate_parse_cfg_filename_token_locators(parse_cfg, request.form)
                 app.logger.warning(
                     "[compute %s] parser config built in %.1f ms",
@@ -13515,6 +13651,43 @@ def start_computation_redirect(computation_type):
                         selected_data_entries = _filtered
                     if selected_data_entries:
                         selected_entries = selected_data_entries
+                    if not filename_format_spec:
+                        nested_selected_exts = {
+                            str(context.get("selected_data_extension") or "").strip().lower()
+                            for context in folder_contexts
+                            if str(context.get("folder_path") or "").strip() in selected_path_set
+                            and bool(context.get("has_nested_subfolders"))
+                            and str(context.get("selected_data_extension") or "").strip()
+                        }
+                        if nested_selected_exts:
+                            expanded_auto_entries = _expand_entries_for_selected_extensions_scope(
+                                source_entries,
+                                selected_path_set,
+                                nested_selected_exts,
+                                empirical_subfolder_filter_map,
+                            )
+                            if expanded_auto_entries:
+                                selected_entries = expanded_auto_entries
+                    app.logger.warning(
+                        "[compute %s] empirical entries baseline selected=%d source_total=%d",
+                        job_id,
+                        len(selected_entries),
+                        len(source_entries),
+                    )
+                    if filename_format_spec:
+                        expanded_entries = _expand_entries_for_filename_format_scope(
+                            source_entries,
+                            selected_path_set,
+                            folder_contexts,
+                            empirical_subfolder_filter_map,
+                        )
+                        if expanded_entries:
+                            selected_entries = expanded_entries
+                        app.logger.warning(
+                            "[compute %s] empirical entries expanded=%d",
+                            job_id,
+                            len(selected_entries),
+                        )
                     if not selected_entries:
                         raise ValueError("No files available in the selected analysis folder(s).")
                     if filename_format_spec:
@@ -13540,15 +13713,11 @@ def start_computation_redirect(computation_type):
                             )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
-                        nested_label = str(entry.get("level1_subfolder") or "").strip()
-                        if filename_format_spec and nested_label:
-                            logical_name = nested_label
-                        else:
-                            logical_name = _prefixed_file_name(
-                                entry["name"],
-                                entry.get("folder_name"),
-                                apply_prefix=use_prefix,
-                            )
+                        logical_name = _prefixed_file_name(
+                            entry["name"],
+                            entry.get("folder_name"),
+                            apply_prefix=use_prefix,
+                        )
                         empirical_upload_paths.append({
                             "name": logical_name,
                             "ext": entry["extension"],

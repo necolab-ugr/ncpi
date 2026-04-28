@@ -768,6 +768,20 @@ def _load_uploaded_source_bytes(name, ext, content):
                 except OSError:
                     pass
 
+    if ext == ".fif":
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(prefix="ncpi_fif_", suffix=".fif", delete=False) as handle:
+                handle.write(raw)
+                temp_path = handle.name
+            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".fif")
+        finally:
+            if temp_path and os.path.isfile(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
@@ -783,6 +797,8 @@ def _load_uploaded_source_path(path, name=None, ext=None):
     safe_path = str(path or "")
     if not safe_path or not os.path.exists(safe_path):
         raise ValueError(f"Uploaded file path does not exist: '{safe_path}'.")
+    if not os.path.isfile(safe_path):
+        raise ValueError(f"Uploaded path is not a regular file: '{safe_path}'.")
     safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
     ext = str(ext or os.path.splitext(safe_name)[1]).lower()
 
@@ -826,6 +842,13 @@ def _load_uploaded_source_path(path, name=None, ext=None):
         except Exception as exc:
             raise ValueError(f"mne is required to parse .set files: {exc}")
         return mne.io.read_raw_eeglab(safe_path, preload=True)
+
+    if ext == ".fif":
+        try:
+            import mne
+        except Exception as exc:
+            raise ValueError(f"mne is required to parse .fif files: {exc}")
+        return mne.io.read_raw_fif(safe_path, preload=True, verbose=False)
 
     if ext == ".edf":
         try:

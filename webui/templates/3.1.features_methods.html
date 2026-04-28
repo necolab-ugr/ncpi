@@ -32,7 +32,7 @@
             }
         }
         const supportedParserFileExtensions = new Set([
-            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather', '.set', '.edf', '.tsv'
+            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather', '.set', '.fif', '.edf', '.tsv'
         ]);
         return {
             activeTab: initialActiveTab,
@@ -1113,6 +1113,13 @@
                 const token = String(tokenName || '').trim().toLowerCase();
                 if (!token) return '';
                 return `__file_token_${token}__`;
+            },
+            parserFilenameFormatHasExplicitExtension() {
+                const formatValue = String(this.parserFilenameFormat || '').trim();
+                if (!formatValue) return false;
+                // Consider extension explicitly specified only when literal suffix
+                // ends with ".ext" (e.g. ".fif", ".mat", ".edf").
+                return /\.[a-z0-9]+$/i.test(formatValue);
             },
             insertFilenameFormatToken(token) {
                 const clean = String(token || '').trim();
@@ -2308,6 +2315,8 @@
 
                 try {
                     const formData = new FormData(form);
+                    const filenameFormatValue = String(this.parserFilenameFormat || '').trim();
+                    formData.set('parser_filename_format', filenameFormatValue);
                     // Append additional files so the backend can use them for metadata lookup
                     for (const f of this.additionalLocalFiles || []) {
                         formData.append('additional_metadata_file', f);
@@ -2952,6 +2961,7 @@
                     <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
                     <input type="hidden" name="parser_analysis_folder_paths" :value="JSON.stringify(parserAnalysisFolderPaths || [])">
                     <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
+                    <input type="hidden" name="parser_filename_format" :value="String(parserFilenameFormat || '').trim()">
                 
 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -3201,7 +3211,6 @@
                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
                             <input
                                 type="text"
-                                name="parser_filename_format"
                                 x-model="parserFilenameFormat"
                                 placeholder="$id$_comp_reject.mat"
                                 @keydown.enter.prevent="applyFilenameFormatAndReinspect()"
@@ -3237,7 +3246,6 @@
                                 <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
                                 <input
                                     type="text"
-                                    name="parser_filename_format"
                                     x-model="parserFilenameFormat"
                                     placeholder="$id$-$group$_$condition$.pkl"
                                     @keydown.enter.prevent="applyFilenameFormatAndReinspect()"
@@ -3245,7 +3253,7 @@
                                 >
                             </label>
                             <p class="text-[11px] text-gray-500 dark:text-gray-400">
-                                Use literal text + tokens between <code>$...$</code>. In nested datasets, this is applied to first-level folder names; otherwise it is applied to file names.
+                                Use literal text + tokens between <code>$...$</code>. The format is always matched against file names (including extension), also for nested datasets.
                             </p>
                             <div class="flex flex-wrap gap-2">
                                 <template x-for="token in parserFilenameFormatTokens()" :key="'filename-format-token-'+token">
@@ -3323,7 +3331,7 @@
                                         <div class="text-xs text-gray-500 dark:text-gray-400"><span x-text="folderProfile.file_count || 0"></span> file(s)</div>
                                     </div>
 
-                                    <div x-show="parserFolderDataFileCandidates(folderProfile).length > 0" class="space-y-2 rounded-lg border border-red-200/70 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3">
+                                    <div x-show="parserFolderDataFileCandidates(folderProfile).length > 0 && !parserFilenameFormatHasExplicitExtension()" class="space-y-2 rounded-lg border border-red-200/70 dark:border-red-900/40 bg-red-50/40 dark:bg-red-950/20 p-3">
                                         <h4 class="text-xs font-semibold text-red-800 dark:text-red-300 uppercase tracking-wide">Data source selection</h4>
                                         <p class="text-[11px] text-red-800/90 dark:text-red-200/90" x-show="folderProfile.has_nested_subfolders">
                                             Sample subfolder:
@@ -3351,14 +3359,17 @@
                                         </p>
                                     </div>
 
+                                    <div x-show="(folderProfile.structure_warnings || []).length > 0"
+                                         class="space-y-1 rounded-lg border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 p-3">
+                                        <h4 class="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide">Data source warnings</h4>
+                                        <template x-for="(warn, wi) in folderProfile.structure_warnings || []" :key="'fsw-'+wi">
+                                            <p class="text-[11px] text-amber-800 dark:text-amber-300" x-text="warn"></p>
+                                        </template>
+                                    </div>
+
                                     <!-- Subfolder inclusion filter -->
                                     <div x-show="folderProfile.has_nested_subfolders && parserFolderAllSubfolders(folderProfile).length > 0"
                                          class="space-y-2 rounded-lg border border-amber-200/70 dark:border-amber-800/40 bg-amber-50/40 dark:bg-amber-950/20 p-3">
-                                        <div x-show="(folderProfile.structure_warnings || []).length > 0" class="space-y-1">
-                                            <template x-for="(warn, wi) in folderProfile.structure_warnings || []" :key="'sw-'+wi">
-                                                <p class="text-[11px] text-amber-800 dark:text-amber-300" x-text="warn"></p>
-                                            </template>
-                                        </div>
                                         <div class="flex items-center justify-between gap-2">
                                             <h4 class="text-xs font-semibold text-amber-800 dark:text-amber-300 uppercase tracking-wide">Subfolder filter</h4>
                                             <span class="text-[11px] text-amber-700 dark:text-amber-400"
