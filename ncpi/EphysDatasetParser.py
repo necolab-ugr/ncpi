@@ -512,7 +512,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat, .set, .edf, .tsv paths
+      - .npy, .json, .mat, .set, .fif, .edf, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -604,7 +604,23 @@ class EphysDatasetParser:
 
                 return mne.io.read_raw_eeglab(str(path), preload=self.config.preload), source_file
 
+            if suffix == ".fif":
+                if not path.is_file():
+                    raise ValueError(
+                        f"FIF file does not exist or is not a regular file: '{path}'. "
+                        "Verify the dataset path and that the file is available on disk."
+                    )
+                _require_mne("MNE FIF .fif loading")
+                import mne  # type: ignore
+
+                return mne.io.read_raw_fif(str(path), preload=self.config.preload, verbose=False), source_file
+
             if suffix == ".edf":
+                if not path.is_file():
+                    raise ValueError(
+                        f"EDF file does not exist or is not a regular file: '{path}'. "
+                        "Verify the dataset path and that the file is available on disk."
+                    )
                 return _load_edf_with_pyedflib(path), source_file
 
             if suffix in (".csv", ".parquet", ".tsv"):
