@@ -7,6 +7,9 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union, Lite
 from collections.abc import Mapping as MappingABC
 import numpy as np
 from ncpi import tools
+import scipy.io as sio 
+import h5py  
+from functools import lru_cache
 
 
 # ---- Type aliases ---------------------------------------------------------
@@ -68,7 +71,7 @@ def _require_mne(context: str = "") -> None:
         msg += " but is not installed."
         raise ImportError(msg)
 
-
+@lru_cache(maxsize=None)
 def _require_scipy(context: str = "") -> None:
     if not tools.ensure_module("scipy"):
         msg = "scipy is required"
@@ -77,7 +80,7 @@ def _require_scipy(context: str = "") -> None:
         msg += " but is not installed."
         raise ImportError(msg)
 
-
+@lru_cache(maxsize=None)
 def _require_h5py(context: str = "") -> None:
     if not tools.ensure_module("h5py"):
         msg = "h5py is required"
@@ -85,10 +88,6 @@ def _require_h5py(context: str = "") -> None:
             msg += f" for {context}"
         msg += " but is not installed."
         raise ImportError(msg)
-
-
-def _is_matlab_v73_error(exc: Exception) -> bool:
-    return "please use hdf reader for matlab v7.3 files" in str(exc or "").lower()
 
 
 class _HDF5MatLazyMapping(MappingABC):
@@ -99,7 +98,6 @@ class _HDF5MatLazyMapping(MappingABC):
         self.group_path = str(group_path or "/")
 
     def _keys(self) -> list[str]:
-        import h5py  # type: ignore
         with h5py.File(self.file_path, "r") as h5f:
             grp = h5f[self.group_path]
             return [str(k) for k in grp.keys() if not str(k).startswith("#")]
@@ -112,7 +110,6 @@ class _HDF5MatLazyMapping(MappingABC):
 
     def __getitem__(self, key: str) -> Any:
         key_str = str(key)
-        import h5py  # type: ignore
         with h5py.File(self.file_path, "r") as h5f:
             grp = h5f[self.group_path]
             if key_str not in grp:
@@ -121,7 +118,6 @@ class _HDF5MatLazyMapping(MappingABC):
 
     def __contains__(self, key: object) -> bool:
         key_str = str(key)
-        import h5py  # type: ignore
         with h5py.File(self.file_path, "r") as h5f:
             grp = h5f[self.group_path]
             return key_str in grp
@@ -141,8 +137,6 @@ class _HDF5MatLazyMapping(MappingABC):
 
 
 def _hdf5_mat_to_python_value(value: Any, h5file: Any, file_path: Optional[str] = None) -> Any:
-    import h5py  # type: ignore
-
     if isinstance(value, h5py.Reference):
         if not value:
             return None
@@ -173,7 +167,6 @@ def _hdf5_mat_to_python_value(value: Any, h5file: Any, file_path: Optional[str] 
 
 
 def _hdf5_mat_to_python_node(node: Any, h5file: Any, file_path: Optional[str] = None) -> Any:
-    import h5py  # type: ignore
 
     if isinstance(node, h5py.Group):
         if file_path:
@@ -191,31 +184,27 @@ def _hdf5_mat_to_python_node(node: Any, h5file: Any, file_path: Optional[str] = 
     return node
 
 
+@lru_cache(maxsize=128)
+def _is_hdf5_mat(file_path: str) -> bool:
+    """Return True if file .mat is v7.3 (HDF5)."""
+    with open(file_path, "rb") as f:
+        return f.read(8) == b'\x89HDF\r\n\x1a\n'
+
+
 def _load_mat_with_fallback(path: Path) -> Any:
-    scipy_exc: Optional[Exception] = None
-    try:
+    # Fast file version detection
+    if _is_hdf5_mat(str(path)):
+        _require_h5py("MATLAB v7.3 .mat loading")
+        try:
+            return _HDF5MatLazyMapping(str(path), "/")
+        except Exception as exc:
+            raise ValueError(f"Failed to load v7.3 MATLAB file '{path}' with h5py: {exc}")
+    else:
         _require_scipy("MATLAB .mat loading")
-        import scipy.io as sio  # type: ignore
         try:
             return sio.loadmat(path, squeeze_me=True, struct_as_record=False)
         except Exception as exc:
-            scipy_exc = exc
-            if not _is_matlab_v73_error(exc):
-                raise
-    except Exception as exc:
-        if scipy_exc is None:
-            scipy_exc = exc
-
-    _require_h5py("MATLAB v7.3 .mat loading")
-    try:
-        return _HDF5MatLazyMapping(str(path), "/")
-    except Exception as exc:
-        if scipy_exc is not None:
-            raise ValueError(
-                f"Failed to parse MATLAB file '{path}' with scipy and h5py. "
-                f"scipy: {scipy_exc}; h5py: {exc}"
-            )
-        raise
+            raise ValueError(f"Failed to load legacy MATLAB file '{path}' with scipy: {exc}")
 
 
 # ---- Locators -------------------------------------------------------------
