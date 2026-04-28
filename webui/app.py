@@ -7786,6 +7786,10 @@ def features_parser_inspect():
         request.form,
         "empirical_data_file_selections",
     )
+    inspect_mode = (request.form.get("inspect_mode") or "").strip().lower()
+    if inspect_mode not in {"quick", "deep"}:
+        inspect_mode = "deep"
+    quick_scan_mode = inspect_mode == "quick" and bool(simulation_folder_paths or empirical_folder_paths)
     listed_file_names = [str(item).strip() for item in request.form.getlist("listed_file_names") if str(item).strip()]
     uploads = [f for f in request.files.getlist("file") if f and f.filename]
     _metadata_server_paths_raw = [p.strip() for p in request.form.getlist("metadata_server_path") if p.strip()]
@@ -7808,6 +7812,8 @@ def features_parser_inspect():
     folder_file_count = 0
     filename_filter_stats = None
     filename_filter_warning = ""
+    combined_candidates_from_profiles = []
+    candidate_field_folders_from_profiles = {}
 
     try:
         if listed_file_names:
@@ -7876,8 +7882,8 @@ def features_parser_inspect():
             (
                 folder_profiles,
                 extension_summaries,
-                _combined_candidates_from_profiles,
-                _candidate_field_folders_from_profiles,
+                combined_candidates_from_profiles,
+                candidate_field_folders_from_profiles,
                 combined_logical_names,
             ) = _build_folder_inspection_profiles(
                 folder_entries,
@@ -7954,8 +7960,8 @@ def features_parser_inspect():
             (
                 folder_profiles,
                 extension_summaries,
-                _combined_candidates_from_profiles,
-                _candidate_field_folders_from_profiles,
+                combined_candidates_from_profiles,
+                candidate_field_folders_from_profiles,
                 combined_logical_names,
             ) = _build_folder_inspection_profiles(
                 folder_entries,
@@ -8074,12 +8080,60 @@ def features_parser_inspect():
             ]
             selected_data_dataframe_fields = _collect_dataframe_candidate_fields_from_description(selected_description)
 
-            metadata_summary = _aggregate_candidate_metadata_from_file_entries(folder_entries)
-            combined_candidates = metadata_summary.get("candidate_fields") or list(selected_data_candidates)
-            combined_field_details = metadata_summary.get("field_details") or list(selected_data_field_details)
-            candidate_field_folders = metadata_summary.get("candidate_field_folders") or {}
-            candidate_field_origins = metadata_summary.get("candidate_field_origins") or {}
-            dataframe_candidate_fields = metadata_summary.get("dataframe_candidate_fields") or []
+            metadata_summary = None
+            inspected_file_count = 0
+            if quick_scan_mode:
+                field_detail_map = {}
+                candidate_field_origins_map = defaultdict(set)
+                dataframe_fields = set()
+                for profile in (extension_profiles or []):
+                    for detail in (profile.get("field_details") or []):
+                        if not isinstance(detail, dict):
+                            continue
+                        field_name = str(detail.get("field") or "").strip()
+                        if not field_name:
+                            continue
+                        if field_name not in field_detail_map:
+                            field_detail_map[field_name] = detail
+                        origin_name = str(detail.get("origin") or "").strip().lower()
+                        if origin_name:
+                            candidate_field_origins_map[field_name].add(origin_name)
+                            if origin_name == "dataframe":
+                                dataframe_fields.add(field_name)
+
+                combined_candidates = list(combined_candidates_from_profiles or selected_data_candidates)
+                combined_field_details = [field_detail_map[key] for key in combined_candidates if key in field_detail_map]
+                if not combined_field_details:
+                    combined_field_details = list(selected_data_field_details)
+                candidate_field_folders = dict(candidate_field_folders_from_profiles or {})
+                if not candidate_field_folders and combined_candidates:
+                    fallback_folder = str(folder_summaries[0].get("folder_name") or "selected_folder") if folder_summaries else "selected_folder"
+                    candidate_field_folders = {field: [fallback_folder] for field in combined_candidates}
+                candidate_field_origins = {
+                    key: sorted(values)
+                    for key, values in candidate_field_origins_map.items()
+                }
+                dataframe_candidate_fields = [field for field in combined_candidates if field in dataframe_fields]
+                if not dataframe_candidate_fields:
+                    dataframe_candidate_fields = list(selected_data_dataframe_fields)
+                inspected_file_count = int(max(
+                    1,
+                    len(
+                        [
+                            profile
+                            for profile in (extension_profiles or [])
+                            if str(profile.get("sample_file_path") or "").strip()
+                        ]
+                    ),
+                ))
+            else:
+                metadata_summary = _aggregate_candidate_metadata_from_file_entries(folder_entries)
+                combined_candidates = metadata_summary.get("candidate_fields") or list(selected_data_candidates)
+                combined_field_details = metadata_summary.get("field_details") or list(selected_data_field_details)
+                candidate_field_folders = metadata_summary.get("candidate_field_folders") or {}
+                candidate_field_origins = metadata_summary.get("candidate_field_origins") or {}
+                dataframe_candidate_fields = metadata_summary.get("dataframe_candidate_fields") or []
+                inspected_file_count = int(metadata_summary.get("inspected_file_count") or 0)
 
             combined_defaults = selected_description.get("defaults") or {
                 "data": _pick_field_guess_fuzzy(selected_data_candidates, ["data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
@@ -8177,8 +8231,16 @@ def features_parser_inspect():
                 "candidate_fields": combined_candidates,
                 "defaults": combined_defaults,
                 "summary": (
-                    f"Selected {len(folder_summaries)} folder(s), {folder_file_count} file(s). "
-                    f"Metadata inspected in {int(metadata_summary.get('inspected_file_count') or 0)} file(s)."
+                    (
+                        f"Selected {len(folder_summaries)} folder(s), {folder_file_count} file(s). "
+                        f"Quick sample inspection ready (inspected {inspected_file_count} file(s)). "
+                        "Full-folder metadata scan is running in background."
+                    )
+                    if quick_scan_mode
+                    else (
+                        f"Selected {len(folder_summaries)} folder(s), {folder_file_count} file(s). "
+                        f"Metadata inspected in {inspected_file_count} file(s)."
+                    )
                 ),
                 "field_details": combined_field_details,
                 "manual_field_details": _manual_field_details_for_ui(),
@@ -8206,6 +8268,9 @@ def features_parser_inspect():
                 "folder_file_count": folder_file_count,
                 "fs_hint_hz": fs_hint_hz,
                 "fs_hint_note": fs_hint_note,
+                "inspection_phase": "quick" if quick_scan_mode else "deep",
+                "deep_scan_status": "in_progress" if quick_scan_mode else "completed",
+                "deep_scan_required": bool(quick_scan_mode),
             }
             virtual_keys = _virtual_field_keys_from_details(description.get("virtual_field_details") or [])
             if virtual_keys:
@@ -8314,6 +8379,12 @@ def features_parser_inspect():
                 description["filename_format_filter"] = filename_filter_stats
             if filename_filter_warning:
                 description["filename_format_warning"] = filename_filter_warning
+        if "inspection_phase" not in description:
+            description["inspection_phase"] = "deep"
+        if "deep_scan_status" not in description:
+            description["deep_scan_status"] = "completed"
+        if "deep_scan_required" not in description:
+            description["deep_scan_required"] = False
         description["source_name"] = file_name
         if folder_summaries:
             description["folder_path"] = folder_summaries[0]["folder_path"]
@@ -12668,6 +12739,7 @@ def start_computation_redirect(computation_type):
         app.logger.warning("[compute %s] features data_source_kind=%s", job_id, data_source_kind)
         empirical_source_mode = (request.form.get("empirical_source_mode") or "upload").strip()
         existing_data_path = (request.form.get("existing_data_path") or "").strip()
+        parser_deep_scan_status = (request.form.get("parser_deep_scan_status") or "").strip().lower()
         if not (request.form.get("parser_data_locator") or "").strip():
             flash('Select the data locator for EphysDatasetParser.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
@@ -12794,6 +12866,9 @@ def start_computation_redirect(computation_type):
                 flash('Use either a local simulation folder upload or a server simulation folder path, not both.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
             if simulation_folder_paths:
+                if parser_deep_scan_status not in {"complete", "completed"}:
+                    flash('Data inspection is still running. Wait for the full folder scan to finish before computing features.', 'error')
+                    return redirect(request.referrer or url_for('features_methods'))
                 try:
                     simulation_data_file_selections = _extract_data_file_selection_map_from_form(
                         request.form,
@@ -12880,6 +12955,9 @@ def start_computation_redirect(computation_type):
                     singular_key="empirical_folder_path",
                     plural_key="empirical_folder_paths",
                 )
+                if parser_deep_scan_status not in {"complete", "completed"}:
+                    flash('Data inspection is still running. Wait for the full folder scan to finish before computing features.', 'error')
+                    return redirect(request.referrer or url_for('features_methods'))
                 try:
                     empirical_data_file_selections = _extract_data_file_selection_map_from_form(
                         request.form,
