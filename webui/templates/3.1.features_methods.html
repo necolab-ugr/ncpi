@@ -57,6 +57,10 @@
             _baseParserInfo: null,
             parserLoading: false,
             parserError: '',
+            parserDeepScanInProgress: false,
+            parserDeepScanStatus: '',
+            parserDeepScanError: '',
+            parserInspectionGeneration: 0,
             parserFilenameFormat: '',
             parserAnalysisFolderPaths: [],
             parserAnalysisFolderNames: [],
@@ -221,6 +225,10 @@
                     '_baseParserInfo',
                     'parserLoading',
                     'parserError',
+                    'parserDeepScanInProgress',
+                    'parserDeepScanStatus',
+                    'parserDeepScanError',
+                    'parserInspectionGeneration',
                     'parserFilenameFormat',
                     'parserAnalysisFolderPaths',
                     'parserAnalysisFolderNames',
@@ -419,6 +427,9 @@
                 this.simulationDataFileSelections = {};
                 this.simulationListedFileNames = [];
                 this.simulationLocalFiles = [];
+                this.parserDeepScanInProgress = false;
+                this.parserDeepScanStatus = '';
+                this.parserDeepScanError = '';
                 this.appendSimulationSelection = false;
                 if (nextMode === 'server-path') {
                     this.clearSimulationUploadInput();
@@ -660,6 +671,9 @@
                 this.simulationDataFileSelections = {};
                 this.parserFilenameFormat = '';
                 this.parserInfo = null;
+                this.parserDeepScanInProgress = false;
+                this.parserDeepScanStatus = '';
+                this.parserDeepScanError = '';
             },
             isMultipleFolderExtensionError(message) {
                 const token = String(message || '').toLowerCase();
@@ -1421,6 +1435,15 @@
                     return '';
                 }
                 if (kind === 'new-simulation') {
+                    if (this.simulationSourceMode === 'server-path') {
+                        const deepStatus = String(this.parserDeepScanStatus || '').trim().toLowerCase();
+                        if (this.parserDeepScanInProgress || deepStatus === 'in_progress' || deepStatus === 'running') {
+                            return 'Full folder inspection is still running in background. Please wait before computing features.';
+                        }
+                        if (deepStatus === 'failed') {
+                            return 'Full folder inspection failed. Reinspect the selected server folder before computing features.';
+                        }
+                    }
                     const folderPaths = Array.isArray(this.simulationFolderPaths) ? this.simulationFolderPaths : [];
                     const hasSimulationPath = (folderPaths.length > 0 || String(this.simulationFolderPath || '').trim().length > 0)
                         && this.simulationFileCount > 0;
@@ -1508,6 +1531,10 @@
             resetParserConfig() {
                 this.parserInfo = null;
                 this.parserError = '';
+                this.parserDeepScanInProgress = false;
+                this.parserDeepScanStatus = '';
+                this.parserDeepScanError = '';
+                this.parserInspectionGeneration += 1;
                 this.parserDataLocator = '';
                 this.parserFsManual = String(1.0 / (0.0625e-3));
                 this.parserFsSource = '__none__';
@@ -1668,9 +1695,14 @@
                     this.simulationSampleName = '';
                     this.simulationInspectedSamples = [];
                     this.parserInfo = null;
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = '';
+                    this.parserDeepScanError = '';
                     return;
                 }
                 this.parserLoading = true;
+                const generation = (Number(this.parserInspectionGeneration) || 0) + 1;
+                this.parserInspectionGeneration = generation;
                 const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
                 const previousSimulationFileCount = this.simulationFileCount;
                 const previousSimulationSampleName = this.simulationSampleName;
@@ -1685,22 +1717,28 @@
                     this.simulationSourceMode = 'server-path';
                     this.clearSimulationUploadInput();
                     this.simulationLocalFiles = [];
-                    const formData = new FormData();
-                    formData.append('simulation_folder_paths', JSON.stringify(folderPaths));
-                    if (folderPaths.length === 1) formData.append('simulation_folder_path', folderPaths[0]);
-                    const simulationSelections = this.normalizeDataFileSelectionMap(
-                        this.simulationDataFileSelections,
-                        folderPaths,
-                    );
-                    if (Object.keys(simulationSelections).length > 0) {
-                        formData.append('simulation_data_file_selections', JSON.stringify(simulationSelections));
-                    }
-                    this.appendFilenameFormatToFormData(formData);
+                    const buildInspectFormData = (inspectMode) => {
+                        const formData = new FormData();
+                        formData.append('simulation_folder_paths', JSON.stringify(folderPaths));
+                        if (folderPaths.length === 1) formData.append('simulation_folder_path', folderPaths[0]);
+                        const simulationSelections = this.normalizeDataFileSelectionMap(
+                            this.simulationDataFileSelections,
+                            folderPaths,
+                        );
+                        if (Object.keys(simulationSelections).length > 0) {
+                            formData.append('simulation_data_file_selections', JSON.stringify(simulationSelections));
+                        }
+                        formData.append('inspect_mode', inspectMode);
+                        this.appendFilenameFormatToFormData(formData);
+                        return formData;
+                    };
+                    const quickFormData = buildInspectFormData('quick');
                     const response = await fetch('{{ url_for('features_parser_inspect') }}', {
                         method: 'POST',
-                        body: formData,
+                        body: quickFormData,
                     });
                     const payload = await this.parseJsonFromResponse(response, 'Failed to inspect simulation outputs folder.');
+                    if (generation !== this.parserInspectionGeneration) return;
                     this.parserInfo = payload;
                     this._baseParserInfo = payload;
                     this.syncDataFileSelectionsFromPayload(payload, 'simulation');
@@ -1732,11 +1770,42 @@
                     if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) {
                         await this.inspectAllAdditionalFiles();
                     }
-
                     this.selectedPipelinePath = '';
+                    this.parserDeepScanInProgress = true;
+                    this.parserDeepScanStatus = 'in_progress';
+                    this.parserDeepScanError = '';
+
+                    const deepFormData = buildInspectFormData('deep');
+                    fetch('{{ url_for('features_parser_inspect') }}', {
+                        method: 'POST',
+                        body: deepFormData,
+                    })
+                        .then(async (deepResponse) => {
+                            const deepPayload = await this.parseJsonFromResponse(deepResponse, 'Failed to complete full folder inspection.');
+                            if (generation !== this.parserInspectionGeneration) return;
+                            this.parserInfo = deepPayload;
+                            this._baseParserInfo = deepPayload;
+                            this.syncDataFileSelectionsFromPayload(deepPayload, 'simulation');
+                            this.ensureDataLocatorMatchesSelectedFolder();
+                            this.parserDeepScanInProgress = false;
+                            this.parserDeepScanStatus = 'complete';
+                            this.parserDeepScanError = '';
+                            if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) {
+                                await this.inspectAllAdditionalFiles();
+                            }
+                        })
+                        .catch((error) => {
+                            if (generation !== this.parserInspectionGeneration) return;
+                            this.parserDeepScanInProgress = false;
+                            this.parserDeepScanStatus = 'failed';
+                            this.parserDeepScanError = error.message || 'Full folder inspection failed.';
+                        });
                 } catch (error) {
                     const message = error.message || 'Failed to inspect simulation outputs folder.';
                     this.parserError = message;
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = 'failed';
+                    this.parserDeepScanError = message;
                     if (this.isFilenameFormatMatchError(message)) {
                         this.parserInfo = null;
                         this._baseParserInfo = null;
@@ -1775,6 +1844,9 @@
                     this.empiricalFileCount = 0;
                     this.empiricalSampleName = '';
                     this.parserInfo = null;
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = '';
+                    this.parserDeepScanError = '';
                     return;
                 }
                 this.parserLoading = true;
@@ -1806,6 +1878,9 @@
                     this._baseParserInfo = payload
                     this.syncDataFileSelectionsFromPayload(payload, 'empirical');
                     this.applyParserDefaults(payload);
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = 'complete';
+                    this.parserDeepScanError = '';
                     this.empiricalFileCount = Number(payload.folder_file_count || 0);
                     this.empiricalSampleName = payload.source_name || '';
                     this.dataSourceKind = 'new-empirical';
@@ -1816,6 +1891,9 @@
                 } catch (error) {
                     const message = error.message || 'Failed to inspect empirical folder.';
                     this.parserError = message;
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = 'failed';
+                    this.parserDeepScanError = message;
                     if (this.isFilenameFormatMatchError(message)) {
                         this.parserInfo = null;
                         this._baseParserInfo = null;
@@ -2053,6 +2131,9 @@
                     this.parserInfo = payload;
                     this._baseParserInfo = payload;
                     this.applyParserDefaults(payload);
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = 'complete';
+                    this.parserDeepScanError = '';
                     // Re-merge additional files if any are already selected
                     if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0){
                         await this.inspectAllAdditionalFiles();
@@ -2060,6 +2141,9 @@
                 } catch (error) {
                     const message = error.message || 'Failed to inspect data source.';
                     this.parserError = message;
+                    this.parserDeepScanInProgress = false;
+                    this.parserDeepScanStatus = 'failed';
+                    this.parserDeepScanError = message;
                     if (this.isFilenameFormatMatchError(message)) {
                         this.parserInfo = null;
                         this._baseParserInfo = null;
@@ -3241,6 +3325,19 @@
                             <h3 class="font-bold text-base text-[#34495E] dark:text-white">Folder and File Inspection</h3>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-100" x-text="parserInfo.summary"></p>
+                        <div x-show="parserDeepScanInProgress" class="flex items-start gap-2 text-xs bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg px-3 py-2">
+                            <span class="text-blue-600 dark:text-blue-400 text-base leading-5">⏳</span>
+                            <div>
+                                <span class="font-semibold text-blue-700 dark:text-blue-300">Full-folder inspection is running in background.</span>
+                                <span class="text-blue-600 dark:text-blue-400/90 ml-1">The form is ready, but Compute will stay locked until this scan finishes.</span>
+                            </div>
+                        </div>
+                        <div x-show="!parserDeepScanInProgress && parserDeepScanStatus === 'complete'" class="text-xs text-green-700 dark:text-green-300 bg-green-50/70 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg px-3 py-2">
+                            Full-folder inspection completed.
+                        </div>
+                        <div x-show="parserDeepScanStatus === 'failed'" class="text-xs text-red-700 dark:text-red-300 bg-red-50/70 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg px-3 py-2">
+                            <span x-text="parserDeepScanError || 'Full-folder inspection failed. Reinspect the selected folder.'"></span>
+                        </div>
                         <div class="space-y-2 rounded-lg border border-gray-200 dark:border-[#323b67] bg-gray-50/70 dark:bg-[#191e33]/60 p-3">
                             <label class="text-sm block">
                                 <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
@@ -4496,7 +4593,8 @@
             </div>
 
             <template x-if="activeTab === 'configure-method' && !submitInProgress && computeSubmitBlockReason()">
-                <div class="mt-6 w-full p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 rounded-xl">
+                <div class="flex mt-6 w-full p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 rounded-xl">
+                    <span class="text-blue-600 dark:text-blue-400 text-base leading-5">⏳</span>
                     <p class="text-sm text-amber-800 dark:text-amber-200">
                         Configuration issue: <span class="font-semibold" x-text="computeSubmitBlockReason()"></span>
                     </p>
