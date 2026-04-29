@@ -754,13 +754,51 @@ def _load_uploaded_source_bytes(name, ext, content):
     if ext == ".mat":
         return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
+    if ext == ".edf":
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(prefix="ncpi_edf_", suffix=".edf", delete=False) as handle:
+                handle.write(raw)
+                temp_path = handle.name
+            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".edf")
+        finally:
+            if temp_path and os.path.isfile(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
+    if ext == ".fif":
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(prefix="ncpi_fif_", suffix=".fif", delete=False) as handle:
+                handle.write(raw)
+                temp_path = handle.name
+            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".fif")
+        finally:
+            if temp_path and os.path.isfile(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
+
+
+def _load_edf_with_parser(path):
+    from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+
+    parser = EphysDatasetParser(ParseConfig())
+    source_obj, _ = parser._load_source(path)
+    return source_obj
 
 
 def _load_uploaded_source_path(path, name=None, ext=None):
     safe_path = str(path or "")
     if not safe_path or not os.path.exists(safe_path):
         raise ValueError(f"Uploaded file path does not exist: '{safe_path}'.")
+    if not os.path.isfile(safe_path):
+        raise ValueError(f"Uploaded path is not a regular file: '{safe_path}'.")
     safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
     ext = str(ext or os.path.splitext(safe_name)[1]).lower()
 
@@ -804,6 +842,19 @@ def _load_uploaded_source_path(path, name=None, ext=None):
         except Exception as exc:
             raise ValueError(f"mne is required to parse .set files: {exc}")
         return mne.io.read_raw_eeglab(safe_path, preload=True)
+
+    if ext == ".fif":
+        try:
+            import mne
+        except Exception as exc:
+            raise ValueError(f"mne is required to parse .fif files: {exc}")
+        return mne.io.read_raw_fif(safe_path, preload=True, verbose=False)
+
+    if ext == ".edf":
+        try:
+            return _load_edf_with_parser(safe_path)
+        except ImportError as exc:
+            raise ValueError(f"pyEDFlib is required to parse .edf files: {exc}")
 
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
