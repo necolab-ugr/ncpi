@@ -3526,23 +3526,109 @@ def _pick_field_guess_fuzzy(candidates, patterns):
     if not normalized_patterns:
         return ""
 
-    for item in candidates:
-        key = str(item or "")
+    best_item = ""
+    best_score = -1
+    best_depth = -1
+    for item in candidates or []:
+        key = str(item or "").strip()
+        if not key:
+            continue
         lower_key = key.lower()
-        tokens = [tok for tok in re.split(r"[^a-z0-9]+", lower_key) if tok]
+        segments = [seg for seg in lower_key.split(".") if seg]
+        leaf = segments[-1] if segments else lower_key
+        leaf_tokens = [tok for tok in re.split(r"[^a-z0-9]+", leaf) if tok]
+        all_tokens = [tok for tok in re.split(r"[^a-z0-9]+", lower_key) if tok]
+        score = 0
+
         for pattern in normalized_patterns:
-            if not pattern:
-                continue
-            if pattern in tokens:
-                return item
+            if pattern == leaf:
+                score = max(score, 100)
+            if pattern in leaf_tokens:
+                score = max(score, 90)
+            if leaf.endswith(f"_{pattern}") or leaf.startswith(f"{pattern}_"):
+                score = max(score, 85)
             if lower_key.endswith(f".{pattern}"):
-                return item
+                score = max(score, 80)
+            if pattern in all_tokens:
+                score = max(score, 70)
             boundary = rf"(^|[^a-z0-9]){re.escape(pattern)}([^a-z0-9]|$)"
             if re.search(boundary, lower_key):
-                return item
-            if pattern in lower_key:
-                return item
-    return ""
+                score = max(score, 60)
+            if len(pattern) >= 4 and pattern in lower_key:
+                score = max(score, 40)
+
+        depth = len(segments)
+        if score > best_score or (score == best_score and depth > best_depth):
+            best_score = score
+            best_depth = depth
+            best_item = item
+
+    return best_item if best_score > 0 else ""
+
+
+def _pick_data_field_guess(candidates, patterns, source_obj):
+    normalized_patterns = [str(pattern or "").strip().lower() for pattern in patterns if str(pattern or "").strip()]
+    if not normalized_patterns:
+        return ""
+
+    best_item = ""
+    best_score = -1
+    best_ndim = -1
+    best_depth = -1
+
+    for item in candidates or []:
+        key = str(item or "").strip()
+        if not key:
+            continue
+        lower_key = key.lower()
+        segments = [seg for seg in lower_key.split(".") if seg]
+        leaf = segments[-1] if segments else lower_key
+        leaf_tokens = [tok for tok in re.split(r"[^a-z0-9]+", leaf) if tok]
+        all_tokens = [tok for tok in re.split(r"[^a-z0-9]+", lower_key) if tok]
+        score = 0
+
+        for pattern in normalized_patterns:
+            if pattern == leaf:
+                score = max(score, 100)
+            if pattern in leaf_tokens:
+                score = max(score, 90)
+            if leaf.endswith(f"_{pattern}") or leaf.startswith(f"{pattern}_"):
+                score = max(score, 85)
+            if lower_key.endswith(f".{pattern}"):
+                score = max(score, 80)
+            if pattern in all_tokens:
+                score = max(score, 70)
+            boundary = rf"(^|[^a-z0-9]){re.escape(pattern)}([^a-z0-9]|$)"
+            if re.search(boundary, lower_key):
+                score = max(score, 60)
+            if len(pattern) >= 4 and pattern in lower_key:
+                score = max(score, 40)
+
+        if score <= 0:
+            continue
+
+        ndim = -1
+        resolved = _resolve_locator_value(source_obj, key)
+        if resolved is not None:
+            try:
+                arr = np.asarray(resolved)
+                if isinstance(arr, np.ndarray):
+                    ndim = int(arr.ndim)
+            except Exception:
+                ndim = -1
+
+        depth = len(segments)
+        if (
+            score > best_score
+            or (score == best_score and ndim > best_ndim)
+            or (score == best_score and ndim == best_ndim and depth > best_depth)
+        ):
+            best_score = score
+            best_ndim = ndim
+            best_depth = depth
+            best_item = item
+
+    return best_item if best_score > 0 else ""
 
 def _expand_mat_struct(value, prefix=""):
     """Recursivamente extrae campos de un mat_struct o cell array."""
@@ -4546,6 +4632,75 @@ def _estimate_sensor_count(value, axis=None):
     return None
 
 
+def _safe_array_shape(value):
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return None
+    if not isinstance(arr, np.ndarray):
+        return None
+    if arr.ndim <= 0:
+        return None
+    return tuple(int(dim) for dim in arr.shape)
+
+
+def _safe_channel_name_count(value):
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        return int(len(value)) if len(value) > 0 else None
+    if isinstance(value, np.ndarray):
+        if value.ndim == 1 and value.size > 0:
+            return int(value.size)
+        return None
+    return None
+
+
+def _infer_axis_defaults_from_values(data_value, ch_names_value=None):
+    shape = _safe_array_shape(data_value)
+    if not shape:
+        return {
+            "axis_samples": 0,
+            "axis_channels": -1,
+            "axis_ids": -1,
+            "axis_epochs": -1,
+            "axis_confidence": "low",
+        }
+
+    ndim = len(shape)
+    if ndim == 1:
+        return {
+            "axis_samples": 0,
+            "axis_channels": -1,
+            "axis_ids": -1,
+            "axis_epochs": -1,
+            "axis_confidence": "medium",
+        }
+
+    max_size = max(shape)
+    axis_samples = min(idx for idx, dim in enumerate(shape) if dim == max_size)
+
+    axis_channels = -1
+    ch_count = _safe_channel_name_count(ch_names_value)
+    if ch_count is not None and ch_count > 0:
+        channel_matches = [idx for idx, dim in enumerate(shape) if dim == ch_count and idx != axis_samples]
+        if channel_matches:
+            axis_channels = min(channel_matches)
+
+    remaining = [idx for idx in range(ndim) if idx not in {axis_samples, axis_channels}]
+    remaining.sort()
+    axis_ids = remaining[0] if len(remaining) >= 1 else -1
+    axis_epochs = remaining[1] if len(remaining) >= 2 else -1
+
+    return {
+        "axis_samples": int(axis_samples),
+        "axis_channels": int(axis_channels),
+        "axis_ids": int(axis_ids),
+        "axis_epochs": int(axis_epochs),
+        "axis_confidence": "high" if axis_channels >= 0 else "medium",
+    }
+
+
 def _auto_channel_names(value, axis=None):
     count = _estimate_sensor_count(value, axis=axis)
     if count is None or count < 1:
@@ -4880,14 +5035,14 @@ def _describe_parser_source(path):
 
     def _build_defaults(candidates):
         return {
-            "data": _pick_field_guess_fuzzy(candidates, ["data", "signal", "proxy", "lfp", "eeg", "meg", "ecog", "cdm"]),
+            "data": _pick_data_field_guess(candidates, ["data", "signal", "samples", "proxy", "lfp", "eeg", "meg", "ecog", "cdm"], source_obj),
             "fs": _pick_field_guess_fuzzy(
                 candidates,
-                ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
+                ["fs", "fsample", "sfreq", "freq", "frequency", "sample_frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
             ),
             "ch_names": _pick_field_guess_fuzzy(
                 candidates,
-                ["ch_names", "channels", "channel_names", "channel", "sensors", "sensor", "ch"],
+                ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
             ),
             "recording_type": _pick_field_guess(candidates, ["recording_type", "modality", "recording", "type"]),
             "subject_id": _pick_field_guess(candidates, ["subject_id", "subject", "subj", "participant"]),
@@ -4900,6 +5055,19 @@ def _describe_parser_source(path):
         fs_hint_hz, fs_hint_note = _extract_dataframe_fs_hint(source_obj)
         columns = [str(col) for col in source_obj.columns]
         defaults = _build_defaults(columns)
+        data_for_axes = None
+        ch_for_axes = None
+        try:
+            if defaults.get("data"):
+                data_for_axes = _extract_dataframe_data_column(source_obj, defaults.get("data"))
+        except Exception:
+            data_for_axes = None
+        try:
+            if defaults.get("ch_names"):
+                ch_for_axes = _extract_dataframe_channel_names(source_obj, defaults.get("ch_names"))
+        except Exception:
+            ch_for_axes = None
+        defaults.update(_infer_axis_defaults_from_values(data_for_axes, ch_for_axes))
         if fs_hint_hz is None and defaults["fs"] and defaults["fs"] in source_obj.columns:
             fs_series = pd.to_numeric(source_obj[defaults["fs"]], errors="coerce").dropna()
             if not fs_series.empty:
@@ -4942,6 +5110,7 @@ def _describe_parser_source(path):
         return payload
 
     if isinstance(source_obj, np.ndarray):
+        axis_defaults = _infer_axis_defaults_from_values(source_obj, None)
         sensor_count = _estimate_sensor_count(source_obj)
         payload = {
             "source_type": "ndarray",
@@ -4955,6 +5124,11 @@ def _describe_parser_source(path):
                 "group": "",
                 "species": "",
                 "condition": "",
+                "axis_samples": axis_defaults.get("axis_samples", 0),
+                "axis_channels": axis_defaults.get("axis_channels", -1),
+                "axis_ids": axis_defaults.get("axis_ids", -1),
+                "axis_epochs": axis_defaults.get("axis_epochs", -1),
+                "axis_confidence": axis_defaults.get("axis_confidence", "low"),
             },
             "summary": f"NumPy array with shape {list(source_obj.shape)}.",
             "sensor_count_estimate": sensor_count,
@@ -5013,6 +5187,11 @@ def _describe_parser_source(path):
             "species": "",
             "condition": "",
         }
+        try:
+            mne_sample = source_obj.get_data()
+        except Exception:
+            mne_sample = None
+        mne_defaults.update(_infer_axis_defaults_from_values(mne_sample, getattr(source_obj, "ch_names", None)))
         summary_parts = [f"MNE {type(source_obj).__name__}", f"{n_ch} channels"]
         if sfreq:
             summary_parts.append(f"{sfreq:g} Hz")
@@ -5040,6 +5219,9 @@ def _describe_parser_source(path):
         top_keys = [str(k) for k in source_obj.keys() if not str(k).startswith("__")]
         data_guess = defaults.get("data")
         resolved_data = _resolve_locator_value(source_obj, data_guess)
+        ch_guess = defaults.get("ch_names")
+        resolved_ch_names = _resolve_locator_value(source_obj, ch_guess) if ch_guess else None
+        defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names))
         sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
         source_format = str(source_obj.get("__source_format__") or "").strip().lower()
         if source_format == "edf":
@@ -5101,6 +5283,9 @@ def _describe_parser_source(path):
 
     data_guess = defaults.get("data")
     resolved_data = _resolve_locator_value(source_obj, data_guess)
+    ch_guess = defaults.get("ch_names")
+    resolved_ch_names = _resolve_locator_value(source_obj, ch_guess) if ch_guess else None
+    defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names))
     sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
     payload = {
         "source_type": "object",
@@ -8555,15 +8740,20 @@ def features_parser_inspect():
                 dataframe_candidate_fields = metadata_summary.get("dataframe_candidate_fields") or []
                 inspected_file_count = int(metadata_summary.get("inspected_file_count") or 0)
 
+            selected_source_obj = None
+            try:
+                selected_source_obj = _load_features_source(inspect_path)
+            except Exception:
+                selected_source_obj = None
             combined_defaults = selected_description.get("defaults") or {
-                "data": _pick_field_guess_fuzzy(selected_data_candidates, ["data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
+                "data": _pick_data_field_guess(selected_data_candidates, ["data", "signal", "samples", "lfp", "eeg", "meg", "ecog", "cdm"], selected_source_obj),
                 "fs": _pick_field_guess_fuzzy(
                     selected_data_candidates,
-                    ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
+                    ["fs", "fsample", "sfreq", "freq", "frequency", "sample_frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
                 ),
                 "ch_names": _pick_field_guess_fuzzy(
                     selected_data_candidates,
-                    ["ch_names", "channels", "channel_names", "channel", "sensors", "sensor", "ch"],
+                    ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
                 ),
                 "recording_type": _pick_field_guess(selected_data_candidates, ["recording_type", "modality", "recording", "type"]),
                 "subject_id": _pick_field_guess(selected_data_candidates, ["subject_id", "subject", "subj", "participant"]),
