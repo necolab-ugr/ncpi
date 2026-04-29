@@ -2399,6 +2399,8 @@
 
                 try {
                     const formData = new FormData(form);
+                    const deepScanStatusValue = String(this.parserDeepScanStatus || '').trim();
+                    formData.set('parser_deep_scan_status', deepScanStatusValue);
                     const filenameFormatValue = String(this.parserFilenameFormat || '').trim();
                     formData.set('parser_filename_format', filenameFormatValue);
                     // Append additional files so the backend can use them for metadata lookup
@@ -3045,6 +3047,7 @@
                     <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
                     <input type="hidden" name="parser_analysis_folder_paths" :value="JSON.stringify(parserAnalysisFolderPaths || [])">
                     <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
+                    <input type="hidden" name="parser_deep_scan_status" :value="parserDeepScanStatus">
                     <input type="hidden" name="parser_filename_format" :value="String(parserFilenameFormat || '').trim()">
                 
 
