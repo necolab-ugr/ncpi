@@ -76,6 +76,21 @@ FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
 PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
 INFERENCE_TRAINING_DATA_DIR = _module_tmp_subdir("inference", "training_data")
 MAX_OUTPUT_LINES = 200
+SIMULATION_BUNDLE_FILE = "simulation.pkl"
+SIMULATION_LEGACY_BUNDLE_FILES = {"sim_data.pkl"}
+SIMULATION_BUNDLE_FILES = {SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES}
+SIMULATION_BUNDLE_FIELD_BY_FILE = {
+    "times.pkl": "times",
+    "gids.pkl": "gids",
+    "dt.pkl": "dt",
+    "tstop.pkl": "tstop",
+    "network.pkl": "network",
+    "population_sizes.pkl": "population_sizes",
+    "vm.pkl": "vm",
+    "ampa.pkl": "ampa",
+    "gaba.pkl": "gaba",
+    "exc_state_events.pkl": "exc_state_events",
+}
 
 
 def refresh_tmp_paths():
@@ -229,12 +244,78 @@ def _resolve_sim_file(file_paths, key, default_name, required=True):
         default_path = os.path.join(DEFAULT_SIM_DATA_DIR, default_name)
         if os.path.exists(default_path):
             return default_path
+        if default_name in SIMULATION_BUNDLE_FIELD_BY_FILE:
+            bundle_path = os.path.join(DEFAULT_SIM_DATA_DIR, SIMULATION_BUNDLE_FILE)
+            if os.path.exists(bundle_path):
+                return bundle_path
+            for legacy_name in SIMULATION_LEGACY_BUNDLE_FILES:
+                legacy_bundle_path = os.path.join(DEFAULT_SIM_DATA_DIR, legacy_name)
+                if os.path.exists(legacy_bundle_path):
+                    return legacy_bundle_path
 
     if required:
         raise FileNotFoundError(
             f"Missing required input '{key}'. Upload a file or place {default_name} in {DEFAULT_SIM_DATA_DIR}."
         )
     return None
+
+
+def _coerce_simulation_bundle_payload(payload):
+    required_keys = {"times", "gids", "dt", "tstop", "network"}
+
+    if isinstance(payload, list):
+        if not payload:
+            return None
+        first = payload[0]
+        if not isinstance(first, MappingABC) or not required_keys.issubset(first.keys()):
+            return None
+        normalized = {
+            key: [item.get(key) for item in payload]
+            for key in required_keys
+        }
+        population_sizes = [item.get("population_sizes") for item in payload]
+        if any(value is not None for value in population_sizes):
+            normalized["population_sizes"] = population_sizes
+        return normalized
+
+    if not isinstance(payload, MappingABC):
+        return None
+    if not required_keys.issubset(payload.keys()):
+        return None
+
+    normalized = {key: payload.get(key) for key in required_keys}
+    if payload.get("population_sizes") is not None:
+        normalized["population_sizes"] = payload.get("population_sizes")
+    if payload.get("vm") is not None:
+        normalized["vm"] = payload.get("vm")
+    if payload.get("ampa") is not None:
+        normalized["ampa"] = payload.get("ampa")
+    if payload.get("gaba") is not None:
+        normalized["gaba"] = payload.get("gaba")
+    if payload.get("exc_state_events") is not None:
+        normalized["exc_state_events"] = payload.get("exc_state_events")
+    return normalized
+
+
+def _is_simulation_bundle_path(path):
+    return os.path.basename(str(path or "")).lower() in SIMULATION_BUNDLE_FILES
+
+
+def _load_simulation_component_from_path(path, default_file_name):
+    payload = read_file(path)
+    if not _is_simulation_bundle_path(path):
+        return payload
+
+    field = SIMULATION_BUNDLE_FIELD_BY_FILE.get(str(default_file_name or "").lower())
+    if not field:
+        return payload
+
+    bundle = _coerce_simulation_bundle_payload(payload)
+    if bundle is None:
+        raise ValueError(f"Invalid simulation bundle file: {path}")
+    if field not in bundle:
+        raise ValueError(f"Simulation bundle {path} does not contain '{field}'.")
+    return bundle[field]
 
 
 def _append_job_output(job_status, job_id, message):
@@ -1476,6 +1557,13 @@ def _infer_trial_count_from_values(*values):
 
 
 def _coerce_dt_ms(value):
+    if isinstance(value, (list, tuple)):
+        for item in value:
+            dt_ms = _coerce_dt_ms(item)
+            if dt_ms is not None:
+                return dt_ms
+        return None
+
     if isinstance(value, pd.DataFrame):
         dt_ms = _first_numeric_from_column(value, "dt_ms")
         if dt_ms is None:
@@ -1513,7 +1601,7 @@ def _load_simulation_dt_ms(file_paths):
     if not dt_path:
         return None, None
     try:
-        dt_obj = read_file(dt_path)
+        dt_obj = _load_simulation_component_from_path(dt_path, "dt.pkl")
     except Exception:
         return None, dt_path
     return _coerce_dt_ms(dt_obj), dt_path
@@ -3507,6 +3595,13 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                     default_path = os.path.join(DEFAULT_SIM_DATA_DIR, default_name)
                     if os.path.exists(default_path):
                         return default_path
+                bundle_path = os.path.join(DEFAULT_SIM_DATA_DIR, SIMULATION_BUNDLE_FILE)
+                if os.path.exists(bundle_path):
+                    return bundle_path
+                for legacy_name in SIMULATION_LEGACY_BUNDLE_FILES:
+                    legacy_bundle_path = os.path.join(DEFAULT_SIM_DATA_DIR, legacy_name)
+                    if os.path.exists(legacy_bundle_path):
+                        return legacy_bundle_path
             if required:
                 expected = ", ".join(default_names)
                 raise FileNotFoundError(
@@ -3517,6 +3612,19 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         def _load_proxy_component(component_key, file_key, default_names, label):
             source_path = _resolve_proxy_file_candidates(file_key, default_names, required=True)
             payload = read_file(source_path)
+            if _is_simulation_bundle_path(source_path):
+                bundle_payload = _coerce_simulation_bundle_payload(payload)
+                if bundle_payload is None:
+                    raise ValueError(f"Invalid simulation bundle file: {source_path}")
+                bundle_field_map = {"AMPA": "ampa", "GABA": "gaba", "Vm": "vm"}
+                preferred_field = bundle_field_map.get(component_key)
+                payload = bundle_payload.get(preferred_field)
+                if payload is None:
+                    payload = bundle_payload.get("exc_state_events")
+                if payload is None:
+                    raise ValueError(
+                        f"Simulation bundle {os.path.basename(source_path)} does not contain {component_key} data."
+                    )
             component = _extract_proxy_component_from_payload(payload, component_key)
             source_name = os.path.basename(source_path)
             if source_name == "exc_state_events.pkl":
@@ -3535,8 +3643,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             _append_job_output(job_status, job_id, "Loading spike times and gids...")
             times_path = _resolve_proxy_file('times_file', 'times.pkl', required=True)
             gids_path = _resolve_proxy_file('gids_file', 'gids.pkl', required=True)
-            fr_times = read_file(times_path)
-            fr_gids = read_file(gids_path)
+            fr_times = _load_simulation_component_from_path(times_path, "times.pkl")
+            fr_gids = _load_simulation_component_from_path(gids_path, "gids.pkl")
             proxy_sim_step = float(bin_size)
             dt_source = "bin_size_ms"
 
@@ -3602,7 +3710,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 dt_source = "form_sim_step"
             else:
                 raise ValueError(
-                    "Simulation step could not be determined. Provide sim_step or ensure dt.pkl is available in simulation outputs."
+                    "Simulation step could not be determined. Provide sim_step or ensure dt is present in simulation outputs "
+                    f"(either dt.pkl or {SIMULATION_BUNDLE_FILE})."
                 )
 
         _append_job_output(job_status, job_id, f"Effective proxy sampling step: {proxy_sim_step:g} ms ({dt_source}).")
@@ -3706,7 +3815,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         output_root = _field_potential_output_dir("proxy")
         os.makedirs(output_root, exist_ok=True)
         # Keep canonical short filenames for proxy outputs.
-        for name in ('proxy.pkl', 'sim_data.pkl'):
+        for name in ('proxy.pkl', SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES):
             old_path = os.path.join(output_root, name)
             if os.path.isfile(old_path):
                 try:
@@ -3936,11 +4045,15 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         spike_times_path = _resolve_sim_file(
             file_paths, "kernel_spike_times_file", "times.pkl", required=True
         )
-        spike_times_raw = read_file(spike_times_path)
+        spike_times_raw = _load_simulation_component_from_path(spike_times_path, "times.pkl")
         pop_sizes_path = _resolve_sim_file(
             file_paths, "kernel_population_sizes_file", "population_sizes.pkl", required=False
         )
-        population_sizes_raw = read_file(pop_sizes_path) if pop_sizes_path else None
+        population_sizes_raw = (
+            _load_simulation_component_from_path(pop_sizes_path, "population_sizes.pkl")
+            if pop_sizes_path
+            else None
+        )
 
         network_path = _resolve_sim_file(
             file_paths, "kernel_network_file", "network.pkl", required=False
@@ -3949,10 +4062,14 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             candidate_network = os.path.join(os.path.dirname(spike_times_path), "network.pkl")
             if os.path.exists(candidate_network):
                 network_path = candidate_network
+            else:
+                candidate_bundle = os.path.join(os.path.dirname(spike_times_path), SIMULATION_BUNDLE_FILE)
+                if os.path.exists(candidate_bundle):
+                    network_path = candidate_bundle
         network_obj = None
         if network_path and os.path.exists(network_path):
             try:
-                network_obj = read_file(network_path)
+                network_obj = _load_simulation_component_from_path(network_path, "network.pkl")
             except Exception as exc:
                 _append_job_output(
                     job_status,
@@ -4020,7 +4137,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 inter_area_scales = {}
                 if network_obj is not None:
                     try:
-                        inter_area_scales = _compute_inter_area_kernel_scales(network_obj, area_populations)
+                        network_trial_obj = _pick_trial_item(network_obj, trial_idx)
+                        inter_area_scales = _compute_inter_area_kernel_scales(network_trial_obj, area_populations)
                         if inter_area_scales and not logged_scaling_applied:
                             _append_job_output(
                                 job_status,

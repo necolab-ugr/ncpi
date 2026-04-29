@@ -140,6 +140,22 @@ MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES
 MAX_SIMULATION_GRID_COMBINATIONS = 256
 GRID_PREFIX = "grid="
 SIMULATION_JOINT_GROUPS_FIELD = "sim_joint_groups"
+SIMULATION_BUNDLE_FILE = "simulation.pkl"
+SIMULATION_LEGACY_BUNDLE_FILES = {"sim_data.pkl"}
+SIMULATION_LEGACY_CORE_FILES = ("times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl")
+SIMULATION_OPTIONAL_LEGACY_FILES = ("population_sizes.pkl", "vm.pkl", "ampa.pkl", "gaba.pkl", "exc_state_events.pkl")
+SIMULATION_FILE_TO_FIELD = {
+    "times.pkl": "times",
+    "gids.pkl": "gids",
+    "dt.pkl": "dt",
+    "tstop.pkl": "tstop",
+    "network.pkl": "network",
+    "population_sizes.pkl": "population_sizes",
+    "vm.pkl": "vm",
+    "ampa.pkl": "ampa",
+    "gaba.pkl": "gaba",
+    "exc_state_events.pkl": "exc_state_events",
+}
 SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
 SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
 NATIVE_PATH_PICKER_ENABLED = str(os.environ.get("NCPI_ENABLE_NATIVE_PATH_PICKER", "0")).strip().lower() in {"1", "true", "yes", "on"}
@@ -1235,6 +1251,181 @@ def _write_simulation_grid_metadata(output_dir, metadata):
     return metadata_path
 
 
+def _simulation_bundle_path(output_dir=None):
+    root = output_dir if output_dir else SIMULATION_DATA_DIR
+    return os.path.join(root, SIMULATION_BUNDLE_FILE)
+
+
+def _simulation_bundle_candidates(output_dir=None):
+    root = output_dir if output_dir else SIMULATION_DATA_DIR
+    candidates = [SIMULATION_BUNDLE_FILE, *sorted(SIMULATION_LEGACY_BUNDLE_FILES)]
+    return [os.path.join(root, name) for name in candidates]
+
+
+def _as_scenario_list(value):
+    return value if isinstance(value, list) else [value]
+
+
+def _coerce_simulation_payload(payload):
+    required_keys = {"times", "gids", "dt", "tstop", "network"}
+
+    if isinstance(payload, list):
+        if not payload:
+            return None
+        first = payload[0]
+        if not isinstance(first, dict) or not required_keys.issubset(first.keys()):
+            return None
+        population_sizes_values = [item.get("population_sizes") for item in payload]
+        vm_values = [item.get("vm") for item in payload]
+        ampa_values = [item.get("ampa") for item in payload]
+        gaba_values = [item.get("gaba") for item in payload]
+        exc_state_values = [item.get("exc_state_events") for item in payload]
+        return {
+            "times": _as_scenario_list([item.get("times") for item in payload]),
+            "gids": _as_scenario_list([item.get("gids") for item in payload]),
+            "dt": _as_scenario_list([item.get("dt") for item in payload]),
+            "tstop": _as_scenario_list([item.get("tstop") for item in payload]),
+            "network": _as_scenario_list([item.get("network") for item in payload]),
+            "population_sizes": (
+                _as_scenario_list(population_sizes_values)
+                if any(value is not None for value in population_sizes_values)
+                else None
+            ),
+            "vm": _as_scenario_list(vm_values) if any(value is not None for value in vm_values) else None,
+            "ampa": _as_scenario_list(ampa_values) if any(value is not None for value in ampa_values) else None,
+            "gaba": _as_scenario_list(gaba_values) if any(value is not None for value in gaba_values) else None,
+            "exc_state_events": (
+                _as_scenario_list(exc_state_values)
+                if any(value is not None for value in exc_state_values)
+                else None
+            ),
+            "grid_metadata": None,
+        }
+
+    if not isinstance(payload, dict):
+        return None
+    if not required_keys.issubset(payload.keys()):
+        return None
+
+    normalized = {
+        "times": _as_scenario_list(payload["times"]),
+        "gids": _as_scenario_list(payload["gids"]),
+        "dt": _as_scenario_list(payload["dt"]),
+        "tstop": _as_scenario_list(payload["tstop"]),
+        "network": _as_scenario_list(payload["network"]),
+        "population_sizes": (
+            _as_scenario_list(payload["population_sizes"])
+            if payload.get("population_sizes") is not None
+            else None
+        ),
+        "vm": _as_scenario_list(payload["vm"]) if payload.get("vm") is not None else None,
+        "ampa": _as_scenario_list(payload["ampa"]) if payload.get("ampa") is not None else None,
+        "gaba": _as_scenario_list(payload["gaba"]) if payload.get("gaba") is not None else None,
+        "exc_state_events": (
+            _as_scenario_list(payload["exc_state_events"])
+            if payload.get("exc_state_events") is not None
+            else None
+        ),
+        "grid_metadata": payload.get("grid_metadata"),
+    }
+    return normalized
+
+
+def _simulation_payload_from_output_lists(output_lists, grid_metadata=None):
+    required = set(SIMULATION_LEGACY_CORE_FILES)
+    missing = sorted(name for name in required if name not in output_lists)
+    if missing:
+        raise ValueError(f"Missing simulation output payload(s): {', '.join(missing)}")
+
+    payload = {
+        "times": list(output_lists["times.pkl"]),
+        "gids": list(output_lists["gids.pkl"]),
+        "dt": list(output_lists["dt.pkl"]),
+        "tstop": list(output_lists["tstop.pkl"]),
+        "network": list(output_lists["network.pkl"]),
+    }
+    for optional_name in SIMULATION_OPTIONAL_LEGACY_FILES:
+        if optional_name in output_lists:
+            payload[SIMULATION_FILE_TO_FIELD[optional_name]] = list(output_lists[optional_name])
+    if grid_metadata:
+        payload["grid_metadata"] = grid_metadata
+    return payload
+
+
+def _write_simulation_bundle_payload(output_dir, payload):
+    os.makedirs(output_dir, exist_ok=True)
+    bundle_path = _simulation_bundle_path(output_dir)
+    with open(bundle_path, "wb") as handle:
+        pickle.dump(payload, handle)
+    return bundle_path
+
+
+def _normalize_simulation_data_dir_to_bundle(output_dir):
+    if not os.path.isdir(output_dir):
+        return None
+
+    metadata = None
+    metadata_path = _simulation_grid_metadata_path(output_dir)
+    if metadata_path and os.path.isfile(metadata_path):
+        try:
+            with open(metadata_path, "rb") as handle:
+                maybe_meta = pickle.load(handle)
+            if isinstance(maybe_meta, dict):
+                metadata = maybe_meta
+        except Exception:
+            metadata = None
+
+    for candidate in _simulation_bundle_candidates(output_dir):
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            with open(candidate, "rb") as handle:
+                raw_payload = pickle.load(handle)
+            payload = _coerce_simulation_payload(raw_payload)
+        except Exception:
+            payload = None
+        if payload is None:
+            continue
+        if payload.get("grid_metadata") is None and metadata is not None:
+            payload["grid_metadata"] = metadata
+        bundle_path = _write_simulation_bundle_payload(output_dir, payload)
+        if os.path.basename(candidate) != SIMULATION_BUNDLE_FILE:
+            try:
+                os.remove(candidate)
+            except OSError:
+                pass
+        return bundle_path
+
+    legacy_payload_paths = {}
+    for file_name in [*SIMULATION_LEGACY_CORE_FILES, *SIMULATION_OPTIONAL_LEGACY_FILES]:
+        path = os.path.join(output_dir, file_name)
+        if os.path.isfile(path):
+            legacy_payload_paths[file_name] = path
+
+    missing_required = [
+        name for name in SIMULATION_LEGACY_CORE_FILES
+        if name not in legacy_payload_paths
+    ]
+    if missing_required:
+        return None
+
+    output_lists = {}
+    for file_name, path in legacy_payload_paths.items():
+        with open(path, "rb") as handle:
+            output_lists[file_name] = _as_scenario_list(pickle.load(handle))
+
+    payload = _simulation_payload_from_output_lists(output_lists, grid_metadata=metadata)
+    bundle_path = _write_simulation_bundle_payload(output_dir, payload)
+
+    for file_name in legacy_payload_paths:
+        try:
+            os.remove(os.path.join(output_dir, file_name))
+        except OSError:
+            pass
+    _clear_simulation_grid_metadata_file(output_dir)
+    return bundle_path
+
+
 def _rewrite_pickle_as_single_scenario_list(path):
     if not path or not os.path.isfile(path):
         raise FileNotFoundError(f"Simulation output file not found: {path}")
@@ -1485,7 +1676,7 @@ def _list_field_potential_detected_files():
                     continue
                 if abs_path in seen_paths:
                     continue
-                if os.path.basename(abs_path).lower() == "sim_data.pkl":
+                if os.path.basename(abs_path).lower() in {SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES}:
                     # Legacy proxy metadata payload; keep hidden from field-potential picks.
                     continue
                 seen_paths.add(abs_path)
@@ -1510,6 +1701,7 @@ def _list_simulation_detected_files():
         return entries
 
     label_map = {
+        "simulation.pkl": "Combined simulation payload",
         "times.pkl": "Spike times",
         "gids.pkl": "Spike gids",
         "dt.pkl": "Simulation dt",
@@ -1627,18 +1819,7 @@ def _looks_like_simulation_grid_metadata(source_obj):
     return required_keys.issubset(set(source_obj.keys()))
 
 
-def _describe_saved_result_source(path):
-    try:
-        with open(path, "rb") as handle:
-            source_obj = pickle.load(handle)
-    except Exception as exc:
-        return {
-            "summary": f"Failed to inspect file: {exc}",
-            "detail_summary": "",
-            "field_details": [],
-            "error": str(exc),
-        }
-
+def _describe_result_object(source_obj):
     top_summary = _summarize_value_for_ui(source_obj)
     payload = {
         "summary": "",
@@ -1720,6 +1901,27 @@ def _describe_saved_result_source(path):
         payload["field_details"] = _describe_saved_result_fields(source_obj)
         return payload
 
+    payload["summary"] = (
+        f"{payload['top_level_type']}"
+        + (f" with shape {payload['top_level_shape']}" if payload["top_level_shape"] is not None else "")
+        + "."
+    )
+    return payload
+
+
+def _describe_saved_result_source(path):
+    try:
+        with open(path, "rb") as handle:
+            source_obj = pickle.load(handle)
+    except Exception as exc:
+        return {
+            "summary": f"Failed to inspect file: {exc}",
+            "detail_summary": "",
+            "field_details": [],
+            "error": str(exc),
+        }
+    payload = _describe_result_object(source_obj)
+
     try:
         normalized = _describe_parser_source(path)
     except Exception:
@@ -1761,6 +1963,7 @@ def _attach_result_inspection(entries):
 
 def _simulation_output_label_for_name(name):
     label_map = {
+        "simulation.pkl": "Combined simulation payload",
         "times.pkl": "Spike times",
         "gids.pkl": "Spike gids",
         "dt.pkl": "Simulation dt",
@@ -1795,7 +1998,44 @@ def _result_summary_entries_for_job(status, computation_type):
             path = os.path.join(result_path, name)
             if os.path.isfile(path):
                 _append_file_entry(path, _simulation_output_label_for_name(name))
-        return _attach_result_inspection(entries)
+        enriched = _attach_result_inspection(entries)
+
+        expanded = []
+        for item in enriched:
+            expanded.append(item)
+            lower_name = str(item.get("name") or "").lower()
+            if lower_name not in {SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES}:
+                continue
+            bundle_obj = None
+            bundle_path = item.get("path")
+            if not bundle_path or not os.path.isfile(bundle_path):
+                continue
+            try:
+                with open(bundle_path, "rb") as handle:
+                    raw_bundle_obj = pickle.load(handle)
+                bundle_obj = _coerce_simulation_payload(raw_bundle_obj)
+                if bundle_obj is None and isinstance(raw_bundle_obj, MappingABC):
+                    bundle_obj = raw_bundle_obj
+            except Exception:
+                bundle_obj = None
+            if not isinstance(bundle_obj, MappingABC):
+                continue
+            for field_name, field_value in bundle_obj.items():
+                field_name = str(field_name or "").strip()
+                if not field_name:
+                    continue
+                field_inspection = _describe_result_object(field_value)
+                field_inspection["detail_summary"] = (
+                    (field_inspection.get("detail_summary") or "").strip() + f" Expanded from {item.get('name')}."
+                ).strip()
+                expanded.append({
+                    "key": f"{item.get('key')}::{field_name}",
+                    "name": field_name,
+                    "label": "Simulation field",
+                    "path": item.get("path"),
+                    "inspection": field_inspection,
+                })
+        return expanded
 
     if computation_type in {"field_potential_proxy", "field_potential_kernel", "field_potential_meeg"}:
         root = result_path if result_path and os.path.isdir(result_path) else os.path.dirname(str(result_path or ""))
@@ -1807,7 +2047,7 @@ def _result_summary_entries_for_job(status, computation_type):
                 if not os.path.isfile(path):
                     continue
                 lower = name.lower()
-                if lower == "sim_data.pkl":
+                if lower in {SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES}:
                     continue
                 if computation_type == "field_potential_proxy":
                     if lower != "proxy.pkl":
@@ -6116,6 +6356,11 @@ def upload_sim_files():
                 continue
             file.save(os.path.join(simulation_data_dir, filename))
 
+    try:
+        _normalize_simulation_data_dir_to_bundle(simulation_data_dir)
+    except Exception as exc:
+        flash(f"Warning: failed to normalize simulation outputs into {SIMULATION_BUNDLE_FILE}: {exc}", "error")
+
     return redirect(request.referrer or url_for('upload_sim'))
 
 
@@ -6540,20 +6785,11 @@ def _simulation_computation(job_id, job_status, params):
                         f"Simulation {run_idx}/{total_runs} did not produce expected files: {missing}"
                     )
 
-            if total_runs == 1:
-                for name in trial_files:
-                    src = os.path.join(trial_output_dir, name)
-                    dst = os.path.join(output_dir, name)
-                    with open(src, "rb") as handle:
-                        payload = pickle.load(handle)
-                    with open(dst, "wb") as handle:
-                        pickle.dump([payload], handle)
-            else:
-                for name in generated_files:
-                    src = os.path.join(trial_output_dir, name)
-                    with open(src, "rb") as handle:
-                        payload = pickle.load(handle)
-                    aggregated_outputs.setdefault(name, []).append(payload)
+            for name in generated_files:
+                src = os.path.join(trial_output_dir, name)
+                with open(src, "rb") as handle:
+                    payload = pickle.load(handle)
+                aggregated_outputs.setdefault(name, []).append(payload)
 
             job_status[job_id]["simulation_completed"] = run_idx
             if total_runs > 1:
@@ -6567,30 +6803,25 @@ def _simulation_computation(job_id, job_status, params):
 
             shutil.rmtree(run_root, ignore_errors=True)
 
+        simulation_payload = _simulation_payload_from_output_lists(
+            aggregated_outputs,
+            grid_metadata=grid_metadata,
+        )
+        bundle_path = _write_simulation_bundle_payload(output_dir, simulation_payload)
+        _append_job_output(job_status, job_id, f"Stored combined simulation payload in {bundle_path}.")
         if total_runs > 1:
-            for name, payload_list in aggregated_outputs.items():
-                dst = os.path.join(output_dir, name)
-                with open(dst, "wb") as handle:
-                    pickle.dump(payload_list, handle)
             if is_grid:
                 _append_job_output(
                     job_status,
                     job_id,
-                    f"Stored grid outputs in {output_dir} ({total_runs} entries per file).",
+                    f"Grid run stored with {total_runs} trial(s) inside {SIMULATION_BUNDLE_FILE}.",
                 )
             else:
                 _append_job_output(
                     job_status,
                     job_id,
-                    f"Stored repeated single-trial outputs in {output_dir} ({total_runs} entries per file).",
+                    f"Repeated run stored with {total_runs} trial(s) inside {SIMULATION_BUNDLE_FILE}.",
                 )
-        if grid_metadata:
-            try:
-                metadata_path = _write_simulation_grid_metadata(output_dir, grid_metadata)
-                if metadata_path:
-                    _append_job_output(job_status, job_id, f"Stored grid metadata in {metadata_path}.")
-            except Exception as meta_exc:
-                _append_job_output(job_status, job_id, f"Warning: failed to store grid metadata: {meta_exc}")
 
         job_status[job_id].update({
             "status": "finished",
@@ -6682,7 +6913,13 @@ def _simulation_computation_custom(job_id, job_status, params):
         )
         if not trial_files:
             raise RuntimeError("No .pkl simulation outputs were produced.")
-        _normalize_simulation_output_files_as_lists(output_dir, trial_files)
+        bundle_path = _normalize_simulation_data_dir_to_bundle(output_dir)
+        if not bundle_path:
+            raise RuntimeError(
+                "Simulation outputs are incomplete. Expected either simulation.pkl or legacy files "
+                "(times.pkl, gids.pkl, dt.pkl, tstop.pkl, network.pkl)."
+            )
+        _append_job_output(job_status, job_id, f"Stored combined simulation payload in {bundle_path}.")
 
         job_status[job_id].update({
             "status": "finished",
@@ -7036,6 +7273,22 @@ def field_potential_kernel():
         "population_sizes": os.path.join(default_dir, "population_sizes.pkl"),
     }
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
+    bundle_path = _simulation_bundle_path(default_dir)
+    bundle_payload = None
+    if os.path.isfile(bundle_path):
+        try:
+            with open(bundle_path, "rb") as handle:
+                bundle_payload = _coerce_simulation_payload(pickle.load(handle))
+        except Exception:
+            bundle_payload = None
+    if bundle_payload:
+        for key in ("times", "gids", "population_sizes"):
+            if default_sim.get(key):
+                continue
+            if bundle_payload.get(key) is None:
+                continue
+            default_sim[key] = True
+            default_paths[key] = bundle_path
     kernel_output_root = FIELD_POTENTIAL_KERNEL_DIR
     preferred_cdm = []
     for fname in ("cdm.pkl",):
@@ -7106,12 +7359,28 @@ def field_potential_proxy():
         "nu_ext": os.path.join(default_dir, "nu_ext.pkl"),
     }
     default_sim = {key: os.path.exists(path) for key, path in default_paths.items()}
+    bundle_path = _simulation_bundle_path(default_dir)
+    bundle_payload = None
+    if os.path.isfile(bundle_path):
+        try:
+            with open(bundle_path, "rb") as handle:
+                bundle_payload = _coerce_simulation_payload(pickle.load(handle))
+        except Exception:
+            bundle_payload = None
+    if bundle_payload:
+        for key in ("times", "gids", "vm", "ampa", "gaba", "exc_state_events"):
+            if default_sim.get(key):
+                continue
+            if bundle_payload.get(key) is None:
+                continue
+            default_sim[key] = True
+            default_paths[key] = bundle_path
     default_sim_names = {
-        "times": "times.pkl" if default_sim["times"] else "",
-        "gids": "gids.pkl" if default_sim["gids"] else "",
-        "vm": "vm.pkl" if default_sim["vm"] else "",
-        "ampa": "ampa.pkl" if default_sim["ampa"] else "",
-        "gaba": "gaba.pkl" if default_sim["gaba"] else "",
+        "times": (os.path.basename(default_paths["times"]) if default_sim["times"] else ""),
+        "gids": (os.path.basename(default_paths["gids"]) if default_sim["gids"] else ""),
+        "vm": (os.path.basename(default_paths["vm"]) if default_sim["vm"] else ""),
+        "ampa": (os.path.basename(default_paths["ampa"]) if default_sim["ampa"] else ""),
+        "gaba": (os.path.basename(default_paths["gaba"]) if default_sim["gaba"] else ""),
     }
     # Cavallari simulations store aggregated currents in exc_state_events.pkl.
     if default_sim.get("exc_state_events"):
@@ -7138,11 +7407,11 @@ def field_potential_proxy():
 def field_potential_proxy_infer_trials():
     file_key = (request.form.get("file_key") or "").strip()
     default_names = {
-        "times_file": ["times.pkl"],
-        "gids_file": ["gids.pkl"],
-        "vm_file": ["vm.pkl", "exc_state_events.pkl"],
-        "ampa_file": ["ampa.pkl", "exc_state_events.pkl"],
-        "gaba_file": ["gaba.pkl", "exc_state_events.pkl"],
+        "times_file": ["times.pkl", SIMULATION_BUNDLE_FILE, *sorted(SIMULATION_LEGACY_BUNDLE_FILES)],
+        "gids_file": ["gids.pkl", SIMULATION_BUNDLE_FILE, *sorted(SIMULATION_LEGACY_BUNDLE_FILES)],
+        "vm_file": ["vm.pkl", "exc_state_events.pkl", SIMULATION_BUNDLE_FILE, *sorted(SIMULATION_LEGACY_BUNDLE_FILES)],
+        "ampa_file": ["ampa.pkl", "exc_state_events.pkl", SIMULATION_BUNDLE_FILE, *sorted(SIMULATION_LEGACY_BUNDLE_FILES)],
+        "gaba_file": ["gaba.pkl", "exc_state_events.pkl", SIMULATION_BUNDLE_FILE, *sorted(SIMULATION_LEGACY_BUNDLE_FILES)],
     }
     if file_key not in default_names:
         return jsonify({"error": "Invalid simulation file key for trial detection."}), 400
@@ -7191,6 +7460,21 @@ def field_potential_proxy_infer_trials():
             return jsonify({"error": "No file source provided for trial detection."}), 400
 
         payload = compute_utils.read_file(source_path)
+        source_name = os.path.basename(source_path).lower()
+        if source_name in {SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES}:
+            sim_payload = _coerce_simulation_payload(payload)
+            if sim_payload is None:
+                return jsonify({"error": "Simulation bundle is invalid or missing required keys."}), 400
+            key_to_field = {
+                "times_file": "times",
+                "gids_file": "gids",
+                "vm_file": "vm",
+                "ampa_file": "ampa",
+                "gaba_file": "gaba",
+            }
+            payload = sim_payload.get(key_to_field[file_key])
+            if payload is None:
+                return jsonify({"error": f"Simulation bundle does not contain '{key_to_field[file_key]}'."}), 400
         trial_count = int(compute_utils._infer_trial_count_from_values(payload))
         trial_count = max(1, trial_count)
         return jsonify({
@@ -9093,60 +9377,12 @@ def _load_simulation_outputs():
         ):
             root = analysis_root
 
-    required = ["times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"]
+    required = list(SIMULATION_LEGACY_CORE_FILES)
     paths = {
         name: (os.path.join(root, name) if os.path.isfile(os.path.join(root, name)) else None)
         for name in required
     }
     missing = [name for name, path in paths.items() if path is None]
-
-    def _as_scenario_list(value):
-        return value if isinstance(value, list) else [value]
-
-    def _coerce_sim_payload(payload):
-        if isinstance(payload, list):
-            if not payload:
-                return None
-            first = payload[0]
-            if not isinstance(first, dict):
-                return None
-            required_keys = {"times", "gids", "dt", "tstop", "network"}
-            if not required_keys.issubset(first.keys()):
-                return None
-            population_sizes_values = [item.get("population_sizes") for item in payload]
-            population_sizes_payload = (
-                _as_scenario_list(population_sizes_values)
-                if any(value is not None for value in population_sizes_values)
-                else None
-            )
-            return {
-                "times": _as_scenario_list([item.get("times") for item in payload]),
-                "gids": _as_scenario_list([item.get("gids") for item in payload]),
-                "dt": _as_scenario_list([item.get("dt") for item in payload]),
-                "tstop": _as_scenario_list([item.get("tstop") for item in payload]),
-                "network": _as_scenario_list([item.get("network") for item in payload]),
-                "population_sizes": population_sizes_payload,
-                "grid_metadata": None,
-            }
-        if not isinstance(payload, dict):
-            return None
-        required_keys = {"times", "gids", "dt", "tstop", "network"}
-        if not required_keys.issubset(payload.keys()):
-            return None
-        population_sizes_payload = payload.get("population_sizes")
-        return {
-            "times": _as_scenario_list(payload["times"]),
-            "gids": _as_scenario_list(payload["gids"]),
-            "dt": _as_scenario_list(payload["dt"]),
-            "tstop": _as_scenario_list(payload["tstop"]),
-            "network": _as_scenario_list(payload["network"]),
-            "population_sizes": (
-                _as_scenario_list(population_sizes_payload)
-                if population_sizes_payload is not None
-                else None
-            ),
-            "grid_metadata": payload.get("grid_metadata"),
-        }
 
     def _infer_trial_count_from_proxy_data(proxy_path):
         """Infer trial count when loading field potential proxy data."""
@@ -9160,22 +9396,89 @@ def _load_simulation_outputs():
         except Exception:
             return 1
 
-    if missing:
-        sim_data_path = os.path.join(root, "sim_data.pkl")
-        proxy_pkl_path = os.path.join(root, "proxy.pkl")
-        
-        sim_data = None
-        # Try to load sim_data.pkl if it exists
-        if os.path.isfile(sim_data_path):
+    def _load_grid_metadata():
+        metadata_local = None
+        metadata_path = _simulation_grid_metadata_path(root)
+        if metadata_path and os.path.isfile(metadata_path):
             try:
-                with open(sim_data_path, "rb") as f:
-                    sim_payload = pickle.load(f)
-                sim_data = _coerce_sim_payload(sim_payload)
+                with open(metadata_path, "rb") as handle:
+                    maybe_meta = pickle.load(handle)
+                if isinstance(maybe_meta, dict):
+                    metadata_local = maybe_meta
             except Exception:
-                pass
-        
+                metadata_local = None
+        if metadata_local is None:
+            legacy_candidates = ["simulation_grid_metadata.pkl", "simulation_grid_metadata.json"]
+            for legacy_name in legacy_candidates:
+                legacy_path = os.path.join(root, legacy_name)
+                if not os.path.isfile(legacy_path):
+                    continue
+                try:
+                    if legacy_name.endswith(".json"):
+                        with open(legacy_path, "r", encoding="utf-8") as handle:
+                            maybe_meta = json.load(handle)
+                    else:
+                        with open(legacy_path, "rb") as handle:
+                            maybe_meta = pickle.load(handle)
+                    if isinstance(maybe_meta, dict):
+                        metadata_local = maybe_meta
+                        break
+                except Exception:
+                    continue
+        return metadata_local
+
+    metadata = _load_grid_metadata()
+    sim_data = None
+    for candidate in _simulation_bundle_candidates(root):
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            with open(candidate, "rb") as handle:
+                raw_payload = pickle.load(handle)
+            maybe_sim_data = _coerce_simulation_payload(raw_payload)
+        except Exception:
+            maybe_sim_data = None
+        if maybe_sim_data is None:
+            continue
+        if maybe_sim_data.get("grid_metadata") is None:
+            maybe_sim_data["grid_metadata"] = metadata
+        sim_data = maybe_sim_data
+        break
+
+    if sim_data is None and not missing:
+        payload = {}
+        for name, path in paths.items():
+            with open(path, "rb") as f:
+                payload[name] = pickle.load(f)
+        sim_data = {
+            "times": _as_scenario_list(payload["times.pkl"]),
+            "gids": _as_scenario_list(payload["gids.pkl"]),
+            "dt": _as_scenario_list(payload["dt.pkl"]),
+            "tstop": _as_scenario_list(payload["tstop.pkl"]),
+            "network": _as_scenario_list(payload["network.pkl"]),
+            "population_sizes": None,
+            "vm": None,
+            "ampa": None,
+            "gaba": None,
+            "exc_state_events": None,
+            "grid_metadata": metadata,
+        }
+        for optional_name in SIMULATION_OPTIONAL_LEGACY_FILES:
+            optional_path = os.path.join(root, optional_name)
+            if not os.path.isfile(optional_path):
+                continue
+            try:
+                with open(optional_path, "rb") as handle:
+                    raw_optional = pickle.load(handle)
+                sim_data[SIMULATION_FILE_TO_FIELD[optional_name]] = _as_scenario_list(raw_optional)
+            except Exception:
+                continue
+
+    if sim_data is None:
+        proxy_pkl_path = os.path.join(root, "proxy.pkl")
+
         # Fallback/Supplement: if we have proxy.pkl (field potential data), use it to infer trial count
-        # This handles the case where proxy.pkl is selected alongside incomplete sim_data.pkl
+        # This handles the case where proxy.pkl is selected alongside incomplete simulation payloads
         if os.path.isfile(proxy_pkl_path):
             try:
                 proxy_trial_count = _infer_trial_count_from_proxy_data(proxy_pkl_path)
@@ -9226,60 +9529,10 @@ def _load_simulation_outputs():
             return sim_data
         
         raise FileNotFoundError(
-            f"Missing simulation output files in {root}: {', '.join(missing)}"
+            f"Missing simulation output files in {root}. Expected {SIMULATION_BUNDLE_FILE} "
+            f"or legacy files ({', '.join(SIMULATION_LEGACY_CORE_FILES)})."
         )
-
-    payload = {}
-    for name, path in paths.items():
-        with open(path, "rb") as f:
-            payload[name] = pickle.load(f)
-    population_sizes_payload = None
-    population_sizes_path = os.path.join(root, "population_sizes.pkl")
-    if os.path.isfile(population_sizes_path):
-        try:
-            with open(population_sizes_path, "rb") as f:
-                population_sizes_payload = _as_scenario_list(pickle.load(f))
-        except Exception:
-            population_sizes_payload = None
-
-    metadata = None
-    metadata_path = _simulation_grid_metadata_path(root)
-    if metadata_path and os.path.isfile(metadata_path):
-        try:
-            with open(metadata_path, "rb") as handle:
-                maybe_meta = pickle.load(handle)
-            if isinstance(maybe_meta, dict):
-                metadata = maybe_meta
-        except Exception:
-            metadata = None
-    if metadata is None:
-        legacy_candidates = ["simulation_grid_metadata.pkl", "simulation_grid_metadata.json"]
-        for legacy_name in legacy_candidates:
-            legacy_path = os.path.join(root, legacy_name)
-            if not os.path.isfile(legacy_path):
-                continue
-            try:
-                if legacy_name.endswith(".json"):
-                    with open(legacy_path, "r", encoding="utf-8") as handle:
-                        maybe_meta = json.load(handle)
-                else:
-                    with open(legacy_path, "rb") as handle:
-                        maybe_meta = pickle.load(handle)
-                if isinstance(maybe_meta, dict):
-                    metadata = maybe_meta
-                    break
-            except Exception:
-                continue
-
-    return {
-        "times": _as_scenario_list(payload["times.pkl"]),
-        "gids": _as_scenario_list(payload["gids.pkl"]),
-        "dt": _as_scenario_list(payload["dt.pkl"]),
-        "tstop": _as_scenario_list(payload["tstop.pkl"]),
-        "network": _as_scenario_list(payload["network.pkl"]),
-        "population_sizes": population_sizes_payload,
-        "grid_metadata": metadata,
-    }
+    return sim_data
 
 
 def _simulation_trial_count(sim_data):
@@ -9895,6 +10148,8 @@ def _analysis_store_simulation_inputs(inputs):
     analysis_root = _analysis_data_dir(create=True)
 
     required_name_by_stem = {
+        "simulation": SIMULATION_BUNDLE_FILE,
+        "sim_data": SIMULATION_BUNDLE_FILE,
         "times": "times.pkl",
         "gids": "gids.pkl",
         "dt": "dt.pkl",
@@ -9943,6 +10198,7 @@ def _analysis_store_simulation_inputs(inputs):
         raise ValueError("No supported simulation .pkl/.pickle files were uploaded.")
 
     priority = {
+        SIMULATION_BUNDLE_FILE: 0,
         "times.pkl": 0,
         "gids.pkl": 1,
         "dt.pkl": 2,
@@ -10080,6 +10336,7 @@ def _analysis_collect_upload_inputs(uploads, server_file_paths, server_label):
 
 def _analysis_detect_single_input_kind(item):
     known_simulation_files = {
+        SIMULATION_BUNDLE_FILE,
         "times.pkl",
         "gids.pkl",
         "dt.pkl",
@@ -10090,7 +10347,7 @@ def _analysis_detect_single_input_kind(item):
         "ampa.pkl",
         "gaba.pkl",
         "exc_state_events.pkl",
-        "sim_data.pkl",
+        *SIMULATION_LEGACY_BUNDLE_FILES,
         SIMULATION_GRID_METADATA_FILE,
     }
     source_path = item.get("source_path")
@@ -10320,13 +10577,18 @@ def analysis_upload_auto():
     _set_analysis_selection_mode("simulation")
     _set_analysis_selected_simulation_keys(selected_keys)
 
-    required = {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"}
+    required = set(SIMULATION_LEGACY_CORE_FILES)
     selected_simulation_names = {
         str(key).split("::", 1)[1]
         for key in selected_keys
         if str(key).startswith("simulation::") and "::" in str(key)
     }
-    missing_required = sorted(name for name in required if name not in selected_simulation_names)
+    if SIMULATION_BUNDLE_FILE in selected_simulation_names or any(
+        legacy_name in selected_simulation_names for legacy_name in SIMULATION_LEGACY_BUNDLE_FILES
+    ):
+        missing_required = []
+    else:
+        missing_required = sorted(name for name in required if name not in selected_simulation_names)
 
     simulation_available = False
     is_full_simulation = False
@@ -10486,6 +10748,8 @@ def analysis_upload_simulation_files():
     simulation_root = _analysis_data_dir(create=True)
 
     required_name_by_stem = {
+        "simulation": SIMULATION_BUNDLE_FILE,
+        "sim_data": SIMULATION_BUNDLE_FILE,
         "times": "times.pkl",
         "gids": "gids.pkl",
         "dt": "dt.pkl",
@@ -10535,6 +10799,7 @@ def analysis_upload_simulation_files():
         return jsonify({"error": "No supported simulation .pkl/.pickle files were uploaded."}), 400
 
     priority = {
+        SIMULATION_BUNDLE_FILE: 0,
         "times.pkl": 0,
         "gids.pkl": 1,
         "dt.pkl": 2,
@@ -10549,13 +10814,18 @@ def analysis_upload_simulation_files():
     _set_analysis_selection_mode("simulation")
     _set_analysis_selected_simulation_keys(selected_keys)
 
-    required = {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"}
+    required = set(SIMULATION_LEGACY_CORE_FILES)
     selected_simulation_names = {
         str(key).split("::", 1)[1]
         for key in selected_keys
         if str(key).startswith("simulation::") and "::" in str(key)
     }
-    missing_required = sorted(name for name in required if name not in selected_simulation_names)
+    if SIMULATION_BUNDLE_FILE in selected_simulation_names or any(
+        legacy_name in selected_simulation_names for legacy_name in SIMULATION_LEGACY_BUNDLE_FILES
+    ):
+        missing_required = []
+    else:
+        missing_required = sorted(name for name in required if name not in selected_simulation_names)
 
     simulation_available = False
     is_full_simulation = False
@@ -12052,8 +12322,8 @@ def analysis_plot_simulation():
             return None
 
     required_by_plot = {
-        "raster": {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"},
-        "firing_rates": {"times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl"},
+        "raster": set(SIMULATION_LEGACY_CORE_FILES),
+        "firing_rates": set(SIMULATION_LEGACY_CORE_FILES),
         "cdm": set(),
         "cdm_psd": set(),
     }
@@ -12064,7 +12334,10 @@ def analysis_plot_simulation():
                 "No simulation files selected. Select the required simulation output files first.",
                 status=400,
             )
-        missing_selected = sorted(required_files - selected_sim_files)
+        has_bundle = SIMULATION_BUNDLE_FILE in selected_sim_files or any(
+            legacy_name in selected_sim_files for legacy_name in SIMULATION_LEGACY_BUNDLE_FILES
+        )
+        missing_selected = [] if has_bundle else sorted(required_files - selected_sim_files)
         if missing_selected:
             return _analysis_plot_error(
                 "Selected files are incomplete for this plot type. Missing: "

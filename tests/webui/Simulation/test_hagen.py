@@ -227,8 +227,39 @@ def _extract_zip(zip_path, destination):
 
 def _load_output_pickle(output_dir, filename):
     """Load a simulation output pickle file from a result directory."""
-    with open(output_dir / filename, "rb") as handle:
-        return pickle.load(handle)
+    direct_path = output_dir / filename
+    if direct_path.is_file():
+        with open(direct_path, "rb") as handle:
+            return pickle.load(handle)
+
+    bundle_path = output_dir / "simulation.pkl"
+    if not bundle_path.is_file():
+        legacy_bundle_path = output_dir / "sim_data.pkl"
+        bundle_path = legacy_bundle_path if legacy_bundle_path.is_file() else None
+    if bundle_path is None:
+        raise FileNotFoundError(f"Missing simulation output '{filename}' in {output_dir}.")
+
+    with open(bundle_path, "rb") as handle:
+        bundle = pickle.load(handle)
+
+    if isinstance(bundle, dict):
+        field_map = {
+            "times.pkl": "times",
+            "gids.pkl": "gids",
+            "dt.pkl": "dt",
+            "tstop.pkl": "tstop",
+            "network.pkl": "network",
+            "population_sizes.pkl": "population_sizes",
+            "vm.pkl": "vm",
+            "ampa.pkl": "ampa",
+            "gaba.pkl": "gaba",
+            "exc_state_events.pkl": "exc_state_events",
+        }
+        field = field_map.get(filename)
+        if field and field in bundle:
+            return bundle[field]
+
+    raise KeyError(f"Simulation bundle does not contain data for '{filename}'.")
 
 
 def _coerce_trial_payloads(payload):

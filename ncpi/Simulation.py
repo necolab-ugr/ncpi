@@ -1,6 +1,24 @@
 import os
+import pickle
 import subprocess
 import sys
+
+SIMULATION_BUNDLE_FILE = "simulation.pkl"
+SIMULATION_CORE_FILES = ("times.pkl", "gids.pkl", "dt.pkl", "tstop.pkl", "network.pkl")
+SIMULATION_OPTIONAL_FILES = ("population_sizes.pkl", "vm.pkl", "ampa.pkl", "gaba.pkl", "exc_state_events.pkl")
+SIMULATION_GRID_METADATA_FILES = ("grid_metadata.pkl", "simulation_grid_metadata.pkl")
+SIMULATION_FIELD_BY_FILENAME = {
+    "times.pkl": "times",
+    "gids.pkl": "gids",
+    "dt.pkl": "dt",
+    "tstop.pkl": "tstop",
+    "network.pkl": "network",
+    "population_sizes.pkl": "population_sizes",
+    "vm.pkl": "vm",
+    "ampa.pkl": "ampa",
+    "gaba.pkl": "gaba",
+    "exc_state_events.pkl": "exc_state_events",
+}
 
 
 def _headless_subprocess_env():
@@ -81,3 +99,73 @@ class Simulation:
         run_script(os.path.join(self.python_folder, script_path),
                    os.path.join(self.param_folder, param_path),
                    self.output_folder)
+
+    @staticmethod
+    def bundle_output_folder(output_folder, output_filename=SIMULATION_BUNDLE_FILE, remove_source_files=False):
+        if not os.path.isdir(output_folder):
+            raise FileNotFoundError(f"Output folder '{output_folder}' does not exist.")
+
+        def _load_pickle(name):
+            path = os.path.join(output_folder, name)
+            if not os.path.isfile(path):
+                return None
+            with open(path, "rb") as handle:
+                return pickle.load(handle)
+
+        def _as_trial_list(value):
+            return value if isinstance(value, list) else [value]
+
+        missing = []
+        payload = {}
+        loaded_names = []
+        for file_name in SIMULATION_CORE_FILES:
+            obj = _load_pickle(file_name)
+            if obj is None:
+                missing.append(file_name)
+                continue
+            payload[SIMULATION_FIELD_BY_FILENAME[file_name]] = _as_trial_list(obj)
+            loaded_names.append(file_name)
+        if missing:
+            raise ValueError(
+                "Cannot create simulation bundle; missing required file(s): "
+                + ", ".join(missing)
+            )
+
+        for file_name in SIMULATION_OPTIONAL_FILES:
+            obj = _load_pickle(file_name)
+            if obj is None:
+                continue
+            payload[SIMULATION_FIELD_BY_FILENAME[file_name]] = _as_trial_list(obj)
+            loaded_names.append(file_name)
+
+        for meta_name in SIMULATION_GRID_METADATA_FILES:
+            obj = _load_pickle(meta_name)
+            if isinstance(obj, dict):
+                payload["grid_metadata"] = obj
+                loaded_names.append(meta_name)
+                break
+
+        bundle_path = os.path.join(output_folder, output_filename)
+        with open(bundle_path, "wb") as handle:
+            pickle.dump(payload, handle)
+
+        if remove_source_files:
+            removable = set(loaded_names)
+            removable.update({"sim_data.pkl"})
+            removable.discard(output_filename)
+            for name in removable:
+                path = os.path.join(output_folder, name)
+                if os.path.isfile(path):
+                    try:
+                        os.remove(path)
+                    except OSError:
+                        pass
+
+        return bundle_path
+
+    def bundle_outputs(self, output_filename=SIMULATION_BUNDLE_FILE, remove_source_files=False):
+        return self.bundle_output_folder(
+            self.output_folder,
+            output_filename=output_filename,
+            remove_source_files=remove_source_files,
+        )
