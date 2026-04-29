@@ -131,26 +131,28 @@
                                     <th class="px-3 py-1.5 text-left font-semibold">Field</th>
                                     <th class="px-3 py-1.5 text-left font-semibold">Type</th>
                                     <th class="px-3 py-1.5 text-left font-semibold">Shape</th>
+                                    <th class="px-3 py-1.5 text-left font-semibold">Detail</th>
                                 </tr>
                             </thead>
                             <tbody>
-                                <template x-for="field in (item.inspection && item.inspection.field_details ? item.inspection.field_details.slice(0, 8) : [])" :key="item.name + '-' + field.field">
+                                <template x-for="field in (item.inspection && item.inspection.field_details ? item.inspection.field_details.slice(0, 40) : [])" :key="item.name + '-' + field.field">
                                     <tr class="border-t border-slate-100 dark:border-slate-800">
                                         <td class="px-3 py-1.5 font-mono align-top" x-text="field.field"></td>
                                         <td class="px-3 py-1.5 align-top" x-text="field.python_type || 'Unknown'"></td>
                                         <td class="px-3 py-1.5 align-top" x-text="field.shape !== null ? JSON.stringify(field.shape) : '—'"></td>
+                                        <td class="px-3 py-1.5 align-top" x-text="field.detail || '—'"></td>
                                     </tr>
                                 </template>
                             </tbody>
                         </table>
                     </div>
                     <p class="text-[11px] text-amber-700 dark:text-amber-300"
-                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 0">
+                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details_sampled">
                         Field details are based on the first sample examined when the result contains sample collections.
                     </p>
                     <p class="text-[11px] text-amber-700 dark:text-amber-300"
-                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 8"
-                       x-text="'Showing first 8 fields out of ' + item.inspection.field_details.length + '.'"></p>
+                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 40"
+                       x-text="'Showing first 40 fields out of ' + item.inspection.field_details.length + '.'"></p>
                 </div>
             </template>
         </div>

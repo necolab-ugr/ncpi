@@ -1777,32 +1777,149 @@ def _describe_mapping_fields_for_ui(mapping_obj, ordered_keys=None):
     return details
 
 
+def _collection_total_items_for_ui(value):
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return 0
+        if value.dtype == object:
+            return int(value.size)
+        return int(value.shape[0])
+    if isinstance(value, (list, tuple)):
+        return len(value)
+    return 0
+
+
+def _collection_indexed_items_for_ui(value, max_items=6):
+    if max_items <= 0:
+        return []
+    if isinstance(value, np.ndarray):
+        if value.ndim == 0:
+            return []
+        if value.dtype == object:
+            items = []
+            for idx, item in enumerate(value.flat):
+                if idx >= max_items:
+                    break
+                items.append((idx, item))
+            return items
+        limit = min(int(value.shape[0]), max_items)
+        return [(idx, value[idx]) for idx in range(limit)]
+    if isinstance(value, (list, tuple)):
+        limit = min(len(value), max_items)
+        return [(idx, value[idx]) for idx in range(limit)]
+    return []
+
+
+def _is_nested_collection_for_ui(value):
+    if isinstance(value, MappingABC):
+        return True
+    if isinstance(value, (list, tuple)):
+        return len(value) > 0
+    if isinstance(value, np.ndarray):
+        return value.ndim > 0 and value.size > 0 and value.dtype == object
+    return False
+
+
+def _append_nested_collection_details_for_ui(details, prefix, value, depth, *, max_rows=120, max_items=4, max_keys=16):
+    if depth <= 0 or len(details) >= max_rows:
+        return
+
+    if isinstance(value, MappingABC):
+        keys = [str(k) for k in value.keys() if not str(k).startswith("__")]
+        for key in keys[:max_keys]:
+            if len(details) >= max_rows:
+                return
+            child_value = value.get(key)
+            child_field = f"{prefix}.{key}" if prefix else key
+            details.append(_field_detail_from_value(child_field, child_value))
+            if _is_nested_collection_for_ui(child_value):
+                _append_nested_collection_details_for_ui(
+                    details,
+                    child_field,
+                    child_value,
+                    depth - 1,
+                    max_rows=max_rows,
+                    max_items=max_items,
+                    max_keys=max_keys,
+                )
+        return
+
+    for idx, item in _collection_indexed_items_for_ui(value, max_items=max_items):
+        if len(details) >= max_rows:
+            return
+        child_field = f"{prefix}[{idx}]"
+        details.append(_field_detail_from_value(child_field, item))
+        if _is_nested_collection_for_ui(item):
+            _append_nested_collection_details_for_ui(
+                details,
+                child_field,
+                item,
+                depth - 1,
+                max_rows=max_rows,
+                max_items=max_items,
+                max_keys=max_keys,
+            )
+
+
+def _describe_collection_fields_for_ui(source_obj):
+    details = []
+    total_items = _collection_total_items_for_ui(source_obj)
+    for idx, item in _collection_indexed_items_for_ui(source_obj, max_items=6):
+        if len(details) >= 120:
+            break
+        item_field = f"[{idx}]"
+        details.append(_field_detail_from_value(item_field, item))
+        if _is_nested_collection_for_ui(item):
+            _append_nested_collection_details_for_ui(
+                details,
+                item_field,
+                item,
+                depth=2,
+                max_rows=120,
+                max_items=4,
+                max_keys=16,
+            )
+    return {
+        "field_details": details,
+        "sampled": False,
+        "truncated": len(details) >= 120 or total_items > 6,
+        "total_items": int(total_items),
+    }
+
+
 def _describe_saved_result_fields(source_obj):
     if isinstance(source_obj, pd.DataFrame):
-        return _describe_dataframe_fields_for_ui(source_obj)
+        return {
+            "field_details": _describe_dataframe_fields_for_ui(source_obj),
+            "sampled": False,
+            "truncated": False,
+            "total_items": None,
+        }
 
     if isinstance(source_obj, MappingABC):
-        return _describe_mapping_fields_for_ui(source_obj)
+        return {
+            "field_details": _describe_mapping_fields_for_ui(source_obj),
+            "sampled": False,
+            "truncated": False,
+            "total_items": None,
+        }
 
     if isinstance(source_obj, np.ndarray):
-        return [_field_detail_from_value("__self__", source_obj)]
+        if source_obj.ndim > 0 and (source_obj.dtype == object or source_obj.shape[0] > 1):
+            return _describe_collection_fields_for_ui(source_obj)
+        return {
+            "field_details": [_field_detail_from_value("__self__", source_obj)],
+            "sampled": False,
+            "truncated": False,
+            "total_items": int(source_obj.size) if source_obj.ndim > 0 else 1,
+        }
 
     if isinstance(source_obj, (list, tuple)):
         if not source_obj:
-            return []
-        if all(isinstance(item, pd.DataFrame) for item in source_obj):
-            return _describe_dataframe_fields_for_ui(source_obj[0])
+            return {"field_details": [], "sampled": False, "truncated": False, "total_items": 0}
+        return _describe_collection_fields_for_ui(source_obj)
 
-        sample = source_obj[0]
-        if isinstance(sample, MappingABC):
-            details = _describe_mapping_fields_for_ui(sample)
-            for item in details:
-                item["field"] = f"sample.{item['field']}"
-            return details
-
-        return [_field_detail_from_value("sample", sample)]
-
-    return []
+    return {"field_details": [], "sampled": False, "truncated": False, "total_items": None}
 
 
 def _looks_like_simulation_grid_metadata(source_obj):
@@ -1825,6 +1942,7 @@ def _describe_result_object(source_obj):
         "summary": "",
         "detail_summary": "",
         "field_details": [],
+        "field_details_sampled": False,
         "top_level_type": top_summary.get("python_type") or "",
         "top_level_shape": top_summary.get("shape"),
         "top_level_detail": top_summary.get("detail") or "",
@@ -1880,25 +1998,29 @@ def _describe_result_object(source_obj):
             payload["detail_summary"] = "The file is empty."
             return payload
 
-        sample = source_obj[0]
-        sample_summary = _summarize_value_for_ui(sample)
-        sample_shape = sample_summary.get("shape")
-        sample_shape_text = f", shape={sample_shape}" if sample_shape is not None else ""
-        payload["detail_summary"] = (
-            f"Sample item: {sample_summary.get('python_type') or type(sample).__name__}{sample_shape_text}."
-        )
+        field_info = _describe_saved_result_fields(source_obj)
+        payload["field_details"] = field_info.get("field_details") or []
+        payload["field_details_sampled"] = bool(field_info.get("sampled"))
         if all(isinstance(item, pd.DataFrame) for item in source_obj):
             payload["summary"] = f"Sequence with {count} trial DataFrame(s)."
-            payload["detail_summary"] = (
-                f"Sample DataFrame: {sample.shape[0]} rows x {sample.shape[1]} columns."
-            )
-        payload["field_details"] = _describe_saved_result_fields(source_obj)
+        shown_items = min(count, 6)
+        payload["detail_summary"] = f"Expanded {shown_items} of {count} item(s)."
         return payload
 
     if isinstance(source_obj, np.ndarray):
         payload["summary"] = f"NumPy array with shape {list(source_obj.shape)}."
-        payload["detail_summary"] = payload["top_level_detail"]
-        payload["field_details"] = _describe_saved_result_fields(source_obj)
+        field_info = _describe_saved_result_fields(source_obj)
+        payload["field_details"] = field_info.get("field_details") or []
+        payload["field_details_sampled"] = bool(field_info.get("sampled"))
+        if field_info.get("field_details"):
+            total_items = field_info.get("total_items")
+            if isinstance(total_items, int) and total_items >= 0:
+                shown_items = min(total_items, 6)
+                payload["detail_summary"] = f"Expanded {shown_items} of {total_items} item(s)."
+            else:
+                payload["detail_summary"] = payload["top_level_detail"]
+        else:
+            payload["detail_summary"] = payload["top_level_detail"]
         return payload
 
     payload["summary"] = (
@@ -1918,25 +2040,10 @@ def _describe_saved_result_source(path):
             "summary": f"Failed to inspect file: {exc}",
             "detail_summary": "",
             "field_details": [],
+            "field_details_sampled": False,
             "error": str(exc),
         }
     payload = _describe_result_object(source_obj)
-
-    try:
-        normalized = _describe_parser_source(path)
-    except Exception:
-        normalized = None
-    if normalized:
-        payload["summary"] = normalized.get("summary") or ""
-        payload["detail_summary"] = payload["top_level_detail"]
-        payload["field_details"] = list(normalized.get("field_details") or [])
-        return payload
-
-    payload["summary"] = (
-        f"{payload['top_level_type']}"
-        + (f" with shape {payload['top_level_shape']}" if payload["top_level_shape"] is not None else "")
-        + "."
-    )
     return payload
 
 
@@ -1952,6 +2059,7 @@ def _attach_result_inspection(entries):
                 "summary": "",
                 "detail_summary": "",
                 "field_details": [],
+                "field_details_sampled": False,
                 "top_level_type": "",
                 "top_level_shape": None,
                 "top_level_detail": "",
@@ -4880,7 +4988,7 @@ def _describe_parser_source(path):
 
     def _build_defaults(candidates):
         return {
-            "data": _pick_field_guess_fuzzy(candidates, ["data", "signal", "proxy", "lfp", "eeg", "meg", "ecog", "cdm"]),
+            "data": _pick_field_guess_fuzzy(candidates, ["sum", "data", "signal", "proxy", "lfp", "eeg", "meg", "ecog", "cdm"]),
             "fs": _pick_field_guess_fuzzy(
                 candidates,
                 ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
@@ -7225,34 +7333,13 @@ def field_potential_load_precomputed():
 
 @app.route("/field_potential/kernel")
 def field_potential_kernel():
-    mc_models_default = os.path.expandvars(
-        os.path.expanduser(os.path.join("$HOME", "multicompartment_neuron_network"))
-    )
-    mc_outputs_default = os.path.join(
-        mc_models_default, "output", "adb947bfb931a5a8d09ad078a6d256b0"
-    )
-    repo_root = _repo_root
-    kernel_params_default = os.path.join(
-        repo_root,
-        "examples",
-        "simulation",
-        "Hagen_model",
-        "simulation",
-        "params",
-        "analysis_params.py",
-    )
-
-    remembered_mc_folder = _path_history_value_for_key("field_potential_kernel:mc_folder_browser")
-    if remembered_mc_folder:
-        mc_models_default = remembered_mc_folder
-
-    remembered_output_sim = _path_history_value_for_key("field_potential_kernel:output_sim_path_browser")
-    if remembered_output_sim:
-        mc_outputs_default = remembered_output_sim
-
-    remembered_kernel_params = _path_history_value_for_key("field_potential_kernel:kernel_params_module_browser")
-    if remembered_kernel_params:
-        kernel_params_default = remembered_kernel_params
+    mc_models_default = ""
+    mc_outputs_default = ""
+    kernel_params_default = ""
+    kernel_dt_default = 0.0625
+    kernel_tstop_default = 12000.0
+    kernel_dt_source = ""
+    kernel_tstop_source = ""
 
     remembered_mc_folder_local = _path_history_value_for_key("field_potential_kernel:mc_folder_local_staged")
     if remembered_mc_folder_local and not os.path.isdir(remembered_mc_folder_local):
@@ -7266,6 +7353,8 @@ def field_potential_kernel():
     default_paths = {
         "times": os.path.join(default_dir, "times.pkl"),
         "gids": os.path.join(default_dir, "gids.pkl"),
+        "dt": os.path.join(default_dir, "dt.pkl"),
+        "tstop": os.path.join(default_dir, "tstop.pkl"),
         "vm": os.path.join(default_dir, "vm.pkl"),
         "ampa": os.path.join(default_dir, "ampa.pkl"),
         "gaba": os.path.join(default_dir, "gaba.pkl"),
@@ -7289,6 +7378,67 @@ def field_potential_kernel():
                 continue
             default_sim[key] = True
             default_paths[key] = bundle_path
+
+    def _first_numeric(value):
+        if value is None:
+            return None
+        if isinstance(value, np.ndarray):
+            if value.size == 0:
+                return None
+            if value.ndim == 0:
+                return _first_numeric(value.item())
+            for item in value.flat:
+                parsed = _first_numeric(item)
+                if parsed is not None:
+                    return parsed
+            return None
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                parsed = _first_numeric(item)
+                if parsed is not None:
+                    return parsed
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if np.isfinite(parsed):
+            return parsed
+        return None
+
+    dt_candidate = None
+    tstop_candidate = None
+    if isinstance(bundle_payload, MappingABC):
+        dt_candidate = _first_numeric(bundle_payload.get("dt"))
+        tstop_candidate = _first_numeric(bundle_payload.get("tstop"))
+        if dt_candidate is not None:
+            kernel_dt_default = float(dt_candidate)
+            kernel_dt_source = SIMULATION_BUNDLE_FILE
+        if tstop_candidate is not None:
+            kernel_tstop_default = float(tstop_candidate)
+            kernel_tstop_source = SIMULATION_BUNDLE_FILE
+
+    if dt_candidate is None and os.path.isfile(default_paths["dt"]):
+        try:
+            with open(default_paths["dt"], "rb") as handle:
+                dt_raw = pickle.load(handle)
+            dt_candidate = _first_numeric(dt_raw)
+            if dt_candidate is not None:
+                kernel_dt_default = float(dt_candidate)
+                kernel_dt_source = "dt.pkl"
+        except Exception:
+            pass
+
+    if tstop_candidate is None and os.path.isfile(default_paths["tstop"]):
+        try:
+            with open(default_paths["tstop"], "rb") as handle:
+                tstop_raw = pickle.load(handle)
+            tstop_candidate = _first_numeric(tstop_raw)
+            if tstop_candidate is not None:
+                kernel_tstop_default = float(tstop_candidate)
+                kernel_tstop_source = "tstop.pkl"
+        except Exception:
+            pass
     kernel_output_root = FIELD_POTENTIAL_KERNEL_DIR
     preferred_cdm = []
     for fname in ("cdm.pkl",):
@@ -7326,7 +7476,16 @@ def field_potential_kernel():
                 except Exception:
                     continue
                 if params and params[0].name == "cell":
-                    biophys_options.append(name)
+                    source_text = ""
+                    try:
+                        source_text = inspect.getsource(obj)
+                    except Exception:
+                        source_text = ""
+                    lower_src = source_text.lower()
+                    has_pas_insert = "insert('pas')" in lower_src or 'insert("pas")' in lower_src
+                    has_g_pas_set = "g_pas" in lower_src
+                    if has_pas_insert or has_g_pas_set:
+                        biophys_options.append(name)
     except Exception:
         biophys_options = []
     biophys_options = sorted(set(biophys_options))
@@ -7337,6 +7496,10 @@ def field_potential_kernel():
         mc_models_default=mc_models_default,
         mc_outputs_default=mc_outputs_default,
         kernel_params_default=kernel_params_default,
+        kernel_dt_default=kernel_dt_default,
+        kernel_tstop_default=kernel_tstop_default,
+        kernel_dt_source=kernel_dt_source,
+        kernel_tstop_source=kernel_tstop_source,
         default_sim=default_sim,
         default_sim_paths=default_paths,
         default_meeg=default_meeg,
@@ -8556,7 +8719,7 @@ def features_parser_inspect():
                 inspected_file_count = int(metadata_summary.get("inspected_file_count") or 0)
 
             combined_defaults = selected_description.get("defaults") or {
-                "data": _pick_field_guess_fuzzy(selected_data_candidates, ["data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
+                "data": _pick_field_guess_fuzzy(selected_data_candidates, ["sum", "data", "signal", "lfp", "eeg", "meg", "ecog", "cdm"]),
                 "fs": _pick_field_guess_fuzzy(
                     selected_data_candidates,
                     ["fs", "sfreq", "freq", "frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
@@ -10030,6 +10193,7 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
 
     dt_ms = None
     raw_signals = None
+    sum_signal = None
     data_signal = None
 
     if isinstance(obj, pd.DataFrame):
@@ -10042,9 +10206,11 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
             except Exception:
                 dt_ms = None
         raw_signals = row.get("raw_signals") if "raw_signals" in row else None
+        sum_signal = row.get("sum") if "sum" in row else None
         data_signal = row.get("data") if "data" in row else None
     elif isinstance(obj, dict):
         raw_signals = obj.get("raw_signals")
+        sum_signal = obj.get("sum")
         data_signal = obj.get("data")
         if obj.get("dt_ms") is not None:
             try:
@@ -10052,7 +10218,7 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
             except Exception:
                 dt_ms = None
     else:
-        data_signal = obj
+        sum_signal = obj
 
     series_by_area = {}
     if isinstance(raw_signals, dict) and raw_signals:
@@ -10068,8 +10234,9 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
                 area = "global"
             series_by_area[area] = _sum_signals(series_by_area.get(area), signal)
 
-    if not series_by_area and data_signal is not None:
-        arr = np.asarray(data_signal, dtype=float)
+    aggregate_signal = sum_signal if sum_signal is not None else data_signal
+    if not series_by_area and aggregate_signal is not None:
+        arr = np.asarray(aggregate_signal, dtype=float)
         if model == "four_area":
             if arr.ndim == 2 and arr.shape[0] == len(areas):
                 for i, area in enumerate(areas):
@@ -12073,13 +12240,16 @@ def analysis_plot_simulation():
 
         obj = payload[0] if isinstance(payload, list) and payload else payload
         raw_signals = None
+        sum_signal = None
         data_signal = None
         if isinstance(obj, pd.DataFrame) and not obj.empty:
             row = obj.iloc[0]
             raw_signals = row.get("raw_signals") if "raw_signals" in row else None
+            sum_signal = row.get("sum") if "sum" in row else None
             data_signal = row.get("data") if "data" in row else None
         elif isinstance(obj, dict):
             raw_signals = obj.get("raw_signals")
+            sum_signal = obj.get("sum")
             data_signal = obj.get("data")
 
         if isinstance(raw_signals, dict):
@@ -12088,8 +12258,9 @@ def analysis_plot_simulation():
                     if candidate.strip().lower() in common_areas:
                         _push(candidate)
 
-        if not names and data_signal is not None:
-            arr = np.asarray(data_signal, dtype=float)
+        aggregate_signal = sum_signal if sum_signal is not None else data_signal
+        if not names and aggregate_signal is not None:
+            arr = np.asarray(aggregate_signal, dtype=float)
             if arr.ndim == 2 and 4 in arr.shape:
                 for candidate in ("frontal", "parietal", "temporal", "occipital"):
                     _push(candidate)
@@ -14296,10 +14467,10 @@ def start_computation_redirect(computation_type):
                     "gaba_file",
                 ]
             elif computation_type == "field_potential_kernel":
+                # electrode_parameters_file removed: electrodeParameters are taken from KernelParams (analysis_params)
                 server_file_keys = [
                     "kernel_spike_times_file",
                     "kernel_population_sizes_file",
-                    "electrode_parameters_file",
                 ]
             elif computation_type == "field_potential_meeg":
                 redirect_target = "field_potential_meeg"
@@ -14481,7 +14652,14 @@ def start_computation_redirect(computation_type):
         "cancel_requested": False,
         "computation_type": computation_type,
         "output": "",
-        "progress_mode": "manual" if computation_type in {"features", "inference", "inference_training", "field_potential_meeg"} else "time",
+        "progress_mode": "manual" if computation_type in {
+            "features",
+            "inference",
+            "inference_training",
+            "field_potential_proxy",
+            "field_potential_kernel",
+            "field_potential_meeg",
+        } else "time",
     }
 
     # Submit the long-running task according to the computation type.
