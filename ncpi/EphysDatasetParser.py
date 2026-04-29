@@ -99,10 +99,6 @@ def _require_pyedflib(context: str = "") -> None:
         raise ImportError(msg)
 
 
-def _is_matlab_v73_error(exc: Exception) -> bool:
-    return "please use hdf reader for matlab v7.3 files" in str(exc or "").lower()
-
-
 class _HDF5MatLazyMapping(MappingABC):
     __lazy_hdf5__ = True
 
@@ -197,16 +193,9 @@ def _hdf5_mat_to_python_node(node: Any, h5file: Any, file_path: Optional[str] = 
     return node
 
 
-@lru_cache(maxsize=128)
-def _is_hdf5_mat(file_path: str) -> bool:
-    """Return True if file .mat is v7.3 (HDF5)."""
-    with open(file_path, "rb") as f:
-        return f.read(8) == b'\x89HDF\r\n\x1a\n'
-
-
 def _load_mat_with_fallback(path: Path) -> Any:
     # Fast file version detection
-    if _is_hdf5_mat(str(path)):
+    if h5py.is_hdf5(str(path)):
         _require_h5py("MATLAB v7.3 .mat loading")
         try:
             return _HDF5MatLazyMapping(str(path), "/")
