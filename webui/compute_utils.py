@@ -1671,7 +1671,8 @@ def _extract_signal_and_meta_from_source(obj):
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
-        if "data" in obj.columns and not obj.empty:
+        signal_column = "sum" if "sum" in obj.columns else ("data" if "data" in obj.columns else None)
+        if signal_column is not None and not obj.empty:
             selected_row = obj.iloc[0]
             if "probe" in obj.columns:
                 for probe_name in dipole_probe_priority:
@@ -1679,21 +1680,12 @@ def _extract_signal_and_meta_from_source(obj):
                     if not matched.empty:
                         selected_row = matched.iloc[0]
                         break
-            return selected_row.get("data"), meta
+            return selected_row.get(signal_column), meta
         if not obj.empty:
             return obj.iloc[0, 0], meta
         return None, meta
 
     if isinstance(obj, MappingABC):
-        probe_outputs = obj.get("probe_outputs")
-        if isinstance(probe_outputs, MappingABC) and probe_outputs:
-            for probe_name in dipole_probe_priority:
-                candidate = probe_outputs.get(probe_name)
-                if candidate is not None:
-                    return _extract_signal_and_meta_from_source(candidate)
-            first_candidate = next(iter(probe_outputs.values()))
-            return _extract_signal_and_meta_from_source(first_candidate)
-
         dt_ms = _safe_float(obj.get("dt_ms"))
         decimation_factor = _safe_float(obj.get("decimation_factor"))
         fs_hz = _safe_float(obj.get("fs_hz"))
@@ -1710,8 +1702,18 @@ def _extract_signal_and_meta_from_source(obj):
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
+        if "sum" in obj:
+            return obj.get("sum"), meta
         if "data" in obj:
             return obj.get("data"), meta
+        probe_outputs = obj.get("probe_outputs")
+        if isinstance(probe_outputs, MappingABC) and probe_outputs:
+            for probe_name in dipole_probe_priority:
+                candidate = probe_outputs.get(probe_name)
+                if candidate is not None:
+                    return _extract_signal_and_meta_from_source(candidate)
+            first_candidate = next(iter(probe_outputs.values()))
+            return _extract_signal_and_meta_from_source(first_candidate)
 
     return obj, meta
 
@@ -1854,6 +1856,70 @@ def _parse_range_pair(params, min_key, max_key):
     if lo >= hi:
         raise ValueError(f"Invalid range: {min_key} must be less than {max_key}.")
     return [float(lo), float(hi)]
+
+
+class _KernelParamsCreateKernelAdapter:
+    """Adapt list/array kernel params (e.g., Cavallari) to create_kernel's per-post loop."""
+
+    def __init__(self, kernel_params):
+        self._kernel_params = kernel_params
+
+    def __getattr__(self, name):
+        return getattr(self._kernel_params, name)
+
+    @staticmethod
+    def _current_post_index():
+        frame = inspect.currentframe()
+        if frame is not None:
+            frame = frame.f_back
+        while frame is not None:
+            if frame.f_code.co_name == "create_kernel" and "j" in frame.f_locals:
+                try:
+                    return int(frame.f_locals["j"])
+                except Exception:
+                    return None
+            frame = frame.f_back
+        return None
+
+    @property
+    def extSynapseParameters(self):
+        ext_params = getattr(self._kernel_params, "extSynapseParameters", None)
+        post_idx = self._current_post_index()
+        if post_idx is not None and isinstance(ext_params, (list, tuple)):
+            if 0 <= post_idx < len(ext_params):
+                return ext_params[post_idx]
+        return ext_params
+
+    @property
+    def netstim_interval(self):
+        interval = getattr(self._kernel_params, "netstim_interval", None)
+        post_idx = self._current_post_index()
+        if isinstance(interval, (list, tuple, np.ndarray)):
+            arr = np.asarray(interval, dtype=float).ravel()
+            if arr.size == 0:
+                return interval
+            if post_idx is not None and 0 <= post_idx < arr.size:
+                return float(arr[post_idx])
+            if arr.size == 1:
+                return float(arr[0])
+            return arr
+        return interval
+
+
+def _adapt_kernel_params_for_create_kernel(kernel_params):
+    ext_params = getattr(kernel_params, "extSynapseParameters", None)
+    interval = getattr(kernel_params, "netstim_interval", None)
+    uses_ext_sequence = isinstance(ext_params, (list, tuple))
+    uses_interval_sequence = isinstance(interval, (list, tuple, np.ndarray))
+    if not (uses_ext_sequence or uses_interval_sequence):
+        return kernel_params, []
+    adapted = _KernelParamsCreateKernelAdapter(kernel_params)
+    reasons = []
+    if uses_ext_sequence:
+        reasons.append("extSynapseParameters")
+    if uses_interval_sequence:
+        reasons.append("netstim_interval")
+    return adapted, reasons
 
 
 def _resolve_fs_from_df(df):
@@ -3721,6 +3787,19 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             fr_gids,
             *(sim_data.values()),
         )
+        if job_id in job_status:
+            job_status[job_id]["simulation_total"] = int(trial_count)
+            job_status[job_id]["simulation_completed"] = 0
+            job_status[job_id]["progress"] = 0
+
+        def _set_sample_progress(completed_samples):
+            if job_id not in job_status:
+                return
+            total = max(1, int(trial_count))
+            completed = max(0, min(int(completed_samples), total))
+            job_status[job_id]["simulation_completed"] = completed
+            job_status[job_id]["progress"] = int((completed / total) * 100)
+
         if trial_count > 1:
             _append_job_output(job_status, job_id, f"Detected {trial_count} trial(s); computing proxy for each trial.")
 
@@ -3798,6 +3877,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 row["trial_index"] = int(trial_idx)
 
             trial_proxy_payloads.append(pd.DataFrame([row]))
+            _set_sample_progress(trial_idx + 1)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
 
@@ -3847,35 +3927,40 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded_files):
     try:
         _append_job_output(job_status, job_id, "Starting kernel computation.")
-        repo_root = _repo_root
-        default_mc_folder = os.path.expandvars(
-            os.path.expanduser(os.path.join("$HOME", "multicompartment_neuron_network"))
-        )
-        default_output_sim = os.path.join(
-            default_mc_folder, "output", "adb947bfb931a5a8d09ad078a6d256b0"
-        )
-        default_params_path = os.path.join(
-            repo_root,
-            "examples",
-            "simulation",
-            "Hagen_model",
-            "simulation",
-            "params",
-            "analysis_params.py",
-        )
+        mc_folder = str(params.get("mc_folder") or "").strip()
+        output_sim_path = str(params.get("output_sim_path") or "").strip()
+        params_path = str(params.get("kernel_params_module") or "").strip()
 
-        mc_folder = params.get("mc_folder") or default_mc_folder
-        output_sim_path = params.get("output_sim_path") or default_output_sim
-        params_path = params.get("kernel_params_module") or default_params_path
+        if not mc_folder:
+            raise ValueError("Multicompartment neuron model folder is required.")
+        if not os.path.isdir(mc_folder):
+            raise FileNotFoundError(f"Multicompartment neuron model folder not found: {mc_folder}")
+        if not params_path:
+            raise ValueError("Kernel parameters module is required.")
+        if not os.path.isfile(params_path):
+            raise FileNotFoundError(f"Kernel parameters module not found: {params_path}")
 
         _append_job_output(job_status, job_id, f"MC folder: {mc_folder}")
         _append_job_output(job_status, job_id, f"Params module: {params_path}")
-        _append_job_output(job_status, job_id, f"Output simulation path: {output_sim_path}")
+        _append_job_output(
+            job_status,
+            job_id,
+            f"Output simulation path: {output_sim_path if output_sim_path else '(not provided)'}",
+        )
 
         module = _load_module_from_path(params_path, name="kernel_params")
         KernelParams = getattr(module, "KernelParams", None)
         if KernelParams is None:
             raise AttributeError("KernelParams not found in params module.")
+        KernelParams, adapter_reasons = _adapt_kernel_params_for_create_kernel(KernelParams)
+        if adapter_reasons:
+            _append_job_output(
+                job_status,
+                job_id,
+                "Detected sequence-based kernel parameters for "
+                + ", ".join(adapter_reasons)
+                + "; applying per-population adapter for create_kernel compatibility.",
+            )
         pop_names = getattr(KernelParams, "population_names", None)
         pop_count = len(pop_names) if pop_names is not None else None
 
@@ -3891,6 +3976,31 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         biophys = _parse_literal_value(params.get("biophys"), None)
         if biophys is None:
             biophys = ["set_Ih_linearized_hay2011", "make_cell_uniform"]
+        elif isinstance(biophys, list) and len(biophys) == 0:
+            cell_parameters = getattr(KernelParams, "cellParameters", None)
+            custom_fun = cell_parameters.get("custom_fun") if isinstance(cell_parameters, dict) else None
+            if callable(custom_fun):
+                biophys = [custom_fun]
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Biophysical membrane properties left empty; using KernelParams.cellParameters.custom_fun.",
+                )
+            elif isinstance(custom_fun, (list, tuple)) and len(custom_fun) > 0:
+                biophys = list(custom_fun)
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Biophysical membrane properties left empty; using KernelParams.cellParameters.custom_fun.",
+                )
+            else:
+                biophys = ["set_Ih_linearized_hay2011", "make_cell_uniform"]
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Biophysical membrane properties left empty and no KernelParams.cellParameters.custom_fun found; "
+                    "using default webui biophys functions.",
+                )
 
         g_eff = _parse_bool(params.get("g_eff"), KernelParams.MC_params.get("g_eff", None))
         n_ext = _parse_literal_value(params.get("n_ext"), KernelParams.MC_params.get("n_ext", None))
@@ -3919,25 +4029,15 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         if probe_kernel_approx and probe_current_dipole:
             raise ValueError("Select only one of KernelApproxCurrentDipoleMoment or CurrentDipoleMoment.")
 
-        electrodeParameters = None
-        electrode_path = file_paths.get("electrode_parameters_file")
-        if electrode_path:
-            electrodeParameters = read_file(electrode_path)
-        else:
-            electrode_value = params.get("electrode_parameters")
-            if electrode_value not in (None, ""):
-                if electrode_value.strip() == "KernelParams.electrodeParameters":
-                    electrodeParameters = getattr(KernelParams, "electrodeParameters", None)
-                else:
-                    electrodeParameters = _parse_literal_value(electrode_value, None)
-            else:
-                electrodeParameters = getattr(KernelParams, "electrodeParameters", None)
+        # electrodeParameters should always be loaded from the KernelParams (analysis_params).
+        # Do NOT allow passing electrode parameters via uploaded files or params from the web UI.
+        electrodeParameters = getattr(KernelParams, "electrodeParameters", None)
+        # If probes are selected and GaussCylinderPotential is not among them, we don't need electrodeParameters
         if probe_selection_present and not probe_gauss_cylinder:
             electrodeParameters = None
+        # If GaussCylinderPotential is selected ensure electrodeParameters exist in KernelParams
         if probe_selection_present and probe_gauss_cylinder and electrodeParameters is None:
-            electrodeParameters = getattr(KernelParams, "electrodeParameters", None)
-            if electrodeParameters is None:
-                raise ValueError("electrodeParameters must be provided when GaussCylinderPotential is selected.")
+            raise ValueError("electrodeParameters must be provided in KernelParams when GaussCylinderPotential is selected.")
 
         if probe_selection_present:
             cdm = probe_kernel_approx or probe_current_dipole
@@ -3999,10 +4099,13 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             mean_nu_x = None
             vrest = None
 
-        if not output_sim_path or not os.path.exists(output_sim_path):
+        if output_sim_path and not os.path.exists(output_sim_path):
+            raise FileNotFoundError(f"Output simulation path not found: {output_sim_path}")
+        if not output_sim_path:
             if mean_nu_x is None or vrest is None:
                 raise FileNotFoundError(
-                    "Output simulation path not found. Provide mean_nu_X and Vrest or a valid output_sim_path."
+                    "Multicompartment network simulation outputs path was not provided. "
+                    "Provide mean_nu_X and Vrest, or select a valid output_sim_path."
                 )
             output_sim_path = None
 
@@ -4046,14 +4149,44 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             file_paths, "kernel_spike_times_file", "times.pkl", required=True
         )
         spike_times_raw = _load_simulation_component_from_path(spike_times_path, "times.pkl")
-        pop_sizes_path = _resolve_sim_file(
-            file_paths, "kernel_population_sizes_file", "population_sizes.pkl", required=False
-        )
-        population_sizes_raw = (
-            _load_simulation_component_from_path(pop_sizes_path, "population_sizes.pkl")
-            if pop_sizes_path
-            else None
-        )
+        manual_population_sizes = {}
+        manual_pop_e = _safe_float(params.get("kernel_population_size_e"))
+        manual_pop_i = _safe_float(params.get("kernel_population_size_i"))
+        if manual_pop_e is not None:
+            manual_population_sizes["E"] = float(manual_pop_e)
+        if manual_pop_i is not None:
+            manual_population_sizes["I"] = float(manual_pop_i)
+
+        if manual_population_sizes:
+            population_sizes_raw = manual_population_sizes
+            _append_job_output(
+                job_status,
+                job_id,
+                "Using manual population sizes for kernel convolution normalization.",
+            )
+        else:
+            pop_sizes_path = _resolve_sim_file(
+                file_paths, "kernel_population_sizes_file", "population_sizes.pkl", required=False
+            )
+            population_sizes_raw = None
+            if pop_sizes_path:
+                try:
+                    population_sizes_raw = _load_simulation_component_from_path(
+                        pop_sizes_path, "population_sizes.pkl"
+                    )
+                except ValueError as exc:
+                    if (
+                        _is_simulation_bundle_path(pop_sizes_path)
+                        and "does not contain 'population_sizes'" in str(exc)
+                    ):
+                        population_sizes_raw = None
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "No population_sizes found in simulation bundle; proceeding without spike-rate normalization.",
+                        )
+                    else:
+                        raise
 
         network_path = _resolve_sim_file(
             file_paths, "kernel_network_file", "network.pkl", required=False
@@ -4078,6 +4211,19 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 )
 
         trial_count = _infer_trial_count_from_values(spike_times_raw, population_sizes_raw)
+        if job_id in job_status:
+            job_status[job_id]["simulation_total"] = int(trial_count)
+            job_status[job_id]["simulation_completed"] = 0
+            job_status[job_id]["progress"] = 0
+
+        def _set_sample_progress(completed_samples):
+            if job_id not in job_status:
+                return
+            total = max(1, int(trial_count))
+            completed = max(0, min(int(completed_samples), total))
+            job_status[job_id]["simulation_completed"] = completed
+            job_status[job_id]["progress"] = int((completed / total) * 100)
+
         if trial_count > 1:
             _append_job_output(job_status, job_id, f"Detected {trial_count} trial(s); computing CDM/LFP for each trial.")
 
@@ -4101,14 +4247,12 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             axis_to_index = {"x": 0, "y": 1, "z": 2}
             if component_token in axis_to_index:
                 component = axis_to_index[component_token]
+            elif component_token in {"xyz", "all", "3", "3d"}:
+                component = None
             else:
                 component = int(float(component_val))
         mode = params.get("cdm_mode") or "same"
-        scale_val = params.get("cdm_scale")
-        scale = float(scale_val) if scale_val not in (None, "") else 1.0
-        aggregate_val = params.get("cdm_aggregate")
-        aggregate = aggregate_val if aggregate_val else None
-
+        scale = float(dt) * 1e-3
         kernels_for_save = None
         probe_trial_payloads = {probe_name: [] for probe_name in probe_names}
         logged_area_detected = False
@@ -4240,10 +4384,9 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     component=component,
                     mode=mode,
                     scale=scale,
-                    aggregate=aggregate,
                 )
                 row = {
-                    "data": _sum_signal_dict(cdm_signals),
+                    "sum": _sum_signal_dict(cdm_signals),
                     "raw_signals": cdm_signals,
                     "probe": probe_name,
                     "dt_ms": float(cdm_dt),
@@ -4255,6 +4398,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     row["trial_index"] = int(trial_idx)
                 payload_df = pd.DataFrame([row])
                 probe_trial_payloads[probe_name].append(payload_df)
+            _set_sample_progress(trial_idx + 1)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed kernel convolution trial {trial_idx + 1}/{trial_count}.")
 
@@ -4262,7 +4406,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         for probe_name in probe_names:
             clipped_payloads, clipped_length = _clip_trial_dataframe_payloads(
                 probe_trial_payloads[probe_name],
-                signal_columns=("data", "raw_signals"),
+                signal_columns=("sum", "raw_signals"),
             )
             probe_trial_payloads[probe_name] = clipped_payloads
             if clipped_length is not None and not clipped_reported:
@@ -4286,7 +4430,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 return dict(payload.iloc[0].to_dict())
             if isinstance(payload, MappingABC):
                 return dict(payload)
-            return {"data": payload}
+            return {"sum": payload}
 
         cdm_path = os.path.join(output_root, "cdm.pkl")
         cdm_trial_payloads = []
@@ -4317,8 +4461,14 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
 
             selected_payload = dict(probe_outputs[selected_probe])
             selected_payload["probe"] = selected_probe
-            selected_payload["probe_outputs"] = probe_outputs
-            selected_payload["probe_order"] = list(probe_outputs.keys())
+            remaining_probe_outputs = {
+                probe_name: payload
+                for probe_name, payload in probe_outputs.items()
+                if probe_name != selected_probe
+            }
+            if remaining_probe_outputs:
+                selected_payload["probe_outputs"] = remaining_probe_outputs
+            selected_payload["probe_order"] = [selected_probe] + list(remaining_probe_outputs.keys())
             if trial_count > 1:
                 selected_payload.setdefault("trial_index", int(trial_idx))
             cdm_trial_payloads.append(selected_payload)
@@ -4344,7 +4494,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
 def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_files):
     try:
         _append_job_output(job_status, job_id, "Starting M/EEG computation.")
-        job_status[job_id]["progress"] = 5
+        if job_id in job_status:
+            job_status[job_id]["progress"] = 0
         file_paths = params.get("file_paths", {})
 
         cdm_path = file_paths.get("meeg_cdm_file")
@@ -4369,11 +4520,12 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         if trial_count > 1:
             _append_job_output(job_status, job_id, f"Detected {trial_count} CDM trial(s); computing M/EEG for each trial.")
         if job_id in job_status:
+            job_status[job_id]["simulation_total"] = int(trial_count)
+            job_status[job_id]["simulation_completed"] = 0
             job_status[job_id]["meeg_trial_total"] = int(trial_count)
             job_status[job_id]["meeg_trial_index"] = 0
             job_status[job_id]["meeg_sensors_total"] = 0
             job_status[job_id]["meeg_sensors_completed"] = 0
-        job_status[job_id]["progress"] = 20
 
         dipole_locations = None
         dipole_path = file_paths.get("meeg_dipole_file")
@@ -4397,7 +4549,6 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         auto_1020 = _parse_bool(params.get("meeg_auto_1020"), False)
 
         _append_job_output(job_status, job_id, f"Model: {model}")
-        job_status[job_id]["progress"] = 45
         potential = ncpi.FieldPotential()
         model_kwargs = model_kwargs or {}
         is_meg = model in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}
@@ -4562,8 +4713,6 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 f"Computing electrodes/sensors for trial {trial_idx + 1}/{trial_count}: 0/{n_sensors}",
             )
             log_every = 1 if n_sensors <= 300 else max(1, n_sensors // 100)
-            trial_progress_start = 50 + int((trial_idx / trial_count) * 40)
-            trial_progress_end = 50 + int(((trial_idx + 1) / trial_count) * 40)
             for idx in range(n_sensors):
                 if is_meg:
                     acc = np.zeros((3, n_times))
@@ -4582,8 +4731,11 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         job_id,
                         f"Computed electrodes/sensors: {idx + 1}/{n_sensors} (trial {trial_idx + 1}/{trial_count})",
                     )
-                progress = trial_progress_start + int((idx + 1) / n_sensors * max(1, (trial_progress_end - trial_progress_start)))
-                job_status[job_id]["progress"] = progress
+                total_trials = max(1, int(trial_count))
+                sensor_fraction = float(idx + 1) / float(max(1, n_sensors))
+                global_fraction = (float(trial_idx) + sensor_fraction) / float(total_trials)
+                progress = int(global_fraction * 100.0)
+                job_status[job_id]["progress"] = max(0, min(100, progress))
                 if job_id in job_status:
                     job_status[job_id]["meeg_sensors_completed"] = int(idx + 1)
 
@@ -4601,6 +4753,9 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             if trial_count > 1:
                 row["trial_index"] = int(trial_idx)
             trial_payloads.append(pd.DataFrame([row]))
+            if job_id in job_status:
+                job_status[job_id]["simulation_completed"] = int(trial_idx + 1)
+                job_status[job_id]["progress"] = int(((trial_idx + 1) / max(1, trial_count)) * 100)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed M/EEG trial {trial_idx + 1}/{trial_count}.")
 

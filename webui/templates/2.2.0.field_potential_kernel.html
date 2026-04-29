@@ -121,16 +121,19 @@
                             <div class="input-group">
                                 <label class="input-label">Multicompartment neuron model folder</label>
                                 <p class="input-subtext">Folder containing the multicompartment neuron model
-                                    descriptions (cell parameters and morphologies).</p>
+                                    descriptions (cell parameters and morphologies). Expected files include
+                                    <code>.hoc</code> templates and mechanism files in <code>mod/*.mod</code>.</p>
                                 <div id="kernelMcFolderUploadCard"
                                     class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                     <input id="mcFolderDisplayInput" class="hidden" type="text" value="{{ mc_models_default }}" />
                                     <input id="mcFolderHiddenInput" type="hidden" name="mc_folder" value="{{ mc_models_default }}" />
-                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="server-path" />
+                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'local-upload' }}" />
                                     <input id="kernelMcFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple />
                                     <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
                                         <button type="button" data-path-action="true" class="kernel-path-upload-local px-2.5 py-1 text-[10px] rounded border">Local folder</button>
+                                        {% if webui_runtime.is_server_runtime %}
                                         <button type="button" data-path-action="true" class="kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border">Server folder</button>
+                                        {% endif %}
                                     </div>
                                     <span class="material-symbols-outlined text-slate-400">folder_open</span>
                                     <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Multicompartment neuron model folder</span>
@@ -174,18 +177,21 @@
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Multicompartment network simulation outputs</label>
-                                <p class="input-subtext">Folder containing MC network simulation outputs. If not specified,
-                                    both mean firing rates (mean_nu_X) and resting membrane potential (Vrest) must be
-                                    provided.</p>
+                                <p class="input-subtext">Folder containing MC network simulation outputs. Expected files include
+                                    <code>spikes.h5</code> (for mean firing rates) and <code>somav.h5</code> (for Vrest
+                                    estimation). If not specified, both mean firing rates (mean_nu_X) and resting
+                                    membrane potential (Vrest) must be provided.</p>
                                 <div id="kernelOutputSimUploadCard"
                                     class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                     <input id="outputSimDisplayInput" class="hidden" type="text" value="{{ mc_outputs_default }}" />
                                     <input id="outputSimHiddenInput" type="hidden" name="output_sim_path" value="{{ mc_outputs_default }}" />
-                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="server-path" />
+                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'local-upload' }}" />
                                     <input id="kernelOutputFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple />
                                     <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
                                         <button type="button" data-path-action="true" class="kernel-path-upload-local px-2.5 py-1 text-[10px] rounded border">Local folder</button>
+                                        {% if webui_runtime.is_server_runtime %}
                                         <button type="button" data-path-action="true" class="kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border">Server folder</button>
+                                        {% endif %}
                                     </div>
                                     <span class="material-symbols-outlined text-slate-400">folder_open</span>
                                     <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Multicompartment network simulation outputs</span>
@@ -239,13 +245,23 @@
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-1">
                             <div class="input-group">
                                 <label class="input-label">Time Step (dt)</label>
-                                <p class="input-subtext">Simulation time step in ms.</p>
-                                <input class="input-field" step="0.01" type="number" name="dt" value="0.0625" />
+                                <p class="input-subtext">
+                                    Simulation time step in ms.
+                                    {% if kernel_dt_source %}
+                                    <span class="block mt-1 text-emerald-600 dark:text-emerald-400">Auto-filled from <code>{{ kernel_dt_source }}</code>.</span>
+                                    {% endif %}
+                                </p>
+                                <input class="input-field" step="0.01" type="number" name="dt" value="{{ kernel_dt_default }}" />
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Stop Time (tstop)</label>
-                                <p class="input-subtext">Total simulation stop time in ms.</p>
-                                <input class="input-field" type="number" name="tstop" value="12000" />
+                                <p class="input-subtext">
+                                    Total simulation stop time in ms.
+                                    {% if kernel_tstop_source %}
+                                    <span class="block mt-1 text-emerald-600 dark:text-emerald-400">Auto-filled from <code>{{ kernel_tstop_source }}</code>.</span>
+                                    {% endif %}
+                                </p>
+                                <input class="input-field" type="number" name="tstop" value="{{ kernel_tstop_default }}" />
                             </div>
                             <div class="input-group">
                                 <label class="input-label">Presynaptic Activation Time (t_X)</label>
@@ -276,11 +292,13 @@
                             <div id="kernelParamsModuleUpload"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelParamsModuleFile" name="kernel_params_file" accept=".py" />
-                                <input type="hidden" id="kernelParamsModuleSourceMode" name="kernel_params_module_source_mode" value="server-path" />
+                                <input type="hidden" id="kernelParamsModuleSourceMode" name="kernel_params_module_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'upload' }}" />
                                 <input type="hidden" id="kernelParamsModuleServerPath" name="kernel_params_module" value="{{ kernel_params_default }}" />
                                 <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
                                     <button type="button" data-kernel-params-action="true" class="kernel-params-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
+                                    {% if webui_runtime.is_server_runtime %}
                                     <button type="button" data-kernel-params-action="true" class="kernel-params-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
+                                    {% endif %}
                                 </div>
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Kernel parameters module (.py)</span>
@@ -333,37 +351,18 @@
                                 <input class="input-field" step="0.1" type="number" name="vrest_value" value="" />
                             </div>
                         </div>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div class="input-group !mb-0">
-                                <label class="input-label">External synapse counts (n_ext)</label>
-                                <p class="input-subtext">Optional override for external synapse counts per population. If empty, <code>KernelParams.MC_params['n_ext']</code> is used (and this field is only required when that value is not defined).</p>
-                                <input class="input-field" min="0" step="1" type="number" name="n_ext" value="" />
-                            </div>
-                            <div class="input-group !mb-0">
-                                <label class="input-label">Conductance effects (g_eff)</label>
-                                <label class="checkbox-wrapper !mt-1">
-                                    <div class="flex items-center h-5">
-                                        <input checked=""
-                                            class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary"
-                                            type="checkbox" name="g_eff" value="true" />
-                                    </div>
-                                    <div class="flex flex-col">
-                                        <span class="text-sm font-semibold">Account for conductance effects</span>
-                                    </div>
-                                </label>
-                            </div>
-                        </div>
-                        <div class="input-group">
-                            <label class="input-label">Weight matrix override</label>
-                            <p class="input-subtext">Set size then fill values (rows = presynaptic, columns = postsynaptic). Leave blank to use defaults.</p>
-                            <div class="flex items-center gap-3">
-                                <label class="text-xs font-semibold text-slate-500 dark:text-slate-400" for="weightMatrixSize">Matrix size</label>
-                                <input id="weightMatrixSize" class="input-field w-24" min="1" max="12" step="1" type="number" value="2" />
-                            </div>
-                            <div id="weightMatrixGrid"
-                                class="grid gap-2 max-w-[360px] p-3 bg-slate-50 dark:bg-slate-900 rounded-lg border border-dashed border-slate-300">
-                            </div>
-                            <input type="hidden" name="weights" id="weightsField" />
+                        <div class="input-group !mb-0">
+                            <label class="input-label">Conductance effects (g_eff)</label>
+                            <label class="checkbox-wrapper !mt-1">
+                                <div class="flex items-center h-5">
+                                    <input checked=""
+                                        class="w-4 h-4 rounded border-slate-300 text-primary focus:ring-primary"
+                                        type="checkbox" name="g_eff" value="true" />
+                                </div>
+                                <div class="flex flex-col">
+                                    <span class="text-sm font-semibold">Account for conductance effects</span>
+                                </div>
+                            </label>
                         </div>
                     </div>
                 </section>
@@ -390,15 +389,15 @@
                                 data-source-mode-input="kernel_spike_times_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelSpikeTimesFile" name="kernel_spike_times_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="server-path" />
+                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="{{ 'auto-detected' if default_sim.times else 'server-path' }}" />
                                 <input type="hidden" name="kernel_spike_times_file_server_path" value="{{ default_sim_paths.times if default_sim.times else '' }}" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
-                                <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
+                                <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times in simulation.pkl or times.pkl)</span>
                                 <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                                 <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
-                                    data-uploaded data-default-name="{{ 'times.pkl' if default_sim.times else '' }}">
+                                    data-uploaded data-default-name="{{ 'simulation.pkl → times' if default_sim.times else '' }}">
                                     <div class="flex items-start justify-between gap-2">
-                                        <span><span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}times.pkl{% endif %}</span></span>
+                                        <span><span data-uploaded-label>{% if default_sim.times %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.times %}simulation.pkl → times{% endif %}</span></span>
                                         <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                             <span class="material-symbols-outlined text-sm leading-none">close</span>
                                         </button>
@@ -406,51 +405,18 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="input-group">
-                            <label class="input-label" for="population-sizes">Population sizes</label>
-                            <p class="input-subtext">Optional dict of population sizes to normalize spike rates (Hz).</p>
-                            <div id="kernelPopulationSizesUpload"
-                                data-upload="kernelPopulationSizesFile"
-                                data-source-mode-input="kernel_population_sizes_file_source_mode"
-                                class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
-                                <input class="hidden" type="file" id="kernelPopulationSizesFile" name="kernel_population_sizes_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_population_sizes_file_source_mode" value="server-path" />
-                                <input type="hidden" name="kernel_population_sizes_file_server_path" value="" />
-                                <span class="material-symbols-outlined text-slate-400">upload_file</span>
-                                <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Population sizes (population_sizes.pkl)</span>
-                                <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
-                                <div class="mt-2 hidden w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1"
-                                    data-uploaded data-default-name="{{ 'population_sizes.pkl' if default_sim.population_sizes else '' }}">
-                                    <div class="flex items-start justify-between gap-2">
-                                        <span><span data-uploaded-label>{% if default_sim.population_sizes %}Loaded{% else %}Uploaded{% endif %}</span>: <span data-uploaded-name>{% if default_sim.population_sizes %}population_sizes.pkl{% endif %}</span></span>
-                                        <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
-                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
-                                        </button>
-                                    </div>
+                        <!-- Electrode parameters upload removed; electrodeParameters are loaded from KernelParams (analysis_params) -->
+                        <div class="input-group md:col-span-2">
+                            <label class="input-label">Population sizes</label>
+                            <p class="input-subtext">Optional manual sizes used to normalize spike rates (Hz).</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label class="text-xs font-semibold text-slate-500 dark:text-slate-400" for="kernelPopulationSizeE">E population size</label>
+                                    <input class="input-field" id="kernelPopulationSizeE" min="0" step="1" type="number" name="kernel_population_size_e" placeholder="e.g. 8192" />
                                 </div>
-                            </div>
-                        </div>
-                        <div class="input-group">
-                            <label class="input-label" for="kernelElectrodeParametersFile">Electrode parameters</label>
-                            <p class="input-subtext">Upload a .pkl dict. If omitted, defaults to KernelParams.electrodeParameters.</p>
-                            <div id="kernelElectrodeParametersUpload"
-                                data-upload="kernelElectrodeParametersFile"
-                                data-source-mode-input="electrode_parameters_file_source_mode"
-                                class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
-                                <input class="hidden" type="file" id="kernelElectrodeParametersFile" name="electrode_parameters_file" accept=".pkl" />
-                                <input type="hidden" name="electrode_parameters_file_source_mode" value="server-path" />
-                                <input type="hidden" name="electrode_parameters_file_server_path" value="" />
-                                <span class="material-symbols-outlined text-slate-400">upload_file</span>
-                                <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Electrode parameters (.pkl)</span>
-                                <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
-                                <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 hidden"
-                                    data-uploaded data-default-name="">
-                                    <div class="flex items-start justify-between gap-2">
-                                        <span><span data-uploaded-label>Uploaded</span>: <span data-uploaded-name></span></span>
-                                        <button type="button" data-upload-action="true" data-clear-upload class="hidden inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
-                                            <span class="material-symbols-outlined text-sm leading-none">close</span>
-                                        </button>
-                                    </div>
+                                <div>
+                                    <label class="text-xs font-semibold text-slate-500 dark:text-slate-400" for="kernelPopulationSizeI">I population size</label>
+                                    <input class="input-field" id="kernelPopulationSizeI" min="0" step="1" type="number" name="kernel_population_size_i" placeholder="e.g. 1024" />
                                 </div>
                             </div>
                         </div>
@@ -496,11 +462,12 @@
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="component">Component</label>
-                            <p class="input-subtext">Select dipole component axis (x, y, z).</p>
+                            <p class="input-subtext">Select dipole component axis (x, y, z) or all components.</p>
                             <select class="input-field" id="component" name="cdm_component">
                                 <option value="x">x</option>
                                 <option value="y">y</option>
                                 <option selected="" value="z">z</option>
+                                <option value="xyz">xyz (all)</option>
                             </select>
                         </div>
                         <div class="input-group">
@@ -514,16 +481,9 @@
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="signal-scale">Scale</label>
-                            <p class="input-subtext">Multiply the convolved signal by this constant: output = convolve(rate, kernel) * scale.</p>
-                            <input class="input-field" id="signal-scale" step="0.000001" type="number" name="cdm_scale" value="0.0000625" />
-                        </div>
-                        <div class="input-group">
-                            <label class="input-label" for="aggregate">Aggregate</label>
-                            <p class="input-subtext">If set to "sum", adds a "sum" entry that is the elementwise total of all probe signals.</p>
-                            <select class="input-field" id="aggregate" name="cdm_aggregate">
-                                <option selected="" value="">None</option>
-                                <option value="sum">sum</option>
-                            </select>
+                            <p class="input-subtext">Computed automatically as <code>dt * 10^-3</code> so firing rates (Hz = s^-1) are integrated with kernel time sampling in ms.</p>
+                            <input id="signal-scale" type="hidden" name="cdm_scale" value="0.0000625" />
+                            <div id="signal-scale-display" class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm font-mono text-slate-700 dark:text-slate-200">0.0000625</div>
                         </div>
                     </div>
                 </div>
@@ -749,7 +709,7 @@
         </template>
         <template x-if="activeTab === 'cdm_computation'">
             <button type="submit" form="kernel-compute-form"
-                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                class="flex items-center justify-center gap-2 py-2.5 px-5 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
                 Compute CDM/LFP
                 <span class="material-symbols-outlined">arrow_forward</span>
             </button>
@@ -863,87 +823,20 @@
 <script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-    const matrixSizeInput = document.getElementById('weightMatrixSize');
-    const matrixGrid = document.getElementById('weightMatrixGrid');
-    const weightsField = document.getElementById('weightsField');
-
-    const updateWeightsField = () => {
-        if (!matrixGrid || !weightsField) {
-            return;
-        }
-        const inputs = Array.from(matrixGrid.querySelectorAll('input[data-row]'));
-        if (inputs.length === 0) {
-            weightsField.value = '';
-            return;
-        }
-        const size = Number(matrixGrid.dataset.size || 0);
-        const matrix = Array.from({ length: size }, () => Array.from({ length: size }, () => null));
-        let hasEmpty = false;
-        inputs.forEach((input) => {
-            const row = Number(input.dataset.row);
-            const col = Number(input.dataset.col);
-            const value = input.value.trim();
-            if (value === '') {
-                hasEmpty = true;
-                return;
-            }
-            const num = Number(value);
-            if (Number.isNaN(num)) {
-                hasEmpty = true;
-                return;
-            }
-            matrix[row][col] = num;
-        });
-        if (hasEmpty) {
-            weightsField.value = '';
-            return;
-        }
-        weightsField.value = JSON.stringify(matrix);
-    };
-
-    const buildWeightMatrix = (size) => {
-        if (!matrixGrid || !weightsField) {
-            return;
-        }
-        const n = Math.max(1, Math.min(12, Number(size) || 2));
-        matrixGrid.dataset.size = String(n);
-        matrixGrid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
-        matrixGrid.innerHTML = '';
-        for (let row = 0; row < n; row += 1) {
-            for (let col = 0; col < n; col += 1) {
-                const input = document.createElement('input');
-                input.type = 'number';
-                input.step = '0.000001';
-                input.className = 'input-field !py-1 text-center';
-                input.dataset.row = String(row);
-                input.dataset.col = String(col);
-                input.addEventListener('input', updateWeightsField);
-                matrixGrid.appendChild(input);
-            }
-        }
-        updateWeightsField();
-    };
-
-    if (matrixSizeInput) {
-        buildWeightMatrix(matrixSizeInput.value);
-        matrixSizeInput.addEventListener('change', (event) => {
-            buildWeightMatrix(event.target.value);
-        });
-        matrixSizeInput.addEventListener('input', (event) => {
-            if (!event.target.value) {
-                return;
-            }
-            buildWeightMatrix(event.target.value);
-        });
-    }
-
     const kernelComputeForm = document.getElementById('kernel-compute-form');
     const meegComputeForm = document.getElementById('meeg-compute-form');
+    const kernelDtInput = document.querySelector('input[name="dt"]');
+    const signalScaleInput = document.getElementById('signal-scale');
+    const signalScaleDisplay = document.getElementById('signal-scale-display');
     const biophysItemsContainer = document.getElementById('biophysItems');
     const biophysAddBtn = document.getElementById('biophysAddBtn');
     const biophysHidden = document.getElementById('biophysHidden');
     const availableBiophysOptions = {{ biophys_options | tojson }};
-    const defaultBiophysItems = ['set_Ih_linearized_hay2011', 'make_cell_uniform'];
+    const preferredBiophysDefaults = ['set_Ih_linearized_hay2011', 'set_pas_hay2011'];
+    const defaultBiophysItems = preferredBiophysDefaults.filter((name) => availableBiophysOptions.includes(name));
+    if (defaultBiophysItems.length === 0 && availableBiophysOptions.length > 0) {
+        defaultBiophysItems.push(availableBiophysOptions[0]);
+    }
 
     const syncBiophysHidden = () => {
         if (!biophysItemsContainer || !biophysHidden) {
@@ -1015,11 +908,76 @@ document.addEventListener('DOMContentLoaded', () => {
     if (biophysAddBtn) {
         biophysAddBtn.addEventListener('click', () => createBiophysRow(''));
     }
+    const kernelMissingMandatorySelections = () => {
+        const missing = [];
+        const mcFolderPath = String(document.getElementById('mcFolderHiddenInput')?.value || '').trim();
+        if (!mcFolderPath) {
+            missing.push('Multicompartment neuron model folder');
+        }
+
+        const paramsMode = String(document.getElementById('kernelParamsModuleSourceMode')?.value || 'upload')
+            .trim()
+            .toLowerCase();
+        const paramsServerPath = String(document.getElementById('kernelParamsModuleServerPath')?.value || '').trim();
+        const paramsFileInput = document.getElementById('kernelParamsModuleFile');
+        const hasUploadedParams = Boolean(paramsFileInput && paramsFileInput.files && paramsFileInput.files.length > 0);
+        const hasKernelParams = paramsMode === 'server-path' ? Boolean(paramsServerPath) : hasUploadedParams;
+        if (!hasKernelParams) {
+            missing.push('Kernel parameters module');
+        }
+        return missing;
+    };
+    const updateKernelSubmitAvailability = () => {
+        const kernelSubmitBtn = document.querySelector('button[type="submit"][form="kernel-compute-form"]');
+        if (!kernelSubmitBtn) return;
+        const missing = kernelMissingMandatorySelections();
+        const blocked = missing.length > 0;
+        kernelSubmitBtn.disabled = blocked;
+        kernelSubmitBtn.setAttribute('aria-disabled', blocked ? 'true' : 'false');
+        kernelSubmitBtn.title = blocked ? `Required before compute: ${missing.join(', ')}.` : '';
+    };
     if (kernelComputeForm) {
-        kernelComputeForm.addEventListener('submit', () => {
+        kernelComputeForm.addEventListener('submit', (event) => {
+            const missing = kernelMissingMandatorySelections();
+            if (missing.length > 0) {
+                event.preventDefault();
+                alert(`Cannot compute CDM/LFP yet. Missing required inputs: ${missing.join(', ')}.`);
+                updateKernelSubmitAvailability();
+                return;
+            }
             syncBiophysHidden();
+            if (kernelDtInput && signalScaleInput) {
+                const dtValue = Number.parseFloat(kernelDtInput.value);
+                const computedScale = Number.isFinite(dtValue) ? dtValue * 1e-3 : 0;
+                const normalized = computedScale.toExponential(6);
+                signalScaleInput.value = normalized;
+                if (signalScaleDisplay) {
+                    signalScaleDisplay.textContent = normalized;
+                }
+            }
         });
     }
+
+    const syncKernelScaleFromDt = () => {
+        if (!kernelDtInput || !signalScaleInput) {
+            return;
+        }
+        const dtValue = Number.parseFloat(kernelDtInput.value);
+        const computedScale = Number.isFinite(dtValue) ? dtValue * 1e-3 : 0;
+        const normalized = computedScale.toExponential(6);
+        signalScaleInput.value = normalized;
+        if (signalScaleDisplay) {
+            signalScaleDisplay.textContent = normalized;
+        }
+    };
+    if (kernelDtInput && signalScaleInput) {
+        syncKernelScaleFromDt();
+        kernelDtInput.addEventListener('input', syncKernelScaleFromDt);
+        kernelDtInput.addEventListener('change', syncKernelScaleFromDt);
+    }
+    updateKernelSubmitAvailability();
+    const kernelSubmitButtonObserver = new MutationObserver(() => updateKernelSubmitAvailability());
+    kernelSubmitButtonObserver.observe(document.body, { childList: true, subtree: true });
 
     const KERNEL_SERVER_FOLDER_HISTORY_KEY = 'field_potential_kernel:folder_browser';
     const KERNEL_SERVER_FILE_HISTORY_KEY = 'field_potential_kernel:file_browser';
@@ -1151,9 +1109,13 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingFileExtensions = '.pkl';
     let pendingFolderHistoryKey = KERNEL_SERVER_FOLDER_HISTORY_KEY;
     let pendingFileHistoryKey = KERNEL_SERVER_FILE_HISTORY_KEY;
+    const kernelServerModeEnabled = Boolean((window.__webuiRuntime || {}).is_server_runtime);
 
     const normalizeKernelBrowseSourceMode = (value) => {
         const raw = String(value || '').trim().toLowerCase();
+        if (!kernelServerModeEnabled) {
+            return 'local-upload';
+        }
         if (raw === 'local-picker' || raw === 'local-upload') {
             return 'local-upload';
         }
@@ -1172,7 +1134,7 @@ document.addEventListener('DOMContentLoaded', () => {
         output_sim_path: String({{ mc_outputs_local_staged_default | tojson }} || '').trim(),
     };
     const runtimeDefaultPathMode = normalizeKernelBrowseSourceMode(
-        (window.__webuiRuntime || {}).default_path_picker_source_mode || 'server-path'
+        (window.__webuiRuntime || {}).default_path_picker_source_mode || (kernelServerModeEnabled ? 'server-path' : 'local-upload')
     );
     const resolveInitialFolderMode = (fieldName, sourceInput) => {
         return normalizeKernelBrowseSourceMode(sourceInput?.value || runtimeDefaultPathMode);
@@ -1259,14 +1221,15 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const setKernelPathModeVisuals = (cfg, mode) => {
-        if (!cfg || !cfg.localModeBtn || !cfg.serverModeBtn) return;
+        if (!cfg || !cfg.localModeBtn) return;
         const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
         const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
         [cfg.localModeBtn, cfg.serverModeBtn].forEach((btn) => {
+            if (!btn) return;
             btn.classList.remove(...activeClasses);
             btn.classList.add(...inactiveClasses);
         });
-        if (mode === 'server-path') {
+        if (mode === 'server-path' && cfg.serverModeBtn) {
             cfg.serverModeBtn.classList.add(...activeClasses);
             cfg.serverModeBtn.classList.remove(...inactiveClasses);
         } else {
@@ -1294,6 +1257,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cfg.localSummary) cfg.localSummary.classList.toggle('hidden', !localPath);
             if (cfg.serverSummary) cfg.serverSummary.classList.add('hidden');
             if (cfg.serverPath) cfg.serverPath.textContent = '';
+            updateKernelSubmitAvailability();
             return;
         }
 
@@ -1305,6 +1269,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cfg.serverSummary) cfg.serverSummary.classList.toggle('hidden', !serverPathValue);
         if (cfg.localSummary) cfg.localSummary.classList.add('hidden');
         if (cfg.localName) cfg.localName.textContent = '';
+        updateKernelSubmitAvailability();
     };
 
     const setKernelPathCardMode = (fieldName, mode) => {
@@ -2024,14 +1989,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const kernelParamsServerClear = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-clear"]') : null;
 
     const setKernelParamsModeVisuals = (mode) => {
-        if (!kernelParamsLocalModeBtn || !kernelParamsServerModeBtn) return;
+        if (!kernelParamsLocalModeBtn) return;
         const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
         const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
         [kernelParamsLocalModeBtn, kernelParamsServerModeBtn].forEach((btn) => {
+            if (!btn) return;
             btn.classList.remove(...activeClasses);
             btn.classList.add(...inactiveClasses);
         });
-        if (mode === 'server-path') {
+        if (mode === 'server-path' && kernelParamsServerModeBtn) {
             kernelParamsServerModeBtn.classList.add(...activeClasses);
             kernelParamsServerModeBtn.classList.remove(...inactiveClasses);
         } else {
@@ -2049,6 +2015,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.toggle('hidden', !clean);
         if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
         if (kernelParamsServerPathInput) kernelParamsServerPathInput.value = '';
+        updateKernelSubmitAvailability();
     };
 
     const setKernelParamsServerSelection = (pathValue) => {
@@ -2059,11 +2026,13 @@ document.addEventListener('DOMContentLoaded', () => {
         if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
         if (kernelParamsLocalName) kernelParamsLocalName.textContent = '';
         if (kernelParamsFileInput) kernelParamsFileInput.value = '';
+        updateKernelSubmitAvailability();
     };
 
     const setKernelParamsMode = (mode) => {
         if (!kernelParamsSourceModeInput) return;
-        const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+        const wantsServer = String(mode || '').trim().toLowerCase() === 'server-path';
+        const nextMode = (kernelServerModeEnabled && wantsServer) ? 'server-path' : 'upload';
         kernelParamsSourceModeInput.value = nextMode;
         setKernelParamsModeVisuals(nextMode);
         if (nextMode === 'server-path') {
@@ -2078,12 +2047,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
             if (kernelParamsServerPath) kernelParamsServerPath.textContent = '';
         }
+        updateKernelSubmitAvailability();
     };
 
     if (kernelParamsUploadZone && kernelParamsFileInput && kernelParamsSourceModeInput && kernelParamsServerPathInput) {
-        const initialMode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase() === 'upload'
-            ? 'upload'
-            : 'server-path';
+        const initialRawMode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase();
+        const initialMode = (kernelServerModeEnabled && initialRawMode === 'server-path')
+            ? 'server-path'
+            : 'upload';
         setKernelParamsMode(initialMode);
         const initialServerPath = String(kernelParamsServerPathInput.value || '').trim();
         if (initialServerPath) {
@@ -2184,22 +2155,7 @@ document.addEventListener('DOMContentLoaded', () => {
             extensions: '.pkl,.pickle',
             historyKey: 'field_potential_kernel:kernel_spike_times_browser',
         },
-        {
-            zoneId: 'kernelPopulationSizesUpload',
-            fileInputId: 'kernelPopulationSizesFile',
-            modeInputName: 'kernel_population_sizes_file_source_mode',
-            serverPathName: 'kernel_population_sizes_file_server_path',
-            extensions: '.pkl,.pickle',
-            historyKey: 'field_potential_kernel:kernel_population_sizes_browser',
-        },
-        {
-            zoneId: 'kernelElectrodeParametersUpload',
-            fileInputId: 'kernelElectrodeParametersFile',
-            modeInputName: 'electrode_parameters_file_source_mode',
-            serverPathName: 'electrode_parameters_file_server_path',
-            extensions: '.pkl,.pickle',
-            historyKey: 'field_potential_kernel:kernel_electrode_parameters_browser',
-        },
+        // Electrode parameters upload removed; electrodeParameters are loaded from KernelParams
         {
             zoneId: 'meegCdmUpload',
             fileInputId: 'meegCdmFile',
