@@ -287,22 +287,52 @@
                         <div class="input-group !mb-0">
                             <label class="input-label">Kernel parameters module</label>
                             <p class="input-subtext">Module or object containing the full specification of the multicompartment
-                                network model (for an example implementation, see:
-                                examples/simulation/Hagen_model/simulation/params/analysis_params.py.)</p>
+                                network model. You can choose either a Python file (local upload or server file) or
+                                automatically load the predefined analysis_params.py for Hagen, Cavallari, or four area models.</p>
                             <div id="kernelParamsModuleUpload"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelParamsModuleFile" name="kernel_params_file" accept=".py" />
                                 <input type="hidden" id="kernelParamsModuleSourceMode" name="kernel_params_module_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'upload' }}" />
                                 <input type="hidden" id="kernelParamsModuleServerPath" name="kernel_params_module" value="{{ kernel_params_default }}" />
+                                <input type="hidden" id="kernelParamsPredefinedModel" name="kernel_params_predefined_model" value="" />
                                 <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
                                     <button type="button" data-kernel-params-action="true" class="kernel-params-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
                                     {% if webui_runtime.is_server_runtime %}
                                     <button type="button" data-kernel-params-action="true" class="kernel-params-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
                                     {% endif %}
                                 </div>
+                                <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
+                                    {% for model_key in ["hagen", "cavallari", "four_area"] %}
+                                    {% set model_cfg = kernel_predefined_params_by_model.get(model_key, {}) %}
+                                    {% set model_available = model_cfg.get("available") %}
+                                    {% set model_path = model_cfg.get("path", "") %}
+                                    {% set model_label = model_cfg.get("label", model_key) %}
+                                    {% set model_locked_to_detected = detected_simulation_model in ["hagen", "cavallari", "four_area"] and detected_simulation_origin != "custom" and model_key != detected_simulation_model %}
+                                    <button
+                                        type="button"
+                                        data-kernel-params-action="true"
+                                        data-kernel-params-auto-model="{{ model_key }}"
+                                        data-kernel-params-auto-path="{{ model_path }}"
+                                        class="kernel-params-auto-load px-2.5 py-1 text-[10px] rounded border"
+                                        {% if kernel_auto_params_disabled or (not model_available) or model_locked_to_detected %}disabled aria-disabled="true"{% endif %}>
+                                        Auto {{ model_label }}
+                                    </button>
+                                    {% endfor %}
+                                </div>
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Kernel parameters module (.py)</span>
                                 <p class="text-[10px] text-slate-400" data-role="hint">Drag and drop Python files or click to browse</p>
+                                {% if kernel_auto_params_disabled %}
+                                <p id="kernelParamsAutoStatus" class="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
+                                    Automatic predefined model loading is disabled because the detected simulation origin is custom.
+                                </p>
+                                {% elif detected_simulation_model in ["hagen", "cavallari", "four_area"] and detected_simulation_origin != "custom" %}
+                                <p id="kernelParamsAutoStatus" class="mt-1 text-[10px] text-sky-700 dark:text-sky-300">
+                                    Detected simulation model: {{ kernel_predefined_params_by_model.get(detected_simulation_model, {}).get("label", detected_simulation_model) }}. Only the matching predefined model auto-load option is enabled.
+                                </p>
+                                {% else %}
+                                <p id="kernelParamsAutoStatus" class="mt-1 hidden text-[10px] text-emerald-700 dark:text-emerald-300"></p>
+                                {% endif %}
                                 <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
                                     data-role="local-summary">
                                     <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
@@ -481,9 +511,13 @@
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="signal-scale">Scale</label>
-                            <p class="input-subtext">Computed automatically as <code>dt * 10^-3</code> so firing rates (Hz = s^-1) are integrated with kernel time sampling in ms.</p>
-                            <input id="signal-scale" type="hidden" name="cdm_scale" value="0.0000625" />
-                            <div id="signal-scale-display" class="rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm font-mono text-slate-700 dark:text-slate-200">0.0000625</div>
+                            <p class="input-subtext">Default is computed as <code>dt * 10^-3</code> so firing rates (Hz = s^-1) are integrated with kernel time sampling in ms. You can edit it manually.</p>
+                            <input class="input-field font-mono" id="signal-scale" type="number" step="any" name="cdm_scale" value="0.0000625" />
+                        </div>
+                        <div class="input-group">
+                            <label class="input-label" for="cdm-decimation-factor">Decimation factor</label>
+                            <p class="input-subtext">Downsample computed CDM/LFP signals by keeping one sample every N time points. Use <code>1</code> to disable decimation.</p>
+                            <input class="input-field" id="cdm-decimation-factor" min="1" step="1" type="number" name="cdm_decimation_factor" value="1" />
                         </div>
                     </div>
                 </div>
@@ -827,7 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const meegComputeForm = document.getElementById('meeg-compute-form');
     const kernelDtInput = document.querySelector('input[name="dt"]');
     const signalScaleInput = document.getElementById('signal-scale');
-    const signalScaleDisplay = document.getElementById('signal-scale-display');
+    let kernelScaleAutoMode = true;
     const biophysItemsContainer = document.getElementById('biophysItems');
     const biophysAddBtn = document.getElementById('biophysAddBtn');
     const biophysHidden = document.getElementById('biophysHidden');
@@ -946,34 +980,39 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             syncBiophysHidden();
-            if (kernelDtInput && signalScaleInput) {
-                const dtValue = Number.parseFloat(kernelDtInput.value);
-                const computedScale = Number.isFinite(dtValue) ? dtValue * 1e-3 : 0;
-                const normalized = computedScale.toExponential(6);
-                signalScaleInput.value = normalized;
-                if (signalScaleDisplay) {
-                    signalScaleDisplay.textContent = normalized;
+            if (signalScaleInput) {
+                const scaleValue = Number.parseFloat(signalScaleInput.value);
+                if (!Number.isFinite(scaleValue)) {
+                    event.preventDefault();
+                    alert('Scale must be a valid numeric value.');
+                    return;
                 }
             }
         });
     }
 
-    const syncKernelScaleFromDt = () => {
+    const syncKernelScaleFromDt = ({ force = false } = {}) => {
         if (!kernelDtInput || !signalScaleInput) {
             return;
         }
         const dtValue = Number.parseFloat(kernelDtInput.value);
-        const computedScale = Number.isFinite(dtValue) ? dtValue * 1e-3 : 0;
+        const computedScale = Number.isFinite(dtValue) && dtValue > 0 ? dtValue * 1e-3 : 0;
         const normalized = computedScale.toExponential(6);
-        signalScaleInput.value = normalized;
-        if (signalScaleDisplay) {
-            signalScaleDisplay.textContent = normalized;
+        const hasCurrentValue = String(signalScaleInput.value || '').trim() !== '';
+        if (force || kernelScaleAutoMode || !hasCurrentValue) {
+            signalScaleInput.value = normalized;
         }
     };
     if (kernelDtInput && signalScaleInput) {
-        syncKernelScaleFromDt();
-        kernelDtInput.addEventListener('input', syncKernelScaleFromDt);
-        kernelDtInput.addEventListener('change', syncKernelScaleFromDt);
+        syncKernelScaleFromDt({ force: true });
+        signalScaleInput.addEventListener('input', () => {
+            kernelScaleAutoMode = false;
+        });
+        signalScaleInput.addEventListener('change', () => {
+            kernelScaleAutoMode = false;
+        });
+        kernelDtInput.addEventListener('input', () => syncKernelScaleFromDt());
+        kernelDtInput.addEventListener('change', () => syncKernelScaleFromDt());
     }
     updateKernelSubmitAvailability();
     const kernelSubmitButtonObserver = new MutationObserver(() => updateKernelSubmitAvailability());
@@ -1978,6 +2017,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const kernelParamsFileInput = document.getElementById('kernelParamsModuleFile');
     const kernelParamsSourceModeInput = document.getElementById('kernelParamsModuleSourceMode');
     const kernelParamsServerPathInput = document.getElementById('kernelParamsModuleServerPath');
+    const kernelParamsPredefinedModelInput = document.getElementById('kernelParamsPredefinedModel');
+    const kernelParamsAutoStatus = document.getElementById('kernelParamsAutoStatus');
+    const kernelParamsAutoButtons = kernelParamsUploadZone
+        ? Array.from(kernelParamsUploadZone.querySelectorAll('.kernel-params-auto-load[data-kernel-params-auto-model]'))
+        : [];
     const kernelParamsLocalModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-upload-local') : null;
     const kernelParamsServerModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-upload-server') : null;
     const kernelParamsHint = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="hint"]') : null;
@@ -1987,30 +2031,88 @@ document.addEventListener('DOMContentLoaded', () => {
     const kernelParamsServerSummary = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-summary"]') : null;
     const kernelParamsServerPath = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-path"]') : null;
     const kernelParamsServerClear = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="server-clear"]') : null;
+    const kernelParamsAutoDisabled = Boolean({{ kernel_auto_params_disabled | tojson }});
+    const kernelPredefinedParamsByModel = {{ kernel_predefined_params_by_model | tojson }};
+    const detectedKernelSimulationModel = String({{ detected_simulation_model | tojson }} || '').trim().toLowerCase();
+    const detectedKernelSimulationOrigin = String({{ detected_simulation_origin | tojson }} || '').trim().toLowerCase();
+    const kernelHasDetectedPredefinedModel = ['hagen', 'cavallari', 'four_area'].includes(detectedKernelSimulationModel)
+        && detectedKernelSimulationOrigin !== 'custom';
 
-    const setKernelParamsModeVisuals = (mode) => {
-        if (!kernelParamsLocalModeBtn) return;
-        const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
-        const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-        [kernelParamsLocalModeBtn, kernelParamsServerModeBtn].forEach((btn) => {
-            if (!btn) return;
-            btn.classList.remove(...activeClasses);
-            btn.classList.add(...inactiveClasses);
-        });
-        if (mode === 'server-path' && kernelParamsServerModeBtn) {
-            kernelParamsServerModeBtn.classList.add(...activeClasses);
-            kernelParamsServerModeBtn.classList.remove(...inactiveClasses);
-        } else {
-            kernelParamsLocalModeBtn.classList.add(...activeClasses);
-            kernelParamsLocalModeBtn.classList.remove(...inactiveClasses);
+    const kernelParamActiveClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
+    const kernelParamInactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
+    const setKernelParamButtonState = (button, isActive) => {
+        if (!button) return;
+        if (isActive) {
+            button.classList.add(...kernelParamActiveClasses);
+            button.classList.remove(...kernelParamInactiveClasses);
+            return;
         }
+        button.classList.remove(...kernelParamActiveClasses);
+        button.classList.add(...kernelParamInactiveClasses);
+    };
+    const inferKernelParamsChoiceKey = () => {
+        const predefinedModel = String(kernelParamsPredefinedModelInput?.value || '').trim().toLowerCase();
+        if (predefinedModel) {
+            return `auto-${predefinedModel}`;
+        }
+        const mode = String(kernelParamsSourceModeInput?.value || '').trim().toLowerCase();
+        return mode === 'server-path' ? 'server-file' : 'local-upload';
+    };
+    const syncKernelParamsChoiceVisuals = () => {
+        const choiceKey = inferKernelParamsChoiceKey();
+        setKernelParamButtonState(kernelParamsLocalModeBtn, choiceKey === 'local-upload');
+        setKernelParamButtonState(kernelParamsServerModeBtn, choiceKey === 'server-file');
+        kernelParamsAutoButtons.forEach((btn) => {
+            const modelKey = String(btn.dataset.kernelParamsAutoModel || '').trim().toLowerCase();
+            setKernelParamButtonState(btn, choiceKey === `auto-${modelKey}`);
+        });
+    };
+
+    const setKernelParamsAutoStatusText = (text) => {
+        if (!kernelParamsAutoStatus) return;
+        const clean = String(text || '').trim();
+        kernelParamsAutoStatus.textContent = clean;
+        if (kernelParamsAutoDisabled || kernelHasDetectedPredefinedModel) {
+            return;
+        }
+        kernelParamsAutoStatus.classList.toggle('hidden', !clean);
+    };
+
+    const clearKernelParamsAutoSelection = () => {
+        if (kernelParamsPredefinedModelInput) {
+            kernelParamsPredefinedModelInput.value = '';
+        }
+        if (!kernelParamsAutoDisabled && !kernelHasDetectedPredefinedModel) {
+            setKernelParamsAutoStatusText('');
+        }
+        syncKernelParamsChoiceVisuals();
+    };
+
+    const setKernelParamsAutoSelection = (modelKey, modelLabel) => {
+        const normalizedModel = String(modelKey || '').trim().toLowerCase();
+        if (!normalizedModel || kernelParamsAutoDisabled) {
+            return;
+        }
+        if (kernelParamsPredefinedModelInput) {
+            kernelParamsPredefinedModelInput.value = normalizedModel;
+        }
+        syncKernelParamsChoiceVisuals();
+        const label = String(modelLabel || normalizedModel).trim();
+        setKernelParamsAutoStatusText(`${label} analysis_params.py loaded automatically.`);
+    };
+
+    const setKernelParamsModeVisuals = () => {
+        syncKernelParamsChoiceVisuals();
         if (kernelParamsHint) {
             kernelParamsHint.textContent = 'Drag and drop Python files or click to browse';
         }
     };
 
-    const setKernelParamsLocalSelection = (fileName) => {
+    const setKernelParamsLocalSelection = (fileName, { preserveAuto = false } = {}) => {
         const clean = String(fileName || '').trim();
+        if (!preserveAuto) {
+            clearKernelParamsAutoSelection();
+        }
         if (kernelParamsLocalName) kernelParamsLocalName.textContent = clean;
         if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.toggle('hidden', !clean);
         if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
@@ -2018,23 +2120,30 @@ document.addEventListener('DOMContentLoaded', () => {
         updateKernelSubmitAvailability();
     };
 
-    const setKernelParamsServerSelection = (pathValue) => {
+    const setKernelParamsServerSelection = (pathValue, { preserveAuto = false } = {}) => {
         const clean = String(pathValue || '').trim();
+        if (!preserveAuto) {
+            clearKernelParamsAutoSelection();
+        }
         if (kernelParamsServerPathInput) kernelParamsServerPathInput.value = clean;
         if (kernelParamsServerPath) kernelParamsServerPath.textContent = clean;
         if (kernelParamsServerSummary) kernelParamsServerSummary.classList.toggle('hidden', !clean);
         if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
         if (kernelParamsLocalName) kernelParamsLocalName.textContent = '';
         if (kernelParamsFileInput) kernelParamsFileInput.value = '';
+        syncKernelParamsChoiceVisuals();
         updateKernelSubmitAvailability();
     };
 
-    const setKernelParamsMode = (mode) => {
+    const setKernelParamsMode = (mode, { clearAuto = true } = {}) => {
         if (!kernelParamsSourceModeInput) return;
         const wantsServer = String(mode || '').trim().toLowerCase() === 'server-path';
-        const nextMode = (kernelServerModeEnabled && wantsServer) ? 'server-path' : 'upload';
+        const nextMode = wantsServer ? 'server-path' : 'upload';
+        if (clearAuto) {
+            clearKernelParamsAutoSelection();
+        }
         kernelParamsSourceModeInput.value = nextMode;
-        setKernelParamsModeVisuals(nextMode);
+        setKernelParamsModeVisuals();
         if (nextMode === 'server-path') {
             if (kernelParamsFileInput) kernelParamsFileInput.value = '';
             if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
@@ -2051,26 +2160,45 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (kernelParamsUploadZone && kernelParamsFileInput && kernelParamsSourceModeInput && kernelParamsServerPathInput) {
+        setKernelParamButtonState(kernelParamsLocalModeBtn, false);
+        setKernelParamButtonState(kernelParamsServerModeBtn, false);
+        kernelParamsAutoButtons.forEach((btn) => setKernelParamButtonState(btn, false));
         const initialRawMode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase();
-        const initialMode = (kernelServerModeEnabled && initialRawMode === 'server-path')
-            ? 'server-path'
-            : 'upload';
-        setKernelParamsMode(initialMode);
+        const initialMode = initialRawMode === 'server-path' ? 'server-path' : 'upload';
+        setKernelParamsMode(initialMode, { clearAuto: false });
         const initialServerPath = String(kernelParamsServerPathInput.value || '').trim();
         if (initialServerPath) {
             setKernelParamsServerSelection(initialServerPath);
         }
+        if (kernelHasDetectedPredefinedModel && !kernelParamsAutoDisabled) {
+            const detectedAutoBtn = kernelParamsAutoButtons.find(
+                (btn) => String(btn.dataset.kernelParamsAutoModel || '').trim().toLowerCase() === detectedKernelSimulationModel,
+            );
+            const detectedModelCfg = kernelPredefinedParamsByModel[detectedKernelSimulationModel] || {};
+            const detectedModelPath = String(
+                detectedAutoBtn?.dataset.kernelParamsAutoPath || detectedModelCfg.path || '',
+            ).trim();
+            if (detectedAutoBtn && !detectedAutoBtn.disabled && detectedModelPath) {
+                setKernelParamsMode('server-path', { clearAuto: false });
+                setKernelParamsServerSelection(detectedModelPath, { preserveAuto: true });
+                setKernelParamsAutoSelection(
+                    detectedKernelSimulationModel,
+                    detectedModelCfg.label || detectedAutoBtn.textContent || detectedKernelSimulationModel,
+                );
+            }
+        }
+        syncKernelParamsChoiceVisuals();
 
         if (kernelParamsLocalModeBtn) {
             kernelParamsLocalModeBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
-                setKernelParamsMode('upload');
+                setKernelParamsMode('upload', { clearAuto: true });
             });
         }
         if (kernelParamsServerModeBtn) {
             kernelParamsServerModeBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
-                setKernelParamsMode('server-path');
+                setKernelParamsMode('server-path', { clearAuto: true });
             });
         }
         if (kernelParamsLocalClear) {
@@ -2088,6 +2216,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 setKernelParamsServerSelection('');
             });
         }
+        kernelParamsAutoButtons.forEach((btn) => {
+            btn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (btn.disabled || kernelParamsAutoDisabled) {
+                    return;
+                }
+                const modelKey = String(btn.dataset.kernelParamsAutoModel || '').trim().toLowerCase();
+                const modelCfg = kernelPredefinedParamsByModel[modelKey] || {};
+                const candidatePath = String(btn.dataset.kernelParamsAutoPath || modelCfg.path || '').trim();
+                if (!candidatePath) {
+                    alert('Default analysis_params.py path is not available for this model.');
+                    return;
+                }
+                setKernelParamsMode('server-path', { clearAuto: false });
+                setKernelParamsServerSelection(candidatePath, { preserveAuto: true });
+                setKernelParamsAutoSelection(modelKey, modelCfg.label || btn.textContent || modelKey);
+                updateKernelSubmitAvailability();
+            });
+        });
 
         kernelParamsUploadZone.addEventListener('click', async (event) => {
             if (event.target && event.target.closest('[data-kernel-params-action]')) {
@@ -2127,7 +2275,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const dt = new DataTransfer();
             dt.items.add(files[0]);
             kernelParamsFileInput.files = dt.files;
-            setKernelParamsMode('upload');
+            setKernelParamsMode('upload', { clearAuto: true });
             setKernelParamsLocalSelection(files[0].name);
         });
 
@@ -2135,7 +2283,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const file = kernelParamsFileInput.files && kernelParamsFileInput.files[0]
                 ? kernelParamsFileInput.files[0]
                 : null;
-            setKernelParamsMode('upload');
+            setKernelParamsMode('upload', { clearAuto: true });
             setKernelParamsLocalSelection(file ? file.name : '');
         });
         kernelParamsServerPathInput.addEventListener('input', () => {

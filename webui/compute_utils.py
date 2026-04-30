@@ -1747,6 +1747,24 @@ def _clip_signal_time_length(value, length):
     return np.array(clipped, copy=True)
 
 
+def _decimate_signal_time(value, factor):
+    step = int(factor) if factor is not None else 1
+    if step <= 1:
+        return value
+    if isinstance(value, MappingABC):
+        return {key: _decimate_signal_time(item, step) for key, item in value.items()}
+    try:
+        arr = np.asarray(value)
+    except Exception:
+        return value
+    if arr.ndim == 0:
+        return value
+    slicer = [slice(None)] * arr.ndim
+    slicer[-1] = slice(None, None, step)
+    decimated = arr[tuple(slicer)]
+    return np.array(decimated, copy=True)
+
+
 def _clip_trial_dataframe_payloads(payloads, signal_columns=("data",)):
     payload_list = [frame.copy() for frame in list(payloads or []) if isinstance(frame, pd.DataFrame)]
     if not payload_list:
@@ -4252,7 +4270,13 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             else:
                 component = int(float(component_val))
         mode = params.get("cdm_mode") or "same"
-        scale = float(dt) * 1e-3
+        scale = _parse_float_param(params, "cdm_scale", default=(float(dt) * 1e-3))
+        if scale is None or not np.isfinite(scale):
+            raise ValueError("cdm_scale must be a valid numeric value.")
+        cdm_decimation_factor = _parse_int_param(params, "cdm_decimation_factor", default=1)
+        if cdm_decimation_factor is None or cdm_decimation_factor < 1:
+            raise ValueError("cdm_decimation_factor must be an integer >= 1.")
+        cdm_decimation_factor = int(cdm_decimation_factor)
         kernels_for_save = None
         probe_trial_payloads = {probe_name: [] for probe_name in probe_names}
         logged_area_detected = False
@@ -4263,6 +4287,13 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         logged_population_aggregated = False
 
         fs_hz = (1000.0 / float(cdm_dt)) if float(cdm_dt) > 0 else None
+        fs_hz_after_decimation = (fs_hz / cdm_decimation_factor) if (fs_hz is not None and cdm_decimation_factor > 1) else fs_hz
+        if cdm_decimation_factor > 1:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Applying CDM/LFP decimation factor x{cdm_decimation_factor} after convolution.",
+            )
         for trial_idx in range(trial_count):
             spike_times_trial_raw = _pick_trial_item(spike_times_raw, trial_idx)
             spike_times_input, area_names, area_populations, _ = _extract_area_population_layout_from_spike_times(
@@ -4385,14 +4416,20 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     mode=mode,
                     scale=scale,
                 )
+                if cdm_decimation_factor > 1:
+                    cdm_signals = _decimate_signal_time(cdm_signals, cdm_decimation_factor)
                 row = {
                     "sum": _sum_signal_dict(cdm_signals),
                     "raw_signals": cdm_signals,
                     "probe": probe_name,
                     "dt_ms": float(cdm_dt),
-                    "decimation_factor": 1,
-                    "fs_hz": fs_hz,
-                    "metadata": {"dt_ms": float(cdm_dt), "decimation_factor": 1, "fs_hz": fs_hz},
+                    "decimation_factor": cdm_decimation_factor,
+                    "fs_hz": fs_hz_after_decimation,
+                    "metadata": {
+                        "dt_ms": float(cdm_dt),
+                        "decimation_factor": cdm_decimation_factor,
+                        "fs_hz": fs_hz_after_decimation,
+                    },
                 }
                 if trial_count > 1:
                     row["trial_index"] = int(trial_idx)

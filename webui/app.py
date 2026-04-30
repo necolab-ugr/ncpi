@@ -4,6 +4,7 @@ import subprocess
 import signal
 import ast
 import json
+import importlib.util
 import threading
 import glob
 import base64
@@ -339,6 +340,228 @@ FOUR_AREA_GRID_KEYS = [
     "inter_area.J_YX",
     "inter_area.delay_YX",
 ]
+
+PREDEFINED_KERNEL_ANALYSIS_PARAMS_RELATIVE_PATHS = {
+    "hagen": os.path.join(
+        "examples", "simulation", "Hagen_model", "simulation", "params", "analysis_params.py"
+    ),
+    "cavallari": os.path.join(
+        "examples", "simulation", "Cavallari_model", "MC_simulation", "analysis_params.py"
+    ),
+    "four_area": os.path.join(
+        "examples", "simulation", "four_area_cortical_model", "simulation", "params", "analysis_params.py"
+    ),
+}
+
+PREDEFINED_KERNEL_MODEL_LABELS = {
+    "hagen": "Hagen",
+    "cavallari": "Cavallari",
+    "four_area": "Four area",
+}
+
+
+def _predefined_kernel_analysis_params_paths():
+    paths = {}
+    for model_key, rel_path in PREDEFINED_KERNEL_ANALYSIS_PARAMS_RELATIVE_PATHS.items():
+        paths[model_key] = os.path.realpath(os.path.join(_repo_root, rel_path))
+    return paths
+
+
+def _simulation_origin(sim_data):
+    if not isinstance(sim_data, MappingABC):
+        return ""
+    origin = str(sim_data.get("simulation_origin") or "").strip().lower()
+    return origin if origin in {"predefined", "custom"} else ""
+
+
+def _load_python_module_from_file_path(path, module_name):
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load module from path: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _is_number_like(value):
+    return isinstance(value, (int, float, np.integer, np.floating)) and not isinstance(value, bool)
+
+
+def _validate_kernel_value_structure(candidate_value, reference_value, value_path, issues, depth=0, max_depth=3):
+    if len(issues) >= 24 or depth > max_depth:
+        return
+
+    if isinstance(reference_value, MappingABC):
+        if not isinstance(candidate_value, MappingABC):
+            issues.append(f"{value_path}: expected dict-like value.")
+            return
+        ref_keys = [key for key in reference_value.keys() if not str(key).startswith("_")]
+        missing = [str(key) for key in ref_keys if key not in candidate_value]
+        if missing:
+            issues.append(f"{value_path}: missing key(s): {', '.join(missing[:8])}.")
+        for key in ref_keys:
+            if key not in candidate_value:
+                continue
+            _validate_kernel_value_structure(
+                candidate_value.get(key),
+                reference_value.get(key),
+                f"{value_path}.{key}",
+                issues,
+                depth + 1,
+                max_depth=max_depth,
+            )
+        return
+
+    if isinstance(reference_value, np.ndarray):
+        try:
+            candidate_arr = np.asarray(candidate_value)
+        except Exception:
+            issues.append(f"{value_path}: expected array-like value.")
+            return
+        if candidate_arr.ndim != reference_value.ndim:
+            issues.append(
+                f"{value_path}: expected array ndim={reference_value.ndim}, got ndim={candidate_arr.ndim}."
+            )
+        return
+
+    if isinstance(reference_value, (list, tuple)):
+        if not isinstance(candidate_value, (list, tuple, np.ndarray)):
+            issues.append(f"{value_path}: expected sequence value.")
+            return
+        candidate_seq = list(candidate_value) if not isinstance(candidate_value, np.ndarray) else list(candidate_value)
+        ref_len = len(reference_value)
+        cand_len = len(candidate_seq)
+        if ref_len != cand_len:
+            issues.append(f"{value_path}: expected length {ref_len}, got {cand_len}.")
+            return
+        max_items = min(ref_len, 6)
+        for idx in range(max_items):
+            _validate_kernel_value_structure(
+                candidate_seq[idx],
+                reference_value[idx],
+                f"{value_path}[{idx}]",
+                issues,
+                depth + 1,
+                max_depth=max_depth,
+            )
+        return
+
+    if reference_value is None:
+        return
+
+    if callable(reference_value):
+        if not callable(candidate_value):
+            issues.append(f"{value_path}: expected callable value.")
+        return
+
+    if isinstance(reference_value, bool):
+        if not isinstance(candidate_value, (bool, np.bool_)):
+            issues.append(f"{value_path}: expected boolean value.")
+        return
+
+    if _is_number_like(reference_value):
+        if not _is_number_like(candidate_value):
+            issues.append(f"{value_path}: expected numeric value.")
+        return
+
+    if isinstance(reference_value, str):
+        if not isinstance(candidate_value, str):
+            issues.append(f"{value_path}: expected string value.")
+        return
+
+    if isinstance(reference_value, type):
+        if not isinstance(candidate_value, type):
+            issues.append(f"{value_path}: expected class/type value.")
+        return
+
+
+def _validate_kernel_params_module_path(params_path, model_key=""):
+    try:
+        loaded_module = _load_python_module_from_file_path(
+            params_path,
+            module_name=f"kernel_params_validate_{uuid.uuid4().hex}",
+        )
+    except Exception as exc:
+        return False, f"Failed to import kernel parameters module: {exc}"
+
+    kernel_params = getattr(loaded_module, "KernelParams", None)
+    if kernel_params is None:
+        return False, "Kernel parameters module must define `KernelParams`."
+
+    normalized_model = str(model_key or "").strip().lower()
+    reference_paths = _predefined_kernel_analysis_params_paths()
+
+    if normalized_model in reference_paths and os.path.isfile(reference_paths[normalized_model]):
+        try:
+            ref_module = _load_python_module_from_file_path(
+                reference_paths[normalized_model],
+                module_name=f"kernel_params_reference_{normalized_model}_{uuid.uuid4().hex}",
+            )
+        except Exception as exc:
+            return False, f"Failed to load reference KernelParams for {normalized_model}: {exc}"
+
+        ref_kernel_params = getattr(ref_module, "KernelParams", None)
+        if ref_kernel_params is None:
+            return (
+                False,
+                f"Reference analysis_params for {normalized_model} does not define `KernelParams`.",
+            )
+
+        ref_attrs = {}
+        for attr_name, attr_value in vars(ref_kernel_params).items():
+            if str(attr_name).startswith("_"):
+                continue
+            ref_attrs[attr_name] = attr_value
+
+        missing_attrs = [name for name in ref_attrs.keys() if not hasattr(kernel_params, name)]
+        if missing_attrs:
+            preview = ", ".join(missing_attrs[:12])
+            return (
+                False,
+                f"KernelParams is missing required attribute(s) for {normalized_model}: {preview}.",
+            )
+
+        issues = []
+        for attr_name, ref_attr_value in ref_attrs.items():
+            cand_attr_value = getattr(kernel_params, attr_name)
+            _validate_kernel_value_structure(
+                cand_attr_value,
+                ref_attr_value,
+                f"KernelParams.{attr_name}",
+                issues,
+                depth=0,
+                max_depth=3,
+            )
+            if len(issues) >= 24:
+                break
+
+        if issues:
+            return (
+                False,
+                "KernelParams does not match the expected structure for "
+                f"{normalized_model}. First issue(s): {'; '.join(issues[:6])}",
+            )
+        return True, ""
+
+    baseline_attrs = (
+        "transient",
+        "tau",
+        "MC_params",
+        "cellParameters",
+        "populationParameters",
+        "networkParameters",
+        "population_names",
+        "population_sizes",
+        "synapseParameters",
+    )
+    missing_baseline = [name for name in baseline_attrs if not hasattr(kernel_params, name)]
+    if missing_baseline:
+        return (
+            False,
+            "KernelParams is missing required attribute(s): "
+            + ", ".join(missing_baseline[:12]),
+        )
+    return True, ""
 
 
 def _get_form_value(form, key):
@@ -1328,10 +1551,19 @@ def _coerce_simulation_payload(payload):
         ),
         "grid_metadata": payload.get("grid_metadata"),
     }
+    if payload.get("simulation_origin") is not None:
+        normalized["simulation_origin"] = payload.get("simulation_origin")
+    if payload.get("simulation_model_type") is not None:
+        normalized["simulation_model_type"] = payload.get("simulation_model_type")
     return normalized
 
 
-def _simulation_payload_from_output_lists(output_lists, grid_metadata=None):
+def _simulation_payload_from_output_lists(
+    output_lists,
+    grid_metadata=None,
+    simulation_origin=None,
+    simulation_model_type=None,
+):
     required = set(SIMULATION_LEGACY_CORE_FILES)
     missing = sorted(name for name in required if name not in output_lists)
     if missing:
@@ -1349,6 +1581,10 @@ def _simulation_payload_from_output_lists(output_lists, grid_metadata=None):
             payload[SIMULATION_FILE_TO_FIELD[optional_name]] = list(output_lists[optional_name])
     if grid_metadata:
         payload["grid_metadata"] = grid_metadata
+    if simulation_origin is not None:
+        payload["simulation_origin"] = str(simulation_origin).strip().lower()
+    if simulation_model_type is not None:
+        payload["simulation_model_type"] = str(simulation_model_type).strip().lower()
     return payload
 
 
@@ -1861,28 +2097,62 @@ def _append_nested_collection_details_for_ui(details, prefix, value, depth, *, m
             )
 
 
+def _first_non_null_series_value(series):
+    if not isinstance(series, pd.Series):
+        return None
+    try:
+        sample = series.dropna()
+        if sample.empty:
+            return None
+        return sample.iloc[0]
+    except Exception:
+        return None
+
+
 def _describe_collection_fields_for_ui(source_obj):
     details = []
     total_items = _collection_total_items_for_ui(source_obj)
     for idx, item in _collection_indexed_items_for_ui(source_obj, max_items=6):
-        if len(details) >= 120:
+        if len(details) >= 240:
             break
         item_field = f"[{idx}]"
         details.append(_field_detail_from_value(item_field, item))
+
+        if isinstance(item, pd.DataFrame):
+            column_details = _describe_dataframe_fields_for_ui(item)
+            for column_detail in column_details[:32]:
+                if len(details) >= 240:
+                    break
+                nested_field = f"{item_field}.{column_detail.get('field', '')}".strip(".")
+                nested_detail = dict(column_detail)
+                nested_detail["field"] = nested_field
+                details.append(nested_detail)
+                sample_value = _first_non_null_series_value(item.get(column_detail.get("field", "")))
+                if _is_nested_collection_for_ui(sample_value):
+                    _append_nested_collection_details_for_ui(
+                        details,
+                        nested_field,
+                        sample_value,
+                        depth=3,
+                        max_rows=240,
+                        max_items=6,
+                        max_keys=24,
+                    )
+
         if _is_nested_collection_for_ui(item):
             _append_nested_collection_details_for_ui(
                 details,
                 item_field,
                 item,
-                depth=2,
-                max_rows=120,
-                max_items=4,
-                max_keys=16,
+                depth=4,
+                max_rows=240,
+                max_items=6,
+                max_keys=24,
             )
     return {
         "field_details": details,
         "sampled": False,
-        "truncated": len(details) >= 120 or total_items > 6,
+        "truncated": len(details) >= 240 or total_items > 6,
         "total_items": int(total_items),
     }
 
@@ -7132,6 +7402,8 @@ def _simulation_computation(job_id, job_status, params):
         simulation_payload = _simulation_payload_from_output_lists(
             aggregated_outputs,
             grid_metadata=grid_metadata,
+            simulation_origin="predefined",
+            simulation_model_type=model_type,
         )
         bundle_path = _write_simulation_bundle_payload(output_dir, simulation_payload)
         _append_job_output(job_status, job_id, f"Stored combined simulation payload in {bundle_path}.")
@@ -7244,6 +7516,20 @@ def _simulation_computation_custom(job_id, job_status, params):
             raise RuntimeError(
                 "Simulation outputs are incomplete. Expected either simulation.pkl or legacy files "
                 "(times.pkl, gids.pkl, dt.pkl, tstop.pkl, network.pkl)."
+            )
+        try:
+            with open(bundle_path, "rb") as handle:
+                custom_bundle_payload = pickle.load(handle)
+            custom_bundle = _coerce_simulation_payload(custom_bundle_payload)
+            if isinstance(custom_bundle, dict):
+                custom_bundle["simulation_origin"] = "custom"
+                custom_bundle["simulation_model_type"] = _simulation_model_type(custom_bundle)
+                bundle_path = _write_simulation_bundle_payload(output_dir, custom_bundle)
+        except Exception as exc:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Warning: failed to stamp custom simulation metadata into {bundle_path} ({exc}).",
             )
         _append_job_output(job_status, job_id, f"Stored combined simulation payload in {bundle_path}.")
 
@@ -7675,6 +7961,27 @@ def field_potential_kernel():
         default_meeg["cdm_name"] = os.path.basename(default_meeg["cdm"])
     else:
         default_meeg["cdm_name"] = ""
+    detected_simulation_model = ""
+    detected_simulation_origin = ""
+    try:
+        loaded_sim_data = _load_simulation_outputs()
+        detected_simulation_model = _simulation_model_type(loaded_sim_data)
+        detected_simulation_origin = _simulation_origin(loaded_sim_data)
+    except Exception:
+        detected_simulation_model = ""
+        detected_simulation_origin = ""
+
+    predefined_params_paths = _predefined_kernel_analysis_params_paths()
+    kernel_predefined_params_by_model = {}
+    for model_key in ("hagen", "cavallari", "four_area"):
+        path_value = str(predefined_params_paths.get(model_key) or "").strip()
+        kernel_predefined_params_by_model[model_key] = {
+            "label": PREDEFINED_KERNEL_MODEL_LABELS.get(model_key, model_key),
+            "path": path_value,
+            "available": bool(path_value and os.path.isfile(path_value)),
+        }
+
+    kernel_auto_params_disabled = detected_simulation_origin == "custom"
     requested_tab = request.args.get("tab", "")
     allowed_tabs = {"create_kernel", "cdm_computation", "meeg"}
     initial_tab = requested_tab if requested_tab in allowed_tabs else "create_kernel"
@@ -7721,6 +8028,10 @@ def field_potential_kernel():
         default_sim=default_sim,
         default_sim_paths=default_paths,
         default_meeg=default_meeg,
+        kernel_predefined_params_by_model=kernel_predefined_params_by_model,
+        kernel_auto_params_disabled=kernel_auto_params_disabled,
+        detected_simulation_model=detected_simulation_model,
+        detected_simulation_origin=detected_simulation_origin,
         initial_tab=initial_tab,
         biophys_options=biophys_options,
         mc_models_local_staged_default=remembered_mc_folder_local,
@@ -14722,6 +15033,9 @@ def start_computation_redirect(computation_type):
             kernel_params_source_mode = (request.form.get("kernel_params_module_source_mode") or "server-path").strip().lower()
             if kernel_params_source_mode not in {"upload", "server-path"}:
                 kernel_params_source_mode = "server-path"
+            kernel_params_predefined_model = (request.form.get("kernel_params_predefined_model") or "").strip().lower()
+            if kernel_params_predefined_model not in {"hagen", "cavallari", "four_area"}:
+                kernel_params_predefined_model = ""
 
             if kernel_params_source_mode == "upload":
                 uploaded_kernel_params = file_paths.get("kernel_params_file")
@@ -14748,6 +15062,42 @@ def start_computation_redirect(computation_type):
                     shutil.copy2(source_path, copied_path)
                     file_paths["kernel_params_module_file"] = copied_path
                     kernel_params_module_override = copied_path
+
+            detected_sim_model = ""
+            detected_sim_origin = ""
+            try:
+                sim_data_for_kernel = _load_simulation_outputs()
+                detected_sim_model = _simulation_model_type(sim_data_for_kernel)
+                detected_sim_origin = _simulation_origin(sim_data_for_kernel)
+            except Exception:
+                detected_sim_model = ""
+                detected_sim_origin = ""
+
+            if detected_sim_origin == "custom" and kernel_params_predefined_model:
+                flash(
+                    "Automatic loading of predefined analysis_params.py is disabled after a custom simulation run. "
+                    "Upload or select a custom-compatible kernel params module instead.",
+                    "error",
+                )
+                return redirect(request.referrer or url_for("field_potential_kernel"))
+
+            if kernel_params_module_override is not None:
+                validation_model_key = ""
+                if kernel_params_predefined_model:
+                    validation_model_key = kernel_params_predefined_model
+                elif (
+                    detected_sim_model in {"hagen", "cavallari", "four_area"}
+                    and detected_sim_origin != "custom"
+                ):
+                    validation_model_key = detected_sim_model
+
+                is_valid, validation_error = _validate_kernel_params_module_path(
+                    kernel_params_module_override,
+                    model_key=validation_model_key,
+                )
+                if not is_valid:
+                    flash(validation_error, "error")
+                    return redirect(request.referrer or url_for("field_potential_kernel"))
         if computation_type == "inference":
             if inference_features_source_mode == "server-path" and inference_features_server_path:
                 copied_name = f"inference_features_predict_0_{job_id}_{os.path.basename(inference_features_server_path)}"
