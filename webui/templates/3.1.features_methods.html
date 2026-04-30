@@ -131,6 +131,8 @@
             parserLongChannelCol: '',
             parserLongValueCol: '',
             parserArrayAxesEnabled: false,
+            parserAxisUserEdited: false,
+            parserPrimaryFieldsUserEdited: false,
             parserAxisChannels: '0',
             parserAxisSamples: '1',
             parserAxisEpochs: '-1',
@@ -1079,6 +1081,10 @@
                 ) {
                     out.push(samplingTokenField);
                 }
+                const defaultFs = String(this.parserInfo?.defaults?.fs || '').trim();
+                if (defaultFs && !seen.has(defaultFs)) {
+                    out.push(defaultFs);
+                }
                 return out;
             },
             parserChannelNameSourceCandidates() {
@@ -1101,6 +1107,10 @@
                     if (seen.has(field)) continue;
                     seen.add(field);
                     out.push(field);
+                }
+                const defaultCh = String(this.parserInfo?.defaults?.ch_names || '').trim();
+                if (defaultCh && !seen.has(defaultCh)) {
+                    out.push(defaultCh);
                 }
                 return out;
             },
@@ -1346,16 +1356,230 @@
                 const candidates = dataframeCandidates.length > 0
                     ? dataframeCandidates
                     : this.parserFallbackDataCandidateFields();
+                const withDetectedValues = (items) => {
+                    const out = Array.isArray(items) ? [...items] : [];
+                    for (const value of [
+                        String(this.parserInfo?.defaults?.data || '').trim(),
+                        String(this.parserDataLocator || '').trim(),
+                    ]) {
+                        if (value && !out.includes(value)) out.push(value);
+                    }
+                    return out;
+                };
                 const folders = this.parserFolderSummaries();
-                if (folders.length <= 1) return candidates;
+                if (folders.length <= 1) {
+                    return withDetectedValues(candidates);
+                }
                 const selectedFolderName = this.selectedAnalysisFolderName();
-                if (!selectedFolderName) return candidates;
+                if (!selectedFolderName) {
+                    return withDetectedValues(candidates);
+                }
                 const mapping = this.parserInfo?.candidate_field_folders;
-                if (!mapping || typeof mapping !== 'object') return candidates;
-                return candidates.filter((field) => {
+                if (!mapping || typeof mapping !== 'object') {
+                    return withDetectedValues(candidates);
+                }
+                const filtered = candidates.filter((field) => {
                     const owners = (mapping[field] || []).map((name) => String(name || '').trim()).filter((name) => name.length > 0);
                     return owners.includes(selectedFolderName);
                 });
+                return withDetectedValues(filtered);
+            },
+            inferPrimaryFieldsFromSampleTable(payload) {
+                const out = { data: '', fs: '', ch_names: '' };
+                const profiles = Array.isArray(payload?.extension_profiles) ? payload.extension_profiles : [];
+                const rows = [];
+                for (const profile of profiles) {
+                    const details = Array.isArray(profile?.field_details) ? profile.field_details : [];
+                    for (const row of details) rows.push(row);
+                }
+                const folderProfiles = Array.isArray(payload?.folder_profiles) ? payload.folder_profiles : [];
+                for (const folderProfile of folderProfiles) {
+                    const nestedProfiles = Array.isArray(folderProfile?.extension_profiles) ? folderProfile.extension_profiles : [];
+                    for (const profile of nestedProfiles) {
+                        const details = Array.isArray(profile?.field_details) ? profile.field_details : [];
+                        for (const row of details) rows.push(row);
+                    }
+                }
+                const topLevelDetails = Array.isArray(payload?.field_details) ? payload.field_details : [];
+                for (const row of topLevelDetails) rows.push(row);
+                if (!rows.length) return out;
+
+                const rowField = (row) => String(row?.field || '').trim();
+                const rowType = (row) => String(row?.python_type || '').toLowerCase();
+                const parseShapeLike = (value) => {
+                    if (Array.isArray(value)) {
+                        return value
+                            .map((item) => Number.parseInt(String(item), 10))
+                            .filter((item) => Number.isFinite(item) && item > 0);
+                    }
+                    const text = String(value || '');
+                    const match = text.match(/\[([0-9,\s]+)\]/);
+                    if (!match) return [];
+                    return match[1]
+                        .split(',')
+                        .map((item) => Number.parseInt(item.trim(), 10))
+                        .filter((item) => Number.isFinite(item) && item > 0);
+                };
+                const rowShape = (row) => {
+                    const detail = String(row?.detail || '');
+                    const effectiveMatch = detail.match(/effective\s+shape\s*\[([0-9,\s]+)\]/i);
+                    if (effectiveMatch) {
+                        const effectiveShape = parseShapeLike(`[${effectiveMatch[1]}]`);
+                        if (effectiveShape.length > 0) return effectiveShape;
+                    }
+                    const detailShape = parseShapeLike(detail);
+                    if (detailShape.length > 1) return detailShape;
+                    return parseShapeLike(row?.shape);
+                };
+                const keywordScore = (field, keywords) => {
+                    const lowerField = String(field || '').toLowerCase();
+                    const tokens = lowerField.split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+                    let score = 0;
+                    for (const kw of keywords || []) {
+                        const k = String(kw || '').trim().toLowerCase();
+                        if (!k) continue;
+                        if (lowerField === k) score = Math.max(score, 100);
+                        if (lowerField.endsWith(`.${k}`)) score = Math.max(score, 90);
+                        if (tokens.includes(k)) score = Math.max(score, 85);
+                        if (k.length >= 4 && lowerField.includes(k)) score = Math.max(score, 60);
+                    }
+                    return score;
+                };
+                const looksLikeDataArray = (shape) => {
+                    if (!shape.length) return 0;
+                    if (shape.length >= 2) {
+                        const maxDim = Math.max(...shape);
+                        const minDim = Math.min(...shape);
+                        let score = 140 + Math.min(60, shape.length * 15);
+                        if (maxDim >= 1000) score += 80;
+                        if (minDim >= 16 && minDim <= 256) score += 60;
+                        if (shape.some((dim) => [20, 32, 63, 64].includes(dim))) score += 35;
+                        return score;
+                    }
+                    const only = shape[0];
+                    if (only >= 1000) return 100 + Math.min(80, Math.floor(only / 1000) * 10);
+                    return 0;
+                };
+                const scoreDataRow = (row) => {
+                    const field = rowField(row);
+                    if (!field) return -1;
+                    const shape = rowShape(row);
+                    const type = rowType(row);
+                    const structureScore = looksLikeDataArray(shape);
+                    const nameScore = keywordScore(field, ['signal', 'samples', 'data', 'lfp', 'eeg', 'meg', 'ecog']);
+                    let score = structureScore || 0;
+                    if (type.includes('ndarray') || type.includes('array')) score += 30;
+                    if (structureScore > 0) {
+                        score += Math.min(40, nameScore / 3);
+                    } else {
+                        score += nameScore;
+                    }
+                    return score;
+                };
+                const pickBestData = () => {
+                    let bestRow = null;
+                    let bestScore = -1;
+                    for (const row of rows) {
+                        const score = scoreDataRow(row);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestRow = row;
+                        }
+                    }
+                    return bestScore > 0 ? bestRow : null;
+                };
+                const dataRow = pickBestData();
+                const dataShape = dataRow ? rowShape(dataRow) : [];
+                const scoreChannelRow = (row) => {
+                    const field = rowField(row);
+                    if (!field) return -1;
+                    const shape = rowShape(row);
+                    const type = rowType(row);
+                    const nameScore = keywordScore(field, ['ch_names', 'channels', 'channel_names', 'labels', 'sensor', 'sensors', 'ch']);
+                    let score = nameScore;
+                    if (shape.length === 1 && dataShape.length >= 2 && dataShape.includes(shape[0])) score += 180;
+                    if (shape.length === 1 && dataShape.length === 1 && [20, 32, 63, 64].includes(shape[0])) score += 120;
+                    if (type.includes('list') || type.includes('ndarray') || type.includes('array')) score += 30;
+                    if (shape.length === 1 && shape[0] >= 8 && shape[0] <= 512) score += 25;
+                    return score;
+                };
+                const pickBestByScore = (scoreFn) => {
+                    let bestField = '';
+                    let bestScore = -1;
+                    for (const row of rows) {
+                        const field = rowField(row);
+                        const score = scoreFn(row);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestField = field;
+                        }
+                    }
+                    return bestScore > 0 ? bestField : '';
+                };
+                const scoreFsRow = (row) => {
+                    const field = rowField(row);
+                    if (!field) return -1;
+                    const type = rowType(row);
+                    const shape = rowShape(row);
+                    let score = keywordScore(field, ['fs', 'fsample', 'sfreq', 'sampling_frequency', 'sample_frequency', 'frequency']);
+                    if (type.includes('int') || type.includes('float') || type.includes('number')) score += 120;
+                    if (shape.length === 0) score += 40;
+                    if (shape.length > 1) score -= 80;
+                    return score;
+                };
+
+                out.data = dataRow ? rowField(dataRow) : '';
+                out.fs = pickBestByScore(scoreFsRow);
+                out.ch_names = pickBestByScore(scoreChannelRow);
+                if (out.data || out.fs || out.ch_names) return out;
+
+                const scoreRow = (row, keywords, opts = {}) => {
+                    const field = String(row?.field || '').trim();
+                    if (!field) return -1;
+                    const lowerField = field.toLowerCase();
+                    const tokens = lowerField.split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+                    const type = String(row?.python_type || '').toLowerCase();
+                    const detail = String(row?.detail || '').toLowerCase();
+                    const shape = Array.isArray(row?.shape) ? row.shape : null;
+                    const ndim = shape ? shape.length : -1;
+                    let score = 0;
+                    for (const kw of keywords) {
+                        const k = String(kw || '').trim().toLowerCase();
+                        if (!k) continue;
+                        if (lowerField === k) score = Math.max(score, 100);
+                        if (tokens.includes(k)) score = Math.max(score, 85);
+                        if (lowerField.endsWith(`.${k}`)) score = Math.max(score, 90);
+                        if (k.length >= 4 && lowerField.includes(k)) score = Math.max(score, 60);
+                    }
+                    if (opts.preferArray) {
+                        if (type.includes('ndarray') || detail.includes('array')) score += 25;
+                        if (ndim >= 0) score += Math.min(20, ndim * 5);
+                    }
+                    if (opts.preferScalar) {
+                        if (type.includes('int') || type.includes('float') || type.includes('number')) score += 25;
+                        if (ndim === 0 || shape === null) score += 5;
+                    }
+                    return score;
+                };
+
+                const pickBest = (keywords, opts = {}) => {
+                    let bestField = '';
+                    let bestScore = -1;
+                    for (const row of rows) {
+                        const field = String(row?.field || '').trim();
+                        const score = scoreRow(row, keywords, opts);
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestField = field;
+                        }
+                    }
+                    return bestScore > 0 ? bestField : '';
+                };
+
+                out.data = pickBest(['signal', 'samples', 'data', 'lfp', 'eeg', 'meg', 'ecog'], { preferArray: true });
+                out.fs = pickBest(['fs', 'fsample', 'sfreq', 'sampling_frequency', 'sample_frequency', 'frequency'], { preferScalar: true });
+                out.ch_names = pickBest(['ch_names', 'channels', 'channel_names', 'labels', 'sensor', 'sensors', 'ch'], { preferArray: true });
+                return out;
             },
             parserFolderSelectionCount() {
                 return this.parserFolderSummaries().length;
@@ -1426,12 +1650,22 @@
                     return;
                 }
                 const current = String(this.parserDataLocator || '').trim();
-                if (current && allowed.includes(current)) return;
+                if (current && (allowed.includes(current) || this.isNewDataParserFlow())) {
+                    this.syncParserSelectDom();
+                    return;
+                }
+                const backendDefault = String(this.parserInfo?.defaults?.data || '').trim();
+                if (backendDefault && allowed.includes(backendDefault)) {
+                    this.parserDataLocator = backendDefault;
+                    this.syncParserSelectDom();
+                    return;
+                }
                 const preferred = this.autoPickCandidateField(
-                    ['lfp', 'eeg', 'meg', 'ecog', 'signal', 'data'],
+                    ['lfp', 'eeg', 'meg', 'ecog', 'signal', 'samples', 'data'],
                     allowed,
                 );
                 this.parserDataLocator = preferred || allowed[0] || '';
+                this.syncParserSelectDom();
             },
             canSubmitFeatures() {
                 return !this.computeSubmitBlockReason();
@@ -1502,7 +1736,63 @@
             segmentBoundsInvalid() {
                 return this.segmentValidationError().length > 0;
             },
+            isNewDataParserFlow() {
+                const kind = String(this.dataSourceKind || '').trim();
+                return kind === 'new-simulation' || kind === 'new-empirical';
+            },
+            markParserAxisUserEdited() {
+                this.parserAxisUserEdited = true;
+            },
+            markParserPrimaryFieldsUserEdited() {
+                this.parserPrimaryFieldsUserEdited = true;
+            },
+            syncParserSelectDom() {
+                const sync = () => {
+                    const ensureValue = (selector, value, label) => {
+                        const selectedValue = String(value || '').trim();
+                        if (!selectedValue) return;
+                        document.querySelectorAll(selector).forEach((select) => {
+                            if (!select || String(select.tagName || '').toLowerCase() !== 'select') return;
+                            const exists = Array.from(select.options || []).some((option) => option.value === selectedValue);
+                            if (!exists) {
+                                const option = document.createElement('option');
+                                option.value = selectedValue;
+                                option.textContent = String(label || selectedValue);
+                                option.dataset.autodetected = '1';
+                                select.appendChild(option);
+                            }
+                            select.value = selectedValue;
+                            Array.from(select.options || []).forEach((option) => {
+                                option.selected = option.value === selectedValue;
+                            });
+                        });
+                    };
+
+                    ensureValue(
+                        'select[name="parser_data_locator"]',
+                        this.parserDataLocator,
+                        this.parserFieldLabel(this.parserDataLocator),
+                    );
+                    ensureValue(
+                        'select[name="parser_fs_source"]',
+                        this.parserFsSource,
+                        this.parserFieldLabel(this.parserFsSource),
+                    );
+                    ensureValue(
+                        'select[name="parser_ch_names_source"]',
+                        this.parserChNamesSource,
+                        this.parserFieldLabel(this.parserChNamesSource),
+                    );
+                };
+
+                if (typeof this.$nextTick === 'function') {
+                    this.$nextTick(sync);
+                } else {
+                    setTimeout(sync, 0);
+                }
+            },
             epochsDefinedByAxes() {
+                if (this.isNewDataParserFlow()) return String(this.parserAxisEpochs) !== '-1';
                 return this.parserArrayAxesEnabled && String(this.parserAxisEpochs) !== '-1';
             },
             selectedDataDescription() {
@@ -1591,6 +1881,7 @@
                 this.parserLongChannelCol = '';
                 this.parserLongValueCol = '';
                 this.parserArrayAxesEnabled = false;
+                this.parserAxisUserEdited = false;
                 this.parserAxisChannels = '0';
                 this.parserAxisSamples = '1';
                 this.parserAxisEpochs = '-1';
@@ -1727,6 +2018,8 @@
                     return;
                 }
                 this.parserLoading = true;
+                this.parserAxisUserEdited = false;
+                this.parserPrimaryFieldsUserEdited = false;
                 const generation = (Number(this.parserInspectionGeneration) || 0) + 1;
                 this.parserInspectionGeneration = generation;
                 const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
@@ -1769,6 +2062,7 @@
                     this._baseParserInfo = payload;
                     this.syncDataFileSelectionsFromPayload(payload, 'simulation');
                     this.applyParserDefaults(payload);
+                    this.ensureDataLocatorMatchesSelectedFolder();
                     this.simulationFileCount = Number(payload.folder_file_count || 0);
                     this.simulationSampleName = payload.source_name || '';
                     this.simulationInspectedSamples = (Array.isArray(payload.folder_profiles) ? payload.folder_profiles : [])
@@ -1812,6 +2106,7 @@
                             this.parserInfo = deepPayload;
                             this._baseParserInfo = deepPayload;
                             this.syncDataFileSelectionsFromPayload(deepPayload, 'simulation');
+                            this.applyParserDefaults(deepPayload);
                             this.ensureDataLocatorMatchesSelectedFolder();
                             this.normalizeParserRecordingTypeSource();
                             this.parserDeepScanInProgress = false;
@@ -1877,6 +2172,8 @@
                     return;
                 }
                 this.parserLoading = true;
+                this.parserAxisUserEdited = false;
+                this.parserPrimaryFieldsUserEdited = false;
                 const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
                 const previousEmpiricalFileCount = this.empiricalFileCount;
                 const previousEmpiricalSampleName = this.empiricalSampleName;
@@ -1970,7 +2267,9 @@
                 this.syncAnalysisFolderSelection(payload);
                 const dataFileCandidates = this.parserDataFileCandidateFields();
                 const defaults = payload?.defaults || {};
+                const sampleTableGuesses = this.inferPrimaryFieldsFromSampleTable(payload);
                 const dataCandidates = this.parserDataLocatorCandidates();
+                const fieldDetails = Array.isArray(payload?.field_details) ? payload.field_details : [];
                 const candidateSet = new Set(
                     (Array.isArray(payload?.candidate_fields) ? payload.candidate_fields : [])
                         .map((field) => String(field || '').trim())
@@ -1987,21 +2286,80 @@
                     const field = this.parserFilenameTokenField(token);
                     return candidateSet.has(field) ? field : '';
                 };
-                const autoData = this.autoPickCandidateField(['lfp', 'eeg', 'meg', 'ecog', 'signal', 'data'], dataCandidates);
+                const inferFromFieldDetails = (keywords, opts = {}) => {
+                    const keyList = Array.isArray(keywords)
+                        ? keywords.map((k) => String(k || '').trim().toLowerCase()).filter((k) => k.length > 0)
+                        : [];
+                    if (!keyList.length) return '';
+                    let bestField = '';
+                    let bestScore = -1;
+                    for (const row of fieldDetails) {
+                        const field = String(row?.field || '').trim();
+                        if (!field || !candidateSet.has(field)) continue;
+                        if (this.parserIsVirtualField(field)) continue;
+                        const lowerField = field.toLowerCase();
+                        const tokens = lowerField.split(/[^a-z0-9]+/).filter((t) => t.length > 0);
+                        const pythonType = String(row?.python_type || '').toLowerCase();
+                        const shape = Array.isArray(row?.shape) ? row.shape : null;
+                        let ndim = shape ? shape.length : -1;
+                        let score = 0;
+                        for (const keyword of keyList) {
+                            if (tokens.includes(keyword)) score = Math.max(score, 70);
+                            if (lowerField.endsWith(`.${keyword}`)) score = Math.max(score, 85);
+                            if (lowerField === keyword) score = Math.max(score, 95);
+                            if (keyword.length >= 4 && lowerField.includes(keyword)) score = Math.max(score, 50);
+                        }
+                        if (opts.preferArray) {
+                            if (pythonType.includes('ndarray')) score += 20;
+                            if (ndim >= 0) score += Math.min(10, ndim * 3);
+                        }
+                        if (opts.preferScalar) {
+                            const scalarLike = pythonType.includes('int') || pythonType.includes('float') || pythonType.includes('number');
+                            if (scalarLike) score += 20;
+                            if (ndim === 0 || shape === null) score += 5;
+                        }
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestField = field;
+                        }
+                    }
+                    return bestScore > 0 ? bestField : '';
+                };
+                const autoData = this.autoPickCandidateField(['lfp', 'eeg', 'meg', 'ecog', 'signal', 'samples', 'data'], dataCandidates);
                 const autoFs = this.autoPickCandidateField(
-                    ['fs', 'sfreq', 'freq', 'frequency', 'sampling_rate', 'sampling_frequency'],
+                    ['fs', 'fsample', 'sfreq', 'freq', 'frequency', 'sample_frequency', 'sampling_rate', 'sampling_frequency'],
                     dataFileCandidates,
                 );
                 const autoChannels = this.autoPickCandidateField(
-                    ['ch_names', 'channels', 'channel_names', 'channel', 'sensors', 'sensor', 'ch'],
+                    ['ch_names', 'channels', 'channel_names', 'channel', 'labels', 'sensors', 'sensor', 'ch'],
                     dataFileCandidates,
                 );
-                const defaultData = String(defaults.data || '').trim();
+                const detailData = inferFromFieldDetails(['signal', 'samples', 'data', 'lfp', 'eeg', 'meg', 'ecog'], { preferArray: true });
+                const detailFs = inferFromFieldDetails(['fs', 'fsample', 'sfreq', 'frequency', 'sampling_frequency', 'sample_frequency'], { preferScalar: true });
+                const detailChannels = inferFromFieldDetails(['ch_names', 'channels', 'channel_names', 'labels', 'sensor', 'sensors', 'ch'], { preferArray: true });
+                const parseAxis = (value, fallback = -1) => {
+                    const num = Number.parseInt(String(value ?? ''), 10);
+                    return Number.isFinite(num) ? num : fallback;
+                };
+                const defaultData = String(sampleTableGuesses.data || '').trim() || String(defaults.data || '').trim();
                 const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
-                if (!this.parserDataLocator || !dataCandidates.includes(String(this.parserDataLocator || '').trim())) {
-                    this.parserDataLocator = (defaultDataAllowed ? defaultData : '') || autoData || (dataCandidates[0] || '');
+                const detailDataAllowed = detailData && dataCandidates.includes(detailData);
+                const preferredDataLocator = (defaultDataAllowed ? defaultData : '') || (detailDataAllowed ? detailData : '') || autoData || (dataCandidates[0] || '');
+                if (this.isNewDataParserFlow()) {
+                    // In New data flow, always apply the latest inspected recommendation.
+                    // User can still change it manually afterwards.
+                    this.parserDataLocator = preferredDataLocator;
+                } else if (!this.parserDataLocator || !dataCandidates.includes(String(this.parserDataLocator || '').trim())) {
+                    this.parserDataLocator = preferredDataLocator;
                 }
-                if (!this.parserFsLocator) this.parserFsLocator = defaults.fs || autoFs || '';
+                const fsCandidates = this.parserFsSourceCandidates();
+                const currentFsLocator = String(this.parserFsLocator || '').trim();
+                const preferredFs = String(sampleTableGuesses.fs || '').trim() || String(defaults.fs || '').trim() || detailFs || autoFs || '';
+                if (this.isNewDataParserFlow()) {
+                    this.parserFsLocator = preferredFs;
+                } else if (!currentFsLocator || !fsCandidates.includes(currentFsLocator)) {
+                    this.parserFsLocator = preferredFs;
+                }
                 if (!this.parserRecordingTypeLocator) this.parserRecordingTypeLocator = defaults.recording_type || '';
                 if (!this.parserSubjectIdLocator) this.parserSubjectIdLocator = defaults.subject_id || '';
                 if (!this.parserGroupLocator) this.parserGroupLocator = defaults.group || '';
@@ -2011,7 +2369,14 @@
                 if (this.parserMetadataGroupSource === '__none__' && defaults.group) this.parserMetadataGroupSource = defaults.group;
                 if (this.parserMetadataSpeciesSource === '__none__' && defaults.species) this.parserMetadataSpeciesSource = defaults.species;
                 if (this.parserMetadataConditionSource === '__none__' && defaults.condition) this.parserMetadataConditionSource = defaults.condition;
-                if (!this.parserChNamesLocator) this.parserChNamesLocator = defaults.ch_names || autoChannels || '';
+                const channelSourceCandidates = this.parserChannelNameSourceCandidates();
+                const currentChLocator = String(this.parserChNamesLocator || '').trim();
+                const preferredCh = String(sampleTableGuesses.ch_names || '').trim() || String(defaults.ch_names || '').trim() || detailChannels || autoChannels || '';
+                if (this.isNewDataParserFlow()) {
+                    this.parserChNamesLocator = preferredCh;
+                } else if (!currentChLocator || !channelSourceCandidates.includes(currentChLocator)) {
+                    this.parserChNamesLocator = preferredCh;
+                }
                 const chLocator = String(this.parserChNamesLocator || '').trim();
                 if (chLocator && this.parserIsFileExtractedField(chLocator)) {
                     this.parserChNamesLocator = '';
@@ -2088,6 +2453,21 @@
                     this.parserChNamesSource = '__autocomplete__';
                     this.parserChNamesLocator = '';
                 }
+                const kind = this.resolvedDataSourceKind();
+                if (kind === 'new-simulation' || kind === 'new-empirical') {
+                    this.parserArrayAxesEnabled = true;
+                    if (!this.parserAxisUserEdited) {
+                        const axisSamples = parseAxis(defaults.axis_samples, 0);
+                        const axisChannels = parseAxis(defaults.axis_channels, -1);
+                        const axisIds = parseAxis(defaults.axis_ids, -1);
+                        const axisEpochs = parseAxis(defaults.axis_epochs, -1);
+                        this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
+                        this.parserAxisChannels = String(axisChannels);
+                        this.parserAxisIds = String(axisIds);
+                        this.parserAxisEpochs = String(axisEpochs);
+                    }
+                }
+                this.syncParserSelectDom();
                 this.normalizeParserRecordingTypeSource();
             },
             onPipelineFsSourceChange() {
@@ -2135,6 +2515,8 @@
             },
             async inspectParserSource(existingPath, file) {
                 this.parserLoading = true;
+                this.parserAxisUserEdited = false;
+                this.parserPrimaryFieldsUserEdited = false;
                 this.parserError = '';
                 const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
                 const formData = new FormData();
@@ -2217,6 +2599,7 @@
                     this.metadataInfo = null;
                     this.metadataError = '';
                     this.parserInfo = this._baseParserInfo || null;
+                    if (this.parserInfo) this.applyParserDefaults(this.parserInfo);
                     this.normalizeParserRecordingTypeSource();
                     return;
                 }
@@ -2237,8 +2620,10 @@
                     this.metadataInfo = payload;
                     if (this._baseParserInfo) {
                         this.parserInfo = this.mergeParserInfos(this._baseParserInfo, payload);
+                        this.applyParserDefaults(this.parserInfo);
                     } else {
                         this.parserInfo = payload;
+                        this.applyParserDefaults(this.parserInfo);
                         this.computeFlowChoice = 'new-data';
                         this.dataSourceKind = 'new-simulation';
                     }
@@ -3078,6 +3463,8 @@
                     <input type="hidden" name="parser_analysis_folder_paths" :value="JSON.stringify(parserAnalysisFolderPaths || [])">
                     <input type="hidden" name="parser_analysis_folder_names" :value="JSON.stringify(parserAnalysisFolderNames || [])">
                     <input type="hidden" name="parser_deep_scan_status" :value="parserDeepScanStatus">
+                    <input type="hidden" name="parser_array_axes_enabled"
+                        :value="(resolvedDataSourceKind() === 'new-simulation' || resolvedDataSourceKind() === 'new-empirical') ? '1' : (parserArrayAxesEnabled ? '1' : '0')">
                     <input type="hidden" name="parser_filename_format" :value="String(parserFilenameFormat || '').trim()">
                 
 
@@ -3695,10 +4082,10 @@
                             
                             <p class="text-xs text-gray-500 dark:text-gray-400" x-text="metadataInfo.summary || 'Metadata file successfully analyzed.'"></p>
 
-                            <div x-show="(metadataInfo.field_details || metadataInfo.candidate_fields || []).length > 0" class="space-y-2">
+                            <div x-show="((metadataInfo ? metadataInfo.field_details : []) || (metadataInfo ? metadataInfo.candidate_fields : []) || []).length > 0" class="space-y-2">
                                 <h4 class="text-xs font-semibold text-[#34495E] dark:text-white uppercase tracking-wide">Detected Columns / Fields</h4>
                                 <div class="flex flex-wrap gap-2">
-                                    <template x-for="field in (metadataInfo.field_details || metadataInfo.candidate_fields || [])" :key="'meta-field-'+(field.field || field)">
+                                    <template x-for="field in ((metadataInfo ? metadataInfo.field_details : []) || (metadataInfo ? metadataInfo.candidate_fields : []) || [])" :key="'meta-field-'+(field.field || field)">
                                         <span class="px-2 py-1 rounded-lg bg-primary/10 text-primary text-xs border border-primary/20">
                                             <span x-text="field.field || field"></span>
                                             <span x-show="field.python_type" class="opacity-70 text-[10px] ml-1" x-text="'(' + field.python_type + ')'"></span>
@@ -3745,9 +4132,15 @@
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Data locator *</span>
                                             <span class="block text-[11px] text-gray-400 dark:text-gray-400 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
-                                            <select name="parser_data_locator" x-model="parserDataLocator"
+                                            <select name="parser_data_locator" x-model="parserDataLocator" @change="markParserPrimaryFieldsUserEdited()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">Select</option>
+                                                <option
+                                                    x-show="parserDataLocator && !parserDataLocatorCandidates().includes(String(parserDataLocator || '').trim())"
+                                                    :value="parserDataLocator"
+                                                    :style="parserFieldOptionStyle(parserDataLocator)"
+                                                    x-text="`${parserFieldLabel(parserDataLocator)} (detected)`">
+                                                </option>
                                                 <template x-for="field in parserDataLocatorCandidates()" :key="'pipeline-data-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
@@ -3760,12 +4153,12 @@
 
                                     <!-- Array dimension mapping (pipeline/simulation) -->
                                     <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
-                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <label x-show="resolvedDataSourceKind() === 'pipeline'" class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                             <input type="checkbox" x-model="parserArrayAxesEnabled"
                                                 class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                             Specify array dimension mapping
                                         </label>
-                                        <div x-show="parserArrayAxesEnabled" class="space-y-2">
+                                        <div x-show="parserArrayAxesEnabled || resolvedDataSourceKind() === 'new-simulation'" class="space-y-2">
                                             <p class="text-[11px] text-gray-500 dark:text-gray-100">
                                                 Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                             </p>
@@ -3773,6 +4166,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
@@ -3786,6 +4180,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Samples axis</span>
                                                     <select name="parser_axis_samples" x-model="parserAxisSamples"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -3798,6 +4193,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">IDs axis</span>
                                                     <select name="parser_axis_ids" x-model="parserAxisIds"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
@@ -3811,6 +4207,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trials/Epochs axis</span>
                                                     <select name="parser_axis_epochs" x-model="parserAxisEpochs"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
@@ -3831,9 +4228,15 @@
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency source *</span>
-                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
+                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange(); markParserPrimaryFieldsUserEdited()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
+                                                <option
+                                                    x-show="parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__' && !parserFsSourceCandidates().includes(String(parserFsSource || '').trim())"
+                                                    :value="parserFsSource"
+                                                    :style="parserFieldOptionStyle(parserFsSource)"
+                                                    x-text="`${parserFieldLabel(parserFsSource)} (detected)`">
+                                                </option>
                                                 <template x-for="field in parserFsSourceCandidates()" :key="'pipeline-fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
@@ -3856,16 +4259,22 @@
                                     <div class="grid grid-cols-1 gap-4 items-end">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channel names source *</span>
-                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
+                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange(); markParserPrimaryFieldsUserEdited()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
+                                                <option
+                                                    x-show="parserChNamesSource && parserChNamesSource !== '__autocomplete__' && parserChNamesSource !== '__manual__' && !parserChannelNameSourceCandidates().includes(String(parserChNamesSource || '').trim())"
+                                                    :value="parserChNamesSource"
+                                                    :style="parserFieldOptionStyle(parserChNamesSource)"
+                                                    x-text="`${parserFieldLabel(parserChNamesSource)} (detected)`">
+                                                </option>
                                                 <template x-for="field in parserChannelNameSourceCandidates()" :key="'pipeline-ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
                                             <span class="block text-[11px] text-gray-400 mt-1 dark:text-gray-400">
-                                                Autocomplete uses Channels axis from "Specify array dimension mapping" (defaults to Dim 0 if mapping is off).
+                                                Autocomplete uses the Channels axis from "Specify array dimension mapping".
                                             </span>
                                         </label>
                                     </div>
@@ -4049,9 +4458,15 @@
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Data locator *</span>
                                             <span class="block text-[11px] text-gray-400 dark:text-gray-300 mb-1">Preferred: dataframe column containing the electrophysiological time-series.</span>
-                                            <select name="parser_data_locator" x-model="parserDataLocator"
+                                            <select name="parser_data_locator" x-model="parserDataLocator" @change="markParserPrimaryFieldsUserEdited()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">Select</option>
+                                                <option
+                                                    x-show="parserDataLocator && !parserDataLocatorCandidates().includes(String(parserDataLocator || '').trim())"
+                                                    :value="parserDataLocator"
+                                                    :style="parserFieldOptionStyle(parserDataLocator)"
+                                                    x-text="`${parserFieldLabel(parserDataLocator)} (detected)`">
+                                                </option>
                                                 <template x-for="field in parserDataLocatorCandidates()" :key="'data-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
@@ -4065,12 +4480,9 @@
                                     <!-- Array dimension mapping -->
                                     <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
                                         <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                            <input type="checkbox" x-model="parserArrayAxesEnabled"
-                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                             Specify array dimension mapping
                                         </label>
-                                        <input type="hidden" name="parser_array_axes_enabled" :value="parserArrayAxesEnabled ? '1' : '0'">
-                                        <div x-show="parserArrayAxesEnabled" class="space-y-2">
+                                        <div class="space-y-2">
                                             <p class="text-[11px] text-gray-500 dark:text-gray-100">
                                                 Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                                 Use this when the parser cannot infer the correct orientation automatically.
@@ -4079,6 +4491,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channels axis</span>
                                                     <select name="parser_axis_channels" x-model="parserAxisChannels"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
@@ -4092,6 +4505,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Samples axis</span>
                                                     <select name="parser_axis_samples" x-model="parserAxisSamples"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
@@ -4104,6 +4518,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">IDs axis</span>
                                                     <select name="parser_axis_ids" x-model="parserAxisIds"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
@@ -4117,6 +4532,7 @@
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trials/Epochs axis</span>
                                                     <select name="parser_axis_epochs" x-model="parserAxisEpochs"
+                                                        @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                         <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
@@ -4137,9 +4553,15 @@
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency source *</span>
-                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange()"
+                                            <select name="parser_fs_source" x-model="parserFsSource" @change="onPipelineFsSourceChange(); markParserPrimaryFieldsUserEdited()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__numeric__" :style="parserManualOptionStyle()">Numeric value</option>
+                                                <option
+                                                    x-show="parserFsSource && parserFsSource !== '__numeric__' && parserFsSource !== '__none__' && !parserFsSourceCandidates().includes(String(parserFsSource || '').trim())"
+                                                    :value="parserFsSource"
+                                                    :style="parserFieldOptionStyle(parserFsSource)"
+                                                    x-text="`${parserFieldLabel(parserFsSource)} (detected)`">
+                                                </option>
                                                 <template x-for="field in parserFsSourceCandidates()" :key="'fs-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
@@ -4158,16 +4580,22 @@
                                     <div class="grid grid-cols-1 gap-4 items-end">
                                         <label class="text-sm">
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channel names source *</span>
-                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange()"
+                                            <select name="parser_ch_names_source" x-model="parserChNamesSource" @change="onParserChNamesSourceChange(); markParserPrimaryFieldsUserEdited()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__autocomplete__" :style="parserManualOptionStyle()">Autocomplete</option>
+                                                <option
+                                                    x-show="parserChNamesSource && parserChNamesSource !== '__autocomplete__' && parserChNamesSource !== '__manual__' && !parserChannelNameSourceCandidates().includes(String(parserChNamesSource || '').trim())"
+                                                    :value="parserChNamesSource"
+                                                    :style="parserFieldOptionStyle(parserChNamesSource)"
+                                                    x-text="`${parserFieldLabel(parserChNamesSource)} (detected)`">
+                                                </option>
                                                 <template x-for="field in parserChannelNameSourceCandidates()" :key="'ch-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
                                             <span class="block text-[11px] text-gray-400 mt-1">
-                                                Autocomplete uses Channels axis from "Specify array dimension mapping" (defaults to Dim 0 if mapping is off).
+                                                Autocomplete uses the Channels axis from "Specify array dimension mapping".
                                             </span>
                                         </label>
                                     </div>
@@ -4306,7 +4734,7 @@
                                         <select name="additional_file_link_field" x-model="additionalFileLinkField"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                             <option value="">— None (do not link) —</option>
-                                            <template x-for="field in (metadataInfo.candidate_fields || [])" :key="'add-link-'+field">
+                                            <template x-for="field in (metadataInfo ? (metadataInfo.candidate_fields || []) : [])" :key="'add-link-'+field">
                                                 <option :value="field" x-text="field"></option>
                                             </template>
                                         </select>
