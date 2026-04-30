@@ -4865,6 +4865,34 @@ def _coerce_trial_dataframe_sequence(source_obj):
     return pd.concat(frames, ignore_index=True)
 
 
+def _coerce_trial_mapping_sequence(source_obj):
+    """
+    Newer field-potential pipeline files (notably cdm.pkl) can be stored as
+    a list/tuple (or object ndarray) of per-trial mappings. Normalize them to
+    a DataFrame so parser inspection exposes concrete fields instead of only
+    '__self__'.
+    """
+    seq = None
+    if isinstance(source_obj, np.ndarray) and source_obj.dtype == object and source_obj.ndim == 1:
+        seq = source_obj.tolist()
+    elif isinstance(source_obj, (list, tuple)):
+        seq = list(source_obj)
+    if seq is None:
+        return source_obj
+    if len(seq) == 0:
+        return source_obj
+    if not all(isinstance(item, MappingABC) for item in seq):
+        return source_obj
+
+    rows = []
+    for idx, item in enumerate(seq):
+        row = dict(item)
+        if "trial_index" not in row:
+            row["trial_index"] = int(idx)
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def _stack_array_like_source(source_obj):
     if isinstance(source_obj, np.ndarray):
         if source_obj.dtype != object:
@@ -4897,6 +4925,7 @@ def _load_features_source(path):
     else:
         loaded = _load_parser_source(path)
     loaded = _coerce_trial_dataframe_sequence(loaded)
+    loaded = _coerce_trial_mapping_sequence(loaded)
     return _stack_array_like_source(loaded)
 
 
@@ -4913,10 +4942,14 @@ def _load_uploaded_source_in_memory(upload):
     if ext in {".pkl", ".pickle"}:
         bio = io.BytesIO(raw)
         try:
-            return _stack_array_like_source(_coerce_trial_dataframe_sequence(pd.read_pickle(bio)))
+            loaded = _coerce_trial_dataframe_sequence(pd.read_pickle(bio))
+            loaded = _coerce_trial_mapping_sequence(loaded)
+            return _stack_array_like_source(loaded)
         except Exception:
             bio.seek(0)
-            return _stack_array_like_source(_coerce_trial_dataframe_sequence(pickle.load(bio)))
+            loaded = _coerce_trial_dataframe_sequence(pickle.load(bio))
+            loaded = _coerce_trial_mapping_sequence(loaded)
+            return _stack_array_like_source(loaded)
 
     if ext == ".json":
         try:
