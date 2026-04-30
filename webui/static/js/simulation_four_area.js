@@ -31,9 +31,6 @@ document.addEventListener('DOMContentLoaded', function() {
         n_ext: "[465, 160]",
         nu_ext: 40.0,
         J_ext: 29.89,
-        inter_area_scale: 0.15,
-        inter_area_p: 0.02,
-        inter_area_delay: 10.0,
         "inter_area.C_YX": "[[0.02, 0.02], [0.0, 0.0]]",
         "inter_area.J_YX": "[[0.23835, 0.303], [0.0, 0.0]]",
         "inter_area.delay_YX": "[[10.0, 10.0], [0.0, 0.0]]"
@@ -193,6 +190,15 @@ document.addEventListener('DOMContentLoaded', function() {
             return `area: ${areaName(path[0])}`;
         }
         if (path.length === 2 && sourceTargetMatrixParams.has(paramName)) {
+            if (paramName.startsWith('inter_area.')) {
+                const populations = getPopulationNames();
+                const popCount = populations.length;
+                if (popCount > 0) {
+                    const srcPop = populations[((path[0] % popCount) + popCount) % popCount];
+                    const tgtPop = populations[((path[1] % popCount) + popCount) % popCount];
+                    return `source: ${srcPop} -> target: ${tgtPop}`;
+                }
+            }
             return `source: ${populationName(path[0])} -> target: ${populationName(path[1])}`;
         }
         if (path.length === 2 && paramName === 'tau_syn_YX') {

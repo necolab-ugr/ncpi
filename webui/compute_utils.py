@@ -1392,11 +1392,14 @@ def _scale_kernel_payload(kernel_payload, scale):
     return scaled
 
 
-def _compute_inter_area_kernel_scales(network_obj, populations):
+def _compute_inter_area_kernel_scales(network_obj, populations, areas=None):
     if not isinstance(network_obj, dict):
         return {}
 
     pop_names = network_obj.get("X")
+    area_names = network_obj.get("areas")
+    if not isinstance(area_names, (list, tuple)) or not area_names:
+        area_names = list(areas or [])
     local_c = network_obj.get("C_YX")
     local_j = network_obj.get("J_YX")
     inter_area = network_obj.get("inter_area", {})
@@ -1410,21 +1413,57 @@ def _compute_inter_area_kernel_scales(network_obj, populations):
 
     index_by_pop = {str(pop).strip(): idx for idx, pop in enumerate(pop_names)}
     scales = {}
-    for pre in populations:
-        for post in populations:
-            i = index_by_pop.get(str(pre).strip())
-            j = index_by_pop.get(str(post).strip())
-            if i is None or j is None:
-                continue
-            try:
-                local_strength = abs(float(local_c[i][j])) * abs(float(local_j[i][j]))
-                inter_strength = abs(float(inter_c[i][j])) * abs(float(inter_j[i][j]))
-            except (TypeError, ValueError, IndexError, KeyError):
-                continue
-            if local_strength > 0:
-                scales[(str(pre).strip(), str(post).strip())] = inter_strength / local_strength
-            elif inter_strength == 0:
-                scales[(str(pre).strip(), str(post).strip())] = 0.0
+    pop_list = [str(pop).strip() for pop in populations if str(pop).strip()]
+    pop_count = len(pop_names)
+    area_count = len(area_names)
+
+    # Population-level inter-area matrices (shared for all area pairs).
+    try:
+        if len(inter_c) == pop_count and len(inter_j) == pop_count:
+            for pre in pop_list:
+                for post in pop_list:
+                    i = index_by_pop.get(pre)
+                    j = index_by_pop.get(post)
+                    if i is None or j is None:
+                        continue
+                    local_strength = abs(float(local_c[i][j])) * abs(float(local_j[i][j]))
+                    inter_strength = abs(float(inter_c[i][j])) * abs(float(inter_j[i][j]))
+                    if local_strength > 0:
+                        scales[(pre, post)] = inter_strength / local_strength
+                    elif inter_strength == 0:
+                        scales[(pre, post)] = 0.0
+            return scales
+    except (TypeError, ValueError, IndexError, KeyError):
+        pass
+
+    # Full area-population matrices (per source/target area-pop pair).
+    full_size = pop_count * area_count
+    try:
+        if area_count > 0 and len(inter_c) == full_size and len(inter_j) == full_size:
+            for pre_area_idx, pre_area in enumerate(area_names):
+                pre_area_name = str(pre_area).strip()
+                for post_area_idx, post_area in enumerate(area_names):
+                    post_area_name = str(post_area).strip()
+                    if not pre_area_name or not post_area_name:
+                        continue
+                    for pre in pop_list:
+                        for post in pop_list:
+                            i = index_by_pop.get(pre)
+                            j = index_by_pop.get(post)
+                            if i is None or j is None:
+                                continue
+                            src_idx = pre_area_idx * pop_count + i
+                            tgt_idx = post_area_idx * pop_count + j
+                            local_strength = abs(float(local_c[i][j])) * abs(float(local_j[i][j]))
+                            inter_strength = abs(float(inter_c[src_idx][tgt_idx])) * abs(float(inter_j[src_idx][tgt_idx]))
+                            if local_strength > 0:
+                                scales[(pre_area_name, pre, post_area_name, post)] = inter_strength / local_strength
+                            elif inter_strength == 0:
+                                scales[(pre_area_name, pre, post_area_name, post)] = 0.0
+            return scales
+    except (TypeError, ValueError, IndexError, KeyError):
+        pass
+
     return scales
 
 
@@ -1458,7 +1497,10 @@ def _expand_kernels_for_area_combinations(base_kernels, areas, inter_area_scales
             for pre_area_name in area_names:
                 scale = 1.0
                 if post_area_name != pre_area_name:
-                    scale = inter_area_scales.get((pre_pop, post_pop), 1.0)
+                    scale = inter_area_scales.get(
+                        (pre_area_name, pre_pop, post_area_name, post_pop),
+                        inter_area_scales.get((pre_pop, post_pop), 1.0),
+                    )
                 area_key = f"{post_pop}({post_area_name}):{pre_pop}({pre_area_name})"
                 expanded[area_key] = _scale_kernel_payload(kernel_payload, scale)
                 expanded_any = True
@@ -1801,6 +1843,41 @@ def _sum_signal_dict(signal_dict):
         else:
             total = total + arr
     return total
+
+
+def _sum_signal_dict_by_post_area(signal_dict, areas):
+    if not isinstance(signal_dict, dict):
+        return {}
+    normalized_areas = [str(area).strip() for area in (areas or []) if str(area).strip()]
+    if not normalized_areas:
+        return {}
+    by_area = {}
+    for key, value in signal_dict.items():
+        if not isinstance(key, str) or ":" not in key:
+            continue
+        post_label, _ = key.split(":", 1)
+        _, post_area = _parse_population_area_label(post_label)
+        if post_area is None:
+            continue
+        post_area = str(post_area).strip()
+        if post_area not in normalized_areas:
+            continue
+        arr = np.asarray(value)
+        if post_area not in by_area:
+            by_area[post_area] = np.array(arr, copy=True)
+        else:
+            by_area[post_area] = by_area[post_area] + arr
+    return by_area
+
+
+def _looks_like_area_mapping(value, areas):
+    if not isinstance(value, dict):
+        return False
+    normalized_areas = [str(area).strip() for area in (areas or []) if str(area).strip()]
+    if not normalized_areas:
+        return False
+    keyset = {str(k).strip() for k in value.keys()}
+    return any(area in keyset for area in normalized_areas)
 
 
 def _get_param(params, key, default=None):
@@ -3655,6 +3732,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         sim_data = {}
         fr_times = None
         fr_gids = None
+        proxy_network_areas = []
         nu_ext_mode = str(params.get("nu_ext_mode") or "shared").strip().lower()
         if nu_ext_mode not in {"shared", "per-trial"}:
             nu_ext_mode = "shared"
@@ -3719,9 +3797,29 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 )
             return component
 
+        def _coerce_area_list(values):
+            ordered = []
+            seen = set()
+            for value in values or []:
+                area = str(value or "").strip()
+                if not area or area in seen:
+                    continue
+                seen.add(area)
+                ordered.append(area)
+            return ordered
+
         dt_from_stage, dt_path = _load_simulation_dt_ms(file_paths)
         proxy_sim_step = None
         dt_source = None
+        try:
+            network_path = _resolve_proxy_file("network_file", "network.pkl", required=False)
+            if network_path:
+                network_payload = _load_simulation_component_from_path(network_path, "network.pkl")
+                network_trial = _pick_trial_item(network_payload, 0)
+                if isinstance(network_trial, dict):
+                    proxy_network_areas = _coerce_area_list(network_trial.get("areas"))
+        except Exception:
+            proxy_network_areas = []
 
         if method == 'FR':
             _append_job_output(job_status, job_id, "Loading spike times and gids...")
@@ -3853,10 +3951,39 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         potential = ncpi.FieldPotential()
         trial_proxy_payloads = []
         for trial_idx in range(trial_count):
+            area_proxy_signals = {}
             if method == "FR":
                 trial_times = _pick_trial_item(fr_times, trial_idx)
                 trial_gids = _pick_trial_item(fr_gids, trial_idx)
                 trial_sim_data = {"FR": _compute_mean_firing_rate(trial_times, trial_gids, bin_size)}
+                if isinstance(trial_times, dict) and isinstance(trial_gids, dict):
+                    area_keys = [
+                        str(key).strip()
+                        for key, value in trial_times.items()
+                        if isinstance(value, dict) and isinstance(trial_gids.get(key), dict)
+                    ]
+                    area_keys = _coerce_area_list(area_keys)
+                    if len(area_keys) >= 2:
+                        for area_name in area_keys:
+                            area_sim_data = {
+                                "FR": _compute_mean_firing_rate(
+                                    trial_times.get(area_name, {}),
+                                    trial_gids.get(area_name, {}),
+                                    bin_size,
+                                )
+                            }
+                            area_proxy_signals[area_name] = potential.compute_proxy(
+                                method,
+                                area_sim_data,
+                                proxy_sim_step,
+                                excitatory_only=excitatory_only,
+                            )
+                        if area_proxy_signals:
+                            _append_job_output(
+                                job_status,
+                                job_id,
+                                f"Computed area-resolved proxy sums for trial {trial_idx + 1}: {', '.join(area_proxy_signals.keys())}.",
+                            )
             else:
                 trial_sim_data = {
                     key: _pick_trial_item(value, trial_idx)
@@ -3871,16 +3998,76 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                     else:
                         trial_sim_data["nu_ext"] = nu_ext_payload
 
+                candidate_areas = list(proxy_network_areas)
+                for value in trial_sim_data.values():
+                    if isinstance(value, dict):
+                        candidate_areas.extend(str(key).strip() for key in value.keys())
+                area_keys = _coerce_area_list(candidate_areas)
+                if area_keys:
+                    for area_name in area_keys:
+                        area_trial_sim_data = {}
+                        has_area_specific_component = False
+                        for key, value in trial_sim_data.items():
+                            if _looks_like_area_mapping(value, area_keys) and area_name in value:
+                                area_trial_sim_data[key] = value[area_name]
+                                has_area_specific_component = True
+                            else:
+                                area_trial_sim_data[key] = value
+                        if not has_area_specific_component:
+                            continue
+                        area_proxy_signals[area_name] = potential.compute_proxy(
+                            method,
+                            area_trial_sim_data,
+                            proxy_sim_step,
+                            excitatory_only=excitatory_only,
+                        )
+                    if area_proxy_signals:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"Computed area-resolved proxy sums for trial {trial_idx + 1}: {', '.join(area_proxy_signals.keys())}.",
+                        )
+
             proxy = potential.compute_proxy(method, trial_sim_data, proxy_sim_step, excitatory_only=excitatory_only)
+            proxy_area_payload = None
+            proxy_area_raw = None
+            if area_proxy_signals:
+                ordered_area_names = _coerce_area_list(
+                    proxy_network_areas if proxy_network_areas else list(area_proxy_signals.keys())
+                )
+                if not ordered_area_names:
+                    ordered_area_names = _coerce_area_list(list(area_proxy_signals.keys()))
+                proxy_area_payload = {}
+                proxy_area_raw = {}
+                for area_name in ordered_area_names:
+                    if area_name not in area_proxy_signals:
+                        continue
+                    signal = np.asarray(area_proxy_signals[area_name], dtype=float)
+                    proxy_area_payload[area_name] = signal
+                    proxy_area_raw[f"proxy({area_name})"] = signal
+            elif isinstance(proxy, MappingABC):
+                candidate_areas = _coerce_area_list(proxy_network_areas)
+                if not candidate_areas:
+                    for value in trial_sim_data.values():
+                        if isinstance(value, dict):
+                            candidate_areas.extend(str(key).strip() for key in value.keys())
+                    candidate_areas = _coerce_area_list(candidate_areas)
+                area_sum_payload = _sum_signal_dict_by_post_area(proxy, candidate_areas)
+                if area_sum_payload and all(area in area_sum_payload for area in candidate_areas):
+                    proxy_area_payload = area_sum_payload
+                    proxy_area_raw = dict(proxy)
             dt_ms = _safe_float(proxy_sim_step)
             row = {
-                "data": proxy,
+                "data": proxy_area_payload if proxy_area_payload else proxy,
                 "proxy_method": method,
                 "dt_ms": dt_ms,
                 "decimation_factor": 1,
                 "fs_hz": None,
                 "metadata": {"dt_ms": dt_ms, "decimation_factor": 1, "fs_hz": None, "dt_source": dt_source},
             }
+            if proxy_area_raw:
+                row["raw_signals"] = proxy_area_raw
+                row["sum"] = proxy_area_payload
             dt_val = row.get("dt_ms")
             if dt_val is not None and dt_val > 0:
                 fs_hz = 1000.0 / float(dt_val)
@@ -3901,7 +4088,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         trial_proxy_payloads, clipped_length = _clip_trial_dataframe_payloads(
             trial_proxy_payloads,
-            signal_columns=("data",),
+            signal_columns=("data", "raw_signals", "sum"),
         )
         if clipped_length is not None:
             _append_job_output(
@@ -4269,6 +4456,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 component = None
             else:
                 component = int(float(component_val))
+        component_label = "xyz (all)" if component is None else str(component)
+        _append_job_output(job_status, job_id, f"CDM/LFP component selection: {component_label}.")
         mode = params.get("cdm_mode") or "same"
         scale = _parse_float_param(params, "cdm_scale", default=(float(dt) * 1e-3))
         if scale is None or not np.isfinite(scale):
@@ -4285,6 +4474,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         logged_area_aggregated = False
         logged_population_flattened = False
         logged_population_aggregated = False
+        logged_component_shape = False
+        logged_target_area_sum = False
 
         fs_hz = (1000.0 / float(cdm_dt)) if float(cdm_dt) > 0 else None
         fs_hz_after_decimation = (fs_hz / cdm_decimation_factor) if (fs_hz is not None and cdm_decimation_factor > 1) else fs_hz
@@ -4313,7 +4504,11 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 if network_obj is not None:
                     try:
                         network_trial_obj = _pick_trial_item(network_obj, trial_idx)
-                        inter_area_scales = _compute_inter_area_kernel_scales(network_trial_obj, area_populations)
+                        inter_area_scales = _compute_inter_area_kernel_scales(
+                            network_trial_obj,
+                            area_populations,
+                            areas=area_names,
+                        )
                         if inter_area_scales and not logged_scaling_applied:
                             _append_job_output(
                                 job_status,
@@ -4418,8 +4613,31 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 )
                 if cdm_decimation_factor > 1:
                     cdm_signals = _decimate_signal_time(cdm_signals, cdm_decimation_factor)
+                if not logged_component_shape and cdm_signals:
+                    sample_key = next(iter(cdm_signals.keys()))
+                    sample_arr = np.asarray(cdm_signals[sample_key])
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Sample convolved signal shape for '{sample_key}': {tuple(sample_arr.shape)}.",
+                    )
+                    logged_component_shape = True
+                area_sum_payload = {}
+                if area_names:
+                    area_sum_payload = _sum_signal_dict_by_post_area(cdm_signals, area_names)
+                    if area_sum_payload and not all(
+                        str(area).strip() in area_sum_payload for area in area_names
+                    ):
+                        area_sum_payload = {}
+                    if area_sum_payload and not logged_target_area_sum:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "Summed CDM/LFP signals by target area for four-area outputs.",
+                        )
+                        logged_target_area_sum = True
                 row = {
-                    "sum": _sum_signal_dict(cdm_signals),
+                    "sum": area_sum_payload if area_sum_payload else _sum_signal_dict(cdm_signals),
                     "raw_signals": cdm_signals,
                     "probe": probe_name,
                     "dt_ms": float(cdm_dt),

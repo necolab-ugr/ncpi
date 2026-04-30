@@ -134,22 +134,57 @@ class LIF_network(object):
             C_inter = inter.get('C_YX')
             J_inter = inter.get('J_YX')
             delay_inter = inter.get('delay_YX')
+            if C_inter is None or J_inter is None or delay_inter is None:
+                raise ValueError("inter_area must define C_YX, J_YX and delay_YX.")
+            C_inter = np.asarray(C_inter, dtype=float)
+            J_inter = np.asarray(J_inter, dtype=float)
+            delay_inter = np.asarray(delay_inter, dtype=float)
+            if C_inter.ndim != 2 or J_inter.ndim != 2 or delay_inter.ndim != 2:
+                raise ValueError("inter_area matrices must be 2D.")
+            if C_inter.shape != J_inter.shape or C_inter.shape != delay_inter.shape:
+                raise ValueError("inter_area matrices C_YX, J_YX and delay_YX must share the same shape.")
+
+            n_pops = len(pops)
+            n_areas = len(areas)
+            full_size = n_pops * n_areas
+            if C_inter.shape == (n_pops, n_pops):
+                inter_mode = "population"
+            elif C_inter.shape == (full_size, full_size):
+                inter_mode = "area_population"
+            else:
+                raise ValueError(
+                    "Unsupported inter_area matrix shape. Use either "
+                    f"{n_pops}x{n_pops} (population-level) or {full_size}x{full_size} "
+                    "(full area-population connectivity)."
+                )
+
             # Inter-area variability
             weight_cv = 0.10
             delay_cv = 0.30
             min_delay = 1.0
 
-            for pre_area in areas:
-                for post_area in areas:
+            for pre_area_idx, pre_area in enumerate(areas):
+                for post_area_idx, post_area in enumerate(areas):
                     if pre_area == post_area:
                         continue
                     for i, pre in enumerate(pops):
                         for j, post in enumerate(pops):
-                            if C_inter[i][j] <= 0.0 or J_inter[i][j] == 0.0:
+                            if inter_mode == "population":
+                                p_conn = float(C_inter[i][j])
+                                j_weight = float(J_inter[i][j])
+                                j_delay = float(delay_inter[i][j])
+                            else:
+                                src_idx = pre_area_idx * n_pops + i
+                                tgt_idx = post_area_idx * n_pops + j
+                                p_conn = float(C_inter[src_idx][tgt_idx])
+                                j_weight = float(J_inter[src_idx][tgt_idx])
+                                j_delay = float(delay_inter[src_idx][tgt_idx])
+
+                            if p_conn <= 0.0 or j_weight == 0.0:
                                 continue
                             conn_spec = dict(
                                 rule='pairwise_bernoulli',
-                                p=C_inter[i][j],
+                                p=p_conn,
                             )
                             print(
                                 'Connecting %s with %s \n' % (f"{pre_area}_{pre}", f"{post_area}_{post}"),
@@ -160,16 +195,16 @@ class LIF_network(object):
                                 synapse_model='static_synapse',
                                 weight=nest.math.redraw(
                                     nest.random.normal(
-                                        mean=J_inter[i][j],
-                                        std=abs(J_inter[i][j]) * weight_cv,
+                                        mean=j_weight,
+                                        std=abs(j_weight) * weight_cv,
                                     ),
-                                    min=0.0 if J_inter[i][j] >= 0 else -np.inf,
-                                    max=np.inf if J_inter[i][j] >= 0 else 0.0,
+                                    min=0.0 if j_weight >= 0 else -np.inf,
+                                    max=np.inf if j_weight >= 0 else 0.0,
                                 ),
                                 delay=nest.math.redraw(
                                     nest.random.normal(
-                                        mean=delay_inter[i][j],
-                                        std=delay_inter[i][j] * delay_cv,
+                                        mean=j_delay,
+                                        std=j_delay * delay_cv,
                                     ),
                                     min=min_delay,
                                     max=np.inf,

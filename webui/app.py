@@ -245,9 +245,6 @@ FOUR_AREA_DEFAULTS = {
     "nu_ext": 40.0,
     "J_ext": 29.89,
     "model": "iaf_psc_exp",
-    "inter_area_scale": 0.15,
-    "inter_area_p": 0.02,
-    "inter_area_delay": 10.0,
     "inter_area.C_YX": [[0.02, 0.02], [0.0, 0.0]],
     "inter_area.J_YX": [[0.23835, 0.303], [0.0, 0.0]],
     "inter_area.delay_YX": [[10.0, 10.0], [0.0, 0.0]],
@@ -332,9 +329,6 @@ FOUR_AREA_GRID_KEYS = [
     "n_ext",
     "nu_ext",
     "J_ext",
-    "inter_area_scale",
-    "inter_area_p",
-    "inter_area_delay",
     "inter_area.C_YX",
     "inter_area.J_YX",
     "inter_area.delay_YX",
@@ -1215,9 +1209,6 @@ def _simulation_grid_defaults(model_type):
         )
         return defaults
 
-    inter_area_p = FOUR_AREA_DEFAULTS["inter_area_p"]
-    inter_area_scale = FOUR_AREA_DEFAULTS["inter_area_scale"]
-    inter_area_delay = FOUR_AREA_DEFAULTS["inter_area_delay"]
     j_ee = FOUR_AREA_DEFAULTS["J_EE"]
     j_ie = FOUR_AREA_DEFAULTS["J_IE"]
     j_ei = FOUR_AREA_DEFAULTS["J_EI"]
@@ -1244,15 +1235,9 @@ def _simulation_grid_defaults(model_type):
         "n_ext": FOUR_AREA_DEFAULTS["n_ext"],
         "nu_ext": FOUR_AREA_DEFAULTS["nu_ext"],
         "J_ext": FOUR_AREA_DEFAULTS["J_ext"],
-        "inter_area_scale": inter_area_scale,
-        "inter_area_p": inter_area_p,
-        "inter_area_delay": inter_area_delay,
-        "inter_area.C_YX": [[inter_area_p, inter_area_p], [0.0, 0.0]],
-        "inter_area.J_YX": [
-            [j_ee * inter_area_scale, j_ie * inter_area_scale],
-            [0.0, 0.0],
-        ],
-        "inter_area.delay_YX": [[inter_area_delay, inter_area_delay], [0.0, 0.0]],
+        "inter_area.C_YX": FOUR_AREA_DEFAULTS["inter_area.C_YX"],
+        "inter_area.J_YX": FOUR_AREA_DEFAULTS["inter_area.J_YX"],
+        "inter_area.delay_YX": FOUR_AREA_DEFAULTS["inter_area.delay_YX"],
     }
     return defaults
 
@@ -6574,24 +6559,10 @@ def _build_four_area_network_params(form):
     nu_ext = _parse_float(form, "nu_ext", FOUR_AREA_DEFAULTS["nu_ext"])
     J_ext = _parse_float(form, "J_ext", FOUR_AREA_DEFAULTS["J_ext"])
     model = _parse_str(form, "model", FOUR_AREA_DEFAULTS["model"])
-    inter_area_scale = _parse_float(
-        form, "inter_area_scale", FOUR_AREA_DEFAULTS["inter_area_scale"]
-    )
-    inter_area_p = _parse_float(form, "inter_area_p", FOUR_AREA_DEFAULTS["inter_area_p"])
-    inter_area_delay = _parse_float(
-        form, "inter_area_delay", FOUR_AREA_DEFAULTS["inter_area_delay"]
-    )
-
-    inter_area_C = _parse_literal(
-        form, "inter_area.C_YX", [[inter_area_p, inter_area_p], [0.0, 0.0]]
-    )
-    inter_area_J = _parse_literal(
-        form,
-        "inter_area.J_YX",
-        [[J_EE * inter_area_scale, J_IE * inter_area_scale], [0.0, 0.0]],
-    )
+    inter_area_C = _parse_literal(form, "inter_area.C_YX", FOUR_AREA_DEFAULTS["inter_area.C_YX"])
+    inter_area_J = _parse_literal(form, "inter_area.J_YX", FOUR_AREA_DEFAULTS["inter_area.J_YX"])
     inter_area_delay_YX = _parse_literal(
-        form, "inter_area.delay_YX", [[inter_area_delay, inter_area_delay], [0.0, 0.0]]
+        form, "inter_area.delay_YX", FOUR_AREA_DEFAULTS["inter_area.delay_YX"]
     )
 
     _ensure_length(X, "X", 2)
@@ -6604,9 +6575,28 @@ def _build_four_area_network_params(form):
     _ensure_matrix(delay_YX, "delay_YX", 2, 2)
     _ensure_matrix(tau_syn_YX, "tau_syn_YX", 2, 2)
     _ensure_length(n_ext, "n_ext", 2)
-    _ensure_matrix(inter_area_C, "inter_area.C_YX", 2, 2)
-    _ensure_matrix(inter_area_J, "inter_area.J_YX", 2, 2)
-    _ensure_matrix(inter_area_delay_YX, "inter_area.delay_YX", 2, 2)
+    pop_count = len(X)
+    total_nodes = len(areas) * pop_count
+    allowed_shapes = {(pop_count, pop_count), (total_nodes, total_nodes)}
+
+    _ensure_sequence(inter_area_C, "inter_area.C_YX")
+    if len(inter_area_C) == 0:
+        raise ValueError("'inter_area.C_YX' must not be empty.")
+    _ensure_sequence(inter_area_C[0], "inter_area.C_YX[0]")
+    inter_area_shape = (len(inter_area_C), len(inter_area_C[0]))
+    _ensure_matrix(inter_area_C, "inter_area.C_YX", inter_area_shape[0], inter_area_shape[1])
+    _ensure_matrix(inter_area_J, "inter_area.J_YX", inter_area_shape[0], inter_area_shape[1])
+    _ensure_matrix(
+        inter_area_delay_YX,
+        "inter_area.delay_YX",
+        inter_area_shape[0],
+        inter_area_shape[1],
+    )
+    if inter_area_shape not in allowed_shapes:
+        raise ValueError(
+            "'inter_area.C_YX' must be either a population matrix "
+            f"({pop_count}x{pop_count}) or a full area-population matrix ({total_nodes}x{total_nodes})."
+        )
 
     return "\n".join([
         "# Parameters defining a four-area cortical network model in which the Hagen et al. local LIF microcircuit is",
@@ -6619,11 +6609,6 @@ def _build_four_area_network_params(form):
         f"J_IE = {J_IE}",
         f"J_EI = {J_EI}",
         f"J_II = {J_II}",
-        "",
-        "# Inter-area (long-range) excitatory connectivity parameters",
-        f"inter_area_scale = {inter_area_scale}",
-        f"inter_area_p = {inter_area_p}",
-        f"inter_area_delay = {inter_area_delay}",
         "",
         "LIF_params = dict(",
         f"    areas=areas,",
@@ -6641,7 +6626,9 @@ def _build_four_area_network_params(form):
         f"    # The external drives reflects inputs from other brain areas, subcortical structures and background noise",
         f"    J_ext={J_ext},",
         f"    model={_format_value(model)},",
-        f"    # Inter-area excitatory-only connections (E->E and E->I); no inhibitory cortico-cortical connections",
+        f"    # Inter-area connectivity can be specified as either:",
+        f"    # - population-level matrices ({pop_count}x{pop_count}), shared across area pairs, or",
+        f"    # - full area-population matrices ({total_nodes}x{total_nodes}) for complete customization.",
         f"    inter_area=dict(",
         f"        C_YX={_format_value(inter_area_C)},",
         f"        J_YX={_format_value(inter_area_J)},",
