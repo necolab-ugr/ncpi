@@ -6681,12 +6681,19 @@ def _describe_session_modules(session_root):
 def _build_saved_session_entries():
     entries = []
     active_root = os.path.realpath(tmp_paths.TMP_ROOT)
+    current_uid = os.getuid()
     for session_root in tmp_paths.list_session_roots():
         real_root = os.path.realpath(session_root)
         try:
             updated_at = os.path.getmtime(real_root)
+            owner_uid = os.stat(real_root).st_uid
         except OSError:
-            updated_at = 0.0
+            continue
+
+        # Only show session folders whose user is the same that is running flask
+        if owner_uid != current_uid:
+            continue
+            
         entries.append({
             "id": tmp_paths.session_id_from_root(real_root),
             "name": tmp_paths.get_session_display_name(real_root),
