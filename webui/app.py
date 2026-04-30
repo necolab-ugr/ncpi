@@ -160,7 +160,6 @@ SIMULATION_FILE_TO_FIELD = {
 SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
 SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.json", "simulation_grid_metadata.pkl"}
 NATIVE_PATH_PICKER_ENABLED = str(os.environ.get("NCPI_ENABLE_NATIVE_PATH_PICKER", "0")).strip().lower() in {"1", "true", "yes", "on"}
-PATH_HISTORY_CLIENT_ID_SESSION_KEY = "webui_path_history_client_id"
 PATH_HISTORY_STORAGE_DIR = tmp_subdir("ncpi_webui_path_history")
 PATH_HISTORY_MAX_FIELDS = 256
 PATH_HISTORY_MAX_VALUE_LEN = 4096
@@ -644,27 +643,8 @@ def _set_path_history_store(store):
         return
 
 
-def _path_history_client_id():
-    existing = session.get(PATH_HISTORY_CLIENT_ID_SESSION_KEY)
-    if isinstance(existing, str) and existing.strip():
-        return existing.strip()
-    new_id = uuid.uuid4().hex
-    session[PATH_HISTORY_CLIENT_ID_SESSION_KEY] = new_id
-    session.modified = True
-    return new_id
-
-
 def _path_history_storage_path():
-    try:
-        client_id = _path_history_client_id()
-    except Exception:
-        return ""
-    if not client_id:
-        return ""
-    safe_client_id = re.sub(r"[^a-zA-Z0-9_-]", "", client_id)[:64]
-    if not safe_client_id:
-        return ""
-    return os.path.join(PATH_HISTORY_STORAGE_DIR, f"{safe_client_id}.json")
+    return os.path.join(PATH_HISTORY_STORAGE_DIR, "history.json")
 
 
 def _remember_path_history(field_key, value):
