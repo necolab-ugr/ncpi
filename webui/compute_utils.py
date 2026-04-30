@@ -3719,6 +3719,16 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         sim_step = float(sim_step_value) if sim_step_value not in (None, '') else None
         bin_size_value = params.get('bin_size')
         bin_size = float(bin_size_value) if bin_size_value not in (None, '') else 1.0
+        proxy_decimation_factor = _parse_int_param(params, "proxy_decimation_factor", default=1)
+        if proxy_decimation_factor is None or proxy_decimation_factor < 1:
+            raise ValueError("proxy_decimation_factor must be an integer >= 1.")
+        proxy_decimation_factor = int(proxy_decimation_factor)
+        if proxy_decimation_factor > 1:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Applying proxy decimation factor x{proxy_decimation_factor}.",
+            )
 
         excitatory_only_value = params.get('excitatory_only', 'default').lower()
         if excitatory_only_value == 'true':
@@ -4061,20 +4071,26 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 "data": proxy_area_payload if proxy_area_payload else proxy,
                 "proxy_method": method,
                 "dt_ms": dt_ms,
-                "decimation_factor": 1,
+                "decimation_factor": proxy_decimation_factor,
                 "fs_hz": None,
-                "metadata": {"dt_ms": dt_ms, "decimation_factor": 1, "fs_hz": None, "dt_source": dt_source},
+                "metadata": {"dt_ms": dt_ms, "decimation_factor": proxy_decimation_factor, "fs_hz": None, "dt_source": dt_source},
             }
             if proxy_area_raw:
                 row["raw_signals"] = proxy_area_raw
                 row["sum"] = proxy_area_payload
+            if proxy_decimation_factor > 1:
+                row["data"] = _decimate_signal_time(row["data"], proxy_decimation_factor)
+                if "raw_signals" in row:
+                    row["raw_signals"] = _decimate_signal_time(row["raw_signals"], proxy_decimation_factor)
+                if "sum" in row:
+                    row["sum"] = _decimate_signal_time(row["sum"], proxy_decimation_factor)
             dt_val = row.get("dt_ms")
             if dt_val is not None and dt_val > 0:
-                fs_hz = 1000.0 / float(dt_val)
+                fs_hz = 1000.0 / (float(dt_val) * float(proxy_decimation_factor))
                 row["fs_hz"] = fs_hz
                 row["metadata"] = {
                     "dt_ms": float(dt_val),
-                    "decimation_factor": 1,
+                    "decimation_factor": proxy_decimation_factor,
                     "fs_hz": fs_hz,
                     "dt_source": dt_source,
                 }
@@ -4782,38 +4798,143 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             job_status[job_id]["meeg_sensors_total"] = 0
             job_status[job_id]["meeg_sensors_completed"] = 0
 
-        dipole_locations = None
-        dipole_path = file_paths.get("meeg_dipole_file")
-        if dipole_path and os.path.exists(dipole_path):
-            dipole_locations = read_file(dipole_path)
-        else:
-            dipole_text = params.get("meeg_dipole_locations")
-            dipole_locations = _parse_literal_value(dipole_text, None)
+        def _parse_xyz_locations(raw_value, label):
+            parsed = _parse_literal_value(raw_value, None)
+            if parsed is None or parsed == "":
+                return None
+            arr = np.asarray(parsed, dtype=float)
+            if arr.size == 0:
+                return None
+            if arr.ndim == 1:
+                if arr.shape[0] != 3:
+                    raise ValueError(f"{label} must have shape (3,) or (n, 3).")
+                arr = arr.reshape(1, 3)
+            elif arr.ndim == 2:
+                if arr.shape[1] != 3:
+                    raise ValueError(f"{label} must have shape (n, 3).")
+            else:
+                raise ValueError(f"{label} must have shape (3,) or (n, 3).")
+            return np.array(arr, dtype=float, copy=True)
 
-        sensor_locations = None
-        sensor_path = file_paths.get("meeg_sensor_file")
-        if sensor_path and os.path.exists(sensor_path):
-            sensor_locations = read_file(sensor_path)
-        else:
-            sensor_text = params.get("meeg_sensor_locations")
-            sensor_locations = _parse_literal_value(sensor_text, None)
+        dipole_locations = _parse_xyz_locations(params.get("meeg_dipole_locations"), "meeg_dipole_locations")
+        sensor_locations = _parse_xyz_locations(params.get("meeg_sensor_locations"), "meeg_sensor_locations")
 
         model = params.get("meeg_model") or "NYHeadModel"
         model_kwargs = _parse_literal_value(params.get("meeg_model_kwargs"), None)
-        align_to_surface = _parse_bool(params.get("meeg_align_to_surface"), True)
-        auto_1020 = _parse_bool(params.get("meeg_auto_1020"), False)
+        requested_forward_mode = str(params.get("meeg_forward_mode") or "simultaneous_all_dipoles").strip().lower()
+        if requested_forward_mode not in {"simultaneous_all_dipoles", "per_sensor_independent"}:
+            requested_forward_mode = "simultaneous_all_dipoles"
+        align_to_surface = True
+        simulation_model_hint = str(params.get("meeg_simulation_model") or "").strip().lower()
+        is_four_area_simulation = simulation_model_hint == "four_area"
+        required_four_area_order = ("frontal", "parietal", "temporal", "occipital")
+        if is_four_area_simulation and model == "NYHeadModel":
+            raise ValueError("NYHeadModel is not supported for the four-area simulation model.")
+        force_per_sensor_mode = model == "NYHeadModel"
+        use_per_sensor_independent = force_per_sensor_mode or (requested_forward_mode == "per_sensor_independent")
 
         _append_job_output(job_status, job_id, f"Model: {model}")
+        if force_per_sensor_mode:
+            _append_job_output(
+                job_status,
+                job_id,
+                "NYHeadModel uses fixed per-sensor independent forward simulation mode.",
+            )
+        else:
+            _append_job_output(
+                job_status,
+                job_id,
+                "Forward simulation mode: "
+                + ("per-sensor independent" if use_per_sensor_independent else "simultaneous all dipoles"),
+            )
         potential = ncpi.FieldPotential()
         model_kwargs = model_kwargs or {}
         is_meg = model in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}
         trial_payloads = []
         warned_cdm_1d = False
         warned_cdm_2d = False
+        warned_cdm_replicated = False
+
+        def _coerce_area_cdm_entry(value, area_name):
+            arr = np.asarray(value)
+            if arr.ndim == 1:
+                return np.array(arr, copy=True)
+            if arr.ndim == 2:
+                if arr.shape[0] == 3:
+                    return np.array(arr, copy=True)
+                if arr.shape[1] == 3:
+                    return np.array(arr.T, copy=True)
+                if arr.shape[0] == 1:
+                    return np.array(arr[0], copy=True)
+                if arr.shape[1] == 1:
+                    return np.array(arr[:, 0], copy=True)
+            raise ValueError(
+                f"Four-area CDM entry '{area_name}' must be shaped (n_times,) or (3, n_times)."
+            )
+
+        def _extract_four_area_cdm_map(value):
+            if not isinstance(value, MappingABC):
+                return None
+            mapped = {}
+            for area_name in required_four_area_order:
+                for key, entry in value.items():
+                    if str(key).strip().lower() != area_name:
+                        continue
+                    mapped[area_name] = _coerce_area_cdm_entry(entry, area_name)
+                    break
+            if len(mapped) == len(required_four_area_order):
+                return mapped
+            return None
+
+        def _replicate_single_cdm_for_dipoles(cdm_value, n_dipoles):
+            arr = np.asarray(cdm_value)
+            if n_dipoles <= 1:
+                return arr
+            if arr.ndim == 1:
+                return np.repeat(arr[np.newaxis, :], n_dipoles, axis=0)
+            if arr.ndim == 2:
+                if arr.shape[0] == 3 or arr.shape[1] == 3:
+                    base = arr if arr.shape[0] == 3 else arr.T
+                    return np.repeat(base[np.newaxis, :, :], n_dipoles, axis=0)
+                seed = arr[:1, :] if arr.shape[0] > 0 else np.zeros((1, arr.shape[-1]))
+                return np.repeat(seed, n_dipoles, axis=0)
+            if arr.ndim == 3:
+                seed = arr[:1, :, :] if arr.shape[0] > 0 else np.zeros((1, 3, 1))
+                return np.repeat(seed, n_dipoles, axis=0)
+            return arr
+
+        def _dipole_below_sensor(sensor_xyz, model_key, brain_radius=None):
+            sensor = np.asarray(sensor_xyz, dtype=float)
+            norm = float(np.linalg.norm(sensor))
+            if model_key == "FourSphereVolumeConductor":
+                r1 = _safe_float(brain_radius)
+                if r1 is None or r1 <= 0:
+                    r1 = 79000.0
+                if norm <= 0.0:
+                    return np.array([0.0, 0.0, 0.98 * r1], dtype=float)
+                # Strictly inside the brain sphere: |r_dipole| < r1
+                target_norm = min(norm * 0.98, r1 * 0.98)
+                return sensor * (target_norm / norm)
+            if model_key == "SphericallySymmetricVolCondMEG":
+                # Keep dipole strictly inside the sensor radius.
+                if norm > 0.0:
+                    return sensor * 0.98
+                return np.array([0.0, 0.0, 1000.0], dtype=float)
+            if norm > 0.0:
+                return sensor + np.array([0.0, 0.0, -2000.0], dtype=float)
+            return np.array([0.0, 0.0, -2000.0], dtype=float)
 
         for trial_idx, cdm_trial_raw in enumerate(cdm_trials_raw):
             CDM, cdm_meta = _extract_signal_and_meta_from_source(cdm_trial_raw)
-            if isinstance(CDM, dict):
+            trial_four_area_map = _extract_four_area_cdm_map(CDM)
+            if trial_four_area_map is not None:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "Detected four-area CDM dictionary; mapping frontal/parietal/temporal/occipital to dipoles.",
+                )
+                CDM = np.stack([trial_four_area_map[area_name] for area_name in required_four_area_order], axis=0)
+            elif isinstance(CDM, dict):
                 if "sum" in CDM:
                     _append_job_output(job_status, job_id, "CDM input is a dict; using 'sum' entry.")
                     CDM = CDM["sum"]
@@ -4831,6 +4952,26 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         else:
                             total = total + arr
                     CDM = total
+
+            trial_dipole_locations = np.array(dipole_locations, dtype=float, copy=True) if dipole_locations is not None else None
+            trial_sensor_locations = np.array(sensor_locations, dtype=float, copy=True) if sensor_locations is not None else None
+
+            if is_four_area_simulation:
+                if trial_dipole_locations is None:
+                    raise ValueError(
+                        "Four-area model requires dipole locations for frontal, parietal, temporal, occipital."
+                    )
+                if trial_dipole_locations.shape != (4, 3):
+                    raise ValueError(
+                        "Four-area model requires exactly 4 dipole locations with shape (4, 3), "
+                        "ordered as frontal, parietal, temporal, occipital."
+                    )
+                cdm_arr = np.asarray(CDM)
+                if trial_four_area_map is None and not (cdm_arr.ndim == 3 and cdm_arr.shape[0] == 4):
+                    raise ValueError(
+                        "Four-area M/EEG requires area-resolved CDM with 4 entries (frontal, parietal, temporal, occipital)."
+                    )
+
             CDM = np.asarray(CDM)
             if CDM.ndim == 2 and CDM.shape[0] != 3 and CDM.shape[1] == 3:
                 CDM = CDM.T
@@ -4853,23 +4994,35 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     "KernelApproxCurrentDipoleMoment or CurrentDipoleMoment), not a scalar potential."
                 )
 
-            trial_dipole_locations = dipole_locations
-            trial_sensor_locations = sensor_locations
-            if auto_1020 and model == "NYHeadModel":
-                trial_dipole_locations, _ = potential._get_eeg_1020_locations()
-                trial_dipole_locations = np.asarray(trial_dipole_locations, dtype=float)
+            if trial_dipole_locations is not None and trial_dipole_locations.ndim == 1:
+                trial_dipole_locations = trial_dipole_locations.reshape(1, 3)
+            n_dipoles = int(trial_dipole_locations.shape[0]) if trial_dipole_locations is not None else 1
+            if not is_four_area_simulation and n_dipoles > 1:
+                expanded_cdm = _replicate_single_cdm_for_dipoles(CDM, n_dipoles)
+                if not warned_cdm_replicated:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Replicating the same CDM across all configured dipole locations for M/EEG computation.",
+                    )
+                    warned_cdm_replicated = True
+                CDM = expanded_cdm
+
+            if model == "NYHeadModel":
+                trial_sensor_locations = None
+                ny_dipoles, _ = potential._get_eeg_1020_locations()
+                ny_dipoles = np.asarray(ny_dipoles, dtype=float)
+                if ny_dipoles.ndim != 2 or ny_dipoles.shape[1] != 3:
+                    raise ValueError("NYHeadModel auto dipole locations are invalid.")
                 n_dip = 1 if CDM.ndim == 2 else int(CDM.shape[0])
-                if n_dip == 1:
-                    trial_dipole_locations = trial_dipole_locations[0]
+                if n_dip <= 1:
+                    trial_dipole_locations = np.array(ny_dipoles[0], dtype=float, copy=True)
                 else:
-                    if trial_dipole_locations.shape[0] < n_dip:
-                        needed = n_dip - trial_dipole_locations.shape[0]
-                        tail = np.repeat(trial_dipole_locations[-1:], needed, axis=0)
-                        trial_dipole_locations = np.vstack([trial_dipole_locations, tail])
-                    trial_dipole_locations = trial_dipole_locations[:n_dip]
-                trial_sensor_locations = None
-            elif model == "NYHeadModel":
-                trial_sensor_locations = None
+                    if ny_dipoles.shape[0] < n_dip:
+                        needed = n_dip - ny_dipoles.shape[0]
+                        tail = np.repeat(ny_dipoles[-1:].copy(), needed, axis=0)
+                        ny_dipoles = np.vstack([ny_dipoles, tail])
+                    trial_dipole_locations = np.array(ny_dipoles[:n_dip], dtype=float, copy=True)
             else:
                 if trial_sensor_locations is None:
                     if model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
@@ -4881,17 +5034,21 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
 
             if trial_dipole_locations is None:
                 if model == "FourSphereVolumeConductor":
-                    trial_dipole_locations = np.array([0.0, 0.0, 78000.0])
+                    default_loc = np.array([0.0, 0.0, 78000.0], dtype=float)
                 elif model == "SphericallySymmetricVolCondMEG":
-                    trial_dipole_locations = np.array([0.0, 0.0, 90000.0])
+                    default_loc = np.array([0.0, 0.0, 90000.0], dtype=float)
                 else:
-                    trial_dipole_locations = np.zeros(3)
+                    default_loc = np.array([0.0, 0.0, 0.0], dtype=float)
+                if CDM.ndim == 3 and CDM.shape[0] > 1:
+                    trial_dipole_locations = np.repeat(default_loc.reshape(1, 3), int(CDM.shape[0]), axis=0)
+                else:
+                    trial_dipole_locations = default_loc
 
             p_list, loc_list = potential._normalize_cdm_and_locations(CDM, trial_dipole_locations)
 
-            matrices = []
-            p_use_list = []
             n_sensors = 0
+            p_use_list = []
+            matrices = []
             if model == "NYHeadModel":
                 if potential.nyhead is None:
                     nyhead_model = potential._load_eegmegcalc_model("NYHeadModel")
@@ -4905,8 +5062,6 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 if matrices:
                     n_sensors = matrices[0].shape[0]
             else:
-                if trial_sensor_locations is None:
-                    raise ValueError("sensor_locations must be provided for this model.")
                 trial_sensor_locations = np.asarray(trial_sensor_locations, dtype=float)
                 if trial_sensor_locations.ndim == 1:
                     if trial_sensor_locations.shape[0] != 3:
@@ -4914,9 +5069,11 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     trial_sensor_locations = trial_sensor_locations.reshape(1, 3)
                 if trial_sensor_locations.ndim != 2 or trial_sensor_locations.shape[1] != 3:
                     raise ValueError("sensor_locations must have shape (n_sensors, 3).")
+
                 if model == "FourSphereVolumeConductor":
                     FourSphere = potential._load_eegmegcalc_model("FourSphereVolumeConductor")
                     model_obj = FourSphere(trial_sensor_locations, **model_kwargs)
+                    four_sphere_r1 = _safe_float(getattr(model_obj, "r1", None))
                     def get_M(loc):
                         return model_obj.get_transformation_matrix(loc)
                 elif model == "InfiniteVolumeConductor":
@@ -4937,14 +5094,36 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         return model_obj.get_transformation_matrix(loc)
                 else:
                     raise ValueError(f"Unknown model '{model}'.")
+                n_sensors = int(trial_sensor_locations.shape[0])
+                if use_per_sensor_independent:
+                    if len(p_list) == 0:
+                        raise ValueError("No CDM signal available for M/EEG computation.")
+                    if len(p_list) == 1:
+                        p_reference = p_list[0]
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"Collapsing {len(p_list)} dipole CDM entries into one equivalent CDM by summing components for per-sensor simulation.",
+                        )
+                        p_reference = np.sum(np.stack(p_list, axis=0), axis=0)
+                    p_use_list = [p_reference]
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Using per-sensor independent forward simulation: for each sensor, the same CDM is evaluated at a dipole location below that sensor.",
+                    )
+                else:
+                    for p_i, loc_i in zip(p_list, loc_list):
+                        matrices.append(get_M(loc_i))
+                        p_use_list.append(p_i)
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Using simultaneous multi-dipole forward simulation: all dipoles are simulated together across all sensors.",
+                    )
 
-                for p_i, loc_i in zip(p_list, loc_list):
-                    matrices.append(get_M(loc_i))
-                    p_use_list.append(p_i)
-                if matrices:
-                    n_sensors = matrices[0].shape[0]
-
-            if not matrices or n_sensors <= 0:
+            if n_sensors <= 0:
                 raise ValueError("Unable to determine number of sensors/electrodes.")
 
             n_times = p_use_list[0].shape[1]
@@ -4969,16 +5148,41 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             )
             log_every = 1 if n_sensors <= 300 else max(1, n_sensors // 100)
             for idx in range(n_sensors):
-                if is_meg:
-                    acc = np.zeros((3, n_times))
-                    for M, p_i in zip(matrices, p_use_list):
-                        acc = acc + (M[idx] @ p_i)
-                    meeg[idx] = acc
+                if model == "NYHeadModel":
+                    if is_meg:
+                        acc = np.zeros((3, n_times))
+                        for M, p_i in zip(matrices, p_use_list):
+                            acc = acc + (M[idx] @ p_i)
+                        meeg[idx] = acc
+                    else:
+                        acc = np.zeros((n_times,))
+                        for M, p_i in zip(matrices, p_use_list):
+                            acc = acc + (M[idx] @ p_i)
+                        meeg[idx] = acc
                 else:
-                    acc = np.zeros((n_times,))
-                    for M, p_i in zip(matrices, p_use_list):
-                        acc = acc + (M[idx] @ p_i)
-                    meeg[idx] = acc
+                    if use_per_sensor_independent:
+                        loc_sensor = trial_sensor_locations[idx]
+                        loc_dip = _dipole_below_sensor(
+                            loc_sensor,
+                            model,
+                            brain_radius=four_sphere_r1 if model == "FourSphereVolumeConductor" else None,
+                        )
+                        M_local = get_M(loc_dip)
+                        if is_meg:
+                            meeg[idx] = M_local[idx] @ p_use_list[0]
+                        else:
+                            meeg[idx] = M_local[idx] @ p_use_list[0]
+                    else:
+                        if is_meg:
+                            acc = np.zeros((3, n_times))
+                            for M, p_i in zip(matrices, p_use_list):
+                                acc = acc + (M[idx] @ p_i)
+                            meeg[idx] = acc
+                        else:
+                            acc = np.zeros((n_times,))
+                            for M, p_i in zip(matrices, p_use_list):
+                                acc = acc + (M[idx] @ p_i)
+                            meeg[idx] = acc
 
                 if (idx + 1) % log_every == 0 or (idx + 1) == n_sensors:
                     _append_job_output(

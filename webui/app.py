@@ -10649,7 +10649,10 @@ def _pick_trial_value(value, trial_idx):
 
 
 def _to_1d_signal(value):
-    arr = np.asarray(value, dtype=float)
+    try:
+        arr = np.asarray(value, dtype=float)
+    except Exception:
+        return np.asarray([], dtype=float)
     if arr.ndim == 0:
         return np.asarray([float(arr)], dtype=float)
     if arr.ndim == 1:
@@ -10694,6 +10697,78 @@ def _extract_area_from_signal_key(key, areas):
     return None
 
 
+def _extract_post_area_from_kernel_signal_key(key):
+    key_str = str(key or "").strip()
+    if ":" not in key_str:
+        return None
+    post_label, _ = key_str.split(":", 1)
+    post_label = post_label.strip()
+    if post_label.endswith(")") and "(" in post_label:
+        split_idx = post_label.rfind("(")
+        area = post_label[split_idx + 1:-1].strip()
+        if area:
+            return area
+    return None
+
+
+def _effective_dt_ms_from_payload_row(row):
+    def _as_mapping(value):
+        if isinstance(value, MappingABC):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = ast.literal_eval(text)
+            except Exception:
+                return None
+            if isinstance(parsed, MappingABC):
+                return parsed
+        return None
+
+    def _safe_float(value):
+        try:
+            val = float(value)
+        except Exception:
+            return None
+        if not np.isfinite(val):
+            return None
+        return val
+
+    if not isinstance(row, MappingABC):
+        return None
+
+    dt_ms = _safe_float(row.get("dt_ms"))
+    if dt_ms is None:
+        dt_ms = _safe_float(row.get("dt"))
+    decimation = _safe_float(row.get("decimation_factor"))
+    if decimation is None or decimation <= 0:
+        decimation = 1.0
+    fs_hz = _safe_float(row.get("fs_hz"))
+
+    metadata = _as_mapping(row.get("metadata"))
+    if metadata is not None:
+        if dt_ms is None:
+            dt_ms = _safe_float(metadata.get("dt_ms"))
+        if dt_ms is None:
+            dt_ms = _safe_float(metadata.get("dt"))
+        if (decimation is None or decimation <= 0) and metadata.get("decimation_factor") is not None:
+            decimation = _safe_float(metadata.get("decimation_factor"))
+        if fs_hz is None:
+            fs_hz = _safe_float(metadata.get("fs_hz"))
+        if fs_hz is None:
+            fs_hz = _safe_float(metadata.get("fs"))
+
+    if fs_hz is not None and fs_hz > 0:
+        return 1000.0 / fs_hz
+    if dt_ms is None or dt_ms <= 0:
+        return None
+    if decimation is None or decimation <= 0:
+        decimation = 1.0
+    return float(dt_ms) * float(decimation)
+
+
 def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
     obj = _pick_trial_value(payload, trial_idx)
     if obj is None:
@@ -10708,11 +10783,7 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
         if obj.empty:
             return {}, None
         row = obj.iloc[0]
-        if "dt_ms" in row:
-            try:
-                dt_ms = float(row["dt_ms"])
-            except Exception:
-                dt_ms = None
+        dt_ms = _effective_dt_ms_from_payload_row(row)
         raw_signals = row.get("raw_signals") if "raw_signals" in row else None
         sum_signal = row.get("sum") if "sum" in row else None
         data_signal = row.get("data") if "data" in row else None
@@ -10720,57 +10791,109 @@ def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
         raw_signals = obj.get("raw_signals")
         sum_signal = obj.get("sum")
         data_signal = obj.get("data")
-        if obj.get("dt_ms") is not None:
-            try:
-                dt_ms = float(obj.get("dt_ms"))
-            except Exception:
-                dt_ms = None
+        dt_ms = _effective_dt_ms_from_payload_row(obj)
     else:
         sum_signal = obj
 
+    normalized_areas = [str(area).strip() for area in (areas or []) if str(area).strip()]
+
+    def _resolve_area_name(area_name):
+        token = str(area_name or "").strip()
+        if not token:
+            return None
+        lowered = token.lower()
+        for area in normalized_areas:
+            if str(area).strip().lower() == lowered:
+                return str(area).strip()
+        return token
+
+    def _coerce_area_mapping(mapping_obj):
+        if not isinstance(mapping_obj, MappingABC):
+            return {}
+        area_map = {}
+        for key, value in mapping_obj.items():
+            resolved = _resolve_area_name(key)
+            if not resolved:
+                continue
+            signal = _to_1d_signal(value)
+            if signal.size == 0:
+                continue
+            area_map[resolved] = signal
+        return area_map
+
     series_by_area = {}
+    sum_area_payload = {}
+    raw_area_payload = {}
+    if model == "four_area":
+        sum_area_payload = _coerce_area_mapping(sum_signal if isinstance(sum_signal, MappingABC) else data_signal)
     if isinstance(raw_signals, dict) and raw_signals:
         for signal_key, signal_val in raw_signals.items():
             signal = _to_1d_signal(signal_val)
             if signal.size == 0:
                 continue
             if model == "four_area":
-                area = _extract_area_from_signal_key(signal_key, areas)
+                area = _extract_post_area_from_kernel_signal_key(signal_key)
+                if area is None:
+                    area = _extract_area_from_signal_key(signal_key, normalized_areas)
+                area = _resolve_area_name(area)
                 if area is None:
                     continue
+                raw_area_payload[area] = _sum_signals(raw_area_payload.get(area), signal)
             else:
-                area = "global"
-            series_by_area[area] = _sum_signals(series_by_area.get(area), signal)
+                series_by_area["global"] = _sum_signals(series_by_area.get("global"), signal)
+
+    if model == "four_area":
+        if sum_area_payload:
+            series_by_area.update({area: np.array(sig, copy=True) for area, sig in sum_area_payload.items()})
+        for area, signal in raw_area_payload.items():
+            series_by_area[area] = np.array(signal, copy=True)
 
     aggregate_signal = sum_signal if sum_signal is not None else data_signal
     if not series_by_area and aggregate_signal is not None:
-        arr = np.asarray(aggregate_signal, dtype=float)
-        if model == "four_area":
-            if arr.ndim == 2 and arr.shape[0] == len(areas):
-                for i, area in enumerate(areas):
-                    series_by_area[area] = _to_1d_signal(arr[i])
-            elif arr.ndim == 2 and arr.shape[1] == len(areas):
-                for i, area in enumerate(areas):
-                    series_by_area[area] = _to_1d_signal(arr[:, i])
-            elif arr.ndim == 1:
-                # Proxy outputs can be global 1D signals; broadcast to all areas for plotting.
-                for area in areas:
-                    series_by_area[area] = _to_1d_signal(arr)
+        if isinstance(aggregate_signal, MappingABC):
+            if model == "four_area":
+                mapped = _coerce_area_mapping(aggregate_signal)
+                if mapped:
+                    series_by_area.update(mapped)
+            if not series_by_area:
+                total = None
+                for signal_val in aggregate_signal.values():
+                    signal = _to_1d_signal(signal_val)
+                    if signal.size == 0:
+                        continue
+                    total = _sum_signals(total, signal)
+                if total is not None:
+                    series_by_area["global"] = total
         else:
-            series_by_area["global"] = _to_1d_signal(arr)
+            signal = _to_1d_signal(aggregate_signal)
+            if signal.size > 0:
+                if model == "four_area":
+                    arr = np.asarray(signal, dtype=float)
+                    if arr.ndim == 2 and arr.shape[0] == len(normalized_areas):
+                        for i, area in enumerate(normalized_areas):
+                            series_by_area[area] = _to_1d_signal(arr[i])
+                    elif arr.ndim == 2 and arr.shape[1] == len(normalized_areas):
+                        for i, area in enumerate(normalized_areas):
+                            series_by_area[area] = _to_1d_signal(arr[:, i])
+                    elif arr.ndim == 1:
+                        # Proxy outputs can be global 1D signals; broadcast to all areas for plotting.
+                        for area in normalized_areas:
+                            series_by_area[area] = np.array(arr, copy=True)
+                else:
+                    series_by_area["global"] = signal
 
-    if model == "four_area" and areas:
+    if model == "four_area" and normalized_areas:
         # If only a global signal is available, broadcast it across all areas.
         if "global" in series_by_area:
             global_sig = _to_1d_signal(series_by_area["global"])
-            for area in areas:
+            for area in normalized_areas:
                 series_by_area.setdefault(area, np.array(global_sig, copy=True))
             series_by_area.pop("global", None)
 
         # If no explicit area keys were found but there is exactly one signal, reuse it for all areas.
-        if not all(area in series_by_area for area in areas) and len(series_by_area) == 1:
+        if not all(area in series_by_area for area in normalized_areas) and len(series_by_area) == 1:
             only_sig = _to_1d_signal(next(iter(series_by_area.values())))
-            series_by_area = {area: np.array(only_sig, copy=True) for area in areas}
+            series_by_area = {area: np.array(only_sig, copy=True) for area in normalized_areas}
 
     return series_by_area, dt_ms
 
@@ -12693,7 +12816,10 @@ def analysis_plot_simulation():
     selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
     selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
 
-    allowed_types = {"raster", "firing_rates", "cdm", "cdm_psd"}
+    fp_time_types = {"proxy", "cdm", "lfp", "meeg"}
+    fp_psd_types = {"proxy_psd", "cdm_psd", "lfp_psd", "meeg_psd"}
+    fp_plot_types = fp_time_types | fp_psd_types
+    allowed_types = {"raster", "firing_rates"} | fp_plot_types
     if plot_type not in allowed_types:
         return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
 
@@ -12778,47 +12904,73 @@ def analysis_plot_simulation():
     def _infer_field_potential_model(payload):
         return "four_area" if _field_potential_area_names(payload) else "hagen"
 
-    cdm_payload = None
-    cdm_payload_name = ""
-    if plot_type in {"cdm", "cdm_psd"}:
+    loaded_fp_payloads = {}
+    if plot_type in fp_plot_types:
         if not selected_fp_paths:
             return _analysis_plot_error(
                 "Field-potential plots require a computed field-potential output file. Select a field-potential file first.",
                 status=400,
             )
-        loaded_candidates = []
         for path in selected_fp_paths:
             try:
                 with open(path, "rb") as f:
-                    loaded_candidates.append((path, pickle.load(f)))
+                    loaded_fp_payloads[os.path.basename(path).lower()] = {
+                        "path": path,
+                        "payload": pickle.load(f),
+                    }
             except Exception:
                 continue
-        if not loaded_candidates:
+        if not loaded_fp_payloads:
             return _analysis_plot_error(
                 "Unable to load selected field-potential files. Select a valid field-potential output file.",
                 status=400,
             )
 
-        preferred = None
-        for path, payload in loaded_candidates:
-            name = os.path.basename(path).lower()
-            if name == "proxy.pkl":
-                preferred = (path, payload)
-                break
-        if preferred is None:
-            for path, payload in loaded_candidates:
-                name = os.path.basename(path).lower()
-                if name == "cdm.pkl":
-                    preferred = (path, payload)
-                    break
-        if preferred is None:
-            return _analysis_plot_error(
-                "Field-potential plots require proxy.pkl or cdm.pkl. Select one of these files first.",
-                status=400,
-            )
+    proxy_payload = loaded_fp_payloads.get("proxy.pkl", {}).get("payload")
+    proxy_payload_name = os.path.basename(loaded_fp_payloads.get("proxy.pkl", {}).get("path") or "")
+    cdm_payload = loaded_fp_payloads.get("cdm.pkl", {}).get("payload")
+    cdm_payload_name = os.path.basename(loaded_fp_payloads.get("cdm.pkl", {}).get("path") or "")
+    meeg_payload = loaded_fp_payloads.get("meeg.pkl", {}).get("payload")
+    meeg_payload_name = os.path.basename(loaded_fp_payloads.get("meeg.pkl", {}).get("path") or "")
 
-        cdm_payload_name = os.path.basename(preferred[0])
-        cdm_payload = preferred[1]
+    active_fp_payload = None
+    active_fp_payload_name = ""
+    if plot_type in {"proxy", "proxy_psd"}:
+        active_fp_payload = proxy_payload
+        active_fp_payload_name = proxy_payload_name
+    elif plot_type in {"cdm", "cdm_psd", "lfp", "lfp_psd"}:
+        active_fp_payload = cdm_payload
+        active_fp_payload_name = cdm_payload_name
+    elif plot_type in {"meeg", "meeg_psd"}:
+        active_fp_payload = meeg_payload
+        active_fp_payload_name = meeg_payload_name
+
+    if plot_type in fp_plot_types and active_fp_payload is None:
+        required_name = {
+            "proxy": "proxy.pkl",
+            "proxy_psd": "proxy.pkl",
+            "cdm": "cdm.pkl",
+            "cdm_psd": "cdm.pkl",
+            "lfp": "cdm.pkl",
+            "lfp_psd": "cdm.pkl",
+            "meeg": "meeg.pkl",
+            "meeg_psd": "meeg.pkl",
+        }.get(plot_type, "field-potential .pkl")
+        return _analysis_plot_error(
+            f"This plot requires {required_name}. Select that file first.",
+            status=400,
+        )
+
+    if plot_type in {"proxy", "proxy_psd"}:
+        cdm_payload = proxy_payload
+        cdm_payload_name = proxy_payload_name
+
+    if plot_type in {"proxy", "proxy_psd"} and proxy_payload is None:
+        return _analysis_plot_error("Proxy field-potential plots require proxy.pkl.", status=400)
+    if plot_type in {"cdm", "cdm_psd", "lfp", "lfp_psd"} and cdm_payload is None:
+        return _analysis_plot_error("Kernel-based field-potential plots require cdm.pkl.", status=400)
+    if plot_type in {"meeg", "meeg_psd"} and meeg_payload is None:
+        return _analysis_plot_error("EEG/MEG plots require meeg.pkl.", status=400)
 
     sim_data_error = None
     try:
@@ -12826,15 +12978,15 @@ def analysis_plot_simulation():
     except Exception as exc:
         sim_data_error = exc
         sim_data = None
-        if sim_data is None and plot_type not in {"cdm", "cdm_psd"}:
+        if sim_data is None and plot_type not in fp_plot_types:
             return _analysis_plot_error(str(exc), status=400)
 
     if sim_data is not None:
         total_trials = _simulation_trial_count(sim_data)
         model = _simulation_model_type(sim_data)
     else:
-        total_trials = _field_potential_trial_count(cdm_payload)
-        model = _infer_field_potential_model(cdm_payload)
+        total_trials = _field_potential_trial_count(active_fp_payload)
+        model = _infer_field_potential_model(active_fp_payload)
         if total_trials <= 0:
             message = str(sim_data_error) if sim_data_error is not None else "No field-potential trials were detected."
             return _analysis_plot_error(message, status=400)
@@ -12890,8 +13042,8 @@ def analysis_plot_simulation():
     repeat_selection_applies = (
         selected_repeat_index is not None
         and (
-            plot_type in {"raster", "firing_rates", "cdm"}
-            or (plot_type == "cdm_psd" and cdm_psd_mode == "separate")
+            plot_type in {"raster", "firing_rates", "proxy", "cdm", "lfp", "meeg"}
+            or (plot_type in {"proxy_psd", "cdm_psd", "lfp_psd", "meeg_psd"} and cdm_psd_mode == "separate")
         )
     )
     if repeat_selection_applies:
@@ -13003,8 +13155,14 @@ def analysis_plot_simulation():
     required_by_plot = {
         "raster": set(SIMULATION_LEGACY_CORE_FILES),
         "firing_rates": set(SIMULATION_LEGACY_CORE_FILES),
+        "proxy": set(),
+        "proxy_psd": set(),
         "cdm": set(),
         "cdm_psd": set(),
+        "lfp": set(),
+        "lfp_psd": set(),
+        "meeg": set(),
+        "meeg_psd": set(),
     }
     required_files = required_by_plot[plot_type]
     if plot_type in {"raster", "firing_rates"}:
@@ -13028,11 +13186,11 @@ def analysis_plot_simulation():
     def _simulation_plot_source_text():
         if plot_type in {"raster", "firing_rates"}:
             used_files = sorted(selected_sim_files)
-        elif plot_type in {"cdm", "cdm_psd"}:
-            if cdm_payload_name:
-                used_files = [cdm_payload_name]
+        elif plot_type in fp_plot_types:
+            if active_fp_payload_name:
+                used_files = [active_fp_payload_name]
             else:
-                used_files = [os.path.basename(path) for path in selected_fp_paths]
+                used_files = [os.path.basename(path) for path in selected_fp_paths if os.path.basename(path)]
         else:
             used_files = []
         if not used_files:
@@ -13054,8 +13212,8 @@ def analysis_plot_simulation():
 
     import math
     show_repeat_selector = (
-        plot_type in {"raster", "firing_rates", "cdm"}
-        or (plot_type == "cdm_psd" and cdm_psd_mode == "separate")
+        plot_type in {"raster", "firing_rates", "proxy", "cdm", "lfp", "meeg"}
+        or (plot_type in {"proxy_psd", "cdm_psd", "lfp_psd", "meeg_psd"} and cdm_psd_mode == "separate")
     )
     simulation_repeat_controls = None
     repeat_display_note = ""
@@ -13181,7 +13339,385 @@ def analysis_plot_simulation():
             return None, None
         return ref_freqs, np.nanmean(spectra_matrix, axis=0)
 
-    if plot_type == "cdm_psd":
+    def _trial_row_from_payload(payload, trial_idx):
+        obj = _pick_trial_value(payload, trial_idx)
+        if isinstance(obj, pd.DataFrame):
+            if obj.empty:
+                return {}
+            return dict(obj.iloc[0].to_dict())
+        if isinstance(obj, MappingABC):
+            return dict(obj)
+        return {"sum": obj}
+
+    def _safe_dt_ms_from_row(row):
+        return _effective_dt_ms_from_payload_row(row)
+
+    def _to_channels_time(value):
+        arr = np.asarray(value, dtype=float)
+        if arr.ndim == 1:
+            return arr.reshape(1, -1)
+        if arr.ndim == 2:
+            if arr.shape[0] <= arr.shape[1]:
+                return np.array(arr, copy=True)
+            return np.array(arr.T, copy=True)
+        if arr.ndim == 3:
+            # MEG can come as (n_sensors, 3, n_times); reduce vector components to magnitude.
+            if arr.shape[1] == 3:
+                mag = np.linalg.norm(arr, axis=1)
+                return _to_channels_time(mag)
+            if arr.shape[2] == 3:
+                mag = np.linalg.norm(arr, axis=2)
+                return _to_channels_time(mag)
+            return np.array(arr.reshape((-1, arr.shape[-1])), copy=True)
+        return np.array(arr.reshape((1, -1)), copy=True)
+
+    def _sum_channels_time(base, extra):
+        candidate = _to_channels_time(extra)
+        if base is None:
+            return np.array(candidate, copy=True)
+        n_ch = min(base.shape[0], candidate.shape[0])
+        n_t = min(base.shape[1], candidate.shape[1])
+        total = np.array(base[:n_ch, :n_t], copy=True)
+        total += candidate[:n_ch, :n_t]
+        return total
+
+    def _extract_lfp_series_by_area(trial_idx, area_names):
+        row = _trial_row_from_payload(cdm_payload, trial_idx)
+        if not isinstance(row, MappingABC):
+            return {}, None
+        probe_outputs = row.get("probe_outputs")
+        if isinstance(probe_outputs, MappingABC) and "GaussCylinderPotential" in probe_outputs:
+            row = dict(probe_outputs.get("GaussCylinderPotential") or {})
+        elif str(row.get("probe", "")).strip() != "GaussCylinderPotential":
+            return {}, None
+
+        dt_local = _safe_dt_ms_from_row(row)
+        sum_signal = row.get("sum")
+        raw_signals = row.get("raw_signals")
+        data_signal = row.get("data")
+        normalized_areas = [str(a).strip() for a in (area_names or []) if str(a).strip()]
+
+        if model == "four_area":
+            area_map = {}
+            if isinstance(sum_signal, MappingABC):
+                for area_name in normalized_areas:
+                    if area_name in sum_signal:
+                        area_map[area_name] = _to_channels_time(sum_signal[area_name])
+            if not area_map and isinstance(raw_signals, MappingABC):
+                for signal_key, signal_value in raw_signals.items():
+                    post_area = _extract_post_area_from_kernel_signal_key(signal_key)
+                    if post_area is None:
+                        post_area = _extract_area_from_signal_key(signal_key, normalized_areas)
+                    if post_area is None:
+                        continue
+                    resolved = None
+                    for area_name in normalized_areas:
+                        if area_name.lower() == str(post_area).strip().lower():
+                            resolved = area_name
+                            break
+                    if resolved is None:
+                        continue
+                    area_map[resolved] = _sum_channels_time(area_map.get(resolved), signal_value)
+            if not area_map and sum_signal is not None and normalized_areas:
+                shared = _to_channels_time(sum_signal)
+                for area_name in normalized_areas:
+                    area_map[area_name] = np.array(shared, copy=True)
+            if not area_map and data_signal is not None and normalized_areas:
+                shared = _to_channels_time(data_signal)
+                for area_name in normalized_areas:
+                    area_map[area_name] = np.array(shared, copy=True)
+            return area_map, dt_local
+
+        global_sig = None
+        if isinstance(sum_signal, MappingABC):
+            for value in sum_signal.values():
+                global_sig = _sum_channels_time(global_sig, value)
+        elif sum_signal is not None:
+            global_sig = _to_channels_time(sum_signal)
+        elif isinstance(raw_signals, MappingABC):
+            for value in raw_signals.values():
+                global_sig = _sum_channels_time(global_sig, value)
+        elif data_signal is not None:
+            global_sig = _to_channels_time(data_signal)
+        if global_sig is None:
+            return {}, dt_local
+        return {"global": global_sig}, dt_local
+
+    def _extract_meeg_series(trial_idx):
+        row = _trial_row_from_payload(meeg_payload, trial_idx)
+        if not isinstance(row, MappingABC):
+            return {}, None
+        dt_local = _safe_dt_ms_from_row(row)
+        data = row.get("data")
+        if data is None:
+            data = row.get("sum")
+        if data is None:
+            return {}, dt_local
+        try:
+            series = _to_channels_time(data)
+        except Exception:
+            return {}, dt_local
+        return {"global": series}, dt_local
+
+    def _parse_channel_selection(max_channels):
+        tokens = [str(v).strip() for v in request.form.getlist("sim_channel_indices") if str(v).strip()]
+        if not tokens:
+            single_value = str(request.form.get("sim_channel_indices") or "").strip()
+            if single_value:
+                tokens = [single_value]
+        if not tokens or any(tok.lower() in {"all", "*"} for tok in tokens):
+            return list(range(max_channels))
+        channels = []
+        seen_channels = set()
+        for token in tokens:
+            try:
+                idx = int(token)
+            except Exception:
+                continue
+            if idx < 0 or idx >= max_channels or idx in seen_channels:
+                continue
+            seen_channels.add(idx)
+            channels.append(idx)
+        return channels if channels else list(range(max_channels))
+
+    def _channel_controls(channel_count, selected_channels):
+        options = [{"value": "all", "label": "All channels/sensors"}]
+        options.extend(
+            {"value": str(idx), "label": f"Channel/Sensor {idx}"}
+            for idx in range(int(channel_count))
+        )
+        return {
+            "options": options,
+            "selected_values": [str(idx) for idx in selected_channels] if selected_channels else ["all"],
+        }
+
+    def _time_mask_or_full(time_axis, t_start, t_end):
+        axis = np.asarray(time_axis, dtype=float)
+        if axis.size == 0:
+            return np.zeros((0,), dtype=bool)
+        lo = float(min(t_start, t_end))
+        hi = float(max(t_start, t_end))
+        return (axis >= lo) & (axis <= hi)
+
+    if plot_type in {"lfp", "lfp_psd", "meeg", "meeg_psd"}:
+        if plot_type in {"lfp_psd", "meeg_psd"} and cdm_psd_mode != "separate":
+            return _analysis_plot_error(
+                "LFP and EEG/MEG PSD currently support only 'separate' mode.",
+                status=400,
+            )
+
+        if model == "four_area" and plot_type in {"lfp", "lfp_psd"}:
+            area_names = (
+                _simulation_area_names(sim_data, trial_indices[0])
+                if sim_data is not None
+                else _field_potential_area_names(cdm_payload)
+            )
+        else:
+            area_names = []
+
+        first_series_map = {}
+        if trial_indices:
+            if plot_type in {"lfp", "lfp_psd"}:
+                first_series_map, _ = _extract_lfp_series_by_area(trial_indices[0], area_names)
+            else:
+                first_series_map, _ = _extract_meeg_series(trial_indices[0])
+        first_key = area_names[0] if (area_names and area_names[0] in first_series_map) else ("global" if "global" in first_series_map else None)
+        if first_key is None or first_key not in first_series_map:
+            return _analysis_plot_error(
+                "Selected file does not contain the requested multichannel signals.",
+                status=400,
+            )
+        channel_count = int(_to_channels_time(first_series_map[first_key]).shape[0])
+        selected_channels = _parse_channel_selection(channel_count)
+
+        if simulation_repeat_controls is None:
+            preserve_fields = [
+                "sim_plot_type",
+                "sim_trial_start",
+                "sim_trial_end",
+                "sim_time_start",
+                "sim_time_end",
+                "sim_freq_min",
+                "sim_freq_max",
+                "sim_cdm_psd_mode",
+                "sim_welch_nperseg",
+                "sim_welch_noverlap",
+                "sim_welch_nfft",
+            ]
+            hidden_fields = []
+            for field_name in preserve_fields:
+                value = request.form.get(field_name)
+                if value is None:
+                    continue
+                value_text = str(value).strip()
+                if value_text == "":
+                    continue
+                hidden_fields.append((field_name, value_text))
+            if not any(name == "sim_plot_type" for name, _ in hidden_fields):
+                hidden_fields.append(("sim_plot_type", plot_type))
+            simulation_repeat_controls = {
+                "action_url": url_for("analysis_plot_simulation"),
+                "hidden_fields": hidden_fields,
+                "selected_file_keys": selected_keys,
+                "selected_value": "all",
+                "options": [],
+                "hint": "",
+            }
+        simulation_repeat_controls["channel_controls"] = _channel_controls(channel_count, selected_channels)
+
+        if model == "four_area" and plot_type in {"lfp", "lfp_psd"} and area_names:
+            area_cols = min(2, max(1, len(area_names)))
+            area_rows = int(math.ceil(len(area_names) / area_cols))
+            total_rows = len(trial_indices) * area_rows
+            fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.4 * area_cols, 3.5 * total_rows), dpi=160, squeeze=False)
+            plotted_any = False
+            for trial_pos, trial_idx in enumerate(trial_indices):
+                area_map, dt_local = _extract_lfp_series_by_area(trial_idx, area_names)
+                for area_idx, area_name in enumerate(area_names):
+                    grid_row = trial_pos * area_rows + (area_idx // area_cols)
+                    grid_col = area_idx % area_cols
+                    ax = axs[grid_row][grid_col]
+                    sig = area_map.get(area_name)
+                    if sig is None:
+                        ax.axis("off")
+                        continue
+                    sig = _to_channels_time(sig)
+                    dt_sig = float(dt_local) if dt_local is not None else None
+                    if dt_sig is None or dt_sig <= 0:
+                        ax.axis("off")
+                        continue
+                    if plot_type == "lfp":
+                        t_sig = np.arange(sig.shape[1], dtype=float) * dt_sig
+                        mask_t = _time_mask_or_full(t_sig, time_start, time_end)
+                        area_plotted = False
+                        for ch_idx in selected_channels:
+                            if ch_idx >= sig.shape[0]:
+                                continue
+                            if not np.any(mask_t):
+                                continue
+                            ax.plot(t_sig[mask_t], sig[ch_idx, :][mask_t], linewidth=0.9)
+                            area_plotted = True
+                        ax.set_xlabel("t (ms)")
+                        ax.set_ylabel("LFP (a.u.)")
+                        if np.any(mask_t):
+                            ax.set_xlim(float(np.min(t_sig[mask_t])), float(np.max(t_sig[mask_t])))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP"))
+                        plotted_any = plotted_any or area_plotted
+                    else:
+                        fs = 1000.0 / max(dt_sig, 1e-9)
+                        for ch_idx in selected_channels:
+                            if ch_idx >= sig.shape[0]:
+                                continue
+                            if sig.shape[1] < 8:
+                                continue
+                            welch_kwargs = _resolve_welch_kwargs(sig.shape[1], fs)
+                            freqs, psd = ss.welch(sig[ch_idx], fs=fs, **welch_kwargs)
+                            mask_f = (freqs >= freq_min) & (freqs <= freq_max) & np.isfinite(psd)
+                            if np.any(mask_f):
+                                ax.semilogy(freqs[mask_f], psd[mask_f], linewidth=0.9)
+                                plotted_any = True
+                        ax.set_xlabel("f (Hz)")
+                        ax.set_ylabel("PSD (a.u./Hz)")
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP PSD"))
+                        ax.grid(alpha=0.2)
+                for extra_idx in range(len(area_names), area_rows * area_cols):
+                    grid_row = trial_pos * area_rows + (extra_idx // area_cols)
+                    grid_col = extra_idx % area_cols
+                    axs[grid_row][grid_col].axis("off")
+            if not plotted_any:
+                plt.close(fig)
+                return _analysis_plot_error("No valid multichannel LFP values were available for plotting.", status=400)
+            fig.tight_layout()
+        else:
+            n = len(trial_indices)
+            cols = min(3, max(1, n))
+            rows = int(math.ceil(n / cols))
+            fig, axs = plt.subplots(rows, cols, figsize=(5.4 * cols, 3.6 * rows), dpi=160, squeeze=False)
+            flat_ax = axs.ravel()
+            plotted_any = False
+            for pos, trial_idx in enumerate(trial_indices):
+                ax = flat_ax[pos]
+                if plot_type in {"lfp", "lfp_psd"}:
+                    series_map, dt_local = _extract_lfp_series_by_area(trial_idx, [])
+                else:
+                    series_map, dt_local = _extract_meeg_series(trial_idx)
+                sig = series_map.get("global")
+                if sig is None:
+                    ax.axis("off")
+                    continue
+                sig = _to_channels_time(sig)
+                dt_sig = float(dt_local) if dt_local is not None else None
+                if dt_sig is None or dt_sig <= 0:
+                    ax.axis("off")
+                    continue
+                if plot_type in {"lfp", "meeg"}:
+                    t_sig = np.arange(sig.shape[1], dtype=float) * dt_sig
+                    mask_t = _time_mask_or_full(t_sig, time_start, time_end)
+                    trial_plotted = False
+                    for ch_idx in selected_channels:
+                        if ch_idx >= sig.shape[0]:
+                            continue
+                        if not np.any(mask_t):
+                            continue
+                        ax.plot(t_sig[mask_t], sig[ch_idx, :][mask_t], linewidth=0.9)
+                        trial_plotted = True
+                    ax.set_xlabel("t (ms)")
+                    ax.set_ylabel("LFP (a.u.)" if plot_type == "lfp" else "EEG/MEG (a.u.)")
+                    if np.any(mask_t):
+                        ax.set_xlim(float(np.min(t_sig[mask_t])), float(np.max(t_sig[mask_t])))
+                    ax.set_title(_plot_trial_title(trial_idx, "LFP" if plot_type == "lfp" else "EEG/MEG"))
+                    plotted_any = plotted_any or trial_plotted
+                else:
+                    fs = 1000.0 / max(dt_sig, 1e-9)
+                    for ch_idx in selected_channels:
+                        if ch_idx >= sig.shape[0]:
+                            continue
+                        if sig.shape[1] < 8:
+                            continue
+                        welch_kwargs = _resolve_welch_kwargs(sig.shape[1], fs)
+                        freqs, psd = ss.welch(sig[ch_idx], fs=fs, **welch_kwargs)
+                        mask_f = (freqs >= freq_min) & (freqs <= freq_max) & np.isfinite(psd)
+                        if np.any(mask_f):
+                            ax.semilogy(freqs[mask_f], psd[mask_f], linewidth=0.9)
+                            plotted_any = True
+                    ax.set_xlabel("f (Hz)")
+                    ax.set_ylabel("PSD (a.u./Hz)")
+                    ax.set_title(_plot_trial_title(trial_idx, "LFP PSD" if plot_type == "lfp_psd" else "EEG/MEG PSD"))
+                    ax.grid(alpha=0.2)
+            for pos in range(len(trial_indices), len(flat_ax)):
+                flat_ax[pos].axis("off")
+            if not plotted_any:
+                plt.close(fig)
+                return _analysis_plot_error("No valid multichannel signals were available for plotting.", status=400)
+            fig.tight_layout()
+
+        output = io.BytesIO()
+        fig.savefig(output, format="png", dpi=160)
+        plt.close(fig)
+        output.seek(0)
+        label = {
+            "lfp": "LFP",
+            "lfp_psd": "LFP power spectra",
+            "meeg": "EEG/MEG",
+            "meeg_psd": "EEG/MEG power spectra",
+        }.get(plot_type, plot_type)
+        subtitle = (
+            f"{label}. Model: {model}. Trials {range_start} to {range_end} "
+            f"({(time_start if plot_type in {'lfp', 'meeg'} else freq_min):g}-"
+            f"{(time_end if plot_type in {'lfp', 'meeg'} else freq_max):g} "
+            f"{'ms' if plot_type in {'lfp', 'meeg'} else 'Hz'})."
+            f"{repeat_display_note}{_simulation_plot_source_text()}"
+        )
+        return _render_analysis_plot(
+            title="Simulation outputs",
+            subtitle=subtitle,
+            image_bytes=output.getvalue(),
+            log_output="",
+            simulation_repeat_controls=simulation_repeat_controls,
+        )
+
+    if plot_type in {"proxy_psd", "cdm_psd"}:
+        psd_signal_label = "Field potential (proxy)" if plot_type == "proxy_psd" else "CDM"
         welch_used = None
         configuration_groups = []
         if cdm_psd_mode == "average_by_configuration":
@@ -13256,7 +13792,7 @@ def analysis_plot_simulation():
                 ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
                 ax.set_xlabel("f (Hz)")
                 ax.set_ylabel("PSD (a.u./Hz)")
-                ax.set_title("Mean field-potential power spectrum")
+                ax.set_title(f"Mean {psd_signal_label} power spectrum")
                 ax.grid(alpha=0.2)
                 fig.tight_layout()
             welch_text = welch_used or _fallback_welch_text() or {
@@ -13265,7 +13801,7 @@ def analysis_plot_simulation():
                 "nfft": "auto",
             }
             subtitle = (
-                f"Field-potential power spectra averaged across {len(trial_indices)} selected trial(s). "
+                f"{psd_signal_label} power spectra averaged across {len(trial_indices)} selected trial(s). "
                 f"Model: {model}. Trials {range_start} to {range_end} "
                 f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
@@ -13362,7 +13898,7 @@ def analysis_plot_simulation():
                 "nfft": "auto",
             }
             subtitle = (
-                f"Field-potential power spectra averaged within each configuration across repetitions/trials. "
+                f"{psd_signal_label} power spectra averaged within each configuration across repetitions/trials. "
                 f"Model: {model}. {len(configuration_groups)} configuration(s) from trials {range_start} to {range_end} "
                 f"({freq_min:g}-{freq_max:g} Hz).{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
@@ -13444,7 +13980,7 @@ def analysis_plot_simulation():
                 "nfft": "auto",
             }
             subtitle = (
-                f"Field-potential power spectra plotted separately for {len(trial_indices)} selected trial(s). "
+                f"{psd_signal_label} power spectra plotted separately for {len(trial_indices)} selected trial(s). "
                 f"Model: {model}. Trials {range_start} to {range_end} "
                 f"({freq_min:g}-{freq_max:g} Hz).{repeat_display_note}{_simulation_plot_source_text()} "
                 f"Welch: nperseg={welch_text.get('nperseg')}, "
@@ -13464,6 +14000,7 @@ def analysis_plot_simulation():
             area_rows = int(math.ceil(len(areas) / area_cols))
             total_rows = len(trial_indices) * area_rows
             fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.0 * area_cols, 3.3 * total_rows), dpi=160, squeeze=False)
+            plotted_any = False
             for trial_pos, trial_idx in enumerate(trial_indices):
                 if sim_data is not None:
                     trial = _simulation_trial_data(sim_data, trial_idx)
@@ -13481,7 +14018,7 @@ def analysis_plot_simulation():
 
                 area_series = None
                 dt_fp = None
-                if plot_type == "cdm":
+                if plot_type in {"proxy", "cdm"}:
                     area_series, dt_fp = _field_potential_payload_to_area_series(
                         cdm_payload,
                         model,
@@ -13566,29 +14103,41 @@ def analysis_plot_simulation():
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
-                    elif plot_type == "cdm":
+                    elif plot_type in {"proxy", "cdm"}:
                         cdm = np.asarray(area_series[area_name], dtype=float)
                         dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
                         if dt_local is None:
                             continue
                         t_cdm = np.arange(cdm.size, dtype=float) * dt_local
-                        mask_t = (t_cdm >= time_start) & (t_cdm <= time_end)
+                        mask_t = _time_mask_or_full(t_cdm, time_start, time_end)
+                        if not np.any(mask_t):
+                            continue
                         ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                         ax.set_ylabel("Field potential (a.u.)")
                         ax.set_xlabel("t (ms)")
-                        ax.set_xlim(time_start, time_end)
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} field potential"))
+                        ax.set_xlim(float(np.min(t_cdm[mask_t])), float(np.max(t_cdm[mask_t])))
+                        suffix = "field potential" if plot_type == "proxy" else "CDM"
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} {suffix}"))
+                        plotted_any = True
                 # Hide unused cells in this trial's area grid block.
                 for extra_idx in range(len(areas), area_rows * area_cols):
                     grid_row = trial_pos * area_rows + (extra_idx // area_cols)
                     grid_col = extra_idx % area_cols
                     axs[grid_row][grid_col].axis("off")
+            if plot_type in {"proxy", "cdm"} and not plotted_any:
+                plt.close(fig)
+                return _analysis_plot_error(
+                    "No CDM/field-potential samples were found in the requested time window. "
+                    "Adjust Time start/end or verify dt/tstop in the selected file.",
+                    status=400,
+                )
         else:
             n = len(trial_indices)
             cols = min(3, n)
             rows = int(math.ceil(n / cols))
             fig, axs = plt.subplots(rows, cols, figsize=(5.2 * cols, 3.4 * rows), dpi=160, squeeze=False)
             flat_ax = axs.ravel()
+            plotted_any = False
             for pos, trial_idx in enumerate(trial_indices):
                 ax = flat_ax[pos]
                 if sim_data is not None:
@@ -13661,7 +14210,7 @@ def analysis_plot_simulation():
                         ax.legend(fontsize=7, loc="best")
                     ax.set_xlim(time_start, time_end)
 
-                elif plot_type == "cdm":
+                elif plot_type in {"proxy", "cdm"}:
                     series_by_area, dt_fp = _field_potential_payload_to_area_series(
                         cdm_payload,
                         model,
@@ -13675,21 +14224,33 @@ def analysis_plot_simulation():
                     if dt_local is None:
                         continue
                     t_cdm = np.arange(cdm.size, dtype=float) * dt_local
-                    mask_t = (t_cdm >= time_start) & (t_cdm <= time_end)
+                    mask_t = _time_mask_or_full(t_cdm, time_start, time_end)
+                    if not np.any(mask_t):
+                        continue
                     ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                     ax.set_ylabel("Field potential (a.u.)")
                     ax.set_xlabel("t (ms)")
-                    ax.set_title(_plot_trial_title(trial_idx, "field potential"))
-                    ax.set_xlim(time_start, time_end)
+                    suffix = "field potential" if plot_type == "proxy" else "CDM"
+                    ax.set_title(_plot_trial_title(trial_idx, suffix))
+                    ax.set_xlim(float(np.min(t_cdm[mask_t])), float(np.max(t_cdm[mask_t])))
+                    plotted_any = True
 
             for pos in range(len(trial_indices), len(flat_ax)):
                 flat_ax[pos].axis("off")
+            if plot_type in {"proxy", "cdm"} and not plotted_any:
+                plt.close(fig)
+                return _analysis_plot_error(
+                    "No CDM/field-potential samples were found in the requested time window. "
+                    "Adjust Time start/end or verify dt/tstop in the selected file.",
+                    status=400,
+                )
 
         fig.tight_layout()
         pretty_name = {
             "raster": "Raster plots",
             "firing_rates": "Firing rates",
-            "cdm": "Field potential",
+            "proxy": "Field potential (proxy)",
+            "cdm": "CDM",
         }.get(plot_type, plot_type)
         source_info = _simulation_plot_source_text()
         subtitle = (
@@ -14984,8 +15545,6 @@ def start_computation_redirect(computation_type):
                 redirect_target = "field_potential_meeg"
                 server_file_keys = [
                     "meeg_cdm_file",
-                    "meeg_dipole_file",
-                    "meeg_sensor_file",
                 ]
             for file_key in server_file_keys:
                 source_mode = (request.form.get(f"{file_key}_source_mode") or "upload").strip().lower()

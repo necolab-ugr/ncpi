@@ -154,13 +154,17 @@
                                     </tbody>
                                 </table>
                             </div>
-                            <p class="text-[11px] text-amber-700 dark:text-amber-300"
-                            x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details_sampled">
-                                Field details are based on the first sample examined when the result contains sample collections.
+                            <p class="text-[11px] text-red-700 dark:text-red-300"
+                            x-show="item.inspection && item.inspection.field_details_sampled">
+                                Truncated preview: field details are based on sampled items only (not the full dataset structure).
                             </p>
-                            <p class="text-[11px] text-amber-700 dark:text-amber-300"
-                            x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 120"
-                            x-text="'Showing first 120 fields out of ' + item.inspection.field_details.length + '.'"></p>
+                            <p class="text-[11px] text-red-700 dark:text-red-300"
+                            x-show="item.inspection && item.inspection.top_level_detail && String(item.inspection.top_level_detail).toLowerCase().includes('sample keys')">
+                                Truncated preview: top-level key list is sampled (only a subset of keys is shown in the summary).
+                            </p>
+                            <p class="text-[11px] text-red-700 dark:text-red-300"
+                            x-show="item.inspection && item.inspection.field_details && item.inspection.field_details.length > 120"
+                            x-text="'Truncated preview: showing first 120 fields out of ' + item.inspection.field_details.length + '.'"></p>
                         </div>
                     </template>
                 </div>
@@ -376,7 +380,7 @@ document.addEventListener('alpine:init', () => {
                 .then(response => response.json())
                 .then(data => {
                     this.status = data.status || 'in_progress';
-                    this.progress = data.progress;
+                    this.progress = Number(data.progress || 0);
                     this.output = data.output || "";
                     this.cancelRequested = !!data.cancel_requested || this.status === 'cancelled';
                     this.simulationTotal = Number(data.simulation_total || 0);
@@ -385,6 +389,18 @@ document.addEventListener('alpine:init', () => {
                     this.meegTrialIndex = Number(data.meeg_trial_index || 0);
                     this.meegSensorsTotal = Number(data.meeg_sensors_total || 0);
                     this.meegSensorsCompleted = Number(data.meeg_sensors_completed || 0);
+                    if (
+                        this.computationType === 'field_potential_meeg'
+                        && this.status === 'in_progress'
+                        && this.meegSensorsTotal > 0
+                    ) {
+                        const trialTotal = Math.max(1, this.meegTrialTotal || 1);
+                        const trialIndex = Math.max(1, this.meegTrialIndex || 1);
+                        const sensorFrac = Math.max(0, Math.min(1, this.meegSensorsCompleted / Math.max(1, this.meegSensorsTotal)));
+                        const globalFrac = (Math.max(0, trialIndex - 1) + sensorFrac) / trialTotal;
+                        const sensorProgress = Math.max(0, Math.min(99, Math.round(globalFrac * 100)));
+                        this.progress = Math.max(Number(this.progress || 0), sensorProgress);
+                    }
                     this.$nextTick(() => {
                         if (this.$refs.log) {
                             this.$refs.log.scrollTop = this.$refs.log.scrollHeight;

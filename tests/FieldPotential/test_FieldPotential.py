@@ -436,3 +436,68 @@ def test_compute_cdm_lfp_from_kernels_matches_manual_convolution():
         mode="same",
     )
     np.testing.assert_allclose(result["E:E"], expected)
+
+
+def test_compute_cdm_lfp_from_kernels_keeps_all_channels_for_scalar_probe():
+    fp = FieldPotential()
+    kernels = {
+        "E:E": {
+            "GaussCylinderPotential": np.array([
+                [1.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0],
+            ])
+        }
+    }
+    spike_times = {"E": np.array([1.0, 2.0, 2.0])}
+    dt = 1.0
+    tstop = 5.0
+    bins = np.arange(0.0, tstop + dt, dt)
+    counts, _ = np.histogram(spike_times["E"], bins=bins)
+    rate = counts / (dt / 1000.0)
+
+    result = fp.compute_cdm_lfp_from_kernels(
+        kernels,
+        spike_times,
+        dt=dt,
+        tstop=tstop,
+        probe="GaussCylinderPotential",
+        component=2,  # Should be ignored for scalar multi-channel probes.
+        mode="same",
+    )
+
+    expected = np.vstack([
+        np.convolve(rate, kernels["E:E"]["GaussCylinderPotential"][0], mode="same"),
+        np.convolve(rate, kernels["E:E"]["GaussCylinderPotential"][1], mode="same"),
+    ])
+    np.testing.assert_allclose(result["E:E"], expected)
+
+
+def test_compute_cdm_lfp_from_kernels_selects_component_for_dipole_probe():
+    fp = FieldPotential()
+    kernels = {
+        "E:E": {
+            "KernelApproxCurrentDipoleMoment": np.array([
+                [0.5, 0.0, 0.0],  # x
+                [0.0, 0.5, 0.0],  # y
+                [0.0, 0.0, 0.5],  # z
+            ])
+        }
+    }
+    spike_times = {"E": np.array([1.0, 2.0, 2.0])}
+    dt = 1.0
+    tstop = 5.0
+    bins = np.arange(0.0, tstop + dt, dt)
+    counts, _ = np.histogram(spike_times["E"], bins=bins)
+    rate = counts / (dt / 1000.0)
+
+    result = fp.compute_cdm_lfp_from_kernels(
+        kernels,
+        spike_times,
+        dt=dt,
+        tstop=tstop,
+        probe="KernelApproxCurrentDipoleMoment",
+        component=2,
+        mode="same",
+    )
+    expected = np.convolve(rate, kernels["E:E"]["KernelApproxCurrentDipoleMoment"][2], mode="same")
+    np.testing.assert_allclose(result["E:E"], expected)

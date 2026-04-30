@@ -431,6 +431,31 @@
                     item && typeof item.key === 'string' && item.key.startsWith('field_potential::')
                 );
             },
+            hasSelectedFieldPotentialFileName(fileName) {
+                const target = String(fileName || '').trim().toLowerCase();
+                if (!target) return false;
+                return this.selectedSimulationFiles.some((item) => {
+                    const name = String(item && item.name ? item.name : '').split('/').pop().toLowerCase();
+                    return name === target;
+                });
+            },
+            isFieldPotentialPlotType(type = null) {
+                const token = String(type || this.simPlotType || '').trim().toLowerCase();
+                return ['proxy', 'proxy_psd', 'cdm', 'cdm_psd', 'lfp', 'lfp_psd', 'meeg', 'meeg_psd'].includes(token);
+            },
+            isFieldPotentialPsdPlotType(type = null) {
+                const token = String(type || this.simPlotType || '').trim().toLowerCase();
+                return ['proxy_psd', 'cdm_psd', 'lfp_psd', 'meeg_psd'].includes(token);
+            },
+            canPlotProxyOutputs() {
+                return this.hasSelectedFieldPotentialFileName('proxy.pkl');
+            },
+            canPlotKernelOutputs() {
+                return this.hasSelectedFieldPotentialFileName('cdm.pkl');
+            },
+            canPlotMeegOutputs() {
+                return this.hasSelectedFieldPotentialFileName('meeg.pkl');
+            },
             hasSelectedSimulationMetadataFile() {
                 return this.selectedSimulationFiles.some((item) => {
                     const name = String(item && item.name ? item.name : '').split('/').pop().toLowerCase();
@@ -444,7 +469,7 @@
                 return this.isSimulationSelectionActive();
             },
             isCurrentSimulationPlotTypeAvailable() {
-                if (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd') {
+                if (this.isFieldPotentialPlotType()) {
                     return this.canPlotFieldPotentialOutputs();
                 }
                 return this.isFullSimulation;
@@ -482,8 +507,8 @@
                     }
                     this.simulationModel = data.simulation_model || this.simulationModel;
                     this.simulationWelchDefaults = data.simulation_welch_defaults || null;
-                    if (!this.isFullSimulation && this.hasSelectedFieldPotentialFile() && this.simPlotType !== 'cdm' && this.simPlotType !== 'cdm_psd') {
-                        this.simPlotType = 'cdm';
+                    if (!this.isFullSimulation && this.hasSelectedFieldPotentialFile() && !this.isFieldPotentialPlotType()) {
+                        this.simPlotType = this.canPlotKernelOutputs() ? 'cdm' : (this.canPlotProxyOutputs() ? 'proxy' : this.simPlotType);
                     }
                     this.hasExistingData = false;
                     this.existingDataFiles = [];
@@ -571,7 +596,7 @@
                         delete this.uploads['simulation-upload'];
                     }
                 }
-                if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                if (!this.hasSelectedFieldPotentialFile() && this.isFieldPotentialPlotType()) {
                     this.simPlotType = 'raster';
                 }
                 await this.syncSelectedSimulationFilesOnServer();
@@ -879,10 +904,10 @@
                 this.simulationModel = data.simulation_model || this.simulationModel;
                 this.simulationWelchDefaults = data.simulation_welch_defaults || null;
 
-                if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                if (!this.hasSelectedFieldPotentialFile() && this.isFieldPotentialPlotType()) {
                     this.simPlotType = 'raster';
-                } else if (!this.isFullSimulation && this.canPlotFieldPotentialOutputs() && this.simPlotType !== 'cdm' && this.simPlotType !== 'cdm_psd') {
-                    this.simPlotType = 'cdm';
+                } else if (!this.isFullSimulation && this.canPlotFieldPotentialOutputs() && !this.isFieldPotentialPlotType()) {
+                    this.simPlotType = this.canPlotKernelOutputs() ? 'cdm' : (this.canPlotProxyOutputs() ? 'proxy' : this.simPlotType);
                 }
 
                 const uploadLabel = this.selectedSimulationFiles.length === 1
@@ -1160,7 +1185,7 @@
                 this.simulationModel = data.simulation_model || this.simulationModel;
                 this.simulationWelchDefaults = data.simulation_welch_defaults || null;
 
-                if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                if (!this.hasSelectedFieldPotentialFile() && this.isFieldPotentialPlotType()) {
                     this.simPlotType = 'raster';
                 }
 
@@ -1315,7 +1340,7 @@
                         label: entry.label || 'Simulation'
                     });
                 }
-                if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                if (!this.hasSelectedFieldPotentialFile() && this.isFieldPotentialPlotType()) {
                     this.simPlotType = 'raster';
                 }
                 this.queueDetectedSimulationSelectionSync();
@@ -1341,7 +1366,7 @@
                     source: entry.source || 'simulation',
                     label: entry.label || 'Simulation'
                 }));
-                if (!this.hasSelectedFieldPotentialFile() && (this.simPlotType === 'cdm' || this.simPlotType === 'cdm_psd')) {
+                if (!this.hasSelectedFieldPotentialFile() && this.isFieldPotentialPlotType()) {
                     this.simPlotType = 'raster';
                 }
                 this.queueDetectedSimulationSelectionSync();
@@ -2029,7 +2054,7 @@
                         class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700">
                         <h2 class="text-xl font-semibold text-slate-900 dark:text-white">Simulation outputs</h2>
                         <p class="mt-2 text-sm text-slate-600 dark:text-slate-400">
-                            Plot raster spikes, firing rates, field potentials, or power spectra of field potentials.
+                            Plot raster spikes, firing rates, proxy field potentials, CDM, LFP, EEG/MEG, and their power spectra.
                         </p>
 
                         <div x-show="!isFullSimulation || !hasSelectedFieldPotentialFile()" class="mt-4 rounded-md border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-900/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
@@ -2050,8 +2075,14 @@
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm">
                                     <option value="raster" :disabled="!isFullSimulation">Raster plot of spikes</option>
                                     <option value="firing_rates" :disabled="!isFullSimulation">Firing rates</option>
-                                    <option value="cdm" :disabled="!canPlotFieldPotentialOutputs()">Field potential</option>
-                                    <option value="cdm_psd" :disabled="!canPlotFieldPotentialOutputs()">Power spectra of field potentials</option>
+                                    <option value="proxy" :disabled="!canPlotProxyOutputs()">Field potential (proxy)</option>
+                                    <option value="proxy_psd" :disabled="!canPlotProxyOutputs()">Power spectra of field potential (proxy)</option>
+                                    <option value="cdm" :disabled="!canPlotKernelOutputs()">CDM (KernelApproxCurrentDipoleMoment / CurrentDipoleMoment)</option>
+                                    <option value="cdm_psd" :disabled="!canPlotKernelOutputs()">Power spectra of CDM</option>
+                                    <option value="lfp" :disabled="!canPlotKernelOutputs()">LFP (GaussCylinderPotential)</option>
+                                    <option value="lfp_psd" :disabled="!canPlotKernelOutputs()">Power spectra of LFP (GaussCylinderPotential)</option>
+                                    <option value="meeg" :disabled="!canPlotMeegOutputs()">EEG/MEG</option>
+                                    <option value="meeg_psd" :disabled="!canPlotMeegOutputs()">Power spectra of EEG/MEG</option>
                                 </select>
                             </div>
                             <div class="sm:col-span-3">
@@ -2070,27 +2101,27 @@
                                 <input id="sim-trial-end" name="sim_trial_end" type="number" min="0" step="1" x-model="simTrialEnd"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-3" x-show="simPlotType !== 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-3" x-show="!isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-time-start">Time start (ms)</label>
                                 <input id="sim-time-start" name="sim_time_start" type="number" step="any" x-model="simTimeStart"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-3" x-show="simPlotType !== 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-3" x-show="!isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-time-end">Time end (ms)</label>
                                 <input id="sim-time-end" name="sim_time_end" type="number" step="any" x-model="simTimeEnd"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-3" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-3" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-freq-min">Frequency min (Hz)</label>
                                 <input id="sim-freq-min" name="sim_freq_min" type="number" step="any" x-model="simFreqMin"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-3" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-3" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-freq-max">Frequency max (Hz)</label>
                                 <input id="sim-freq-max" name="sim_freq_max" type="number" step="any" x-model="simFreqMax"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-6" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-6" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-cdm-psd-mode">PSD mode</label>
                                 <select id="sim-cdm-psd-mode" name="sim_cdm_psd_mode" x-model="simCdmPsdMode"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm">
@@ -2102,25 +2133,25 @@
                                     Separate matches the trial-by-trial layout used by spikes and field-potential plots. Average computes one Welch PSD per selected trial and then averages those spectra across all selected trials, repetitions, and configurations. Average repetitions within each configuration computes one PSD per trial, averages those PSDs inside each configuration, and plots one curve/panel per configuration.
                                 </p>
                             </div>
-                            <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-2" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-welch-nperseg">Welch nperseg</label>
                                 <input id="sim-welch-nperseg" name="sim_welch_nperseg" type="number" min="1" step="1" x-model="simWelchNperseg"
                                     :placeholder="simulationWelchDefaults ? simulationWelchDefaults.nperseg : ''"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-2" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-welch-noverlap">Welch noverlap</label>
                                 <input id="sim-welch-noverlap" name="sim_welch_noverlap" type="number" min="0" step="1" x-model="simWelchNoverlap"
                                     :placeholder="simulationWelchDefaults ? simulationWelchDefaults.noverlap : ''"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-2" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-2" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <label class="block text-sm font-medium text-slate-900 dark:text-slate-300" for="sim-welch-nfft">Welch nfft</label>
                                 <input id="sim-welch-nfft" name="sim_welch_nfft" type="number" min="1" step="1" x-model="simWelchNfft"
                                     :placeholder="simulationWelchDefaults ? simulationWelchDefaults.nfft : ''"
                                     class="mt-2 block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm" />
                             </div>
-                            <div class="sm:col-span-6" x-show="simPlotType === 'cdm_psd'" x-cloak>
+                            <div class="sm:col-span-6" x-show="isFieldPotentialPsdPlotType()" x-cloak>
                                 <p class="text-xs text-slate-500 dark:text-slate-400" x-show="simulationWelchDefaults">
                                     Default Welch values (if fields are left empty): nperseg=<span class="font-semibold" x-text="simulationWelchDefaults.nperseg"></span>,
                                     noverlap=<span class="font-semibold" x-text="simulationWelchDefaults.noverlap ?? 'None'"></span>,

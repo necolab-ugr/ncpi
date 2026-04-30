@@ -56,6 +56,12 @@
                         class="form-input w-full h-12 rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary"
                         step="0.0001" type="number" value="0.0625" name="sim_step" />
                 </div>
+                <div class="flex flex-col gap-2">
+                    <label class="text-sm font-bold">Proxy Decimation Factor</label>
+                    <input
+                        class="form-input w-full h-12 rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary"
+                        min="1" step="1" type="number" value="1" name="proxy_decimation_factor" />
+                </div>
                 <div id="frBinSizeContainer" class="flex flex-col gap-2">
                     <label class="text-sm font-bold">Firing Rate Bin Size (ms)</label>
                     <input

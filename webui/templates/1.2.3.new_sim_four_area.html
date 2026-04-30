@@ -144,56 +144,28 @@
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                     <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            <i>J</i><sub><i>E</i><sub><i>E</i></sub></sub> (pA)</span>
-                        <input
-                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                            type="number" step="any" data-param="J_EE"/>
-                    </label>
-                    <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            <i>J</i><sub><i>I</i><sub><i>E</i></sub></sub> (pA)</span>
-                        <input
-                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                            type="number" step="any" data-param="J_IE"/>
-                    </label>
-                    <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            <i>J</i><sub><i>E</i><sub><i>I</i></sub></sub> (pA)</span>
-                        <input
-                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                            type="number" step="any" data-param="J_EI"/>
-                    </label>
-                    <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
-                            <i>J</i><sub><i>I</i><sub><i>I</i></sub></sub> (pA)</span>
-                        <input
-                            class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                            type="number" step="any" data-param="J_II"/>
-                    </label>
-                    <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local connection
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Connection
                             probability matrix <i>C</i><sub><i>Y</i><i>X</i></sub></span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="C_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local weight
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic weight
                             matrix <i>J</i><sub><i>Y</i><i>X</i></sub> (nA)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="J_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local delay
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic delay
                             matrix <i>&delta;</i><sub><i>Y</i><i>X</i></sub> (ms)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
                             type="text" data-param="delay_YX"/>
                     </label>
                     <label class="flex flex-col gap-2">
-                        <span class="text-slate-800 dark:text-white text-sm font-medium">Local synaptic
+                        <span class="text-slate-800 dark:text-white text-sm font-medium">Synaptic
                             time constants <i>&tau;</i><sub>syn,<i>Y</i><i>X</i></sub> (ms)</span>
                         <input
                             class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
@@ -276,10 +248,10 @@
         <div class="flex flex-col gap-2">
             <h3 class="text-base font-semibold text-slate-900 dark:text-white">Joint sweep groups</h3>
             <p class="text-sm text-slate-600 dark:text-slate-300">
-                Keep the current per-parameter sweep controls below. Add a group only when selected parameters should advance together rather than generate all pairwise combinations.
+                Keep the current per-parameter sweep controls below. Add a group only when selected parameters should use the same candidate index together instead of forming a Cartesian product.
             </p>
             <p class="text-xs text-slate-500 dark:text-slate-400">
-                Example: placing `J_EE` and `J_IE` in one group with 3 candidates each creates 3 linked configurations instead of a 3 x 3 sweep.
+                Example: if `J_YX` has 3 candidates and `nu_ext` has 3 candidates in the same group, the sweep runs 3 linked configurations, not 9 combinations.
             </p>
         </div>
         <div id="joint-groups-container" class="mt-4 flex flex-col gap-3"></div>
@@ -369,6 +341,6 @@
     {{ super() }} <!-- import base.html scripts -->
 
     <!-- Simulation-specific JavaScript -->
-    <script src="{{ url_for('static', filename='js/simulation_four_area.js', v='20260424-1') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulation_four_area.js', v='20260430-1') }}"></script>
 
 {% endblock %} > 

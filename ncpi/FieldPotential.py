@@ -614,7 +614,8 @@ class FieldPotential:
         probe: str
             Probe name to read from kernels.
         component: int or None
-            Component to select (e.g., z-component). If None, use all components.
+            Component to select for 3-component dipole kernels (e.g., z-component).
+            If None, use all components/channels.
         mode: str
             Convolution mode ('same', 'full', 'valid').
         scale: float
@@ -662,14 +663,27 @@ class FieldPotential:
             if kernel.ndim == 1:
                 kernel_sel = kernel
                 sig = np.convolve(rate_cache[X], kernel_sel, mode=mode) * scale
-            elif component is not None:
-                kernel_sel = kernel[component]
-                sig = np.convolve(rate_cache[X], kernel_sel, mode=mode) * scale
             else:
-                sig = np.vstack([
-                    np.convolve(rate_cache[X], kernel[ch], mode=mode) * scale
-                    for ch in range(kernel.shape[0])
-                ])
+                # Only apply xyz component selection to true dipole kernels shaped (3, T).
+                # Multi-electrode scalar probes (e.g., GaussCylinderPotential shaped (n_sites, T))
+                # should keep all channels regardless of `component`.
+                if kernel.ndim == 2 and component is not None and kernel.shape[0] == 3:
+                    comp_idx = int(component)
+                    if comp_idx < 0 or comp_idx >= kernel.shape[0]:
+                        raise IndexError(
+                            f"Requested component {comp_idx} out of bounds for kernel shape {kernel.shape}."
+                        )
+                    kernel_sel = kernel[comp_idx]
+                    sig = np.convolve(rate_cache[X], kernel_sel, mode=mode) * scale
+                else:
+                    if kernel.ndim == 2:
+                        kernels_by_channel = kernel
+                    else:
+                        kernels_by_channel = kernel.reshape((-1, kernel.shape[-1]))
+                    sig = np.vstack([
+                        np.convolve(rate_cache[X], kernels_by_channel[ch], mode=mode) * scale
+                        for ch in range(kernels_by_channel.shape[0])
+                    ])
 
             signals[key] = sig
 
