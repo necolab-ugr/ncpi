@@ -176,6 +176,20 @@
                     this.computeFlowSelectorOpen = true;
                     this.computeFlowConfigOpen = false;
                 }
+                this.$watch('parserInfo', () => {
+                    this.$nextTick(() => {
+                        // Normaliza el valor para que pertenezca al conjunto actual de opciones
+                        this.normalizeParserRecordingTypeSource();
+
+                        // Forzar una reasignación real: cambiamos a undefined, esperamos un tick,
+                        // y volvemos al valor correcto. Esto obliga a Alpine a sincronizar el select.
+                        const currentValue = this.parserRecordingTypeSource;
+                        this.parserRecordingTypeSource = undefined;
+                        this.$nextTick(() => {
+                            this.parserRecordingTypeSource = currentValue;
+                        });
+                    });
+                });
             },
             isUploaded(id) {
                 return this.uploads[id] !== undefined;
@@ -1099,6 +1113,18 @@
                     out.push(defaultCh);
                 }
                 return out;
+            },
+            normalizeParserRecordingTypeSource() {
+                const source = String(this.parserRecordingTypeSource || '').trim();
+                const allowedSources = new Set(
+                    (Array.isArray(this.parserInfo?.candidate_fields) ? this.parserInfo.candidate_fields : [])
+                        .map((field) => String(field || '').trim())
+                        .filter((field) => field.length > 0)
+                );
+                if (source === '__value__' || source === '__none__' || allowedSources.has(source)) return;
+                this.parserRecordingTypeSource = '__value__';
+                this.parserRecordingTypeLocator = '';
+                if (!String(this.parserRecordingType || '').trim()) this.parserRecordingType = 'LFP';
             },
             parserFieldOptionStyle(field) {
                 if (this.parserIsTokenField(field)) {
@@ -2082,6 +2108,7 @@
                             this.syncDataFileSelectionsFromPayload(deepPayload, 'simulation');
                             this.applyParserDefaults(deepPayload);
                             this.ensureDataLocatorMatchesSelectedFolder();
+                            this.normalizeParserRecordingTypeSource();
                             this.parserDeepScanInProgress = false;
                             this.parserDeepScanStatus = 'complete';
                             this.parserDeepScanError = '';
@@ -2426,7 +2453,6 @@
                     this.parserChNamesSource = '__autocomplete__';
                     this.parserChNamesLocator = '';
                 }
-
                 const kind = this.resolvedDataSourceKind();
                 if (kind === 'new-simulation' || kind === 'new-empirical') {
                     this.parserArrayAxesEnabled = true;
@@ -2442,6 +2468,7 @@
                     }
                 }
                 this.syncParserSelectDom();
+                this.normalizeParserRecordingTypeSource();
             },
             onPipelineFsSourceChange() {
                 const source = String(this.parserFsSource || '').trim();
@@ -2573,6 +2600,7 @@
                     this.metadataError = '';
                     this.parserInfo = this._baseParserInfo || null;
                     if (this.parserInfo) this.applyParserDefaults(this.parserInfo);
+                    this.normalizeParserRecordingTypeSource();
                     return;
                 }
                 this.metadataLoading = true;
@@ -2599,6 +2627,7 @@
                         this.computeFlowChoice = 'new-data';
                         this.dataSourceKind = 'new-simulation';
                     }
+                    this.normalizeParserRecordingTypeSource();
                 } catch (error) {
                     console.error('[additionalFiles] Error:', error);
                     this.metadataError = error.message || 'Failed to inspect additional files.';
