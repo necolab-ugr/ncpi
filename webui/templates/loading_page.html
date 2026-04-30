@@ -77,132 +77,140 @@
     </div>
     {% endif %}
 
-    <div x-show="status === 'finished' && (previewColumns.length > 0 || previewItems.length > 0 || previewError)"
-         class="w-full mt-6 space-y-3">
-        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between text-xs text-text-light-secondary dark:text-[#929bc9]">
-            <span class="font-semibold lowercase tracking-wide">result explorer</span>
-            <span x-show="previewKind === 'dataframe' && previewTotalRows !== null" class="text-[11px]" x-text="previewSummaryText()"></span>
-            <span x-show="previewKind === 'summary' && previewSummaryLabel" class="text-[11px]" x-text="previewSummaryLabel"></span>
-        </div>
-
-        <div x-show="previewKind === 'dataframe'" class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-            <div class="text-xs text-slate-500 dark:text-slate-400">
-                Click a column name to sort ascending/descending.
-            </div>
-            <div class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-                <span>Rows/page</span>
-                <select x-model="previewPageSize" @change="onPreviewPageSizeChange()"
-                    class="h-9 px-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs">
-                    <option value="20">20</option>
-                    <option value="50">50</option>
-                    <option value="100">100</option>
-                </select>
-            </div>
-        </div>
-
-        <div x-show="previewLoading" class="text-xs text-slate-500 dark:text-slate-400">Loading table...</div>
-        <div x-show="previewError" class="text-xs text-red-500 dark:text-red-400" x-text="previewError"></div>
-
-        <div x-show="previewKind === 'summary' && previewItems.length > 0" class="space-y-3">
-            <template x-for="item in previewItems" :key="item.key || item.name">
-                <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 space-y-2">
-                    <div class="flex items-start justify-between gap-3">
-                        <div class="min-w-0">
-                            <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400" x-text="item.label || 'Result'"></p>
-                            <p class="text-sm font-semibold text-slate-800 dark:text-slate-100 break-all" x-text="item.name"></p>
-                        </div>
-                    </div>
-                    <p class="text-xs text-slate-600 dark:text-slate-300" x-show="item.inspection && item.inspection.summary" x-text="item.inspection.summary"></p>
-                    <p class="text-xs text-slate-500 dark:text-slate-400" x-show="item.inspection && item.inspection.detail_summary" x-text="item.inspection.detail_summary"></p>
-                    <p class="text-xs text-slate-500 dark:text-slate-400" x-show="item.inspection && item.inspection.top_level_type">
-                        <span x-text="'Top level: ' + (item.inspection.top_level_type || '')"></span>
-                        <template x-if="item.inspection && item.inspection.top_level_shape !== null">
-                            <span x-text="' · shape ' + JSON.stringify(item.inspection.top_level_shape)"></span>
-                        </template>
-                        <template x-if="item.inspection && item.inspection.top_level_detail">
-                            <span x-text="' · ' + item.inspection.top_level_detail"></span>
-                        </template>
-                    </p>
-                    <div x-show="item.inspection && item.inspection.field_details && item.inspection.field_details.length > 0"
-                         class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-                        <table class="min-w-full text-xs">
-                            <thead class="bg-slate-50 dark:bg-slate-800">
-                                <tr>
-                                    <th class="px-3 py-1.5 text-left font-semibold">Field</th>
-                                    <th class="px-3 py-1.5 text-left font-semibold">Type</th>
-                                    <th class="px-3 py-1.5 text-left font-semibold">Shape</th>
-                                    <th class="px-3 py-1.5 text-left font-semibold">Detail</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <template x-for="field in (item.inspection && item.inspection.field_details ? item.inspection.field_details.slice(0, 40) : [])" :key="item.name + '-' + field.field">
-                                    <tr class="border-t border-slate-100 dark:border-slate-800">
-                                        <td class="px-3 py-1.5 font-mono align-top" x-text="field.field"></td>
-                                        <td class="px-3 py-1.5 align-top" x-text="field.python_type || 'Unknown'"></td>
-                                        <td class="px-3 py-1.5 align-top" x-text="field.shape !== null ? JSON.stringify(field.shape) : '—'"></td>
-                                        <td class="px-3 py-1.5 align-top" x-text="field.detail || '—'"></td>
-                                    </tr>
-                                </template>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="text-[11px] text-amber-700 dark:text-amber-300"
-                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details_sampled">
-                        Field details are based on the first sample examined when the result contains sample collections.
-                    </p>
-                    <p class="text-[11px] text-amber-700 dark:text-amber-300"
-                       x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 40"
-                       x-text="'Showing first 40 fields out of ' + item.inspection.field_details.length + '.'"></p>
+    <div x-data="{ explorerOpen: false }">
+        <div x-show="status === 'finished' && (previewColumns.length > 0 || previewItems.length > 0 || previewError)"
+            class="w-full mt-6 space-y-3">
+            <div class="flex justify-center w-full">
+                <div class="inline-flex items-center gap-2 text-xs text-text-light-secondary dark:text-[#929bc9] cursor-pointer select-none"
+                    @click="explorerOpen = !explorerOpen">
+                    <span class="text-[11px] font-mono" x-text="explorerOpen ? '▾' : '▸'"></span>
+                    <span class="font-semibold lowercase tracking-wide">Result explorer</span>
+                    <span x-show="previewKind === 'dataframe' && previewTotalRows !== null" class="text-[11px]" x-text="previewSummaryText()"></span>
+                    <span x-show="previewKind === 'summary' && previewSummaryLabel" class="text-[11px]" x-text="previewSummaryLabel"></span>
                 </div>
-            </template>
-        </div>
+            </div>
 
-        <div x-show="previewKind === 'dataframe' && previewColumns.length > 0" class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
-            <table class="min-w-full text-xs font-mono">
-                <thead class="bg-slate-100 dark:bg-slate-800 sticky top-0">
-                    <tr>
-                        <template x-for="col in previewColumns" :key="'th-'+col">
-                            <th class="px-3 py-1.5 text-left text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap border-b border-slate-200 dark:border-slate-700">
-                                <button type="button" @click="togglePreviewSort(col)"
-                                    class="inline-flex items-center gap-1 hover:text-primary">
-                                    <span x-text="col"></span>
-                                    <span class="text-[10px]" x-show="previewSortCol === col" x-text="previewSortDir === 'desc' ? '▼' : '▲'"></span>
-                                </button>
-                            </th>
-                        </template>
-                    </tr>
-                </thead>
-                <tbody>
-                    <template x-if="previewRows.length === 0">
-                        <tr>
-                            <td :colspan="previewColumns.length || 1" class="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                No rows available.
-                            </td>
-                        </tr>
+            <div x-show="explorerOpen">
+                <div x-show="previewKind === 'dataframe'" class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                    <div class="text-xs text-slate-500 dark:text-slate-400">
+                        Click a column name to sort ascending/descending.
+                    </div>
+                    <div class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                        <span>Rows/page</span>
+                        <select x-model="previewPageSize" @change="onPreviewPageSizeChange()"
+                            class="h-9 px-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs">
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div x-show="previewLoading" class="text-xs text-slate-500 dark:text-slate-400">Loading table...</div>
+                <div x-show="previewError" class="text-xs text-red-500 dark:text-red-400" x-text="previewError"></div>
+
+                <div x-show="previewKind === 'summary' && previewItems.length > 0" class="space-y-3">
+                    <template x-for="item in previewItems" :key="item.key || item.name">
+                        <div class="rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 space-y-2">
+                            <div class="flex items-start justify-between gap-3">
+                                <div class="min-w-0">
+                                    <p class="text-[11px] font-semibold uppercase tracking-wide text-slate-400" x-text="item.label || 'Result'"></p>
+                                    <p class="text-sm font-semibold text-slate-800 dark:text-slate-100 break-all" x-text="item.name"></p>
+                                </div>
+                            </div>
+                            <p class="text-xs text-slate-600 dark:text-slate-300" x-show="item.inspection && item.inspection.summary" x-text="item.inspection.summary"></p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400" x-show="item.inspection && item.inspection.detail_summary" x-text="item.inspection.detail_summary"></p>
+                            <p class="text-xs text-slate-500 dark:text-slate-400" x-show="item.inspection && item.inspection.top_level_type">
+                                <span x-text="'Top level: ' + (item.inspection.top_level_type || '')"></span>
+                                <template x-if="item.inspection && item.inspection.top_level_shape !== null">
+                                    <span x-text="' · shape ' + JSON.stringify(item.inspection.top_level_shape)"></span>
+                                </template>
+                                <template x-if="item.inspection && item.inspection.top_level_detail">
+                                    <span x-text="' · ' + item.inspection.top_level_detail"></span>
+                                </template>
+                            </p>
+                            <div x-show="item.inspection && item.inspection.field_details && item.inspection.field_details.length > 0"
+                                class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                                <table class="min-w-full text-xs">
+                                    <thead class="bg-slate-50 dark:bg-slate-800">
+                                        <tr>
+                                            <th class="px-3 py-1.5 text-left font-semibold">Field</th>
+                                            <th class="px-3 py-1.5 text-left font-semibold">Type</th>
+                                            <th class="px-3 py-1.5 text-left font-semibold">Shape</th>
+                                            <th class="px-3 py-1.5 text-left font-semibold">Detail</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template x-for="field in (item.inspection && item.inspection.field_details ? item.inspection.field_details.slice(0, 40) : [])" :key="item.name + '-' + field.field">
+                                            <tr class="border-t border-slate-100 dark:border-slate-800">
+                                                <td class="px-3 py-1.5 font-mono align-top" x-text="field.field"></td>
+                                                <td class="px-3 py-1.5 align-top" x-text="field.python_type || 'Unknown'"></td>
+                                                <td class="px-3 py-1.5 align-top" x-text="field.shape !== null ? JSON.stringify(field.shape) : '—'"></td>
+                                                <td class="px-3 py-1.5 align-top" x-text="field.detail || '—'"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p class="text-[11px] text-amber-700 dark:text-amber-300"
+                            x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details_sampled">
+                                Field details are based on the first sample examined when the result contains sample collections.
+                            </p>
+                            <p class="text-[11px] text-amber-700 dark:text-amber-300"
+                            x-show="['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'].includes(computationType) && item.inspection && item.inspection.field_details && item.inspection.field_details.length > 40"
+                            x-text="'Showing first 40 fields out of ' + item.inspection.field_details.length + '.'"></p>
+                        </div>
                     </template>
-                    <template x-for="(row, ri) in previewRows" :key="'tr-'+ri">
-                        <tr :class="ri % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800/50'">
-                            <template x-for="(cell, ci) in row" :key="'td-'+ri+'-'+ci">
-                                <td class="px-3 py-1 text-slate-700 dark:text-slate-300 whitespace-nowrap max-w-[240px] truncate border-b border-slate-100 dark:border-slate-800"
-                                    x-text="cell"></td>
+                </div>
+
+                <div x-show="previewKind === 'dataframe' && previewColumns.length > 0" class="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700">
+                    <table class="min-w-full text-xs font-mono">
+                        <thead class="bg-slate-100 dark:bg-slate-800 sticky top-0">
+                            <tr>
+                                <template x-for="col in previewColumns" :key="'th-'+col">
+                                    <th class="px-3 py-1.5 text-left text-[11px] font-semibold text-slate-600 dark:text-slate-300 whitespace-nowrap border-b border-slate-200 dark:border-slate-700">
+                                        <button type="button" @click="togglePreviewSort(col)"
+                                            class="inline-flex items-center gap-1 hover:text-primary">
+                                            <span x-text="col"></span>
+                                            <span class="text-[10px]" x-show="previewSortCol === col" x-text="previewSortDir === 'desc' ? '▼' : '▲'"></span>
+                                        </button>
+                                    </th>
+                                </template>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <template x-if="previewRows.length === 0">
+                                <tr>
+                                    <td :colspan="previewColumns.length || 1" class="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                        No rows available.
+                                    </td>
+                                </tr>
                             </template>
-                        </tr>
-                    </template>
-                </tbody>
-            </table>
-        </div>
+                            <template x-for="(row, ri) in previewRows" :key="'tr-'+ri">
+                                <tr :class="ri % 2 === 0 ? 'bg-white dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-800/50'">
+                                    <template x-for="(cell, ci) in row" :key="'td-'+ri+'-'+ci">
+                                        <td class="px-3 py-1 text-slate-700 dark:text-slate-300 whitespace-nowrap max-w-[240px] truncate border-b border-slate-100 dark:border-slate-800"
+                                            x-text="cell"></td>
+                                    </template>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
 
-        <div x-show="previewKind === 'dataframe' && previewColumns.length > 0" class="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
-            <span x-text="previewPageLabel()"></span>
-            <div class="flex items-center gap-2">
-                <button type="button" @click="changePreviewPage(-1)" :disabled="previewPage <= 1 || previewLoading"
-                    class="h-8 px-3 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800">
-                    Previous
-                </button>
-                <button type="button" @click="changePreviewPage(1)" :disabled="previewPage >= previewTotalPages || previewLoading"
-                    class="h-8 px-3 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800">
-                    Next
-                </button>
+                <div x-show="previewKind === 'dataframe' && previewColumns.length > 0" class="flex items-center justify-between gap-3 text-xs text-slate-600 dark:text-slate-300">
+                    <span x-text="previewPageLabel()"></span>
+                    <div class="flex items-center gap-2">
+                        <button type="button" @click="changePreviewPage(-1)" :disabled="previewPage <= 1 || previewLoading"
+                            class="h-8 px-3 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800">
+                            Previous
+                        </button>
+                        <button type="button" @click="changePreviewPage(1)" :disabled="previewPage >= previewTotalPages || previewLoading"
+                            class="h-8 px-3 rounded-lg border border-slate-300 dark:border-slate-700 disabled:opacity-50 disabled:cursor-not-allowed hover:bg-slate-100 dark:hover:bg-slate-800">
+                            Next
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
