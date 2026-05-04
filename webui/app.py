@@ -6820,11 +6820,22 @@ def delete_all_sessions():
     active_root = os.path.realpath(tmp_paths.TMP_ROOT)
     deleted = 0
     errors = []
+    current_uid = os.getuid()
     
     for session_root in tmp_paths.list_session_roots():
         real_root = os.path.realpath(session_root)
         if real_root == active_root:
             continue
+        try:
+            # Check that the owner is the same user
+            owner_uid = os.stat(real_root).st_uid
+        except OSError:
+            continue
+
+        # Ignore the folders whose owner is not the current user
+        if owner_uid != current_uid:   
+            continue
+
         try:
             shutil.rmtree(real_root)
             deleted += 1
