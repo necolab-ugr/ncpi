@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Computing...{% endblock %}
 
+{% block head %}
+{{ super() }}
+<style>
+  [x-cloak] { display: none !important; }
+</style>
+{% endblock %}
+
 {% block content %}
 {% set label_map = {
     'simulation': 'Simulation',
@@ -18,12 +25,12 @@
 
 <div class="flex flex-col items-center gap-6 " x-data="loadingApp('{{ job_id }}', {{ is_pending | tojson }}, '{{ computation_type }}')">
     <div class="flex items-center gap-6">
-        <div x-show="status === 'in_progress' && progress < 100 && !pending" class="flex flex-col items-center gap-6 text-center">
+        <div x-cloak x-show="status === 'in_progress' && progress < 100 && !pending" class="flex flex-col items-center gap-6 text-center">
             <div class="animate-spin rounded-full h-24 w-24 border-t-4 border-b-4 border-primary dark:border-primary"></div>
         </div>
-        <div x-show="status === 'finished' && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
-        <div x-show="status === 'cancelled' && !pending" class="text-amber-500 dark:text-amber-400 text-4xl">■</div>
-        <div x-show="status === 'failed' || error" class="flex flex-col items-center gap-6 text-center">
+        <div x-cloak x-show="status === 'finished' && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
+        <div x-cloak x-show="status === 'cancelled' && !pending" class="text-amber-500 dark:text-amber-400 text-4xl">■</div>
+        <div x-cloak x-show="status === 'failed' || error" class="flex flex-col items-center gap-6 text-center">
             <div class="text-red-500 dark:text-red-400 text-4xl">❌</div>
         </div>
         <div class="flex flex-col gap-2">
