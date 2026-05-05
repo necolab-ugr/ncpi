@@ -863,6 +863,12 @@ def _load_uploaded_source_bytes(name, ext, content):
                 except OSError:
                     pass
 
+    if ext == ".ds":
+        raise ValueError(
+            "CTF .ds datasets are directories and cannot be parsed from a single uploaded file. "
+            "Use Server upload/path selection and select the folder that contains the .ds dataset."
+        )
+
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
@@ -878,10 +884,23 @@ def _load_uploaded_source_path(path, name=None, ext=None):
     safe_path = str(path or "")
     if not safe_path or not os.path.exists(safe_path):
         raise ValueError(f"Uploaded file path does not exist: '{safe_path}'.")
+    safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
+    ext = str(ext or os.path.splitext(safe_name)[1] or os.path.splitext(safe_path)[1]).lower()
+
+    if ext == ".ds":
+        if not os.path.isdir(safe_path):
+            raise ValueError(
+                f"CTF dataset path is not a .ds directory: '{safe_path}'. "
+                "Use server upload/path selection for CTF datasets."
+            )
+        try:
+            import mne
+        except Exception as exc:
+            raise ValueError(f"mne is required to parse .ds CTF datasets: {exc}")
+        return mne.io.read_raw_ctf(safe_path, preload=True, verbose=False)
+
     if not os.path.isfile(safe_path):
         raise ValueError(f"Uploaded path is not a regular file: '{safe_path}'.")
-    safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
-    ext = str(ext or os.path.splitext(safe_name)[1]).lower()
 
     if ext in {".pkl", ".pickle"}:
         try:

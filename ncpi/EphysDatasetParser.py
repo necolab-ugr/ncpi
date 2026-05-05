@@ -494,7 +494,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat, .set, .fif, .edf, .tsv paths
+      - .npy, .json, .mat, .set, .fif, .edf, .ds, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -604,6 +604,17 @@ class EphysDatasetParser:
                         "Verify the dataset path and that the file is available on disk."
                     )
                 return _load_edf_with_pyedflib(path), source_file
+
+            if suffix == ".ds":
+                if not path.is_dir():
+                    raise ValueError(
+                        f"CTF dataset does not exist or is not a directory: '{path}'. "
+                        "CTF recordings must be provided as the .ds folder."
+                    )
+                _require_mne("CTF .ds loading")
+                import mne  # type: ignore
+
+                return mne.io.read_raw_ctf(str(path), preload=self.config.preload, verbose=False), source_file
 
             if suffix in (".csv", ".parquet", ".tsv"):
                 if not tools.ensure_module("pandas"):
