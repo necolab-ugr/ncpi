@@ -4186,6 +4186,52 @@ def _summarize_value_for_ui(value):
     return summary
 
 
+def _summarize_lazy_hdf5_key_for_ui(source_obj, key_name):
+    key = str(key_name or "").strip()
+    if not key:
+        return None
+
+    file_path = str(getattr(source_obj, "file_path", "") or "").strip()
+    group_path = str(getattr(source_obj, "group_path", "/") or "/").strip() or "/"
+    if not file_path:
+        return None
+
+    try:
+        import h5py  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        with h5py.File(file_path, "r") as h5f:
+            if group_path not in h5f:
+                return None
+            group = h5f[group_path]
+            if key not in group:
+                return None
+            node = group[key]
+            if isinstance(node, h5py.Dataset):
+                shape = [int(dim) for dim in node.shape]
+                dtype = str(node.dtype)
+                return {
+                    "python_type": "HDF5 dataset",
+                    "dtype": dtype,
+                    "shape": shape,
+                    "detail": "Lazy-loaded MATLAB v7.3 dataset (metadata only).",
+                }
+            if isinstance(node, h5py.Group):
+                child_count = len(list(node.keys()))
+                return {
+                    "python_type": "HDF5 group",
+                    "dtype": "",
+                    "shape": [int(child_count)],
+                    "detail": f"Lazy-loaded MATLAB v7.3 group with {child_count} key(s).",
+                }
+    except Exception:
+        return None
+
+    return None
+
+
 def _describe_source_fields_for_ui(source_obj, candidate_fields, source_type):
     details = []
     lazy_mapping = bool(getattr(source_obj, "__lazy_hdf5__", False))
@@ -4195,6 +4241,17 @@ def _describe_source_fields_for_ui(source_obj, candidate_fields, source_type):
             continue
         origin = "dataframe" if source_type == "dataframe" else "field"
         if lazy_mapping and "." not in locator and "[" not in locator and locator != "__self__":
+            lazy_summary = _summarize_lazy_hdf5_key_for_ui(source_obj, locator)
+            if lazy_summary is not None:
+                details.append({
+                    "field": locator,
+                    "origin": origin,
+                    "python_type": lazy_summary.get("python_type") or "HDF5 key",
+                    "dtype": lazy_summary.get("dtype") or "",
+                    "shape": lazy_summary.get("shape"),
+                    "detail": lazy_summary.get("detail") or "Lazy-loaded MATLAB v7.3 key.",
+                })
+                continue
             details.append({
                 "field": locator,
                 "origin": origin,
@@ -5052,7 +5109,7 @@ def _safe_channel_name_count(value):
     return None
 
 
-def _infer_axis_defaults_from_values(data_value, ch_names_value=None):
+def _infer_axis_defaults_from_values(data_value, ch_names_value=None, ids_value=None):
     shape = _safe_array_shape(data_value)
     if not shape:
         return {
@@ -5083,10 +5140,22 @@ def _infer_axis_defaults_from_values(data_value, ch_names_value=None):
         if channel_matches:
             axis_channels = min(channel_matches)
 
-    remaining = [idx for idx in range(ndim) if idx not in {axis_samples, axis_channels}]
+    axis_ids = -1
+    ids_count = _safe_channel_name_count(ids_value)
+    if ids_count is not None and ids_count > 0:
+        id_matches = [
+            idx for idx, dim in enumerate(shape)
+            if dim == ids_count and idx not in {axis_samples, axis_channels}
+        ]
+        if id_matches:
+            axis_ids = min(id_matches)
+
+    remaining = [idx for idx in range(ndim) if idx not in {axis_samples, axis_channels, axis_ids}]
     remaining.sort()
-    axis_ids = remaining[0] if len(remaining) >= 1 else -1
-    axis_epochs = remaining[1] if len(remaining) >= 2 else -1
+    axis_epochs = remaining[0] if len(remaining) >= 1 else -1
+    if axis_ids < 0 and len(remaining) >= 2:
+        axis_ids = remaining[0]
+        axis_epochs = remaining[1]
 
     return {
         "axis_samples": int(axis_samples),
@@ -5474,7 +5543,10 @@ def _describe_parser_source(path):
                 ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
             ),
             "recording_type": _pick_field_guess(candidates, ["recording_type", "modality", "recording", "type"]),
-            "subject_id": _pick_field_guess(candidates, ["subject_id", "subject", "subj", "participant"]),
+            "subject_id": _pick_field_guess(
+                candidates,
+                ["subject_id", "sub_ids", "subid", "subject", "subj", "participant", "id", "ids"],
+            ),
             "group": _pick_field_guess(candidates, ["group", "cohort", "class"]),
             "species": _pick_field_guess(candidates, ["species", "animal", "organism"]),
             "condition": _pick_field_guess(candidates, ["condition", "state", "task"]),
@@ -5496,7 +5568,14 @@ def _describe_parser_source(path):
                 ch_for_axes = _extract_dataframe_channel_names(source_obj, defaults.get("ch_names"))
         except Exception:
             ch_for_axes = None
-        defaults.update(_infer_axis_defaults_from_values(data_for_axes, ch_for_axes))
+        ids_for_axes = None
+        try:
+            subj_col = str(defaults.get("subject_id") or "").strip()
+            if subj_col and subj_col in source_obj.columns:
+                ids_for_axes = [str(v) for v in source_obj[subj_col].dropna().tolist()]
+        except Exception:
+            ids_for_axes = None
+        defaults.update(_infer_axis_defaults_from_values(data_for_axes, ch_for_axes, ids_for_axes))
         if fs_hint_hz is None and defaults["fs"] and defaults["fs"] in source_obj.columns:
             fs_series = pd.to_numeric(source_obj[defaults["fs"]], errors="coerce").dropna()
             if not fs_series.empty:
@@ -5650,7 +5729,11 @@ def _describe_parser_source(path):
         resolved_data = _resolve_locator_value(source_obj, data_guess)
         ch_guess = defaults.get("ch_names")
         resolved_ch_names = _resolve_locator_value(source_obj, ch_guess) if ch_guess else None
-        defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names))
+        resolved_ids = None
+        subject_guess = str(defaults.get("subject_id") or "").strip()
+        if subject_guess:
+            resolved_ids = _resolve_locator_value(source_obj, subject_guess)
+        defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names, resolved_ids))
         sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
         source_format = str(source_obj.get("__source_format__") or "").strip().lower()
         if source_format == "edf":
@@ -5714,7 +5797,11 @@ def _describe_parser_source(path):
     resolved_data = _resolve_locator_value(source_obj, data_guess)
     ch_guess = defaults.get("ch_names")
     resolved_ch_names = _resolve_locator_value(source_obj, ch_guess) if ch_guess else None
-    defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names))
+    resolved_ids = None
+    subject_guess = str(defaults.get("subject_id") or "").strip()
+    if subject_guess:
+        resolved_ids = _resolve_locator_value(source_obj, subject_guess)
+    defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names, resolved_ids))
     sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
     payload = {
         "source_type": "object",
@@ -9301,7 +9388,10 @@ def features_parser_inspect():
                     ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
                 ),
                 "recording_type": _pick_field_guess(selected_data_candidates, ["recording_type", "modality", "recording", "type"]),
-                "subject_id": _pick_field_guess(selected_data_candidates, ["subject_id", "subject", "subj", "participant"]),
+                "subject_id": _pick_field_guess(
+                    selected_data_candidates,
+                    ["subject_id", "sub_ids", "subid", "subject", "subj", "participant", "id", "ids"],
+                ),
                 "group": _pick_field_guess(selected_data_candidates, ["group", "cohort", "class"]),
                 "species": _pick_field_guess(selected_data_candidates, ["species", "animal", "organism"]),
                 "condition": _pick_field_guess(selected_data_candidates, ["condition", "state", "task"]),

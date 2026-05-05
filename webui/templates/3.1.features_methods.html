@@ -2341,6 +2341,73 @@
                     const num = Number.parseInt(String(value ?? ''), 10);
                     return Number.isFinite(num) ? num : fallback;
                 };
+                const findFieldDetail = (fieldName) => {
+                    const key = String(fieldName || '').trim();
+                    if (!key) return null;
+                    return fieldDetails.find((row) => String(row?.field || '').trim() === key) || null;
+                };
+                const inferCountFromShape = (shapeValue) => {
+                    if (!Array.isArray(shapeValue) || shapeValue.length === 0) return null;
+                    const dims = shapeValue
+                        .map((v) => Number.parseInt(String(v), 10))
+                        .filter((v) => Number.isFinite(v) && v > 0);
+                    if (!dims.length) return null;
+                    if (dims.length === 1) return dims[0];
+                    const nonSingleton = dims.filter((v) => v > 1);
+                    if (nonSingleton.length === 1) return nonSingleton[0];
+                    return Math.max(...dims);
+                };
+                const inferAxesFromShapes = (dataLocator, chLocator, idLocator) => {
+                    const dataDetail = findFieldDetail(dataLocator);
+                    const dataShape = Array.isArray(dataDetail?.shape) ? dataDetail.shape : null;
+                    if (!dataShape || dataShape.length < 2) return null;
+
+                    const dims = dataShape
+                        .map((v, idx) => ({ idx, size: Number.parseInt(String(v), 10) }))
+                        .filter((item) => Number.isFinite(item.size) && item.size > 0);
+                    if (dims.length < 2) return null;
+
+                    let axisSamples = dims[0].idx;
+                    let maxSize = dims[0].size;
+                    for (const item of dims) {
+                        if (item.size > maxSize) {
+                            maxSize = item.size;
+                            axisSamples = item.idx;
+                        }
+                    }
+
+                    const chCount = inferCountFromShape(findFieldDetail(chLocator)?.shape);
+                    const idCount = inferCountFromShape(findFieldDetail(idLocator)?.shape);
+
+                    const bySize = (count, excluded = new Set()) => {
+                        if (!Number.isFinite(count) || count <= 0) return -1;
+                        const matches = dims
+                            .filter((item) => item.size === count && !excluded.has(item.idx))
+                            .map((item) => item.idx);
+                        return matches.length ? Math.min(...matches) : -1;
+                    };
+
+                    let axisChannels = bySize(chCount, new Set([axisSamples]));
+                    let axisIds = bySize(idCount, new Set([axisSamples, axisChannels]));
+                    let axisEpochs = -1;
+
+                    const remaining = dims
+                        .map((item) => item.idx)
+                        .filter((idx) => !new Set([axisSamples, axisChannels, axisIds]).has(idx))
+                        .sort((a, b) => a - b);
+                    if (remaining.length > 0) axisEpochs = remaining[0];
+                    if (axisIds < 0 && remaining.length > 1) {
+                        axisIds = remaining[0];
+                        axisEpochs = remaining[1];
+                    }
+
+                    return {
+                        axis_samples: axisSamples,
+                        axis_channels: axisChannels,
+                        axis_ids: axisIds,
+                        axis_epochs: axisEpochs,
+                    };
+                };
                 const defaultData = String(sampleTableGuesses.data || '').trim() || String(defaults.data || '').trim();
                 const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
                 const detailDataAllowed = detailData && dataCandidates.includes(detailData);
@@ -2457,10 +2524,27 @@
                 if (kind === 'new-simulation' || kind === 'new-empirical') {
                     this.parserArrayAxesEnabled = true;
                     if (!this.parserAxisUserEdited) {
-                        const axisSamples = parseAxis(defaults.axis_samples, 0);
-                        const axisChannels = parseAxis(defaults.axis_channels, -1);
-                        const axisIds = parseAxis(defaults.axis_ids, -1);
-                        const axisEpochs = parseAxis(defaults.axis_epochs, -1);
+                        const inferredAxes = inferAxesFromShapes(
+                            this.parserDataLocator,
+                            this.parserChNamesLocator,
+                            this.parserSubjectIdLocator,
+                        );
+                        const axisSamples = parseAxis(
+                            inferredAxes?.axis_samples ?? defaults.axis_samples,
+                            0
+                        );
+                        const axisChannels = parseAxis(
+                            inferredAxes?.axis_channels ?? defaults.axis_channels,
+                            -1
+                        );
+                        const axisIds = parseAxis(
+                            inferredAxes?.axis_ids ?? defaults.axis_ids,
+                            -1
+                        );
+                        const axisEpochs = parseAxis(
+                            inferredAxes?.axis_epochs ?? defaults.axis_epochs,
+                            -1
+                        );
                         this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
                         this.parserAxisChannels = String(axisChannels);
                         this.parserAxisIds = String(axisIds);
