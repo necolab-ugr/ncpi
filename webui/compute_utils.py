@@ -1102,6 +1102,38 @@ def _try_resolve_additional_metadata_ch_names(ch_locator, additional_metadata_pa
     return values if values else None
 
 
+def _discover_neighbor_tabular_metadata_paths(source_path, max_files=64):
+    """Collect nearby tabular metadata files next to a source file/directory."""
+    base = str(source_path or "").strip()
+    if not base:
+        return []
+    base_dir = base if os.path.isdir(base) else os.path.dirname(base)
+    if not base_dir or not os.path.isdir(base_dir):
+        return []
+
+    allowed_exts = {".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".feather"}
+    out = []
+    seen = set()
+    try:
+        for name in sorted(os.listdir(base_dir)):
+            full = os.path.join(base_dir, name)
+            if not os.path.isfile(full):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in allowed_exts:
+                continue
+            real = os.path.realpath(full)
+            if real in seen:
+                continue
+            seen.add(real)
+            out.append({"path": real, "name": os.path.basename(real)})
+            if len(out) >= max_files:
+                break
+    except Exception:
+        return out
+    return out
+
+
 def _structure_signature_for_value(value, depth=0, max_depth=2):
     if depth > max_depth:
         return ("depth_limit", type(value).__name__)
@@ -2489,6 +2521,50 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 heartbeat = threading.Thread(target=_parse_heartbeat, daemon=True)
                 heartbeat.start()
                 try:
+                    parsed = parser.parse(source_obj)
+                except KeyError as exc:
+                    ch_locator = getattr(getattr(parse_cfg, "fields", None), "ch_names", None)
+                    ch_locator_str = str(ch_locator or "").strip()
+                    err_msg = str(exc)
+                    can_retry = (
+                        isinstance(ch_locator, str)
+                        and ch_locator_str not in {"", "__self__"}
+                        and f"Cannot resolve step '{ch_locator_str}'" in err_msg
+                    )
+                    if not can_retry:
+                        raise
+
+                    combined_paths = []
+                    seen_paths = set()
+                    for entry in list(params.get("additional_metadata_paths") or []) + _discover_neighbor_tabular_metadata_paths(source_path):
+                        p = str((entry or {}).get("path") or "").strip()
+                        if not p:
+                            continue
+                        rp = os.path.realpath(p)
+                        if rp in seen_paths:
+                            continue
+                        seen_paths.add(rp)
+                        combined_paths.append({
+                            "path": rp,
+                            "name": (entry or {}).get("name") or os.path.basename(rp),
+                        })
+
+                    recovered = _try_resolve_additional_metadata_ch_names(ch_locator_str, combined_paths)
+                    if not recovered:
+                        raise
+
+                    import dataclasses
+                    parse_cfg = dataclasses.replace(
+                        parse_cfg,
+                        fields=dataclasses.replace(parse_cfg.fields, ch_names=recovered),
+                    )
+                    parser = EphysDatasetParser(parse_cfg)
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Auto-detected {len(recovered)} channel name(s) from nearby metadata files "
+                        f"for locator '{ch_locator_str}'. Retrying parse.",
+                    )
                     parsed = parser.parse(source_obj)
                 finally:
                     parse_running["flag"] = False
