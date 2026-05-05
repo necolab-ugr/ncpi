@@ -128,9 +128,23 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".tsv"
+    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".ds", ".tsv"
 }
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
+
+
+def _is_supported_ctf_dataset_path(path):
+    return os.path.isdir(path) and Path(str(path)).suffix.lower() == ".ds"
+
+
+def _is_supported_parser_regular_file(path):
+    return os.path.isfile(path) and Path(str(path)).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
+
+
+def _is_supported_parser_path(path):
+    return _is_supported_ctf_dataset_path(path) or _is_supported_parser_regular_file(path)
+
+
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
 FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
@@ -2496,7 +2510,13 @@ def _collect_empirical_folder_files(folder_path):
         raise ValueError(f"Empirical folder does not exist: {root}")
 
     matches = []
-    for current_root, _, files in os.walk(root):
+    if _is_supported_ctf_dataset_path(root):
+        return [root]
+    for current_root, dirs, files in os.walk(root):
+        ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
+        dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
+        for name in ctf_dirs:
+            matches.append(os.path.join(current_root, name))
         for name in files:
             ext = Path(name).suffix.lower()
             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -2515,7 +2535,13 @@ def _collect_simulation_folder_files(folder_path):
         raise ValueError(f"Simulation outputs folder does not exist: {root}")
 
     matches = []
-    for current_root, _, files in os.walk(root):
+    if _is_supported_ctf_dataset_path(root):
+        return [root]
+    for current_root, dirs, files in os.walk(root):
+        ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
+        dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
+        for name in ctf_dirs:
+            matches.append(os.path.join(current_root, name))
         for name in files:
             ext = Path(name).suffix.lower()
             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -2787,66 +2813,79 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
         branch_directories = defaultdict(set)
         branch_dir_ext_files = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
-        for current_root, _, files in os.walk(root):
-            rel_dir = os.path.relpath(current_root, root)
-            rel_dir_posix = _to_posix_relpath(rel_dir)
-            if rel_dir_posix == ".":
-                dir_depth = 0
-            else:
-                dir_depth = len([token for token in rel_dir_posix.split("/") if token])
-            if dir_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
+        def _append_folder_entry(full_path, name, ext):
+            rel_path = _to_posix_relpath(os.path.relpath(full_path, root))
+            rel_parts = [token for token in rel_path.split("/") if token]
+            file_depth = max(0, len(rel_parts) - 1)
+            if file_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
                 raise ValueError(
-                    f"{kind_label} folder '{folder_name}' exceeds the maximum supported nested depth "
-                    f"({FEATURES_MAX_SUBFOLDER_DEPTH}) at '{current_root}'."
+                    f"{kind_label} folder '{folder_name}' contains a data source deeper than the supported "
+                    f"{FEATURES_MAX_SUBFOLDER_DEPTH} nested levels: '{full_path}'."
                 )
-            if rel_dir_posix != ".":
-                parts = [token for token in rel_dir_posix.split("/") if token]
-                branch_name = parts[0]
-                branch_rel_dir = "/".join(parts[1:]) if len(parts) > 1 else "."
-                branch_directories[branch_name].add(branch_rel_dir or ".")
+            row = {
+                "path": full_path,
+                "name": str(name),
+                "extension": ext,
+                "folder_path": root,
+                "folder_name": folder_name,
+                "relative_path": rel_path,
+            }
+            if len(rel_parts) >= 2:
+                level1_subfolder = rel_parts[0]
+                subfolder_relative_path = "/".join(rel_parts[1:])
+                subfolder_relative_dir = _to_posix_relpath(os.path.dirname(subfolder_relative_path))
+                row["level1_subfolder"] = level1_subfolder
+                row["subfolder_relative_path"] = subfolder_relative_path
+                row["subfolder_relative_dir"] = subfolder_relative_dir
+                branch_directories[level1_subfolder].add(subfolder_relative_dir or ".")
+                branch_dir_ext_files[level1_subfolder][subfolder_relative_dir][ext].append(row)
+            else:
+                row["level1_subfolder"] = ""
+                row["subfolder_relative_path"] = rel_parts[0] if rel_parts else row["name"]
+                row["subfolder_relative_dir"] = "."
+            folder_entries.append(row)
+            extension_counts[ext] += 1
+            return row
 
-            for name in files:
-                ext = Path(name).suffix.lower()
-                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
-                    continue
-                full_path = os.path.join(current_root, name)
-                if not os.path.isfile(full_path):
-                    skipped_unreadable_paths[root].append(full_path)
-                    skipped_unreadable_by_ext[root][ext or "(no extension)"] += 1
-                    if os.path.islink(full_path):
-                        skipped_broken_symlink_paths[root].append(full_path)
-                    continue
-                rel_path = _to_posix_relpath(os.path.relpath(full_path, root))
-                rel_parts = [token for token in rel_path.split("/") if token]
-                file_depth = max(0, len(rel_parts) - 1)
-                if file_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' contains a file deeper than the supported "
-                        f"{FEATURES_MAX_SUBFOLDER_DEPTH} nested levels: '{full_path}'."
-                    )
-                row = {
-                    "path": full_path,
-                    "name": str(name),
-                    "extension": ext,
-                    "folder_path": root,
-                    "folder_name": folder_name,
-                    "relative_path": rel_path,
-                }
-                if len(rel_parts) >= 2:
-                    level1_subfolder = rel_parts[0]
-                    subfolder_relative_path = "/".join(rel_parts[1:])
-                    subfolder_relative_dir = _to_posix_relpath(os.path.dirname(subfolder_relative_path))
-                    row["level1_subfolder"] = level1_subfolder
-                    row["subfolder_relative_path"] = subfolder_relative_path
-                    row["subfolder_relative_dir"] = subfolder_relative_dir
-                    branch_directories[level1_subfolder].add(subfolder_relative_dir or ".")
-                    branch_dir_ext_files[level1_subfolder][subfolder_relative_dir][ext].append(row)
+        if _is_supported_ctf_dataset_path(root):
+            _append_folder_entry(root, os.path.basename(root), ".ds")
+        else:
+            for current_root, dirnames, files in os.walk(root):
+                ctf_dirnames = [name for name in dirnames if Path(name).suffix.lower() == ".ds"]
+                dirnames[:] = [name for name in dirnames if Path(name).suffix.lower() != ".ds"]
+                rel_dir = os.path.relpath(current_root, root)
+                rel_dir_posix = _to_posix_relpath(rel_dir)
+                if rel_dir_posix == ".":
+                    dir_depth = 0
                 else:
-                    row["level1_subfolder"] = ""
-                    row["subfolder_relative_path"] = rel_parts[0] if rel_parts else row["name"]
-                    row["subfolder_relative_dir"] = "."
-                folder_entries.append(row)
-                extension_counts[ext] += 1
+                    dir_depth = len([token for token in rel_dir_posix.split("/") if token])
+                if dir_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' exceeds the maximum supported nested depth "
+                        f"({FEATURES_MAX_SUBFOLDER_DEPTH}) at '{current_root}'."
+                    )
+                if rel_dir_posix != ".":
+                    parts = [token for token in rel_dir_posix.split("/") if token]
+                    branch_name = parts[0]
+                    branch_rel_dir = "/".join(parts[1:]) if len(parts) > 1 else "."
+                    branch_directories[branch_name].add(branch_rel_dir or ".")
+                for name in ctf_dirnames:
+                    full_path = os.path.join(current_root, name)
+                    if os.path.isdir(full_path):
+                        _append_folder_entry(full_path, name, ".ds")
+
+                for name in files:
+                    ext = Path(name).suffix.lower()
+                    if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                        continue
+                    full_path = os.path.join(current_root, name)
+                    if not os.path.isfile(full_path):
+                        skipped_unreadable_paths[root].append(full_path)
+                        skipped_unreadable_by_ext[root][ext or "(no extension)"] += 1
+                        if os.path.islink(full_path):
+                            skipped_broken_symlink_paths[root].append(full_path)
+                        continue
+                    _append_folder_entry(full_path, name, ext)
 
         folder_entries.sort(key=lambda item: item["path"])
 
@@ -3036,6 +3075,20 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                     and str(item.get("subfolder_relative_dir") or ".") == selected_dir
                     and str(item.get("extension") or "").lower() == selected_data_extension.lower()
                 ]
+                if not branch_rows and selected_data_extension.lower() == ".ds":
+                    branch_ds_rows = [
+                        item for item in folder_entries
+                        if str(item.get("level1_subfolder") or "") == branch
+                        and str(item.get("extension") or "").lower() == ".ds"
+                    ]
+                    if len(branch_ds_rows) == 1:
+                        branch_rows = branch_ds_rows
+                    elif len(branch_ds_rows) > 1:
+                        structure_warnings.append(
+                            f"Subfolder '{branch}' contains multiple '.ds' datasets and none matched "
+                            f"the reference directory '{selected_dir}' — skipped."
+                        )
+                        continue
                 if not branch_rows:
                     structure_warnings.append(
                         f"Subfolder '{branch}' has no data file at '{selected_dir}' with extension "
@@ -3216,7 +3269,7 @@ def _validate_simulation_file_path(file_path):
     candidate = os.path.realpath((file_path or "").strip())
     if not candidate:
         raise ValueError("Provide a simulation output file path.")
-    if not os.path.isfile(candidate):
+    if not _is_supported_parser_path(candidate):
         raise ValueError(f"Simulation output file does not exist: {candidate}")
     ext = Path(candidate).suffix.lower()
     if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -8584,7 +8637,7 @@ def features_select_folder():
             if not picked or picked in seen:
                 continue
             seen.add(picked)
-            if not os.path.isfile(picked):
+            if not os.path.isfile(picked) and not _is_supported_ctf_dataset_path(picked):
                 return None, jsonify({"error": f"Selected path is not a file: {picked}"}), 400
             ext = Path(picked).suffix.lower()
             if allowed_exts:
@@ -9092,7 +9145,7 @@ def features_parser_inspect():
                 upload_entries.append({"path": temp_path, "name": upl_name, "folder_name": upl_name})
             for srv_path in metadata_server_paths:
                 real_path = os.path.realpath(srv_path)
-                if not os.path.isfile(real_path):
+                if not _is_supported_parser_path(real_path):
                     return jsonify({"error": f"Server file not found: {srv_path}"}), 400
                 srv_name = os.path.basename(real_path)
                 ext = Path(srv_name).suffix.lower()
