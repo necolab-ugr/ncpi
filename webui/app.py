@@ -15868,12 +15868,6 @@ def job_status_page(job_id):
     # Pass the job_id to the template for use in Alpine.js
     return render_template("loading_page.html", job_id=job_id, computation_type=computation_type, pending=False)
 
-@app.route("/job_status_pending")
-def job_status_pending():
-    """Renders the loading page before a job id is assigned (used for uploads)."""
-    computation_type = request.args.get('computation_type')
-    return render_template("loading_page.html", job_id="", computation_type=computation_type, pending=True)
-
 
 @app.route("/cancel_job/<job_id>", methods=["POST"])
 def cancel_job(job_id):
