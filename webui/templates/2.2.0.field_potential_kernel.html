@@ -791,7 +791,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const biophysAddBtn = document.getElementById('biophysAddBtn');
     const biophysHidden = document.getElementById('biophysHidden');
     const availableBiophysOptions = {{ biophys_options | tojson }};
-    const preferredBiophysDefaults = ['set_Ih_linearized_hay2011', 'set_pas_hay2011'];
+    const preferredBiophysDefaults = ['set_Ih_linearized_hay2011', 'make_cell_uniform'];
     const defaultBiophysItems = preferredBiophysDefaults.filter((name) => availableBiophysOptions.includes(name));
     if (defaultBiophysItems.length === 0 && availableBiophysOptions.length > 0) {
         defaultBiophysItems.push(availableBiophysOptions[0]);

@@ -1,5 +1,6 @@
 import inspect
 import os
+import re
 import subprocess
 import numpy as np
 from copy import deepcopy
@@ -155,6 +156,62 @@ class FieldPotential:
                 "biophys entries must be callables or strings naming known biophys functions."
             )
         return resolved
+
+
+    @staticmethod
+    def _extract_inserted_mechanisms(func):
+        """Infer mechanism names inserted by a biophys helper via sec.insert('...')."""
+        try:
+            source_text = inspect.getsource(func)
+        except Exception:
+            return set()
+        return set(re.findall(r"\.insert\(\s*['\"]([^'\"]+)['\"]\s*\)", source_text))
+
+
+    def _mechanism_available(self, mechanism_name):
+        """Return True if a NEURON density mechanism can be inserted in a probe section."""
+        try:
+            sec = self.neuron.h.Section(name="__ncpi_mech_probe")
+            sec.insert(str(mechanism_name))
+            return True
+        except Exception:
+            return False
+
+
+    def _ensure_required_mechanisms(self, mod_dir, biophys_functions):
+        """
+        Ensure required mechanisms for selected biophys functions are available.
+
+        This guards against cases where `neuron.load_mechanisms` reports success but
+        the shared library failed to load (e.g., ABI mismatch), which later raises
+        "argument not a density mechanism name" at `sec.insert(...)`.
+        """
+        required = sorted({
+            mech
+            for func in biophys_functions
+            for mech in self._extract_inserted_mechanisms(func)
+        })
+        if not required:
+            self.neuron.load_mechanisms(mod_dir)
+            return
+
+        self.neuron.load_mechanisms(mod_dir)
+        missing = [mech for mech in required if not self._mechanism_available(mech)]
+        if not missing:
+            return
+
+        try:
+            subprocess.run(["nrnivmodl"], check=True, cwd=mod_dir)
+        except FileNotFoundError as exc:
+            raise RuntimeError("nrnivmodl not found; cannot build NEURON mechanisms.") from exc
+        self.neuron.load_mechanisms(mod_dir)
+        missing = [mech for mech in required if not self._mechanism_available(mech)]
+        if missing:
+            raise RuntimeError(
+                "Failed to load required NEURON mechanisms "
+                f"{missing} from '{mod_dir}'. "
+                "Rebuild the mod folder with this NEURON installation (run nrnivmodl in mod_dir)."
+            )
 
 
     @staticmethod
@@ -390,15 +447,12 @@ class FieldPotential:
         cellParameters['templatefile'] = os.path.join(MC_folder, cellParameters['templatefile'])
         morphologies = [os.path.join(MC_folder, m) for m in params.morphologies]
 
-        # Recompile mod files if needed
+        # Define biophysical membrane properties
+        set_biophys = self._resolve_biophys(biophys)
+
+        # Ensure mechanism library is loaded and compatible with the selected biophys functions
         mod_dir = os.path.join(MC_folder, "mod")
-        mech_loaded = self.neuron.load_mechanisms(mod_dir)
-        if not mech_loaded:
-            try:
-                subprocess.run(["nrnivmodl"], check=True, cwd=mod_dir)
-            except FileNotFoundError as exc:
-                raise RuntimeError("nrnivmodl not found; cannot build NEURON mechanisms.") from exc
-            self.neuron.load_mechanisms(mod_dir)
+        self._ensure_required_mechanisms(mod_dir, set_biophys)
 
         # Presynaptic activation time
         if t_X is None:
@@ -473,9 +527,6 @@ class FieldPotential:
 
         # Synapse max. conductance (function, mean, st.dev., min.):
         weights = _normalize_weights(weights)
-
-        # Define biophysical membrane properties
-        set_biophys = self._resolve_biophys(biophys)
 
         # Class RecExtElectrode/PointSourcePotential parameters:
         if electrodeParameters is not None:
