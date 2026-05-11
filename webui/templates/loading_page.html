@@ -78,7 +78,7 @@
                 <span class="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" x-show="status === 'in_progress' && progress < 100"></span>
                 <span>ncpi terminal</span>
             </div>
-            <pre x-ref="log" class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed font-mono"
+            <pre x-ref="log" class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed font-mono" id="output-terminal"
                 x-text="output || (pending ? 'Uploading data...' : 'Waiting for ncpi output...')"></pre>
         </div>
     </div>
