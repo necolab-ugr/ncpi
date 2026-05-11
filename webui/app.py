@@ -128,7 +128,7 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".ds", ".tsv"
+    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".ds", ".tsv", ".vhdr", ".dat"
 }
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
 
@@ -147,6 +147,7 @@ def _is_supported_parser_path(path):
 
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX = "__file_extracted_sep__"
 FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
 FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
@@ -3289,6 +3290,16 @@ def _extract_filename_text_chains(file_name):
     return [tok for tok in stem.split("_") if tok.strip()]
 
 
+def _extract_filename_text_parts_by_separator(file_name):
+    stem = Path(str(file_name or "")).stem
+    if not stem:
+        return {}
+    return {
+        "underscore": [tok.strip() for tok in stem.split("_") if tok.strip()],
+        "hyphen": [tok.strip() for tok in stem.split("-") if tok.strip()],
+    }
+
+
 _FILENAME_FORMAT_TOKEN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
@@ -3417,34 +3428,42 @@ def _filter_named_items_by_filename_format(items, get_name, format_spec):
 
 
 def _build_file_extracted_virtual_fields(file_names):
-    chain_rows = [_extract_filename_text_chains(name) for name in (file_names or [])]
-    max_chains = max((len(row) for row in chain_rows), default=0)
     fields = []
+    separator_specs = [("underscore", "_"), ("hyphen", "-")]
+    split_rows = [_extract_filename_text_parts_by_separator(name) for name in (file_names or [])]
 
-    for idx in range(max_chains):
-        ordered_values = []
-        seen = set()
-        for row in chain_rows:
-            if idx >= len(row):
-                continue
-            token = str(row[idx] or "").strip()
-            if not token:
-                continue
-            key = token.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered_values.append(token)
-        if not ordered_values:
+    for sep_name, sep_char in separator_specs:
+        rows = [row.get(sep_name) or [] for row in split_rows]
+        max_parts = max((len(parts) for parts in rows), default=0)
+        if max_parts <= 1:
             continue
-        preview = "/".join(ordered_values[:6])
-        if len(ordered_values) > 6:
-            preview += "/..."
-        fields.append({
-            "key": f"{FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX}{idx}",
-            "label": f"file extracted: {preview}",
-            "values": ordered_values,
-        })
+        for idx in range(max_parts):
+            ordered_values = []
+            seen = set()
+            for parts in rows:
+                if idx >= len(parts):
+                    continue
+                token = str(parts[idx] or "").strip()
+                if not token:
+                    continue
+                key = token.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered_values.append(token)
+            if not ordered_values:
+                continue
+            preview = "/".join(ordered_values[:6])
+            if len(ordered_values) > 6:
+                preview += "/..."
+            fields.append({
+                "key": f"{FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX}{sep_name}__{idx}",
+                "label": f"file extracted: '{sep_char}' block {idx + 1} -> {preview}",
+                "values": ordered_values,
+                "separator": sep_char,
+                "separator_name": sep_name,
+                "index": idx,
+            })
 
     return fields
 
@@ -3507,32 +3526,54 @@ def _attach_file_extracted_virtual_field(description, file_names, filename_forma
     return enriched
 
 
-def _file_extracted_chain_index(locator):
+def _file_extracted_locator_spec(locator):
     if not isinstance(locator, str):
         return None
-    if locator == FILE_EXTRACTED_VIRTUAL_FIELD:
+    raw = str(locator).strip()
+    if raw == FILE_EXTRACTED_VIRTUAL_FIELD:
         # Backward compatibility with previous single extracted field.
-        return -1
-    if not locator.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
+        return {"separator_name": "underscore", "separator": "_", "index": -1}
+    if raw.startswith(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):
+        suffix = raw[len(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):].strip()
+        if "__" not in suffix:
+            return None
+        sep_name, idx_raw = suffix.split("__", 1)
+        sep_name = sep_name.strip().lower()
+        if sep_name not in {"underscore", "hyphen"} or not idx_raw.isdigit():
+            return None
+        return {
+            "separator_name": sep_name,
+            "separator": "_" if sep_name == "underscore" else "-",
+            "index": int(idx_raw),
+        }
+    if not raw.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
         return None
-    suffix = locator[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
+    suffix = raw[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
     if not suffix.isdigit():
         return None
-    return int(suffix)
+    return {"separator_name": "underscore", "separator": "_", "index": int(suffix)}
+
+
+def _file_extracted_chain_index(locator):
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
+        return None
+    return int(spec["index"])
 
 
 def _resolve_file_extracted_value(file_name, locator):
-    index = _file_extracted_chain_index(locator)
-    if index is None:
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
         return None
-    chains = _extract_filename_text_chains(file_name)
-    if not chains:
+    parts = _extract_filename_text_parts_by_separator(file_name).get(str(spec["separator_name"])) or []
+    if not parts:
         return None
+    index = int(spec["index"])
     if index < 0:
-        return chains[-1]
-    if index >= len(chains):
+        return parts[-1]
+    if index >= len(parts):
         return None
-    return chains[index]
+    return parts[index]
 
 
 def _resolve_file_token_value(file_name, locator, filename_format_spec):
@@ -4374,16 +4415,18 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
         preview = ", ".join(values[:5])
         if len(values) > 5:
             preview += ", ..."
-        position = _file_extracted_chain_index(key)
+        locator_spec = _file_extracted_locator_spec(key)
         token_name = _file_token_locator_name(key)
         usage_examples = []
         if token_name:
             usage_examples.append(
                 f"Represents the `{token_name}` token extracted from the filename format."
             )
-        elif position is not None and position >= 0:
+        elif locator_spec is not None and int(locator_spec.get("index", -1)) >= 0:
+            position = int(locator_spec.get("index", 0))
+            separator_char = str(locator_spec.get("separator") or "_")
             usage_examples.append(
-                f"Represents token position {position + 1} extracted from file names."
+                f"Represents block {position + 1} extracted from file names using separator '{separator_char}'."
             )
         usage_examples.append(
             "Use this virtual field as Group/Condition locator when file names encode categories."
@@ -4808,6 +4851,54 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename
         dict(candidate_field_folders),
         combined_logical_names,
     )
+
+
+def _name_candidates_from_selected_data_files(folder_entries, folder_contexts, apply_folder_prefix=False):
+    rows_by_root = defaultdict(list)
+    for row in folder_entries or []:
+        root = str(row.get("folder_path") or "").strip()
+        if root:
+            rows_by_root[root].append(row)
+
+    names = []
+    seen = set()
+    for context in folder_contexts or []:
+        if not isinstance(context, dict):
+            continue
+        folder_path = str(context.get("folder_path") or "").strip()
+        folder_name = str(context.get("folder_name") or "").strip()
+        selected_ext = str(context.get("selected_data_extension") or "").strip().lower()
+        selected_rel = str(context.get("selected_data_file") or "").strip()
+        selected_rel_dir = str(Path(selected_rel).parent).strip() if selected_rel and not selected_rel.startswith("__ext__:") else ""
+        if selected_rel_dir in {"", "."}:
+            selected_rel_dir = "."
+
+        # Build suggestions from all files that belong to the same selected
+        # subfolder pattern (same extension + same relative directory), not
+        # only the single sample-selected file per folder.
+        pool = []
+        for row in rows_by_root.get(folder_path, []):
+            row_ext = str(row.get("extension") or "").strip().lower()
+            if selected_ext and row_ext != selected_ext:
+                continue
+            row_rel_dir = str(row.get("subfolder_relative_dir") or ".").strip() or "."
+            if selected_rel and not selected_rel.startswith("__ext__:") and row_rel_dir != selected_rel_dir:
+                continue
+            pool.append(row)
+
+        source_items = pool if pool else list(context.get("matched_data_files") or [])
+        for item in source_items:
+            if not isinstance(item, dict):
+                continue
+            base_name = str(item.get("name") or item.get("logical_name") or "").strip()
+            if not base_name:
+                continue
+            value = _prefixed_file_name(base_name, folder_name, apply_prefix=apply_folder_prefix)
+            if value in seen:
+                continue
+            seen.add(value)
+            names.append(value)
+    return names
 
 
 def _aggregate_candidate_metadata_from_file_entries(folder_entries):
@@ -9127,8 +9218,13 @@ def features_parser_inspect():
                 folder_summaries,
                 filename_format_spec=filename_format_spec,
             )
+            selected_name_candidates = _name_candidates_from_selected_data_files(
+                folder_entries,
+                folder_contexts,
+                apply_folder_prefix=(len(folder_summaries) > 1),
+            )
             if not name_candidates:
-                name_candidates = combined_logical_names
+                name_candidates = selected_name_candidates or combined_logical_names
             extension_profiles = [
                 profile
                 for folder_profile in folder_profiles
@@ -9205,8 +9301,13 @@ def features_parser_inspect():
                 folder_summaries,
                 filename_format_spec=filename_format_spec,
             )
+            selected_name_candidates = _name_candidates_from_selected_data_files(
+                folder_entries,
+                folder_contexts,
+                apply_folder_prefix=(len(folder_summaries) > 1),
+            )
             if not name_candidates:
-                name_candidates = combined_logical_names
+                name_candidates = selected_name_candidates or combined_logical_names
             extension_profiles = [
                 profile
                 for folder_profile in folder_profiles

@@ -378,6 +378,7 @@ _PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
 _FOLD_PROGRESS_RE = re.compile(r"Fold\s+(\d+)\s*/\s*(\d+)")
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX = "__file_extracted_sep__"
 FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
 FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
@@ -397,31 +398,63 @@ def _extract_filename_text_chains(file_name):
     return [tok.strip() for tok in stem.split("_") if tok.strip()]
 
 
-def _file_extracted_chain_index(locator):
+def _extract_filename_text_parts_by_separator(file_name):
+    stem = os.path.splitext(os.path.basename(str(file_name or "")))[0]
+    if not stem:
+        return {}
+    return {
+        "underscore": [tok.strip() for tok in stem.split("_") if tok.strip()],
+        "hyphen": [tok.strip() for tok in stem.split("-") if tok.strip()],
+    }
+
+
+def _file_extracted_locator_spec(locator):
     if not isinstance(locator, str):
         return None
-    if locator == FILE_EXTRACTED_VIRTUAL_FIELD:
-        return -1
-    if not locator.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
+    raw = str(locator).strip()
+    if raw == FILE_EXTRACTED_VIRTUAL_FIELD:
+        return {"separator_name": "underscore", "separator": "_", "index": -1}
+    if raw.startswith(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):
+        suffix = raw[len(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):].strip()
+        if "__" not in suffix:
+            return None
+        sep_name, idx_raw = suffix.split("__", 1)
+        sep_name = sep_name.strip().lower()
+        if sep_name not in {"underscore", "hyphen"} or not idx_raw.isdigit():
+            return None
+        return {
+            "separator_name": sep_name,
+            "separator": "_" if sep_name == "underscore" else "-",
+            "index": int(idx_raw),
+        }
+    if not raw.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
         return None
-    suffix = locator[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
+    suffix = raw[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
     if not suffix.isdigit():
         return None
-    return int(suffix)
+    return {"separator_name": "underscore", "separator": "_", "index": int(suffix)}
+
+
+def _file_extracted_chain_index(locator):
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
+        return None
+    return int(spec["index"])
 
 
 def _resolve_file_extracted_value(file_name, locator):
-    index = _file_extracted_chain_index(locator)
-    if index is None:
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
         return None
-    chains = _extract_filename_text_chains(file_name)
-    if not chains:
+    parts = _extract_filename_text_parts_by_separator(file_name).get(str(spec["separator_name"])) or []
+    if not parts:
         return None
+    index = int(spec["index"])
     if index < 0:
-        return chains[-1]
-    if index >= len(chains):
+        return parts[-1]
+    if index >= len(parts):
         return None
-    return chains[index]
+    return parts[index]
 
 
 _FILENAME_FORMAT_TOKEN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -869,6 +902,11 @@ def _load_uploaded_source_bytes(name, ext, content):
             "Use Server upload/path selection and select the folder that contains the .ds dataset."
         )
 
+    if ext in {".vhdr", ".dat"}:
+        raise ValueError(
+            f"BrainVision {ext} requires companion files (.vhdr, .eeg/.dat, .vmrk) in the same folder. "
+            "Use server-path selection (folder on disk), not single-file upload."
+        )
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
@@ -956,7 +994,17 @@ def _load_uploaded_source_path(path, name=None, ext=None):
         except ImportError as exc:
             raise ValueError(f"pyEDFlib is required to parse .edf files: {exc}")
 
+    if ext in {".vhdr", ".dat"}:
+        try:
+            from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+            parser = EphysDatasetParser(ParseConfig(preload=True))
+            source_obj, _ = parser._load_source(safe_path)
+            return source_obj
+        except Exception as exc:
+            raise ValueError(f"Failed to parse BrainVision file '{safe_name}': {exc}")
+
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
+
 
 
 def _flatten_matlab_ch_names(raw):
@@ -2280,6 +2328,7 @@ def _apply_additional_file_metadata(
                 locator_name
                 and locator_name not in {FILE_ID_METADATA_LITERAL}
                 and not locator_name.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX)
+                and not locator_name.startswith(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX)
             ):
                 source_candidates.append(locator_name)
             source_candidates.append(target_name)
