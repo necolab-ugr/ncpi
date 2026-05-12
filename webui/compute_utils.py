@@ -1663,6 +1663,47 @@ def _safe_float(value):
         return None
 
 
+def _normalize_cdm_component_axis(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        token = value.strip().lower()
+    else:
+        numeric = _safe_float(value)
+        if numeric is not None and float(numeric).is_integer():
+            token = str(int(numeric))
+        else:
+            token = str(value).strip().lower()
+    if token in {"x", "0"}:
+        return "x"
+    if token in {"y", "1"}:
+        return "y"
+    if token in {"z", "2"}:
+        return "z"
+    if token in {"xyz", "all", "3", "3d"}:
+        return "xyz"
+    return None
+
+
+def _cdm_component_axis_index(axis):
+    normalized = _normalize_cdm_component_axis(axis)
+    axis_to_index = {"x": 0, "y": 1, "z": 2}
+    return axis_to_index.get(normalized)
+
+
+def _extract_cdm_component_meta(value):
+    if not isinstance(value, MappingABC):
+        return None, None
+    axis = _normalize_cdm_component_axis(value.get("component_axis"))
+    if axis is None:
+        axis = _normalize_cdm_component_axis(value.get("component"))
+    if axis is None:
+        axis = _normalize_cdm_component_axis(value.get("component_index"))
+    if axis is None:
+        axis = _normalize_cdm_component_axis(value.get("component_label"))
+    return axis, _cdm_component_axis_index(axis)
+
+
 def _is_trial_sequence(value):
     if not isinstance(value, (list, tuple)):
         return False
@@ -1782,15 +1823,35 @@ def _first_numeric_from_column(df, column_name):
 
 
 def _extract_signal_and_meta_from_source(obj):
-    meta = {"dt_ms": None, "decimation_factor": 1, "fs_hz": None}
+    meta = {
+        "dt_ms": None,
+        "decimation_factor": 1,
+        "fs_hz": None,
+        "component_axis": None,
+        "component_index": None,
+    }
     dipole_probe_priority = ("CurrentDipoleMoment", "KernelApproxCurrentDipoleMoment")
+
+    def _first_non_empty_from_column(df, column_name):
+        if column_name not in df.columns:
+            return None
+        series = df[column_name].dropna()
+        if series.empty:
+            return None
+        for value in series:
+            if isinstance(value, str):
+                if value.strip():
+                    return value
+                continue
+            return value
+        return None
 
     if isinstance(obj, pd.DataFrame):
         dt_ms = _first_numeric_from_column(obj, "dt_ms")
         decimation_factor = _first_numeric_from_column(obj, "decimation_factor")
         fs_hz = _first_numeric_from_column(obj, "fs_hz")
 
-        if "metadata" in obj.columns and (dt_ms is None or fs_hz is None or decimation_factor is None):
+        if "metadata" in obj.columns:
             meta_series = obj["metadata"].dropna()
             if not meta_series.empty:
                 meta_value = meta_series.iloc[0]
@@ -1806,12 +1867,27 @@ def _extract_signal_and_meta_from_source(obj):
                         decimation_factor = _safe_float(meta_value.get("decimation_factor"))
                     if fs_hz is None:
                         fs_hz = _safe_float(meta_value.get("fs_hz"))
+                    component_axis, component_index = _extract_cdm_component_meta(meta_value)
+                    if component_axis is not None:
+                        meta["component_axis"] = component_axis
+                    if component_index is not None:
+                        meta["component_index"] = int(component_index)
 
         if decimation_factor is None or decimation_factor <= 0:
             decimation_factor = 1
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
+        component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component_axis"))
+        if component_axis is None:
+            component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component"))
+        if component_axis is None:
+            component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component_index"))
+        if component_axis is not None:
+            meta["component_axis"] = component_axis
+        component_index = _cdm_component_axis_index(meta.get("component_axis"))
+        if component_index is not None:
+            meta["component_index"] = int(component_index)
         signal_column = "sum" if "sum" in obj.columns else ("data" if "data" in obj.columns else None)
         if signal_column is not None and not obj.empty:
             selected_row = obj.iloc[0]
@@ -1830,6 +1906,11 @@ def _extract_signal_and_meta_from_source(obj):
         dt_ms = _safe_float(obj.get("dt_ms"))
         decimation_factor = _safe_float(obj.get("decimation_factor"))
         fs_hz = _safe_float(obj.get("fs_hz"))
+        component_axis, component_index = _extract_cdm_component_meta(obj)
+        if component_axis is not None:
+            meta["component_axis"] = component_axis
+        if component_index is not None:
+            meta["component_index"] = int(component_index)
         metadata = obj.get("metadata")
         if isinstance(metadata, MappingABC):
             if dt_ms is None:
@@ -1838,6 +1919,11 @@ def _extract_signal_and_meta_from_source(obj):
                 decimation_factor = _safe_float(metadata.get("decimation_factor"))
             if fs_hz is None:
                 fs_hz = _safe_float(metadata.get("fs_hz"))
+            nested_axis, nested_index = _extract_cdm_component_meta(metadata)
+            if meta["component_axis"] is None and nested_axis is not None:
+                meta["component_axis"] = nested_axis
+            if meta["component_index"] is None and nested_index is not None:
+                meta["component_index"] = int(nested_index)
         if decimation_factor is None or decimation_factor <= 0:
             decimation_factor = 1
         meta["dt_ms"] = dt_ms
@@ -4605,19 +4691,62 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             transient = 0.0
         probe_names = selected_probe_names or ["KernelApproxCurrentDipoleMoment"]
         component_val = params.get("cdm_component")
-        if component_val in (None, "", "None"):
+        component_axis = _normalize_cdm_component_axis(component_val)
+        if component_axis is None:
+            component_axis = "xyz"
+        if component_axis not in {"z", "xyz"}:
+            raise ValueError("CDM component must be 'z' or 'xyz (all)'.")
+        component_index = _cdm_component_axis_index(component_axis)
+        if component_axis == "xyz":
             component = None
         else:
-            component_token = str(component_val).strip().lower()
-            axis_to_index = {"x": 0, "y": 1, "z": 2}
-            if component_token in axis_to_index:
-                component = axis_to_index[component_token]
-            elif component_token in {"xyz", "all", "3", "3d"}:
-                component = None
-            else:
-                component = int(float(component_val))
-        component_label = "xyz (all)" if component is None else str(component)
+            component = int(component_index)
+        component_label = "xyz (all)" if component is None else component_axis
         _append_job_output(job_status, job_id, f"CDM/LFP component selection: {component_label}.")
+
+        if component is not None:
+            dipole_probes = {"KernelApproxCurrentDipoleMoment", "CurrentDipoleMoment"}
+            axis_names = {0: "x", 1: "y", 2: "z"}
+
+            def _probe_axis_absmax(kernel_map, probe_name):
+                axis_absmax = [0.0, 0.0, 0.0]
+                matched = 0
+                if not isinstance(kernel_map, MappingABC):
+                    return axis_absmax, matched
+                for entry in kernel_map.values():
+                    if not isinstance(entry, MappingABC) or probe_name not in entry:
+                        continue
+                    arr = np.asarray(entry.get(probe_name))
+                    if arr.ndim != 2 or arr.shape[0] != 3:
+                        continue
+                    matched += 1
+                    for axis_idx in range(3):
+                        try:
+                            axis_abs = float(np.nanmax(np.abs(arr[axis_idx])))
+                        except Exception:
+                            axis_abs = 0.0
+                        if axis_abs > axis_absmax[axis_idx]:
+                            axis_absmax[axis_idx] = axis_abs
+                return axis_absmax, matched
+
+            for probe_name in probe_names:
+                if probe_name not in dipole_probes:
+                    continue
+                axis_absmax, matched_count = _probe_axis_absmax(kernels, probe_name)
+                if matched_count <= 0:
+                    continue
+                chosen_abs = axis_absmax[int(component)]
+                if chosen_abs == 0.0 and max(axis_absmax) > 0.0:
+                    dominant_axis = int(np.argmax(np.asarray(axis_absmax, dtype=float)))
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: selected CDM component "
+                        f"'{axis_names.get(int(component), str(component))}' is zero across all {probe_name} kernels "
+                        f"(max|x|={axis_absmax[0]:.3g}, max|y|={axis_absmax[1]:.3g}, max|z|={axis_absmax[2]:.3g}). "
+                        f"Choose component '{axis_names.get(dominant_axis, 'z')}' or 'xyz (all)' to obtain a non-zero CDM signal.",
+                    )
+                    break
         mode = params.get("cdm_mode") or "same"
         scale = _parse_float_param(params, "cdm_scale", default=(float(dt) * 1e-3))
         if scale is None or not np.isfinite(scale):
@@ -4800,6 +4929,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     "sum": area_sum_payload if area_sum_payload else _sum_signal_dict(cdm_signals),
                     "raw_signals": cdm_signals,
                     "probe": probe_name,
+                    "component_axis": component_axis,
+                    "component_index": component_index,
                     "dt_ms": float(cdm_dt),
                     "decimation_factor": cdm_decimation_factor,
                     "fs_hz": fs_hz_after_decimation,
@@ -4807,6 +4938,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                         "dt_ms": float(cdm_dt),
                         "decimation_factor": cdm_decimation_factor,
                         "fs_hz": fs_hz_after_decimation,
+                        "component_axis": component_axis,
+                        "component_index": component_index,
                     },
                 }
                 if trial_count > 1:
@@ -4974,8 +5107,49 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         required_four_area_order = ("frontal", "parietal", "temporal", "occipital")
         if is_four_area_simulation and model == "NYHeadModel":
             raise ValueError("NYHeadModel is not supported for the four-area simulation model.")
+        if is_four_area_simulation and requested_forward_mode == "per_sensor_independent":
+            raise ValueError("Per-sensor independent simulation is not available for the four-area model.")
         force_per_sensor_mode = model == "NYHeadModel"
         use_per_sensor_independent = force_per_sensor_mode or (requested_forward_mode == "per_sensor_independent")
+
+        four_area_dipole_defaults = {
+            "FourSphereVolumeConductor": np.array(
+                [
+                    [-20000.0, 20000.0, 78000.0],
+                    [-20000.0, -20000.0, 78000.0],
+                    [20000.0, -20000.0, 78000.0],
+                    [20000.0, 20000.0, 78000.0],
+                ],
+                dtype=float,
+            ),
+            "InfiniteVolumeConductor": np.array(
+                [
+                    [-20000.0, 20000.0, 0.0],
+                    [-20000.0, -20000.0, 0.0],
+                    [20000.0, -20000.0, 0.0],
+                    [20000.0, 20000.0, 0.0],
+                ],
+                dtype=float,
+            ),
+            "InfiniteHomogeneousVolCondMEG": np.array(
+                [
+                    [-20000.0, 20000.0, 0.0],
+                    [-20000.0, -20000.0, 0.0],
+                    [20000.0, -20000.0, 0.0],
+                    [20000.0, 20000.0, 0.0],
+                ],
+                dtype=float,
+            ),
+            "SphericallySymmetricVolCondMEG": np.array(
+                [
+                    [-20000.0, 20000.0, 90000.0],
+                    [-20000.0, -20000.0, 90000.0],
+                    [20000.0, -20000.0, 90000.0],
+                    [20000.0, 20000.0, 90000.0],
+                ],
+                dtype=float,
+            ),
+        }
 
         _append_job_output(job_status, job_id, f"Model: {model}")
         if force_per_sensor_mode:
@@ -4998,6 +5172,11 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         warned_cdm_1d = False
         warned_cdm_2d = False
         warned_cdm_replicated = False
+        warned_component_mode_z = False
+        warned_component_mode_xyz = False
+        warned_component_mode_xyz_mismatch = False
+        warned_fixed_four_area_dipoles = False
+        axis_names = {0: "x", 1: "y", 2: "z"}
 
         def _coerce_area_cdm_entry(value, area_name):
             arr = np.asarray(value)
@@ -5047,29 +5226,34 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 return np.repeat(seed, n_dipoles, axis=0)
             return arr
 
-        def _dipole_below_sensor(sensor_xyz, model_key, brain_radius=None):
-            sensor = np.asarray(sensor_xyz, dtype=float)
-            norm = float(np.linalg.norm(sensor))
-            if model_key == "FourSphereVolumeConductor":
-                r1 = _safe_float(brain_radius)
-                if r1 is None or r1 <= 0:
-                    r1 = 79000.0
-                if norm <= 0.0:
-                    return np.array([0.0, 0.0, 0.98 * r1], dtype=float)
-                # Strictly inside the brain sphere: |r_dipole| < r1
-                target_norm = min(norm * 0.98, r1 * 0.98)
-                return sensor * (target_norm / norm)
-            if model_key == "SphericallySymmetricVolCondMEG":
-                # Keep dipole strictly inside the sensor radius.
-                if norm > 0.0:
-                    return sensor * 0.98
-                return np.array([0.0, 0.0, 1000.0], dtype=float)
-            if norm > 0.0:
-                return sensor + np.array([0.0, 0.0, -2000.0], dtype=float)
-            return np.array([0.0, 0.0, -2000.0], dtype=float)
-
         for trial_idx, cdm_trial_raw in enumerate(cdm_trials_raw):
             CDM, cdm_meta = _extract_signal_and_meta_from_source(cdm_trial_raw)
+            component_mode = _normalize_cdm_component_axis(cdm_meta.get("component_axis"))
+            if component_mode not in {"z", "xyz"}:
+                component_mode = None
+            axis_from_meta = _cdm_component_axis_index(cdm_meta.get("component_axis"))
+            if axis_from_meta is None:
+                component_index_value = _safe_float(cdm_meta.get("component_index"))
+                if (
+                    component_index_value is not None
+                    and float(component_index_value).is_integer()
+                    and int(component_index_value) in axis_names
+                ):
+                    axis_from_meta = int(component_index_value)
+            if component_mode == "z" and not warned_component_mode_z:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "CDM metadata indicates z-component-only input; using z with x=y=0 in forward modeling.",
+                )
+                warned_component_mode_z = True
+            elif component_mode == "xyz" and not warned_component_mode_xyz:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "CDM metadata indicates all xyz components; using full dipole vectors in forward modeling.",
+                )
+                warned_component_mode_xyz = True
             trial_four_area_map = _extract_four_area_cdm_map(CDM)
             if trial_four_area_map is not None:
                 _append_job_output(
@@ -5101,15 +5285,19 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             trial_sensor_locations = np.array(sensor_locations, dtype=float, copy=True) if sensor_locations is not None else None
 
             if is_four_area_simulation:
-                if trial_dipole_locations is None:
+                default_four_area_locs = four_area_dipole_defaults.get(model)
+                if default_four_area_locs is None:
                     raise ValueError(
-                        "Four-area model requires dipole locations for frontal, parietal, temporal, occipital."
+                        f"Fixed four-area dipole defaults are not available for model '{model}'."
                     )
-                if trial_dipole_locations.shape != (4, 3):
-                    raise ValueError(
-                        "Four-area model requires exactly 4 dipole locations with shape (4, 3), "
-                        "ordered as frontal, parietal, temporal, occipital."
+                trial_dipole_locations = np.array(default_four_area_locs, dtype=float, copy=True)
+                if not warned_fixed_four_area_dipoles:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Four-area simulation uses fixed dipole locations mapped to frontal/parietal/temporal/occipital areas.",
                     )
+                    warned_fixed_four_area_dipoles = True
                 cdm_arr = np.asarray(CDM)
                 if trial_four_area_map is None and not (cdm_arr.ndim == 3 and cdm_arr.shape[0] == 4):
                     raise ValueError(
@@ -5122,16 +5310,58 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             if CDM.ndim == 3 and CDM.shape[1] != 3 and CDM.shape[2] == 3:
                 CDM = np.transpose(CDM, (0, 2, 1))
             if CDM.ndim == 1:
+                resolved_axis = axis_from_meta if axis_from_meta in axis_names else 2
+                if component_mode == "xyz" and not warned_component_mode_xyz_mismatch:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: CDM metadata says xyz, but payload is single-component; using z-axis fallback for forward modeling.",
+                    )
+                    warned_component_mode_xyz_mismatch = True
                 if not warned_cdm_1d:
-                    _append_job_output(job_status, job_id, "CDM is 1D; assuming z-axis dipole (x=y=0).")
+                    if axis_from_meta in axis_names:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"CDM is 1D; using saved component axis '{axis_names[resolved_axis]}' (other axes set to 0).",
+                        )
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "CDM is 1D with no saved component axis; assuming z-axis dipole (x=y=0).",
+                        )
                     warned_cdm_1d = True
-                CDM = np.vstack([np.zeros_like(CDM), np.zeros_like(CDM), CDM])
+                components = [np.zeros_like(CDM), np.zeros_like(CDM), np.zeros_like(CDM)]
+                components[resolved_axis] = CDM
+                CDM = np.vstack(components)
             elif CDM.ndim == 2 and CDM.shape[0] != 3:
+                resolved_axis = axis_from_meta if axis_from_meta in axis_names else 2
+                if component_mode == "xyz" and not warned_component_mode_xyz_mismatch:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: CDM metadata says xyz, but payload has one component per dipole; using z-axis fallback for forward modeling.",
+                    )
+                    warned_component_mode_xyz_mismatch = True
                 if not warned_cdm_2d:
-                    _append_job_output(job_status, job_id, "CDM has 1 component per dipole; assuming z-axis dipoles (x=y=0).")
+                    if axis_from_meta in axis_names:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"CDM has 1 component per dipole; using saved axis '{axis_names[resolved_axis]}' (other axes set to 0).",
+                        )
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "CDM has 1 component per dipole with no saved axis; assuming z-axis dipoles (x=y=0).",
+                        )
                     warned_cdm_2d = True
                 zeros = np.zeros_like(CDM)
-                CDM = np.stack([zeros, zeros, CDM], axis=1)
+                components = [zeros, zeros, zeros]
+                components[resolved_axis] = CDM
+                CDM = np.stack(components, axis=1)
             if not ((CDM.ndim == 2 and CDM.shape[0] == 3) or (CDM.ndim == 3 and CDM.shape[1] == 3)):
                 raise ValueError(
                     "CDM must have 3 components. Ensure you computed a dipole-moment probe (e.g., "
@@ -5168,7 +5398,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         ny_dipoles = np.vstack([ny_dipoles, tail])
                     trial_dipole_locations = np.array(ny_dipoles[:n_dip], dtype=float, copy=True)
             else:
-                if trial_sensor_locations is None:
+                if (not use_per_sensor_independent) and trial_sensor_locations is None:
                     if model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
                         trial_sensor_locations = np.array([[0.0, 0.0, 90000.0]])
                     elif model == "InfiniteHomogeneousVolCondMEG":
@@ -5177,6 +5407,10 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         trial_sensor_locations = np.array([[0.0, 0.0, 92000.0]])
 
             if trial_dipole_locations is None:
+                if model != "NYHeadModel" and use_per_sensor_independent:
+                    raise ValueError(
+                        "Per-sensor independent mode requires explicit dipole locations for non-NYHeadModel forward models."
+                    )
                 if model == "FourSphereVolumeConductor":
                     default_loc = np.array([0.0, 0.0, 78000.0], dtype=float)
                 elif model == "SphericallySymmetricVolCondMEG":
@@ -5206,6 +5440,10 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 if matrices:
                     n_sensors = matrices[0].shape[0]
             else:
+                if use_per_sensor_independent and trial_sensor_locations is None:
+                    raise ValueError(
+                        "Per-sensor independent mode requires explicit sensor locations for non-NYHeadModel forward models."
+                    )
                 trial_sensor_locations = np.asarray(trial_sensor_locations, dtype=float)
                 if trial_sensor_locations.ndim == 1:
                     if trial_sensor_locations.shape[0] != 3:
@@ -5217,7 +5455,6 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 if model == "FourSphereVolumeConductor":
                     FourSphere = potential._load_eegmegcalc_model("FourSphereVolumeConductor")
                     model_obj = FourSphere(trial_sensor_locations, **model_kwargs)
-                    four_sphere_r1 = _safe_float(getattr(model_obj, "r1", None))
                     def get_M(loc):
                         return model_obj.get_transformation_matrix(loc)
                 elif model == "InfiniteVolumeConductor":
@@ -5240,22 +5477,43 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     raise ValueError(f"Unknown model '{model}'.")
                 n_sensors = int(trial_sensor_locations.shape[0])
                 if use_per_sensor_independent:
-                    if len(p_list) == 0:
-                        raise ValueError("No CDM signal available for M/EEG computation.")
-                    if len(p_list) == 1:
-                        p_reference = p_list[0]
-                    else:
-                        _append_job_output(
-                            job_status,
-                            job_id,
-                            f"Collapsing {len(p_list)} dipole CDM entries into one equivalent CDM by summing components for per-sensor simulation.",
+                    if trial_dipole_locations is None or trial_sensor_locations is None:
+                        raise ValueError(
+                            "Per-sensor independent mode requires explicit dipole and sensor locations."
                         )
-                        p_reference = np.sum(np.stack(p_list, axis=0), axis=0)
-                    p_use_list = [p_reference]
+                    if trial_dipole_locations.ndim == 1:
+                        trial_dipole_locations = trial_dipole_locations.reshape(1, 3)
+                    if trial_sensor_locations.ndim == 1:
+                        trial_sensor_locations = trial_sensor_locations.reshape(1, 3)
+                    if trial_dipole_locations.shape[0] != trial_sensor_locations.shape[0]:
+                        raise ValueError(
+                            "Per-sensor independent mode requires the same number of dipole and sensor locations."
+                        )
+                    n_pairs = int(trial_dipole_locations.shape[0])
+                    if n_pairs <= 0:
+                        raise ValueError("Define at least one dipole/sensor pair for per-sensor independent mode.")
+                    if CDM.ndim == 2 and CDM.shape[0] == 3:
+                        shared_cdm = np.array(CDM, copy=True)
+                    elif CDM.ndim == 3 and CDM.shape[1] == 3:
+                        if CDM.shape[0] == 1:
+                            shared_cdm = np.array(CDM[0], copy=True)
+                        else:
+                            _append_job_output(
+                                job_status,
+                                job_id,
+                                f"Collapsing {CDM.shape[0]} dipole CDM entries into one shared CDM for per-sensor independent pairing.",
+                            )
+                            shared_cdm = np.sum(np.asarray(CDM, dtype=float), axis=0)
+                    else:
+                        raise ValueError("CDM must resolve to a 3-component dipole signal for per-sensor independent mode.")
+                    CDM = np.repeat(shared_cdm[np.newaxis, :, :], n_pairs, axis=0)
+                    p_list, loc_list = potential._normalize_cdm_and_locations(CDM, trial_dipole_locations)
+                    p_use_list = list(p_list)
+                    n_sensors = n_pairs
                     _append_job_output(
                         job_status,
                         job_id,
-                        "Using per-sensor independent forward simulation: for each sensor, the same CDM is evaluated at a dipole location below that sensor.",
+                        "Using per-sensor independent forward simulation: sensor i is computed only from dipole i; the same shared CDM is assigned to all configured dipoles.",
                     )
                 else:
                     for p_i, loc_i in zip(p_list, loc_list):
@@ -5264,7 +5522,13 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     _append_job_output(
                         job_status,
                         job_id,
-                        "Using simultaneous multi-dipole forward simulation: all dipoles are simulated together across all sensors.",
+                        (
+                            "Using simultaneous multi-dipole forward simulation (four-area mode): "
+                            "fixed frontal/parietal/temporal/occipital dipoles are simulated together and each receives its area-specific CDM."
+                            if is_four_area_simulation
+                            else "Using simultaneous multi-dipole forward simulation: all configured dipoles are simulated together across all sensors "
+                                 "and receive the same CDM (replicated across dipoles when needed)."
+                        ),
                     )
 
             if n_sensors <= 0:
@@ -5305,17 +5569,16 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         meeg[idx] = acc
                 else:
                     if use_per_sensor_independent:
-                        loc_sensor = trial_sensor_locations[idx]
-                        loc_dip = _dipole_below_sensor(
-                            loc_sensor,
-                            model,
-                            brain_radius=four_sphere_r1 if model == "FourSphereVolumeConductor" else None,
-                        )
-                        M_local = get_M(loc_dip)
+                        M_local = get_M(loc_list[idx])
+                        p_local = p_use_list[idx]
+                        if idx >= int(M_local.shape[0]):
+                            raise ValueError(
+                                "Per-sensor independent mode requires sensor index alignment with transformation rows."
+                            )
                         if is_meg:
-                            meeg[idx] = M_local[idx] @ p_use_list[0]
+                            meeg[idx] = M_local[idx] @ p_local
                         else:
-                            meeg[idx] = M_local[idx] @ p_use_list[0]
+                            meeg[idx] = M_local[idx] @ p_local
                     else:
                         if is_meg:
                             acc = np.zeros((3, n_times))

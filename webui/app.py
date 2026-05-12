@@ -13199,6 +13199,16 @@ def analysis_plot_simulation():
     plot_type = (request.form.get("sim_plot_type") or "raster").strip().lower()
     selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
     selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
+    plot_log_lines = []
+    plot_log_seen = set()
+
+    def _plot_log_warning(message):
+        text = str(message or "").strip()
+        if not text or text in plot_log_seen:
+            return
+        plot_log_seen.add(text)
+        plot_log_lines.append(text)
+        app.logger.warning(text)
 
     fp_time_types = {"proxy", "cdm", "lfp", "meeg"}
     fp_psd_types = {"proxy_psd", "cdm_psd", "lfp_psd", "meeg_psd"}
@@ -13206,6 +13216,10 @@ def analysis_plot_simulation():
     allowed_types = {"raster", "firing_rates"} | fp_plot_types
     if plot_type not in allowed_types:
         return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
+    if plot_type in {"cdm", "cdm_psd", "meeg", "meeg_psd"}:
+        _plot_log_warning(
+            "Warning: this plot reduces vector signals to the z-component before rendering time traces and PSD."
+        )
 
     def _coerce_selected_sim_payload(payload):
         if isinstance(payload, list):
@@ -13745,13 +13759,11 @@ def analysis_plot_simulation():
                 return np.array(arr, copy=True)
             return np.array(arr.T, copy=True)
         if arr.ndim == 3:
-            # MEG can come as (n_sensors, 3, n_times); reduce vector components to magnitude.
+            # MEG can come as (n_sensors, 3, n_times); use z-component for plotting consistency.
             if arr.shape[1] == 3:
-                mag = np.linalg.norm(arr, axis=1)
-                return _to_channels_time(mag)
+                return np.array(arr[:, 2, :], copy=True)
             if arr.shape[2] == 3:
-                mag = np.linalg.norm(arr, axis=2)
-                return _to_channels_time(mag)
+                return np.array(arr[:, :, 2], copy=True)
             return np.array(arr.reshape((-1, arr.shape[-1])), copy=True)
         return np.array(arr.reshape((1, -1)), copy=True)
 
@@ -14096,7 +14108,7 @@ def analysis_plot_simulation():
             title="Simulation outputs",
             subtitle=subtitle,
             image_bytes=output.getvalue(),
-            log_output="",
+            log_output="\n".join(plot_log_lines),
             simulation_repeat_controls=simulation_repeat_controls,
         )
 
@@ -14650,7 +14662,7 @@ def analysis_plot_simulation():
         title="Simulation outputs",
         subtitle=subtitle,
         image_bytes=output.getvalue(),
-        log_output="",
+        log_output="\n".join(plot_log_lines),
         simulation_repeat_controls=simulation_repeat_controls,
     )
 
