@@ -10262,6 +10262,7 @@ def analysis():
         simulation_trials=simulation_trials,
         simulation_model=simulation_model,
         simulation_welch_defaults=simulation_welch_defaults,
+        meg_topomap_atlases=MEG_TOPO_ATLAS_OPTIONS,
     )
 
 
@@ -11992,6 +11993,89 @@ def _pick_value_column(df, exclude):
     return None
 
 
+MEG_TOPO_ATLAS_OPTIONS = [
+    {"value": "dk", "label": "Desikan-Killiany (DK / aparc)"},
+    {"value": "destrieux", "label": "Destrieux (aparc.a2009s)"},
+    {"value": "hcpmmp1", "label": "HCP-MMP1"},
+    {"value": "hcpmmp1_combined", "label": "HCP-MMP1 combined"},
+    {"value": "aparc_sub", "label": "aparc_sub"},
+]
+MEG_TOPO_ATLAS_VALUES = {item["value"] for item in MEG_TOPO_ATLAS_OPTIONS}
+
+
+def _normalize_meg_atlas_name(atlas):
+    atlas_norm = str(atlas or "").strip().lower()
+    alias_to_parc = {
+        "dk": "aparc",
+        "desikan": "aparc",
+        "desikan-killiany": "aparc",
+        "aparc": "aparc",
+        "destrieux": "aparc.a2009s",
+        "aparc.a2009s": "aparc.a2009s",
+        "hcp-mmp": "HCPMMP1",
+        "hcp": "HCPMMP1",
+        "glasser": "HCPMMP1",
+        "hcpmmp1": "HCPMMP1",
+        "hcp-mmp-combined": "HCPMMP1_combined",
+        "glasser-combined": "HCPMMP1_combined",
+        "hcpmmp1_combined": "HCPMMP1_combined",
+        "aparc-sub": "aparc_sub",
+        "khan": "aparc_sub",
+        "aparc_sub": "aparc_sub",
+    }
+    return alias_to_parc.get(atlas_norm, str(atlas or "").strip())
+
+
+def _meg_expected_region_count(atlas, *, subject="fsaverage", subjects_dir=None):
+    try:
+        import mne
+    except Exception as exc:
+        raise ImportError(f"mne is required for MEG topographic plotting: {exc}") from exc
+    try:
+        import nibabel  # noqa: F401
+    except Exception as exc:
+        raise ImportError(f"nibabel is required for MEG topographic plotting: {exc}") from exc
+    parc = _normalize_meg_atlas_name(atlas)
+
+    subjects_dir_path = Path(subjects_dir).expanduser() if subjects_dir else None
+    if subjects_dir_path is not None:
+        subjects_dir_path.mkdir(parents=True, exist_ok=True)
+
+    fsaverage_dir = Path(mne.datasets.fetch_fsaverage(subjects_dir=subjects_dir_path, verbose=False))
+    subjects_dir_resolved = fsaverage_dir.parent
+    subject_dir = subjects_dir_resolved / subject
+    if not subject_dir.exists():
+        raise ValueError(f"Subject directory not found: {subject_dir}")
+
+    label_dir = subject_dir / "label"
+    if parc in {"HCPMMP1", "HCPMMP1_combined"} and subject == "fsaverage":
+        lh_annot = label_dir / f"lh.{parc}.annot"
+        rh_annot = label_dir / f"rh.{parc}.annot"
+        if not (lh_annot.exists() and rh_annot.exists()):
+            mne.datasets.fetch_hcp_mmp_parcellation(
+                subjects_dir=subjects_dir_resolved,
+                combine=True,
+                accept=True,
+                verbose=False,
+            )
+    elif parc == "aparc_sub" and subject == "fsaverage":
+        mne.datasets.fetch_aparc_sub_parcellation(subjects_dir=subjects_dir_resolved, verbose=False)
+
+    labels = mne.read_labels_from_annot(
+        subject=subject,
+        parc=parc,
+        hemi="both",
+        subjects_dir=subjects_dir_resolved,
+        sort=True,
+        verbose=False,
+    )
+    labels = [
+        lb for lb in labels
+        if not any(token in lb.name.lower() for token in ("unknown", "corpuscallosum", "medialwall"))
+    ]
+    return len(labels)
+
+
 @app.route("/analysis/columns", methods=["POST"])
 def analysis_columns():
     _remember_path_history_from_form(request.form, "analysis_columns")
@@ -12687,6 +12771,14 @@ def analysis_plot_topomap():
     if df_use.empty:
         return _plot_error("No valid rows found for the selected group and sensor columns.")
     _log(f"Topomap settings: group_col={group_col}, value_col={value_col}, mode={grouping_mode}.")
+    topomap_signal_type = str(request.form.get("topomap_signal_type", "eeg") or "eeg").strip().lower()
+    if topomap_signal_type not in {"eeg", "meg"}:
+        return _plot_error("Invalid topographic plot type. Select EEG or MEG.")
+    meg_atlas = str(request.form.get("topomap_meg_atlas", "dk") or "dk").strip()
+    if topomap_signal_type == "meg":
+        if meg_atlas.lower() not in MEG_TOPO_ATLAS_VALUES:
+            return _plot_error("Invalid MEG atlas selection.")
+        _log(f"MEG topographic plotting selected with atlas={meg_atlas}.")
 
     def _infer_vector_length(values):
         lengths = set()
@@ -12753,6 +12845,13 @@ def analysis_plot_topomap():
     scale_mode = request.form.get("topomap_scale_mode", "section")
     use_diverging = grouping_mode == "compare_categories"
     compare_cmap = "bwr" if use_diverging else None
+    meg_expected_count = None
+    if topomap_signal_type == "meg":
+        try:
+            meg_expected_count = _meg_expected_region_count(meg_atlas, subject="fsaverage", subjects_dir=None)
+        except Exception as exc:
+            return _plot_error(f"Unable to prepare MEG atlas '{meg_atlas}': {exc}")
+        _log(f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions.")
 
     sphere = "auto"
     if head_radius is not None:
@@ -12854,7 +12953,7 @@ def analysis_plot_topomap():
                     )
                 control_series = (
                     pd.DataFrame({sensor_col: control_df[sensor_col], "value": control_values})
-                    .groupby(sensor_col)["value"]
+                    .groupby(sensor_col, sort=False)["value"]
                     .mean()
                     .dropna()
                 )
@@ -12870,7 +12969,7 @@ def analysis_plot_topomap():
                         )
                     group_series = (
                         pd.DataFrame({sensor_col: group_df[sensor_col], "value": group_values})
-                        .groupby(sensor_col)["value"]
+                        .groupby(sensor_col, sort=False)["value"]
                         .mean()
                         .dropna()
                     )
@@ -12889,7 +12988,7 @@ def analysis_plot_topomap():
                     )
                 series = (
                     pd.DataFrame({sensor_col: df_use.loc[df_use[group_col] == g, sensor_col], "value": series_data})
-                    .groupby(sensor_col)["value"]
+                    .groupby(sensor_col, sort=False)["value"]
                     .mean()
                     .dropna()
                 )
@@ -12975,6 +13074,7 @@ def analysis_plot_topomap():
             c = idx % cols
             ax = fig.add_subplot(gs[r, c])
             try:
+                im = None
                 plot_vmin = section_vmin
                 plot_vmax = section_vmax
                 if scale_mode == "plot":
@@ -12987,22 +13087,47 @@ def analysis_plot_topomap():
                         plot_vmax = None
                     if use_diverging:
                         plot_vmin, plot_vmax = _symmetric_limits(plot_vmin, plot_vmax)
-                im, _ = analysis.eeg_topomap(
-                    series,
-                    axes=ax,
-                    show=False,
-                    vmin=plot_vmin,
-                    vmax=plot_vmax,
-                    cmap=compare_cmap,
-                    colorbar=False,
-                    sensors=True,
-                    montage="standard_1020",
-                    extrapolate="local",
-                    sphere=sphere,
-                )
+                if topomap_signal_type == "meg":
+                    values = series.to_numpy(dtype=float)
+                    if meg_expected_count is not None and values.size != int(meg_expected_count):
+                        plt.close(fig)
+                        return _plot_error(
+                            f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions, "
+                            f"but plot '{label}' has {values.size}. "
+                            "Ensure the selected sensor/region set matches the atlas size."
+                        )
+                    analysis.meg_surface(
+                        values=values,
+                        atlas=meg_atlas,
+                        subject="fsaverage",
+                        hemisphere="both",
+                        views="lat",
+                        cmap=compare_cmap or "coolwarm",
+                        vmin=plot_vmin,
+                        vmax=plot_vmax,
+                        colorbar=show_colorbar,
+                        show=False,
+                        axes=ax,
+                        auto_fetch=True,
+                        hcp_accept=True,
+                    )
+                else:
+                    im, _ = analysis.eeg_topomap(
+                        series,
+                        axes=ax,
+                        show=False,
+                        vmin=plot_vmin,
+                        vmax=plot_vmax,
+                        cmap=compare_cmap,
+                        colorbar=False,
+                        sensors=True,
+                        montage="standard_1020",
+                        extrapolate="local",
+                        sphere=sphere,
+                    )
             except Exception as exc:
                 plt.close(fig)
-                message = f"Topomap plotting failed: {exc}"
+                message = f"{'MEG' if topomap_signal_type == 'meg' else 'Topomap'} plotting failed: {exc}"
                 lower = message.lower()
                 sensor_info_missing = any(
                     token in lower
@@ -13020,7 +13145,7 @@ def analysis_plot_topomap():
                     message,
                     popup_redirect_url=url_for("analysis") if sensor_info_missing else None,
                 )
-            if show_colorbar:
+            if show_colorbar and topomap_signal_type == "eeg" and im is not None:
                 fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(label)
         row_cursor += rows_needed
@@ -13058,8 +13183,12 @@ def analysis_plot_topomap():
 
     image_bytes = _trim_whitespace(output.getvalue())
     return _render_analysis_plot(
-        title="Topomap result",
-        subtitle="EEG topographic plot.",
+        title=f"{'MEG' if topomap_signal_type == 'meg' else 'EEG'} topomap result",
+        subtitle=(
+            f"MEG atlas topographic plot ({meg_atlas})."
+            if topomap_signal_type == "meg"
+            else "EEG topographic plot."
+        ),
         image_bytes=image_bytes,
         log_output=log_buffer.getvalue(),
     )

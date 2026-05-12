@@ -36,6 +36,7 @@ dependencies = [
     "scipy",
     "tqdm",
     "flask",
+    "werkzeug",
     "pyarrow"
 ]
 
@@ -46,10 +47,18 @@ hctsa = [
     "matlabengine",
 ]
 
+# Dataset parser backends (FIF/EDF/HDF5/MAT variants)
+parser = [
+    "h5py",
+    "mne",
+    "pyEDFlib",
+]
+
 # Statistical analysis (R via rpy2)
 analysis = [
     "rpy2",
     "mne",
+    "nibabel",
 ]
 # Field potential / kernel workflows
 fieldpotential = [
@@ -62,12 +71,28 @@ fieldpotential = [
 # M/EEG utilities (band/spectrum DFA/fEI)
 meeg = [
     "mne",
+    "nibabel",
+]
+
+# WebUI/runtime plotting backends
+webui = [
+    "Pillow",
+    "h5py",
+    "mne",
+    "nibabel",
 ]
 
 # Example notebooks/scripts
 examples = [
+    "h5py",
+    "LFPy",
+    "mpi4py",
+    "nest-simulator",
+    "neuron",
     "pdf2image",
+    "pycatch22",
     "seaborn",
+    "specparam",
     "statsmodels",
 ]
 # Test dependencies (includes optional backends)
@@ -78,29 +103,16 @@ tests = [
     "lfpykit",
     "matlabengine",
     "mne",
+    "nibabel",
     "neuron",
+    "playwright",
+    "Pillow",
+    "pyEDFlib",
     "pytest",
     "rpy2",
     "scikit-learn==1.5.0",
     "sbi==0.24.0",
-    "torch",
-]
-# Everything (union of optional deps)
-all = [
-    "h5py",
-    "LFPy",
-    "lfpykernels",
-    "lfpykit",
-    "matlabengine",
-    "mne",
-    "neuron",
-    "pdf2image",
-    "pytest",
-    "rpy2",
-    "scikit-learn==1.5.0",
-    "seaborn",
-    "sbi==0.24.0",
-    "statsmodels",
+    "specparam",
     "torch",
 ]
 
