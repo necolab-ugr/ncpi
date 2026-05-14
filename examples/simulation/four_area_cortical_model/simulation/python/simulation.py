@@ -16,6 +16,45 @@ class LIF_network(object):
         # Parameters of the LIF network model
         self.LIF_params = LIF_params
 
+    def _area_local_params(self, area):
+        """Return local parameters for one area, applying optional area-specific overrides."""
+        base = {
+            "X": self.LIF_params["X"],
+            "N_X": self.LIF_params["N_X"],
+            "C_m_X": self.LIF_params["C_m_X"],
+            "tau_m_X": self.LIF_params["tau_m_X"],
+            "E_L_X": self.LIF_params["E_L_X"],
+            "C_YX": self.LIF_params["C_YX"],
+            "J_YX": self.LIF_params["J_YX"],
+            "delay_YX": self.LIF_params["delay_YX"],
+            "tau_syn_YX": self.LIF_params["tau_syn_YX"],
+            "n_ext": self.LIF_params["n_ext"],
+            "nu_ext": self.LIF_params["nu_ext"],
+            "J_ext": self.LIF_params["J_ext"],
+            "model": self.LIF_params["model"],
+        }
+        overrides = self.LIF_params.get("area_params", {})
+        area_override = overrides.get(area) if isinstance(overrides, dict) else None
+        if not isinstance(area_override, dict):
+            return base
+        merged = dict(base)
+        for key in (
+            "N_X",
+            "C_m_X",
+            "tau_m_X",
+            "E_L_X",
+            "C_YX",
+            "J_YX",
+            "delay_YX",
+            "tau_syn_YX",
+            "n_ext",
+            "nu_ext",
+            "J_ext",
+        ):
+            if key in area_override:
+                merged[key] = area_override[key]
+        return merged
+
     def create_LIF_network(self, local_num_threads, dt, rng_seed=None):
         """
         Create network nodes and connections.
@@ -43,13 +82,14 @@ class LIF_network(object):
         # Neurons
         self.neurons = {area: {} for area in areas}
         for area in areas:
+            local = self._area_local_params(area)
             for (X, N, C_m, tau_m, E_L, (tau_syn_ex, tau_syn_in)) in zip(
-                self.LIF_params['X'],
-                self.LIF_params['N_X'],
-                self.LIF_params['C_m_X'],
-                self.LIF_params['tau_m_X'],
-                self.LIF_params['E_L_X'],
-                self.LIF_params['tau_syn_YX'],
+                local['X'],
+                local['N_X'],
+                local['C_m_X'],
+                local['tau_m_X'],
+                local['E_L_X'],
+                local['tau_syn_YX'],
             ):
                 net_params = dict(
                     C_m=C_m,
@@ -61,7 +101,7 @@ class LIF_network(object):
                 )
                 print('Creating population %s\n' % f"{area}_{X}", end=' ', flush=True)
                 self.neurons[area][X] = nest.Create(
-                    self.LIF_params['model'],
+                    local['model'],
                     N,
                     net_params,
                 )
@@ -69,10 +109,11 @@ class LIF_network(object):
         # Poisson generators
         self.poisson = {area: {} for area in areas}
         for area in areas:
-            for X, n_ext in zip(pops, self.LIF_params['n_ext']):
+            local = self._area_local_params(area)
+            for X, n_ext in zip(pops, local['n_ext']):
                 self.poisson[area][X] = nest.Create(
                     'poisson_generator', 1, dict(
-                        rate=self.LIF_params['nu_ext'] * n_ext))
+                        rate=local['nu_ext'] * n_ext))
 
         # Spike recorders
         self.spike_recorders = {area: {} for area in areas}
@@ -82,29 +123,30 @@ class LIF_network(object):
 
         # Connections
         for area in areas:
+            local = self._area_local_params(area)
             for i, X in enumerate(pops):
                 # Recurrent connections
                 for j, Y in enumerate(pops):
                     conn_spec = dict(
                         rule='pairwise_bernoulli',
-                        p=self.LIF_params['C_YX'][i][j],
+                        p=local['C_YX'][i][j],
                     )
                     print('Connecting %s with %s \n' % (f"{area}_{X}", f"{area}_{Y}"), end=' ', flush=True)
                     syn_spec = dict(
                         synapse_model='static_synapse',
                         weight=nest.math.redraw(
                             nest.random.normal(
-                                mean=self.LIF_params['J_YX'][i][j],
-                                std=abs(self.LIF_params['J_YX'][i][j]) * 0.1,
+                                mean=local['J_YX'][i][j],
+                                std=abs(local['J_YX'][i][j]) * 0.1,
                             ),
-                            min=0. if self.LIF_params['J_YX'][i][j] >= 0 else -np.inf,
-                            max=np.inf if self.LIF_params['J_YX'][i][j] >= 0 else 0.,
+                            min=0. if local['J_YX'][i][j] >= 0 else -np.inf,
+                            max=np.inf if local['J_YX'][i][j] >= 0 else 0.,
                         ),
 
                         delay=nest.math.redraw(
                             nest.random.normal(
-                                mean=self.LIF_params['delay_YX'][i][j],
-                                std=self.LIF_params['delay_YX'][i][j] * 0.5,
+                                mean=local['delay_YX'][i][j],
+                                std=local['delay_YX'][i][j] * 0.5,
                             ),
                             min=0.3,
                             max=np.inf,
@@ -122,7 +164,7 @@ class LIF_network(object):
                     self.poisson[area][X],
                     self.neurons[area][X],
                     'all_to_all',
-                    dict(weight=self.LIF_params['J_ext']),
+                    dict(weight=local['J_ext']),
                 )
 
                 # Recorders

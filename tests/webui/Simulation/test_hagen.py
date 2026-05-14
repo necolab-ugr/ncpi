@@ -69,6 +69,19 @@ def _log_test_progress(message):
     _write_progress_line(text)
 
 
+def _click_locator(locator, timeout=30000):
+    """Click a locator with a fallback for transient Playwright stability checks."""
+    locator.wait_for(state="visible", timeout=timeout)
+    try:
+        locator.scroll_into_view_if_needed(timeout=timeout)
+    except Exception:
+        pass
+    try:
+        locator.click(timeout=timeout)
+    except Exception:
+        locator.click(timeout=timeout, force=True)
+
+
 def _ensure_import_paths():
     """Ensure the repository and WebUI directories are importable during the tests."""
     for entry in (str(REPO_ROOT), str(WEBUI_DIR)):
@@ -605,13 +618,13 @@ def _navigate_to_hagen_form(page, live_webui_server):
     """Navigate to the Hagen simulation form and wait for its controls to finish loading."""
     page.goto(live_webui_server, wait_until="domcontentloaded")
 
-    page.locator("a[href='/simulation']").first.click()
+    _click_locator(page.locator("a[href='/simulation']").first)
     page.wait_for_url(f"{live_webui_server}/simulation", wait_until="domcontentloaded")
 
-    page.locator("a[href='/simulation/new_sim']").first.click()
+    _click_locator(page.locator("a[href='/simulation/new_sim']").first)
     page.wait_for_url(f"{live_webui_server}/simulation/new_sim", wait_until="domcontentloaded")
 
-    page.locator("a[href='/simulation/new_sim/hagen']").first.click()
+    _click_locator(page.locator("a[href='/simulation/new_sim/hagen']").first)
     page.wait_for_url(f"{live_webui_server}/simulation/new_sim/hagen", wait_until="domcontentloaded")
     page.wait_for_function(
         """
@@ -778,7 +791,7 @@ def _matrix_to_tuple(matrix):
 
 def _build_hagen_j_yx_margin_candidates(default_j_yx):
     """Build boundary candidate matrices for the Hagen J_YX grid-sweep test."""
-    default_matrix = np.array(default_j_yx, dtype=float, copy=False)
+    default_matrix = np.asarray(default_j_yx, dtype=float)
     leaf_candidates = [
         (
             _scale_hagen_parameter(value, 1.0 - HAGEN_RELATIVE_MARGIN),
@@ -824,7 +837,7 @@ def _run_hagen_webui_job(live_webui_server, pytestconfig, configure_page):
                 form_data = _normalized_form_data_from_page(page)
                 _log_test_progress("submitting WebUI simulation")
 
-                page.locator("button[type='submit']").click()
+                _click_locator(page.locator("button[type='submit']"))
                 page.wait_for_url("**/job_status/*", wait_until="domcontentloaded")
                 job_id = Path(urlparse(page.url).path).name
                 _log_test_progress(f"submitted WebUI simulation as job {job_id}")

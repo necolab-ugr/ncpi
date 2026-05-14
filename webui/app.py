@@ -1,4 +1,5 @@
 import os
+import copy
 import shutil
 import subprocess
 import signal
@@ -14,6 +15,7 @@ import inspect
 import re
 import traceback
 import functools
+import textwrap
 from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -348,6 +350,41 @@ FOUR_AREA_GRID_KEYS = [
     "inter_area.J_YX",
     "inter_area.delay_YX",
 ]
+
+FOUR_AREA_LOCAL_OVERRIDE_KEYS = [
+    "N_X",
+    "C_m_X",
+    "tau_m_X",
+    "E_L_X",
+    "C_YX",
+    "J_YX",
+    "delay_YX",
+    "tau_syn_YX",
+    "n_ext",
+    "nu_ext",
+    "J_ext",
+]
+
+FOUR_AREA_LOCAL_OVERRIDE_LITERAL_KEYS = {
+    "N_X",
+    "C_m_X",
+    "tau_m_X",
+    "E_L_X",
+    "C_YX",
+    "J_YX",
+    "delay_YX",
+    "tau_syn_YX",
+    "n_ext",
+}
+
+
+def _four_area_area_override_defaults(areas=None):
+    area_names = list(areas or FOUR_AREA_DEFAULTS["areas"])
+    defaults = {}
+    for area_index in range(len(area_names)):
+        for key in FOUR_AREA_LOCAL_OVERRIDE_KEYS:
+            defaults[f"area_{area_index}.{key}"] = copy.deepcopy(FOUR_AREA_DEFAULTS[key])
+    return defaults
 
 PREDEFINED_KERNEL_ANALYSIS_PARAMS_RELATIVE_PATHS = {
     "hagen": os.path.join(
@@ -1254,6 +1291,7 @@ def _simulation_grid_defaults(model_type):
         "inter_area.J_YX": FOUR_AREA_DEFAULTS["inter_area.J_YX"],
         "inter_area.delay_YX": FOUR_AREA_DEFAULTS["inter_area.delay_YX"],
     }
+    defaults.update(_four_area_area_override_defaults(defaults["areas"]))
     return defaults
 
 
@@ -6795,6 +6833,32 @@ def _build_four_area_network_params(form):
     inter_area_delay_YX = _parse_literal(
         form, "inter_area.delay_YX", FOUR_AREA_DEFAULTS["inter_area.delay_YX"]
     )
+    area_local_params = {}
+    local_defaults = {
+        "N_X": N_X,
+        "C_m_X": C_m_X,
+        "tau_m_X": tau_m_X,
+        "E_L_X": E_L_X,
+        "C_YX": C_YX,
+        "J_YX": J_YX,
+        "delay_YX": delay_YX,
+        "tau_syn_YX": tau_syn_YX,
+        "n_ext": n_ext,
+        "nu_ext": nu_ext,
+        "J_ext": J_ext,
+    }
+
+    for area_index, area_name in enumerate(areas):
+        area_key_prefix = f"area_{area_index}."
+        area_values = {}
+        for local_key in FOUR_AREA_LOCAL_OVERRIDE_KEYS:
+            field_key = f"{area_key_prefix}{local_key}"
+            if local_key in FOUR_AREA_LOCAL_OVERRIDE_LITERAL_KEYS:
+                parsed_value = _parse_literal(form, field_key, copy.deepcopy(local_defaults[local_key]))
+            else:
+                parsed_value = _parse_float(form, field_key, local_defaults[local_key])
+            area_values[local_key] = parsed_value
+        area_local_params[area_name] = area_values
 
     _ensure_length(X, "X", 2)
     _ensure_length(N_X, "N_X", 2)
@@ -6829,6 +6893,19 @@ def _build_four_area_network_params(form):
             f"({pop_count}x{pop_count}) or a full area-population matrix ({total_nodes}x{total_nodes})."
         )
 
+    for area_name, params in area_local_params.items():
+        _ensure_length(params["N_X"], f"area_params[{area_name}].N_X", 2)
+        _ensure_length(params["C_m_X"], f"area_params[{area_name}].C_m_X", 2)
+        _ensure_length(params["tau_m_X"], f"area_params[{area_name}].tau_m_X", 2)
+        _ensure_length(params["E_L_X"], f"area_params[{area_name}].E_L_X", 2)
+        _ensure_matrix(params["C_YX"], f"area_params[{area_name}].C_YX", 2, 2)
+        _ensure_matrix(params["J_YX"], f"area_params[{area_name}].J_YX", 2, 2)
+        _ensure_matrix(params["delay_YX"], f"area_params[{area_name}].delay_YX", 2, 2)
+        _ensure_matrix(params["tau_syn_YX"], f"area_params[{area_name}].tau_syn_YX", 2, 2)
+        _ensure_length(params["n_ext"], f"area_params[{area_name}].n_ext", 2)
+        params["nu_ext"] = float(params["nu_ext"])
+        params["J_ext"] = float(params["J_ext"])
+
     return "\n".join([
         "# Parameters defining a four-area cortical network model in which the Hagen et al. local LIF microcircuit is",
         "# replicated and coupled across four cortical areas. Local network parameters match the Hagen model.",
@@ -6857,6 +6934,8 @@ def _build_four_area_network_params(form):
         f"    # The external drives reflects inputs from other brain areas, subcortical structures and background noise",
         f"    J_ext={J_ext},",
         f"    model={_format_value(model)},",
+        f"    # Area-specific local overrides use the selected values from the WebUI area selector.",
+        f"    area_params={_format_value(area_local_params)},",
         f"    # Inter-area connectivity can be specified as either:",
         f"    # - population-level matrices ({pop_count}x{pop_count}), shared across area pairs, or",
         f"    # - full area-population matrices ({total_nodes}x{total_nodes}) for complete customization.",
@@ -10563,7 +10642,7 @@ def _simulation_default_welch_preview(sim_data):
     return params
 
 
-def _format_trial_param_value(value, max_len=32):
+def _format_trial_param_value(value, max_len=None):
     if isinstance(value, float):
         text = f"{value:.6g}"
     elif isinstance(value, (int, bool)):
@@ -10576,9 +10655,264 @@ def _format_trial_param_value(value, max_len=32):
         except Exception:
             text = repr(value)
     text = str(text)
-    if len(text) > max_len:
-        return text[: max_len - 3] + "..."
+    if isinstance(max_len, int) and max_len > 0 and len(text) > max_len:
+        return text[:max_len]
     return text
+
+
+def _simulation_trial_population_names(sim_data, trial_idx=0):
+    try:
+        trial = _simulation_trial_data(sim_data, trial_idx)
+        trial_network = trial.get("network", {})
+        if isinstance(trial_network, dict):
+            pops = trial_network.get("X")
+            if isinstance(pops, (list, tuple)):
+                return [str(pop) for pop in pops]
+    except Exception:
+        pass
+    net = sim_data.get("network", {}) or {}
+    if isinstance(net, dict):
+        pops = net.get("X")
+        if isinstance(pops, (list, tuple)):
+            return [str(pop) for pop in pops]
+    if isinstance(net, list) and net:
+        first = net[0]
+        if isinstance(first, dict):
+            pops = first.get("X")
+            if isinstance(pops, (list, tuple)):
+                return [str(pop) for pop in pops]
+    return []
+
+
+def _format_connection_entries(matrix, source_labels, target_labels, max_entries=10):
+    arr = np.asarray(matrix, dtype=float)
+    if arr.ndim != 2:
+        return _format_trial_param_value(matrix)
+    rows, cols = arr.shape
+    if len(source_labels) != rows or len(target_labels) != cols:
+        return _format_trial_param_value(matrix)
+
+    entries = []
+    for row_idx in range(rows):
+        for col_idx in range(cols):
+            value = float(arr[row_idx, col_idx])
+            if not np.isfinite(value) or abs(value) <= 1e-15:
+                continue
+            entries.append(f"{source_labels[row_idx]}->{target_labels[col_idx]}={value:.6g}")
+
+    if not entries:
+        return "all zero"
+    if len(entries) > max_entries:
+        shown = entries[:max_entries]
+        shown.append(f"+{len(entries) - max_entries} more")
+        return "; ".join(shown)
+    return "; ".join(entries)
+
+
+def _format_four_area_inter_area_value(sim_data, trial_idx, value):
+    try:
+        arr = np.asarray(value, dtype=float)
+    except Exception:
+        return _format_trial_param_value(value)
+    if arr.ndim != 2:
+        return _format_trial_param_value(value)
+
+    areas = [str(area) for area in _simulation_area_names(sim_data, trial_idx)]
+    pops = [str(pop) for pop in _simulation_trial_population_names(sim_data, trial_idx)]
+    if not areas or not pops:
+        return _format_trial_param_value(value)
+
+    pop_count = len(pops)
+    area_count = len(areas)
+    total_nodes = pop_count * area_count
+    rows, cols = arr.shape
+
+    if rows == pop_count and cols == pop_count:
+        return _format_connection_entries(arr, pops, pops, max_entries=8)
+
+    if rows == total_nodes and cols == total_nodes:
+        node_labels = [f"{area}.{pop}" for area in areas for pop in pops]
+        entries = []
+        for row_idx in range(rows):
+            src_area_idx = row_idx // pop_count
+            for col_idx in range(cols):
+                tgt_area_idx = col_idx // pop_count
+                # Runtime skips same-area inter-area entries (pre_area == post_area),
+                # so do not surface them in changed-parameter summaries.
+                if src_area_idx == tgt_area_idx:
+                    continue
+                weight = float(arr[row_idx, col_idx])
+                if not np.isfinite(weight) or abs(weight) <= 1e-15:
+                    continue
+                entries.append(f"{node_labels[row_idx]}->{node_labels[col_idx]}={weight:.6g}")
+        if not entries:
+            return "all zero (same-area entries ignored)"
+        if len(entries) > 12:
+            shown = entries[:12]
+            shown.append(f"+{len(entries) - 12} more")
+            return "; ".join(shown)
+        return "; ".join(entries)
+
+    return _format_trial_param_value(value)
+
+
+def _matrix_varying_index_pairs_from_trials(sim_data, key, tol=1e-12):
+    """
+    Return matrix index pairs that vary across trials for the given changed key.
+    The comparison is done element-wise over all available trial values for
+    that key (from grid metadata).
+    """
+    meta = sim_data.get("grid_metadata") if isinstance(sim_data, MappingABC) else None
+    if not isinstance(meta, dict):
+        return None, None
+    trials = meta.get("trials")
+    if not isinstance(trials, list) or not trials:
+        return None, None
+
+    matrices = []
+    matrix_shape = None
+    for entry in trials:
+        if not isinstance(entry, dict):
+            continue
+        changed = entry.get("changed")
+        if not isinstance(changed, dict) or key not in changed:
+            continue
+        try:
+            arr = np.asarray(changed.get(key), dtype=float)
+        except Exception:
+            return None, None
+        if arr.ndim != 2:
+            return None, None
+        if matrix_shape is None:
+            matrix_shape = arr.shape
+        elif arr.shape != matrix_shape:
+            return None, None
+        matrices.append(arr)
+
+    if not matrices:
+        return None, None
+    if len(matrices) == 1:
+        return matrices[0], []
+
+    base = matrices[0]
+    diff_mask = np.zeros(base.shape, dtype=bool)
+    for arr in matrices[1:]:
+        finite_both = np.isfinite(base) & np.isfinite(arr)
+        equal_finite = finite_both & (np.abs(arr - base) <= tol)
+        both_nonfinite = (~np.isfinite(base)) & (~np.isfinite(arr))
+        equal_mask = equal_finite | both_nonfinite
+        diff_mask |= ~equal_mask
+
+    varying_pairs = list(zip(*np.where(diff_mask)))
+    return base, varying_pairs
+
+
+def _format_four_area_inter_area_changed_entries(
+    sim_data,
+    trial_idx,
+    key,
+    max_entries=12,
+    tol=1e-12,
+    target_area_name=None,
+):
+    """
+    For a given inter_area matrix key, return a compact string listing only
+    matrix entries that vary across trials/configurations.
+    """
+    meta = sim_data.get("grid_metadata") if isinstance(sim_data, MappingABC) else None
+    if not isinstance(meta, dict):
+        return ""
+    trials = meta.get("trials")
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return ""
+
+    trial_entry = trials[trial_idx]
+    if not isinstance(trial_entry, dict):
+        return ""
+    changed = trial_entry.get("changed")
+    if not isinstance(changed, dict) or key not in changed:
+        return ""
+
+    try:
+        arr_cur = np.asarray(changed.get(key), dtype=float)
+    except Exception:
+        return ""
+    if arr_cur.ndim != 2:
+        return ""
+
+    _, varying_pairs = _matrix_varying_index_pairs_from_trials(sim_data, key, tol=tol)
+    if varying_pairs is None:
+        return ""
+    if not varying_pairs:
+        return ""
+
+    areas = [str(area) for area in _simulation_area_names(sim_data, trial_idx)]
+    pops = [str(pop) for pop in _simulation_trial_population_names(sim_data, trial_idx)]
+    if not areas or not pops:
+        return ""
+
+    pop_count = len(pops)
+    area_count = len(areas)
+    rows, cols = arr_cur.shape
+
+    entries = []
+    # pop-pop matrix
+    if rows == pop_count and cols == pop_count:
+        # In area-specific subplot titles we only show area-resolved entries.
+        # A pop-pop inter-area matrix is shared across area pairs and cannot be
+        # attributed to one target area directly, so skip it in that context.
+        if target_area_name is not None:
+            return ""
+        for r, c in varying_pairs:
+            if r < 0 or c < 0 or r >= rows or c >= cols:
+                continue
+            value = float(arr_cur[r, c])
+            if not np.isfinite(value):
+                continue
+            entries.append(f"{pops[r]}->{pops[c]}={value:.6g}")
+
+    # node-node full matrix
+    elif rows == pop_count * area_count and cols == pop_count * area_count:
+        node_labels = [f"{area}.{pop}" for area in areas for pop in pops]
+        target_name_norm = str(target_area_name).strip().lower() if target_area_name is not None else None
+        for r, c in varying_pairs:
+            if r < 0 or c < 0 or r >= rows or c >= cols:
+                continue
+            src_area_idx = r // pop_count
+            tgt_area_idx = c // pop_count
+            # skip same-area entries as runtime ignores them
+            if src_area_idx == tgt_area_idx:
+                continue
+            if target_name_norm is not None:
+                tgt_area_name = str(areas[tgt_area_idx]).strip().lower()
+                if tgt_area_name != target_name_norm:
+                    continue
+            value = float(arr_cur[r, c])
+            if not np.isfinite(value):
+                continue
+            entries.append(f"{node_labels[r]}->{node_labels[c]}={value:.6g}")
+
+    else:
+        return ""
+
+    if not entries:
+        return ""
+    if len(entries) > max_entries:
+        shown = entries[:max_entries]
+        shown.append(f"+{len(entries) - max_entries} more")
+        return "; ".join(shown)
+    return "; ".join(entries)
+
+
+def _format_changed_param_text(sim_data, trial_idx, key, value):
+    key_text = str(key)
+    if key_text.startswith("inter_area."):
+        param_name = key_text.split(".", 1)[1]
+        if _simulation_model_type(sim_data) == "four_area":
+            resolved = _format_four_area_inter_area_value(sim_data, trial_idx, value)
+            return f"{param_name}: {resolved}"
+        return f"{param_name}: {_format_trial_param_value(value)}"
+    return f"{key_text}={_format_trial_param_value(value)}"
 
 
 def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
@@ -10601,7 +10935,7 @@ def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
     for key in changed_keys:
         if key not in changed:
             continue
-        parts.append(f"{key}={_format_trial_param_value(changed[key])}")
+        parts.append(_format_changed_param_text(sim_data, trial_idx, key, changed[key]))
     if not parts:
         return ""
     if len(parts) > max_params:
@@ -10610,12 +10944,272 @@ def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
     return ", ".join(parts)
 
 
-def _simulation_trial_plot_title(sim_data, trial_idx, suffix):
+def _simulation_trial_changed_param_names_text(sim_data, trial_idx, max_params=2):
+    meta = sim_data.get("grid_metadata")
+    if not isinstance(meta, dict):
+        return ""
+    changed_keys = meta.get("changed_keys")
+    trials = meta.get("trials")
+    if not isinstance(changed_keys, list) or not changed_keys:
+        return ""
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return ""
+    trial_entry = trials[trial_idx]
+    if not isinstance(trial_entry, dict):
+        return ""
+    changed = trial_entry.get("changed")
+    if not isinstance(changed, dict):
+        return ""
+
+    names = []
+    for key in changed_keys:
+        if key not in changed:
+            continue
+        key_text = str(key)
+        if key_text.startswith("inter_area."):
+            key_text = key_text.split(".", 1)[1]
+        names.append(key_text)
+
+    if not names:
+        return ""
+    if len(names) > max_params:
+        remaining = len(names) - max_params
+        names = names[:max_params] + [f"+{remaining} more"]
+    return ", ".join(names)
+
+
+def _wrap_plot_title_text(text, width=88):
+    lines = []
+    for raw_line in str(text or "").splitlines() or [""]:
+        if not raw_line:
+            lines.append("")
+            continue
+        wrapped = textwrap.wrap(
+            raw_line,
+            width=max(20, int(width)),
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        lines.extend(wrapped if wrapped else [raw_line])
+    return "\n".join(lines)
+
+
+def _expand_macrogroup_entries_for_title(param_label, compact_entries):
+    """
+    Expand compact semicolon-separated macrogroup entries into per-row lines.
+    Example: "a=1; b=2" -> ["J_YX: a=1", "J_YX: b=2"].
+    """
+    label = str(param_label or "").strip()
+    text = str(compact_entries or "").strip()
+    if not text:
+        return []
+    chunks = [chunk.strip() for chunk in text.split(";") if chunk.strip()]
+    if not chunks:
+        return []
+    if not label:
+        return chunks
+    return [f"{label}: {chunk}" for chunk in chunks]
+
+
+def _get_globally_varying_params(sim_data):
+    """
+    Extract parameters that vary across all trials in the grid.
+    
+    Args:
+        sim_data: Simulation data dictionary containing grid_metadata
+        
+    Returns:
+        set: Set of parameter names that vary across trials
+    """
+    if not sim_data or "grid_metadata" not in sim_data:
+        return set()
+    
+    grid_metadata = sim_data["grid_metadata"]
+    if "trials" not in grid_metadata or len(grid_metadata["trials"]) < 2:
+        return set()
+    
+    # Prefer the explicit changed_keys produced when metadata was built
+    changed_keys = grid_metadata.get("changed_keys")
+    if isinstance(changed_keys, list) and changed_keys:
+        return {str(k) for k in changed_keys}
+
+    # Fallback: derive varying keys from trial.changed maps.
+    trials = grid_metadata.get("trials")
+    if not isinstance(trials, list) or not trials:
+        return set()
+    changed_maps = []
+    for entry in trials:
+        if not isinstance(entry, dict):
+            continue
+        changed = entry.get("changed")
+        if isinstance(changed, dict):
+            changed_maps.append(changed)
+    if not changed_maps:
+        return set()
+
+    all_params = set()
+    for changed in changed_maps:
+        all_params.update(str(k) for k in changed.keys())
+    varying_params = set()
+    for param_name in all_params:
+        series = []
+        for changed in changed_maps:
+            if param_name in changed:
+                series.append(changed.get(param_name))
+        if len(series) < 2:
+            continue
+        base = series[0]
+        if any(not _values_equal_for_grid(value, base) for value in series[1:]):
+            varying_params.add(param_name)
+
+    return varying_params
+
+
+def _simulation_trial_changed_params_for_title(sim_data, trial_idx, area_name=None):
+    """
+    Format parameters that vary across trials for display in plot title.
+    Each parameter is placed on a separate line, sorted alphabetically.
+    Only includes globally varying parameters (not trial-specific changes).
+    
+    Args:
+        sim_data: Simulation data dictionary
+        trial_idx: Index of the current trial
+        
+    Returns:
+        str: Formatted parameter string with each parameter on a new line, or empty string
+    """
+    if not sim_data or "grid_metadata" not in sim_data:
+        return ""
+    
+    grid_metadata = sim_data["grid_metadata"]
+    if "trials" not in grid_metadata or trial_idx < 0 or trial_idx >= len(grid_metadata["trials"]):
+        return ""
+    
+    # Get only globally varying parameters
+    varying_params = _get_globally_varying_params(sim_data)
+    if not varying_params:
+        return ""
+    
+    trial_data = grid_metadata["trials"][trial_idx]
+    if not isinstance(trial_data, dict):
+        return ""
+    changed_map = trial_data.get("changed") if isinstance(trial_data.get("changed"), dict) else {}
+    
+    model_type = _simulation_model_type(sim_data)
+    area_idx = None
+    area_local_prefix = None
+    area_specific_mode = (
+        model_type == "four_area"
+        and isinstance(area_name, str)
+        and str(area_name).strip() != ""
+    )
+    if area_specific_mode:
+        try:
+            area_names = [str(name) for name in _simulation_area_names(sim_data, trial_idx)]
+            target = str(area_name).strip().lower()
+            for idx, name in enumerate(area_names):
+                if str(name).strip().lower() == target:
+                    area_idx = int(idx)
+                    area_local_prefix = f"area_{idx}."
+                    break
+            if area_idx is None:
+                area_specific_mode = False
+        except Exception:
+            area_specific_mode = False
+
+    # Extract and format only the varying parameters using the existing
+    # formatter so inter-area values and complex structures are displayed
+    # consistently with other parts of the UI.
+    param_lines = []
+    for param_name in sorted(varying_params):  # Sort for consistent ordering
+        # values for globally changing parameters are stored inside the
+        # trial's 'changed' mapping in the grid metadata
+        if param_name not in changed_map:
+            continue
+        value = changed_map.get(param_name)
+
+        if area_specific_mode:
+            key_text = str(param_name)
+            # Keep only area-local params for the selected area and
+            # inter-area entries targeting that area.
+            if key_text.startswith("area_"):
+                if not (area_local_prefix and key_text.startswith(area_local_prefix)):
+                    continue
+                local_key = key_text[len(area_local_prefix):]
+                param_lines.append(f"{local_key}={_format_trial_param_value(value)}")
+                continue
+            if key_text.startswith("inter_area."):
+                compact_entries = _format_four_area_inter_area_changed_entries(
+                    sim_data,
+                    trial_idx,
+                    param_name,
+                    target_area_name=area_name,
+                )
+                if compact_entries:
+                    macro_label = key_text.split(".", 1)[1]
+                    param_lines.extend(
+                        _expand_macrogroup_entries_for_title(macro_label, compact_entries)
+                    )
+                continue
+            # Exclude global/shared parameters from per-area subplot titles.
+            continue
+
+        # For four-area inter-area matrices, only show the specific matrix
+        # entries that differ across trials/configurations (to avoid huge
+        # expanded matrices appearing in subplot titles).
+        try:
+            if str(param_name).startswith("inter_area.") and _simulation_model_type(sim_data) == "four_area":
+                # param_name includes the 'inter_area.' prefix; compute changed
+                # sub-entries and format them compactly. If no element-level
+                # differences are detected, skip adding this parameter to the
+                # title to avoid dumping entire matrices into titles.
+                compact_entries = _format_four_area_inter_area_changed_entries(sim_data, trial_idx, param_name)
+                if compact_entries:
+                    macro_label = str(param_name).split(".", 1)[1]
+                    expanded_lines = _expand_macrogroup_entries_for_title(
+                        macro_label,
+                        compact_entries,
+                    )
+                    param_lines.extend(expanded_lines)
+                    formatted = ""
+                else:
+                    formatted = ""
+                if not formatted:
+                    continue
+            else:
+                formatted = _format_changed_param_text(sim_data, trial_idx, param_name, value)
+        except Exception:
+            formatted = f"{param_name}={_format_trial_param_value(value)}"
+        if formatted:
+            param_lines.append(formatted)
+    
+    # Join with newlines so each parameter is on its own row
+    return "\n".join(param_lines) if param_lines else ""
+
+
+def _simulation_trial_plot_title(sim_data, trial_idx, suffix, area_name=None):
+    """
+    Generate plot title for a simulation trial showing only globally varying
+    parameters, each on its own line. Falls back to the concise name-only
+    summary when no global variations are present.
+    """
     base = f"Trial {trial_idx} {suffix}".strip()
-    changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
-    if changed:
-        return f"{base}\n{changed}"
-    return base
+
+    # Use the globally varying-parameter formatter so titles only show
+    # parameters that change across the entire grid and place each on a
+    # separate row to avoid overlap in subplot layouts.
+    changed_lines = _simulation_trial_changed_params_for_title(
+        sim_data,
+        trial_idx,
+        area_name=area_name,
+    )
+    if changed_lines:
+        base_wrapped = _wrap_plot_title_text(base, width=56)
+        changed_strict = "\n".join(
+            str(line) for line in str(changed_lines).splitlines() if str(line).strip()
+        )
+        return f"{base_wrapped}\n{changed_strict}" if changed_strict else base_wrapped
+    return _wrap_plot_title_text(base)
 
 
 def _simulation_trial_legend_label(sim_data, trial_idx):
@@ -10695,16 +11289,21 @@ def _simulation_group_trials_by_configuration(sim_data, trial_indices):
     return grouped
 
 
-def _simulation_configuration_legend_label(sim_data, configuration_index, trial_indices):
-    changed = ""
-    for trial_idx in trial_indices:
-        changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
-        if changed:
-            break
+def _simulation_configuration_legend_label(sim_data, configuration_index, trial_indices, area_name=None):
     base = f"config {configuration_index}"
-    if changed:
-        return f"{base} | {changed}"
-    return base
+    for trial_idx in trial_indices:
+        changed_lines = _simulation_trial_changed_params_for_title(
+            sim_data,
+            trial_idx,
+            area_name=area_name,
+        )
+        if changed_lines:
+            base_wrapped = _wrap_plot_title_text(base, width=56)
+            changed_strict = "\n".join(
+                str(line) for line in str(changed_lines).splitlines() if str(line).strip()
+            )
+            return f"{base_wrapped}\n{changed_strict}" if changed_strict else base_wrapped
+    return _wrap_plot_title_text(base, width=56)
 
 
 def _population_color(name, idx, total_populations=None):
@@ -10802,6 +11401,52 @@ def _population_colors_for_plot(times_by_population, gids_by_population, populat
             preferred = f"C{idx % 10}"
         colors[name] = preferred
     return ordered, colors
+
+
+def _ensure_ei_legend_entries(ax, population_colors):
+    if ax is None:
+        return
+    try:
+        handles, labels = ax.get_legend_handles_labels()
+    except Exception:
+        handles, labels = [], []
+    existing = {str(label).strip().upper() for label in labels if str(label).strip()}
+    if "E" in existing and "I" in existing:
+        return
+
+    try:
+        from matplotlib.lines import Line2D
+    except Exception:
+        return
+
+    pop_colors = population_colors if isinstance(population_colors, dict) else {}
+    if "E" not in existing:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker=".",
+                linestyle="None",
+                color=pop_colors.get("E", "C0"),
+                markersize=5,
+                label="E",
+            )
+        )
+        labels.append("E")
+    if "I" not in existing:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker=".",
+                linestyle="None",
+                color=pop_colors.get("I", "C1"),
+                markersize=5,
+                label="I",
+            )
+        )
+        labels.append("I")
+    ax.legend(handles=handles, labels=labels, fontsize=7, loc="best")
 
 
 def _spike_rate(times, dt, tstop):
@@ -10915,9 +11560,11 @@ def _to_1d_signal(value):
         return arr
     if arr.ndim == 2:
         if arr.shape[0] == 3:
-            return arr[2]
+            # Vector signal (x, y, z, t): use vector magnitude across components.
+            return np.linalg.norm(arr, axis=0)
         if arr.shape[1] == 3:
-            return arr[:, 2]
+            # Vector signal (t, x, y, z): use vector magnitude across components.
+            return np.linalg.norm(arr, axis=1)
         if arr.shape[0] <= arr.shape[1]:
             return np.sum(arr, axis=0)
         return np.sum(arr, axis=1)
@@ -10992,6 +11639,9 @@ def _effective_dt_ms_from_payload_row(row):
             return None
         return val
 
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+
     if not isinstance(row, MappingABC):
         return None
 
@@ -11023,6 +11673,61 @@ def _effective_dt_ms_from_payload_row(row):
     if decimation is None or decimation <= 0:
         decimation = 1.0
     return float(dt_ms) * float(decimation)
+
+
+def _effective_t_start_ms_from_payload_row(row):
+    def _as_mapping(value):
+        if isinstance(value, MappingABC):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = ast.literal_eval(text)
+            except Exception:
+                return None
+            if isinstance(parsed, MappingABC):
+                return parsed
+        return None
+
+    def _safe_float(value):
+        try:
+            val = float(value)
+        except Exception:
+            return None
+        if not np.isfinite(val):
+            return None
+        return val
+
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+    if not isinstance(row, MappingABC):
+        return 0.0
+
+    start_val = (
+        _safe_float(row.get("t_start_ms"))
+        if row.get("t_start_ms") is not None
+        else _safe_float(row.get("time_start_ms"))
+    )
+    if start_val is None:
+        start_val = _safe_float(row.get("transient_ms"))
+    if start_val is None:
+        start_val = _safe_float(row.get("transient"))
+
+    metadata = _as_mapping(row.get("metadata"))
+    if metadata is not None and start_val is None:
+        start_val = (
+            _safe_float(metadata.get("t_start_ms"))
+            if metadata.get("t_start_ms") is not None
+            else _safe_float(metadata.get("time_start_ms"))
+        )
+        if start_val is None:
+            start_val = _safe_float(metadata.get("transient_ms"))
+        if start_val is None:
+            start_val = _safe_float(metadata.get("transient"))
+
+    return float(start_val) if start_val is not None else 0.0
 
 
 def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
@@ -13218,7 +13923,7 @@ def analysis_plot_simulation():
         return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
     if plot_type in {"cdm", "cdm_psd", "meeg", "meeg_psd"}:
         _plot_log_warning(
-            "Warning: this plot reduces vector signals to the z-component before rendering time traces and PSD."
+            "Warning: this plot computes vector magnitude (module) before rendering time traces and PSD."
         )
 
     def _coerce_selected_sim_payload(payload):
@@ -13595,9 +14300,9 @@ def analysis_plot_simulation():
             return ""
         return " Source: " + ", ".join(used_files) + "."
 
-    def _plot_trial_title(trial_idx, suffix):
+    def _plot_trial_title(trial_idx, suffix, area_name=None):
         if sim_data is not None:
-            return _simulation_trial_plot_title(sim_data, trial_idx, suffix)
+            return _simulation_trial_plot_title(sim_data, trial_idx, suffix, area_name=area_name)
         return f"Trial {trial_idx} {suffix}".strip()
 
     try:
@@ -13750,6 +14455,33 @@ def analysis_plot_simulation():
     def _safe_dt_ms_from_row(row):
         return _effective_dt_ms_from_payload_row(row)
 
+    def _safe_t_stop_ms_from_row(row):
+        if isinstance(row, pd.Series):
+            row = row.to_dict()
+        if not isinstance(row, MappingABC):
+            return None
+        t_stop = row.get("t_stop_ms")
+        if t_stop is None:
+            t_stop = row.get("time_stop_ms")
+        if t_stop is None:
+            metadata = row.get("metadata")
+            if isinstance(metadata, str):
+                text = metadata.strip()
+                if text:
+                    try:
+                        metadata = ast.literal_eval(text)
+                    except Exception:
+                        metadata = None
+            if isinstance(metadata, MappingABC):
+                t_stop = metadata.get("t_stop_ms")
+                if t_stop is None:
+                    t_stop = metadata.get("time_stop_ms")
+        try:
+            t_stop_val = float(t_stop)
+        except Exception:
+            return None
+        return t_stop_val if np.isfinite(t_stop_val) else None
+
     def _to_channels_time(value):
         arr = np.asarray(value, dtype=float)
         if arr.ndim == 1:
@@ -13759,11 +14491,11 @@ def analysis_plot_simulation():
                 return np.array(arr, copy=True)
             return np.array(arr.T, copy=True)
         if arr.ndim == 3:
-            # MEG can come as (n_sensors, 3, n_times); use z-component for plotting consistency.
+            # MEG can come as (n_sensors, 3, n_times); use vector magnitude for each sensor.
             if arr.shape[1] == 3:
-                return np.array(arr[:, 2, :], copy=True)
+                return np.array(np.linalg.norm(arr, axis=1), copy=True)
             if arr.shape[2] == 3:
-                return np.array(arr[:, :, 2], copy=True)
+                return np.array(np.linalg.norm(arr, axis=2), copy=True)
             return np.array(arr.reshape((-1, arr.shape[-1])), copy=True)
         return np.array(arr.reshape((1, -1)), copy=True)
 
@@ -13780,14 +14512,15 @@ def analysis_plot_simulation():
     def _extract_lfp_series_by_area(trial_idx, area_names):
         row = _trial_row_from_payload(cdm_payload, trial_idx)
         if not isinstance(row, MappingABC):
-            return {}, None
+            return {}, None, 0.0
         probe_outputs = row.get("probe_outputs")
         if isinstance(probe_outputs, MappingABC) and "GaussCylinderPotential" in probe_outputs:
             row = dict(probe_outputs.get("GaussCylinderPotential") or {})
         elif str(row.get("probe", "")).strip() != "GaussCylinderPotential":
-            return {}, None
+            return {}, None, 0.0
 
         dt_local = _safe_dt_ms_from_row(row)
+        t_start_local = _effective_t_start_ms_from_payload_row(row)
         sum_signal = row.get("sum")
         raw_signals = row.get("raw_signals")
         data_signal = row.get("data")
@@ -13822,7 +14555,7 @@ def analysis_plot_simulation():
                 shared = _to_channels_time(data_signal)
                 for area_name in normalized_areas:
                     area_map[area_name] = np.array(shared, copy=True)
-            return area_map, dt_local
+            return area_map, dt_local, t_start_local
 
         global_sig = None
         if isinstance(sum_signal, MappingABC):
@@ -13836,24 +14569,33 @@ def analysis_plot_simulation():
         elif data_signal is not None:
             global_sig = _to_channels_time(data_signal)
         if global_sig is None:
-            return {}, dt_local
-        return {"global": global_sig}, dt_local
+            return {}, dt_local, t_start_local
+        return {"global": global_sig}, dt_local, t_start_local
 
     def _extract_meeg_series(trial_idx):
         row = _trial_row_from_payload(meeg_payload, trial_idx)
         if not isinstance(row, MappingABC):
-            return {}, None
+            return {}, None, 0.0
         dt_local = _safe_dt_ms_from_row(row)
+        t_start_local = _effective_t_start_ms_from_payload_row(row)
+        t_stop_local = _safe_t_stop_ms_from_row(row)
         data = row.get("data")
         if data is None:
             data = row.get("sum")
         if data is None:
-            return {}, dt_local
+            return {}, dt_local, t_start_local
         try:
             series = _to_channels_time(data)
         except Exception:
-            return {}, dt_local
-        return {"global": series}, dt_local
+            return {}, dt_local, t_start_local
+        if dt_local is not None and dt_local > 0 and series.shape[1] > 0:
+            t_start_local = _resolve_series_start_ms(
+                t_start_local,
+                dt_local,
+                series.shape[1],
+                t_stop_local,
+            )
+        return {"global": series}, dt_local, t_start_local
 
     def _parse_channel_selection(max_channels):
         tokens = [str(v).strip() for v in request.form.getlist("sim_channel_indices") if str(v).strip()]
@@ -13895,6 +14637,28 @@ def analysis_plot_simulation():
         hi = float(max(t_start, t_end))
         return (axis >= lo) & (axis <= hi)
 
+    def _resolve_series_start_ms(explicit_start_ms, dt_ms, signal_len, trial_tstop_ms):
+        try:
+            start_val = float(explicit_start_ms)
+        except Exception:
+            start_val = 0.0
+        if np.isfinite(start_val) and abs(start_val) > 1e-12:
+            return start_val
+        try:
+            dt_val = float(dt_ms)
+            n_val = int(signal_len)
+            tstop_val = float(trial_tstop_ms)
+        except Exception:
+            return 0.0
+        if not np.isfinite(dt_val) or dt_val <= 0.0 or n_val <= 0:
+            return 0.0
+        if not np.isfinite(tstop_val) or tstop_val <= 0.0:
+            return 0.0
+        inferred_start = tstop_val - (n_val * dt_val)
+        if np.isfinite(inferred_start) and inferred_start > 0.0:
+            return float(inferred_start)
+        return 0.0
+
     if plot_type in {"lfp", "lfp_psd", "meeg", "meeg_psd"}:
         if plot_type in {"lfp_psd", "meeg_psd"} and cdm_psd_mode != "separate":
             return _analysis_plot_error(
@@ -13914,9 +14678,9 @@ def analysis_plot_simulation():
         first_series_map = {}
         if trial_indices:
             if plot_type in {"lfp", "lfp_psd"}:
-                first_series_map, _ = _extract_lfp_series_by_area(trial_indices[0], area_names)
+                first_series_map, _, _ = _extract_lfp_series_by_area(trial_indices[0], area_names)
             else:
-                first_series_map, _ = _extract_meeg_series(trial_indices[0])
+                first_series_map, _, _ = _extract_meeg_series(trial_indices[0])
         first_key = area_names[0] if (area_names and area_names[0] in first_series_map) else ("global" if "global" in first_series_map else None)
         if first_key is None or first_key not in first_series_map:
             return _analysis_plot_error(
@@ -13968,7 +14732,7 @@ def analysis_plot_simulation():
             fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.4 * area_cols, 3.5 * total_rows), dpi=160, squeeze=False)
             plotted_any = False
             for trial_pos, trial_idx in enumerate(trial_indices):
-                area_map, dt_local = _extract_lfp_series_by_area(trial_idx, area_names)
+                area_map, dt_local, t_start_local = _extract_lfp_series_by_area(trial_idx, area_names)
                 for area_idx, area_name in enumerate(area_names):
                     grid_row = trial_pos * area_rows + (area_idx // area_cols)
                     grid_col = area_idx % area_cols
@@ -13983,13 +14747,17 @@ def analysis_plot_simulation():
                         ax.axis("off")
                         continue
                     if plot_type == "lfp":
-                        t_sig = np.arange(sig.shape[1], dtype=float) * dt_sig
+                        t_sig = float(t_start_local) + (np.arange(sig.shape[1], dtype=float) * dt_sig)
                         mask_t = _time_mask_or_full(t_sig, time_start, time_end)
+                        if not np.any(mask_t):
+                            mask_t = np.ones(sig.shape[1], dtype=bool)
+                            _plot_log_warning(
+                                f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                                f"trial {trial_idx} area '{area_name}' LFP samples; plotting full available range instead."
+                            )
                         area_plotted = False
                         for ch_idx in selected_channels:
                             if ch_idx >= sig.shape[0]:
-                                continue
-                            if not np.any(mask_t):
                                 continue
                             ax.plot(t_sig[mask_t], sig[ch_idx, :][mask_t], linewidth=0.9)
                             area_plotted = True
@@ -13997,7 +14765,7 @@ def analysis_plot_simulation():
                         ax.set_ylabel("LFP (a.u.)")
                         if np.any(mask_t):
                             ax.set_xlim(float(np.min(t_sig[mask_t])), float(np.max(t_sig[mask_t])))
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP", area_name=area_name))
                         plotted_any = plotted_any or area_plotted
                     else:
                         fs = 1000.0 / max(dt_sig, 1e-9)
@@ -14014,7 +14782,7 @@ def analysis_plot_simulation():
                                 plotted_any = True
                         ax.set_xlabel("f (Hz)")
                         ax.set_ylabel("PSD (a.u./Hz)")
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP PSD"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP PSD", area_name=area_name))
                         ax.grid(alpha=0.2)
                 for extra_idx in range(len(area_names), area_rows * area_cols):
                     grid_row = trial_pos * area_rows + (extra_idx // area_cols)
@@ -14034,9 +14802,9 @@ def analysis_plot_simulation():
             for pos, trial_idx in enumerate(trial_indices):
                 ax = flat_ax[pos]
                 if plot_type in {"lfp", "lfp_psd"}:
-                    series_map, dt_local = _extract_lfp_series_by_area(trial_idx, [])
+                    series_map, dt_local, t_start_local = _extract_lfp_series_by_area(trial_idx, [])
                 else:
-                    series_map, dt_local = _extract_meeg_series(trial_idx)
+                    series_map, dt_local, t_start_local = _extract_meeg_series(trial_idx)
                 sig = series_map.get("global")
                 if sig is None:
                     ax.axis("off")
@@ -14047,13 +14815,18 @@ def analysis_plot_simulation():
                     ax.axis("off")
                     continue
                 if plot_type in {"lfp", "meeg"}:
-                    t_sig = np.arange(sig.shape[1], dtype=float) * dt_sig
+                    t_sig = float(t_start_local) + (np.arange(sig.shape[1], dtype=float) * dt_sig)
                     mask_t = _time_mask_or_full(t_sig, time_start, time_end)
+                    if not np.any(mask_t):
+                        mask_t = np.ones(sig.shape[1], dtype=bool)
+                        _plot_log_warning(
+                            f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                            f"trial {trial_idx} {'LFP' if plot_type == 'lfp' else 'EEG/MEG'} samples; "
+                            "plotting full available range instead."
+                        )
                     trial_plotted = False
                     for ch_idx in selected_channels:
                         if ch_idx >= sig.shape[0]:
-                            continue
-                        if not np.any(mask_t):
                             continue
                         ax.plot(t_sig[mask_t], sig[ch_idx, :][mask_t], linewidth=0.9)
                         trial_plotted = True
@@ -14220,8 +14993,13 @@ def analysis_plot_simulation():
                 )
                 plotted_any = False
                 for cfg_pos, (cfg_idx, cfg_trial_indices) in enumerate(configuration_groups):
-                    cfg_label = _simulation_configuration_legend_label(sim_data, cfg_idx, cfg_trial_indices)
                     for area_idx, area_name in enumerate(areas):
+                        cfg_label = _simulation_configuration_legend_label(
+                            sim_data,
+                            cfg_idx,
+                            cfg_trial_indices,
+                            area_name=area_name,
+                        )
                         grid_row = cfg_pos * area_rows + (area_idx // area_cols)
                         grid_col = area_idx % area_cols
                         ax = axs[grid_row][grid_col]
@@ -14237,7 +15015,7 @@ def analysis_plot_simulation():
                             ax.axis("off")
                             continue
                         ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
-                        ax.set_title(f"{cfg_label} | {area_name} PSD")
+                        ax.set_title(f"{cfg_label}\n{area_name} PSD")
                         ax.set_xlabel("f (Hz)")
                         ax.set_ylabel("PSD (a.u./Hz)")
                         ax.grid(alpha=0.2)
@@ -14328,7 +15106,7 @@ def analysis_plot_simulation():
                         ax.semilogy(freqs[mask], psd[mask], linewidth=1.0, color="C0")
                         ax.set_xlabel("f (Hz)")
                         ax.set_ylabel("PSD (a.u./Hz)")
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} PSD"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} PSD", area_name=area_name))
                         ax.grid(alpha=0.2)
                         plotted_any = True
                     for extra_idx in range(len(areas), area_rows * area_cols):
@@ -14421,6 +15199,8 @@ def analysis_plot_simulation():
                         areas,
                         trial_idx,
                     )
+                    cdm_row_for_time = _trial_row_from_payload(cdm_payload, trial_idx)
+                    cdm_t_start_ms = _effective_t_start_ms_from_payload_row(cdm_row_for_time)
                     missing = [area for area in areas if area not in area_series]
                     if missing:
                         return _analysis_plot_error(
@@ -14466,9 +15246,9 @@ def analysis_plot_simulation():
                         ax.set_ylabel("gid")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} raster"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} raster", area_name=area_name))
                         if trial_pos == 0 and area_idx == 0:
-                            ax.legend(fontsize=7, loc="best")
+                            _ensure_ei_legend_entries(ax, population_colors)
 
                     elif plot_type == "firing_rates":
                         area_times = times.get(area_name, {})
@@ -14495,25 +15275,38 @@ def analysis_plot_simulation():
                         ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} rates"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} rates", area_name=area_name))
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
                     elif plot_type in {"proxy", "cdm"}:
-                        cdm = np.asarray(area_series[area_name], dtype=float)
-                        dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
-                        if dt_local is None:
+                        cdm = _to_1d_signal(area_series.get(area_name, []))
+                        if cdm.size == 0:
                             continue
-                        t_cdm = np.arange(cdm.size, dtype=float) * dt_local
+                        dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
+                        if dt_local is None or not np.isfinite(dt_local) or dt_local <= 0.0:
+                            continue
+                        trial_tstop_ms = float(tstop) if tstop is not None else None
+                        start_ms = _resolve_series_start_ms(
+                            cdm_t_start_ms,
+                            dt_local,
+                            cdm.size,
+                            trial_tstop_ms,
+                        )
+                        t_cdm = start_ms + (np.arange(cdm.size, dtype=float) * dt_local)
                         mask_t = _time_mask_or_full(t_cdm, time_start, time_end)
                         if not np.any(mask_t):
-                            continue
+                            mask_t = np.ones(cdm.size, dtype=bool)
+                            _plot_log_warning(
+                                f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                                f"trial {trial_idx} area '{area_name}' CDM/proxy samples; plotting full available range instead."
+                            )
                         ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                         ax.set_ylabel("Field potential (a.u.)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(float(np.min(t_cdm[mask_t])), float(np.max(t_cdm[mask_t])))
                         suffix = "field potential" if plot_type == "proxy" else "CDM"
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} {suffix}"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} {suffix}", area_name=area_name))
                         plotted_any = True
                 # Hide unused cells in this trial's area grid block.
                 for extra_idx in range(len(areas), area_rows * area_cols):
@@ -14579,7 +15372,7 @@ def analysis_plot_simulation():
                     ax.set_xlabel("t (ms)")
                     ax.set_title(_plot_trial_title(trial_idx, "raster"))
                     if pos == 0:
-                        ax.legend(fontsize=7, loc="best")
+                        _ensure_ei_legend_entries(ax, population_colors)
                     ax.set_xlim(time_start, time_end)
 
                 elif plot_type == "firing_rates":
@@ -14613,16 +15406,29 @@ def analysis_plot_simulation():
                         [],
                         trial_idx,
                     )
-                    cdm = np.asarray(series_by_area.get("global", []), dtype=float)
+                    cdm = _to_1d_signal(series_by_area.get("global", []))
                     if cdm.size == 0:
                         continue
                     dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
-                    if dt_local is None:
+                    if dt_local is None or not np.isfinite(dt_local) or dt_local <= 0.0:
                         continue
-                    t_cdm = np.arange(cdm.size, dtype=float) * dt_local
+                    cdm_row_for_time = _trial_row_from_payload(cdm_payload, trial_idx)
+                    cdm_t_start_ms = _effective_t_start_ms_from_payload_row(cdm_row_for_time)
+                    trial_tstop_ms = float(tstop) if tstop is not None else None
+                    start_ms = _resolve_series_start_ms(
+                        cdm_t_start_ms,
+                        dt_local,
+                        cdm.size,
+                        trial_tstop_ms,
+                    )
+                    t_cdm = start_ms + (np.arange(cdm.size, dtype=float) * dt_local)
                     mask_t = _time_mask_or_full(t_cdm, time_start, time_end)
                     if not np.any(mask_t):
-                        continue
+                        mask_t = np.ones(cdm.size, dtype=bool)
+                        _plot_log_warning(
+                            f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                            f"trial {trial_idx} CDM/proxy samples; plotting full available range instead."
+                        )
                     ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                     ax.set_ylabel("Field potential (a.u.)")
                     ax.set_xlabel("t (ms)")

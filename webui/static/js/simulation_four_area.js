@@ -8,6 +8,22 @@ document.addEventListener('DOMContentLoaded', function() {
         'C_YX', 'J_YX', 'delay_YX',
         'inter_area.C_YX', 'inter_area.J_YX', 'inter_area.delay_YX',
     ]);
+    const areaSpecificLocalParams = [
+        'N_X',
+        'C_m_X',
+        'tau_m_X',
+        'E_L_X',
+        'C_YX',
+        'J_YX',
+        'delay_YX',
+        'tau_syn_YX',
+        'n_ext',
+        'nu_ext',
+        'J_ext',
+    ];
+    const areaSpecificLocalParamSet = new Set(areaSpecificLocalParams);
+    const interAreaParamNames = ['inter_area.C_YX', 'inter_area.J_YX', 'inter_area.delay_YX'];
+    const interAreaSourceAreaColors = ['#dc2626', '#2563eb', '#16a34a', '#a855f7'];
     // Preset values for four-area cortical model configuration
     const ncpiPresets = {
         tstop: 12000.0,
@@ -47,8 +63,13 @@ document.addEventListener('DOMContentLoaded', function() {
         jointGroupsInput: document.getElementById('sim-joint-groups'),
         repetitionsInput: document.getElementById('sim-repetitions'),
         useNumpySeedInput: document.getElementById('sim-use-numpy-seed'),
-        numpySeedInput: document.getElementById('sim-numpy-seed')
+        numpySeedInput: document.getElementById('sim-numpy-seed'),
+        areaSelector: document.getElementById('four-area-selector'),
+        areaEditorStatus: document.getElementById('four-area-editor-status'),
+        interAreaModeStatus: document.getElementById('inter-area-mode-status'),
     };
+    let areaLocalState = [];
+    let activeAreaIndex = 0;
 
     function ensureInputCanCarryValue(input, value) {
         if (!input) {
@@ -117,6 +138,32 @@ document.addEventListener('DOMContentLoaded', function() {
         return trimmed;
     }
 
+    function _firstCandidateLiteralFromGridSpec(raw) {
+        const text = String(raw ?? '').trim();
+        if (!text.toLowerCase().startsWith('grid=')) {
+            return text;
+        }
+        const spec = text.slice(5).trim();
+        if (!spec) {
+            return text;
+        }
+        if (spec.includes(':') && !/[,\[\]\{\}\(\)]/.test(spec)) {
+            const parts = spec.split(':').map(part => String(part).trim());
+            if (parts.length === 3) {
+                const start = Number(parts[0]);
+                if (Number.isFinite(start)) {
+                    return String(start);
+                }
+            }
+            return text;
+        }
+        const parsed = parseStructured(spec);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+            return toPythonLiteral(parsed[0]);
+        }
+        return text;
+    }
+
     function parseArrayInput(paramName, fallbackValue) {
         const input = document.querySelector(`.param-input[data-param="${paramName}"]`);
         const parsed = parseStructured(input ? input.value : fallbackValue);
@@ -156,6 +203,147 @@ document.addEventListener('DOMContentLoaded', function() {
         return parseArrayInput('areas', ncpiPresets.areas).map(value => String(value));
     }
 
+    function getParamInput(paramName) {
+        return document.querySelector(`.param-input[data-param="${paramName}"]`);
+    }
+
+    function localParamState(paramName) {
+        const input = getParamInput(paramName);
+        if (!input || !input.parentElement) {
+            return null;
+        }
+        const singleControls = input.parentElement.querySelector('.single-array-controls');
+        const gridControls = input.parentElement.querySelector('.grid-parameter-controls');
+        const singleRows = singleControls
+            ? Array.from(singleControls.querySelectorAll('[data-single-array-row="1"] input')).map(rowInput => String(rowInput.value ?? ''))
+            : [];
+        const gridRows = gridControls
+            ? Array.from(gridControls.querySelectorAll('[data-grid-row="1"]')).map(row => ({
+                start: String(row.querySelector('[data-grid-role="start"]')?.value ?? ''),
+                step: String(row.querySelector('[data-grid-role="step"]')?.value ?? ''),
+                end: String(row.querySelector('[data-grid-role="end"]')?.value ?? ''),
+            }))
+            : [];
+        return {
+            inputValue: String(input.value ?? ''),
+            singleRows,
+            gridRows,
+        };
+    }
+
+    function applyLocalParamState(paramName, state) {
+        const input = getParamInput(paramName);
+        if (!input || !state || !input.parentElement) {
+            return;
+        }
+        if (typeof state.inputValue === 'string') {
+            ensureInputCanCarryValue(input, state.inputValue);
+            input.value = state.inputValue;
+        }
+        const singleControls = input.parentElement.querySelector('.single-array-controls');
+        if (singleControls && Array.isArray(state.singleRows)) {
+            const inputs = Array.from(singleControls.querySelectorAll('[data-single-array-row="1"] input'));
+            inputs.forEach((singleInput, idx) => {
+                if (idx < state.singleRows.length) {
+                    singleInput.value = state.singleRows[idx];
+                }
+            });
+        }
+        const gridControls = input.parentElement.querySelector('.grid-parameter-controls');
+        if (gridControls && Array.isArray(state.gridRows)) {
+            const rows = Array.from(gridControls.querySelectorAll('[data-grid-row="1"]'));
+            rows.forEach((row, idx) => {
+                if (idx >= state.gridRows.length) {
+                    return;
+                }
+                const values = state.gridRows[idx] || {};
+                const startInput = row.querySelector('[data-grid-role="start"]');
+                const stepInput = row.querySelector('[data-grid-role="step"]');
+                const endInput = row.querySelector('[data-grid-role="end"]');
+                if (startInput && typeof values.start === 'string') {
+                    startInput.value = values.start;
+                }
+                if (stepInput && typeof values.step === 'string') {
+                    stepInput.value = values.step;
+                }
+                if (endInput && typeof values.end === 'string') {
+                    endInput.value = values.end;
+                }
+            });
+        }
+    }
+
+    function cloneLocalAreaState(state) {
+        if (!state || typeof state !== 'object') {
+            return {};
+        }
+        return JSON.parse(JSON.stringify(state));
+    }
+
+    function captureAreaLocalState(areaIndex) {
+        if (areaIndex < 0 || areaIndex >= areaLocalState.length) {
+            return;
+        }
+        const snapshot = {};
+        areaSpecificLocalParams.forEach(paramName => {
+            snapshot[paramName] = localParamState(paramName);
+        });
+        areaLocalState[areaIndex] = snapshot;
+    }
+
+    function applyAreaLocalState(areaIndex) {
+        if (areaIndex < 0 || areaIndex >= areaLocalState.length) {
+            return;
+        }
+        const snapshot = areaLocalState[areaIndex] || {};
+        areaSpecificLocalParams.forEach(paramName => {
+            applyLocalParamState(paramName, snapshot[paramName]);
+        });
+    }
+
+    function upsertHiddenFormValue(name, value) {
+        if (!elements.form) {
+            return;
+        }
+        let input = elements.form.querySelector(`input[type="hidden"][name="${name}"]`);
+        if (!input) {
+            input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            elements.form.appendChild(input);
+        }
+        input.value = String(value ?? '');
+    }
+
+    function refreshAreaSelectorOptions() {
+        if (!elements.areaSelector) {
+            return;
+        }
+        const areaNames = getAreaNames();
+        if (areaNames.length === 0) {
+            return;
+        }
+        const options = Array.from(elements.areaSelector.options);
+        options.forEach((option, index) => {
+            option.textContent = areaNames[index] || `area_${index}`;
+        });
+        if (elements.areaEditorStatus) {
+            const currentName = areaNames[Math.max(0, Math.min(activeAreaIndex, areaNames.length - 1))] || areaNames[0];
+            elements.areaEditorStatus.textContent = `Area selector affects Network local parameters and recurrent connectivity for "${currentName}" only. Simulation parameters and inter-area connectivity are common for all areas.`;
+        }
+    }
+
+    function initializeAreaLocalState() {
+        const areaNames = getAreaNames();
+        const totalAreas = Math.max(1, areaNames.length || 4);
+        const baseSnapshot = {};
+        areaSpecificLocalParams.forEach(paramName => {
+            baseSnapshot[paramName] = localParamState(paramName);
+        });
+        areaLocalState = Array.from({ length: totalAreas }, () => cloneLocalAreaState(baseSnapshot));
+        activeAreaIndex = 0;
+    }
+
     function indexedName(names, index, fallbackPrefix) {
         if (index >= 0 && index < names.length) {
             return names[index];
@@ -171,8 +359,201 @@ document.addEventListener('DOMContentLoaded', function() {
         return indexedName(getAreaNames(), index, 'area');
     }
 
+    function areaPopulationName(flatIndex) {
+        const populations = getPopulationNames();
+        const popCount = populations.length;
+        if (popCount <= 0) {
+            return `node[${flatIndex}]`;
+        }
+        const areaIdx = Math.floor(flatIndex / popCount);
+        const popIdx = ((flatIndex % popCount) + popCount) % popCount;
+        return `${areaName(areaIdx)}.${populationName(popIdx)}`;
+    }
+
+    function matrixShape(value) {
+        if (!Array.isArray(value) || value.length === 0 || !Array.isArray(value[0])) {
+            return null;
+        }
+        const cols = value[0].length;
+        for (let row = 0; row < value.length; row += 1) {
+            if (!Array.isArray(value[row]) || value[row].length !== cols) {
+                return null;
+            }
+        }
+        return [value.length, cols];
+    }
+
     function formatPath(path) {
         return path.map(idx => `[${idx}]`).join('');
+    }
+
+    function _hexToRgba(hex, alpha) {
+        const raw = String(hex || '').replace('#', '').trim();
+        if (raw.length !== 6) {
+            return `rgba(100, 116, 139, ${alpha})`;
+        }
+        const r = Number.parseInt(raw.slice(0, 2), 16);
+        const g = Number.parseInt(raw.slice(2, 4), 16);
+        const b = Number.parseInt(raw.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function _interAreaSourceAreaIndex(paramName, path) {
+        if (!String(paramName || '').startsWith('inter_area.')) {
+            return null;
+        }
+        if (!Array.isArray(path) || path.length !== 2) {
+            return null;
+        }
+        const populations = getPopulationNames();
+        const popCount = populations.length;
+        const areaCount = getAreaNames().length;
+        const totalNodes = popCount * areaCount;
+        if (popCount <= 0 || totalNodes <= 0) {
+            return null;
+        }
+        if (path[0] < 0 || path[0] >= totalNodes || path[1] < 0 || path[1] >= totalNodes) {
+            return null;
+        }
+        return Math.floor(path[0] / popCount);
+    }
+
+    function _interAreaSourceAreaTitle(areaIndex) {
+        if (!Number.isInteger(areaIndex) || areaIndex < 0) {
+            return 'unknown';
+        }
+        const names = getAreaNames();
+        return names[areaIndex] || `area_${areaIndex}`;
+    }
+
+    function _interAreaGroupTitleText(areaIndex, rowCount) {
+        const count = Number(rowCount || 0);
+        const label = count === 1 ? 'parameter' : 'parameters';
+        return `Source area: ${_interAreaSourceAreaTitle(areaIndex)} (${count} ${label})`;
+    }
+
+    function _refreshInterAreaGroupTitles() {
+        document.querySelectorAll('[data-inter-area-group-title="1"]').forEach(title => {
+            const areaIndex = Number.parseInt(String(title.dataset.sourceAreaIndex ?? '-1'), 10);
+            const rowCount = Number.parseInt(String(title.dataset.rowCount ?? '0'), 10);
+            title.textContent = _interAreaGroupTitleText(areaIndex, rowCount);
+        });
+    }
+
+    function _decorateInterAreaControlsBySourceArea(controls, paramName, rowSelector) {
+        if (!controls || !String(paramName || '').startsWith('inter_area.')) {
+            return;
+        }
+        const rows = Array.from(controls.querySelectorAll(rowSelector));
+        if (rows.length === 0) {
+            return;
+        }
+        const groups = new Map();
+        const order = [];
+        rows.forEach(row => {
+            const path = JSON.parse(row.dataset.path || '[]');
+            const sourceAreaIdx = _interAreaSourceAreaIndex(paramName, path);
+            const key = Number.isInteger(sourceAreaIdx) ? sourceAreaIdx : -1;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+                order.push(key);
+            }
+            groups.get(key).push(row);
+        });
+
+        controls.replaceChildren();
+        order.forEach(sourceAreaIdx => {
+            const groupRows = groups.get(sourceAreaIdx) || [];
+            if (groupRows.length === 0) {
+                return;
+            }
+            const group = document.createElement('div');
+            group.className = 'rounded-lg border border-slate-200 bg-white/80 p-2 dark:border-slate-700 dark:bg-[#111729]';
+
+            const toggle = document.createElement('button');
+            toggle.type = 'button';
+            toggle.className = 'flex w-full items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-xs font-semibold text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800';
+            toggle.setAttribute('aria-expanded', 'false');
+
+            const title = document.createElement('span');
+            title.dataset.interAreaGroupTitle = '1';
+            title.dataset.sourceAreaIndex = String(sourceAreaIdx);
+            title.dataset.rowCount = String(groupRows.length);
+            title.textContent = _interAreaGroupTitleText(sourceAreaIdx, groupRows.length);
+
+            const caret = document.createElement('span');
+            caret.textContent = '+';
+            caret.className = 'text-slate-500 dark:text-slate-400';
+
+            toggle.appendChild(title);
+            toggle.appendChild(caret);
+
+            const body = document.createElement('div');
+            body.className = 'hidden mt-2 flex flex-col gap-2';
+            body.dataset.interAreaGroupBody = '1';
+            groupRows.forEach(row => {
+                body.appendChild(row);
+            });
+
+            toggle.addEventListener('click', () => {
+                const willOpen = body.classList.contains('hidden');
+                body.classList.toggle('hidden', !willOpen);
+                toggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+                caret.textContent = willOpen ? '-' : '+';
+            });
+
+            group.appendChild(toggle);
+            group.appendChild(body);
+            controls.appendChild(group);
+        });
+    }
+
+    function _isIgnoredSameAreaInterAreaPath(paramName, path) {
+        if (!String(paramName || '').startsWith('inter_area.')) {
+            return false;
+        }
+        if (!Array.isArray(path) || path.length !== 2) {
+            return false;
+        }
+        const populations = getPopulationNames();
+        const popCount = populations.length;
+        const areaCount = getAreaNames().length;
+        const totalNodes = popCount * areaCount;
+        if (popCount <= 0 || totalNodes <= 0) {
+            return false;
+        }
+        if (path[0] < 0 || path[0] >= totalNodes || path[1] < 0 || path[1] >= totalNodes) {
+            return false;
+        }
+        const srcArea = Math.floor(path[0] / popCount);
+        const tgtArea = Math.floor(path[1] / popCount);
+        return srcArea === tgtArea;
+    }
+
+    function _styleLeafLabelRow(row, paramName, path) {
+        if (!row) {
+            return;
+        }
+        const labelNode = row.querySelector('[data-param-leaf-label="1"]');
+        row.style.borderLeft = '';
+        row.style.paddingLeft = '';
+        row.style.backgroundColor = '';
+        if (labelNode) {
+            labelNode.style.color = '';
+            labelNode.style.fontWeight = '';
+        }
+        const srcAreaIdx = _interAreaSourceAreaIndex(paramName, path);
+        if (srcAreaIdx === null) {
+            return;
+        }
+        const color = interAreaSourceAreaColors[srcAreaIdx % interAreaSourceAreaColors.length];
+        row.style.borderLeft = `3px solid ${color}`;
+        row.style.paddingLeft = '0.5rem';
+        row.style.backgroundColor = _hexToRgba(color, 0.07);
+        if (labelNode) {
+            labelNode.style.color = color;
+            labelNode.style.fontWeight = '600';
+        }
     }
 
     function describeLeafLabel(paramName, path, index, isArrayKind) {
@@ -189,10 +570,13 @@ document.addEventListener('DOMContentLoaded', function() {
             if (paramName.startsWith('inter_area.')) {
                 const populations = getPopulationNames();
                 const popCount = populations.length;
+                const areaCount = getAreaNames().length;
+                const totalNodes = popCount * areaCount;
+                if (popCount > 0 && totalNodes > 0 && path[0] < totalNodes && path[1] < totalNodes) {
+                    return `source: ${areaPopulationName(path[0])} -> target: ${areaPopulationName(path[1])}`;
+                }
                 if (popCount > 0) {
-                    const srcPop = populations[((path[0] % popCount) + popCount) % popCount];
-                    const tgtPop = populations[((path[1] % popCount) + popCount) % popCount];
-                    return `source: ${srcPop} -> target: ${tgtPop}`;
+                    return `source: ${populationName(path[0])} -> target: ${populationName(path[1])}`;
                 }
             }
             return `source: ${populationName(path[0])} -> target: ${populationName(path[1])}`;
@@ -214,6 +598,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (labelNode) {
                 labelNode.textContent = describeLeafLabel(paramName, path, 0, true);
             }
+            _styleLeafLabelRow(row, paramName, path);
         });
         document.querySelectorAll('[data-grid-row="1"]').forEach(row => {
             const paramName = row.dataset.paramName || '';
@@ -222,7 +607,9 @@ document.addEventListener('DOMContentLoaded', function() {
             if (labelNode) {
                 labelNode.textContent = describeLeafLabel(paramName, path, 0, true);
             }
+            _styleLeafLabelRow(row, paramName, path);
         });
+        _refreshInterAreaGroupTitles();
     }
 
     function collectLeaves(value, path = []) {
@@ -306,6 +693,44 @@ document.addEventListener('DOMContentLoaded', function() {
         return { paramName, pathKey };
     }
 
+    function parseAreaQualifiedLocalParam(paramName) {
+        const text = String(paramName || '').trim();
+        const match = text.match(/^area_(\d+)\.(.+)$/);
+        if (!match) {
+            return null;
+        }
+        const areaIndex = Number(match[1]);
+        const localParam = String(match[2] || '').trim();
+        if (!Number.isInteger(areaIndex) || areaIndex < 0 || !areaSpecificLocalParamSet.has(localParam)) {
+            return null;
+        }
+        return { areaIndex, localParam };
+    }
+
+    function qualifyAreaLocalParamName(paramName, areaIndex) {
+        const raw = String(paramName || '').trim();
+        if (!raw) {
+            return raw;
+        }
+        if (parseAreaQualifiedLocalParam(raw)) {
+            return raw;
+        }
+        if (!areaSpecificLocalParamSet.has(raw)) {
+            return raw;
+        }
+        const idx = Number.isInteger(areaIndex) && areaIndex >= 0 ? areaIndex : 0;
+        return `area_${idx}.${raw}`;
+    }
+
+    function qualifyAreaToken(token, areaIndex) {
+        const parsed = parseJointToken(token);
+        const qualifiedParam = qualifyAreaLocalParamName(parsed.paramName, areaIndex);
+        if (!parsed.pathKey) {
+            return qualifiedParam;
+        }
+        return `${qualifiedParam}::${parsed.pathKey}`;
+    }
+
     function sweepableParamNames() {
         if (!elements.form) {
             return [];
@@ -382,38 +807,75 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.jointGroupsInput.value = JSON.stringify(groups);
     }
 
-    function refreshJointGroupsUi() {
+    function refreshJointGroupsUi(changedSelect = null) {
         const cards = jointGroupCards();
         const selections = cards.map(card => readJointGroupSelection(card));
         const globallySelected = new Set(selections.flat());
         const options = sweepableParamOptions();
+        const optionLabelByValue = new Map(options.map(option => [option.value, option.label]));
 
         cards.forEach((card, index) => {
             const title = card.querySelector('[data-joint-group-title="1"]');
             if (title) {
-                title.textContent = `Group ${index + 1}`;
+                const areaNames = getAreaNames();
+                const areaIndexRaw = Number(String(card?.dataset?.areaIndex ?? 0));
+                const areaIndex = Number.isInteger(areaIndexRaw) && areaIndexRaw >= 0 ? areaIndexRaw : 0;
+                const areaLabel = areaNames[areaIndex] || `area_${areaIndex}`;
+                title.textContent = `Group ${index + 1} (${areaLabel})`;
             }
             const summary = card.querySelector('[data-joint-group-summary="1"]');
             if (summary) {
-                const count = selections[index].length;
-                summary.textContent = count > 0 ? `${count} parameter(s) selected` : 'Select at least two parameters';
+                const selected = selections[index] || [];
+                if (selected.length === 0) {
+                    summary.textContent = 'Select at least two parameters';
+                } else {
+                    const labels = selected.map(value => optionLabelByValue.get(value) || value);
+                    const preview = labels.slice(0, 6);
+                    const suffix = labels.length > preview.length ? `, +${labels.length - preview.length} more` : '';
+                    summary.textContent = `Selected: ${preview.join(', ')}${suffix}`;
+                }
             }
 
             const select = card.querySelector('[data-joint-group-select="1"]');
             if (!select) {
                 return;
             }
+            const previousScrollTop = select.scrollTop;
+            const shouldPreserveInPlace = select === changedSelect || select === document.activeElement;
             const ownSelection = new Set(selections[index]);
-            const fragment = document.createDocumentFragment();
-            options.forEach(option => {
-                const node = document.createElement('option');
-                node.value = option.value;
-                node.textContent = option.label;
-                node.selected = ownSelection.has(option.value);
-                node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
-                fragment.appendChild(node);
+            if (shouldPreserveInPlace) {
+                const existingOptionValues = new Set(Array.from(select.options).map(node => node.value));
+                Array.from(select.options).forEach(node => {
+                    node.disabled = globallySelected.has(node.value) && !ownSelection.has(node.value);
+                    node.selected = ownSelection.has(node.value);
+                });
+                options.forEach(option => {
+                    if (existingOptionValues.has(option.value)) {
+                        return;
+                    }
+                    const node = document.createElement('option');
+                    node.value = option.value;
+                    node.textContent = option.label;
+                    node.selected = ownSelection.has(option.value);
+                    node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
+                    select.appendChild(node);
+                });
+            } else {
+                const fragment = document.createDocumentFragment();
+                options.forEach(option => {
+                    const node = document.createElement('option');
+                    node.value = option.value;
+                    node.textContent = option.label;
+                    node.selected = ownSelection.has(option.value);
+                    node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
+                    fragment.appendChild(node);
+                });
+                select.replaceChildren(fragment);
+            }
+            select.scrollTop = previousScrollTop;
+            window.requestAnimationFrame(() => {
+                select.scrollTop = previousScrollTop;
             });
-            select.replaceChildren(fragment);
         });
 
         syncJointGroupsInput(
@@ -427,6 +889,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const card = document.createElement('div');
         card.dataset.jointGroupCard = '1';
+        card.dataset.areaIndex = String(activeAreaIndex);
         card.className = 'rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-700 dark:bg-[#141a2d]';
         card.innerHTML = `
             <div class="flex items-start justify-between gap-3">
@@ -465,7 +928,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 node.selected = selectedSet.has(option.value);
                 select.appendChild(node);
             });
-            select.addEventListener('change', refreshJointGroupsUi);
+            select.addEventListener('change', () => {
+                refreshJointGroupsUi(select);
+            });
         }
         const removeButton = card.querySelector('[data-remove-joint-group="1"]');
         if (removeButton) {
@@ -479,74 +944,92 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function normalizeJointGroupsInput() {
-        const groups = jointGroupCards()
-            .map(card => readJointGroupSelection(card))
-            .filter(group => group.length > 0);
+        const cards = jointGroupCards();
+        const groupEntries = cards
+            .map(card => ({ card, group: readJointGroupSelection(card) }))
+            .filter(entry => entry.group.length > 0);
+        const groups = groupEntries.map(entry => entry.group);
 
         const seenGroupTokens = new Set();
         const seenBackendParams = new Set();
-        const seenLeafTokens = new Set();
         const backendGroups = [];
+        const countGroups = [];
         const leafGroupsByParam = new Map();
 
         for (let index = 0; index < groups.length; index += 1) {
             const group = groups[index];
+            const card = groupEntries[index]?.card || null;
+            const groupAreaIndexRaw = Number(String(card?.dataset?.areaIndex ?? activeAreaIndex));
+            const groupAreaIndex = Number.isInteger(groupAreaIndexRaw) && groupAreaIndexRaw >= 0
+                ? groupAreaIndexRaw
+                : Math.max(0, activeAreaIndex);
             if (group.length < 2) {
                 return { ok: false, message: `Joint sweep group ${index + 1} must contain at least two parameters.` };
             }
 
             const parsedGroup = group.map(parseJointToken);
-            const groupHasLeafTokens = parsedGroup.some(item => item.pathKey !== '');
-            if (groupHasLeafTokens) {
-                const paramNames = new Set(parsedGroup.map(item => item.paramName));
-                if (paramNames.size !== 1) {
-                    return { ok: false, message: `Joint sweep group ${index + 1} with leaf targets must belong to a single parameter.` };
+            const backendGroup = [];
+            const backendSeenInGroup = new Set();
+            const localLeafPathsByParam = new Map();
+            const countGroup = [];
+
+            for (let tokenIndex = 0; tokenIndex < group.length; tokenIndex += 1) {
+                const parsed = parsedGroup[tokenIndex];
+                const paramName = String(parsed.paramName || '').trim();
+                const pathKey = String(parsed.pathKey || '').trim();
+                const qualifiedParamName = qualifyAreaLocalParamName(paramName, groupAreaIndex);
+                const qualifiedToken = pathKey
+                    ? `${qualifiedParamName}::${pathKey}`
+                    : qualifiedParamName;
+
+                if (!qualifiedParamName) {
+                    return { ok: false, message: `Joint sweep group ${index + 1} contains an invalid parameter target.` };
                 }
-                if (parsedGroup.some(item => !item.pathKey)) {
-                    return { ok: false, message: `Joint sweep group ${index + 1} cannot mix a whole parameter with leaf targets.` };
+                if (seenGroupTokens.has(qualifiedToken)) {
+                    return { ok: false, message: `Parameter "${qualifiedToken}" cannot belong to more than one joint sweep group.` };
                 }
-                const paramName = parsedGroup[0].paramName;
-                const leafPathKeys = parsedGroup.map(item => item.pathKey);
-                const localLeafSet = new Set();
-                for (const token of group) {
-                    if (seenGroupTokens.has(token)) {
-                        return { ok: false, message: `Parameter "${token}" cannot belong to more than one joint sweep group.` };
-                    }
-                    seenGroupTokens.add(token);
-                    if (seenLeafTokens.has(token)) {
-                        return { ok: false, message: `Leaf target "${token}" cannot belong to more than one joint sweep group.` };
-                    }
-                    seenLeafTokens.add(token);
+                seenGroupTokens.add(qualifiedToken);
+                countGroup.push(qualifiedToken);
+
+                if (!backendSeenInGroup.has(qualifiedParamName)) {
+                    backendSeenInGroup.add(qualifiedParamName);
+                    backendGroup.push(qualifiedParamName);
                 }
-                for (const key of leafPathKeys) {
-                    if (localLeafSet.has(key)) {
-                        return { ok: false, message: `Joint sweep group ${index + 1} contains duplicate leaf targets.` };
-                    }
-                    localLeafSet.add(key);
+
+                if (!pathKey) {
+                    continue;
                 }
+                if (!localLeafPathsByParam.has(qualifiedParamName)) {
+                    localLeafPathsByParam.set(qualifiedParamName, new Set());
+                }
+                const leafPathSet = localLeafPathsByParam.get(qualifiedParamName);
+                if (leafPathSet.has(pathKey)) {
+                    return { ok: false, message: `Joint sweep group ${index + 1} contains duplicate leaf targets.` };
+                }
+                leafPathSet.add(pathKey);
+            }
+
+            for (const [paramName, pathSet] of localLeafPathsByParam.entries()) {
                 if (!leafGroupsByParam.has(paramName)) {
                     leafGroupsByParam.set(paramName, []);
                 }
-                leafGroupsByParam.get(paramName).push(leafPathKeys);
-                continue;
+                leafGroupsByParam.get(paramName).push(Array.from(pathSet));
             }
 
-            const backendGroup = parsedGroup.map(item => item.paramName);
-            for (const paramName of backendGroup) {
-                if (seenGroupTokens.has(paramName)) {
-                    return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
+            if (backendGroup.length >= 2) {
+                for (const paramName of backendGroup) {
+                    if (seenBackendParams.has(paramName)) {
+                        return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
+                    }
                 }
-                if (seenBackendParams.has(paramName)) {
-                    return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
-                }
-                seenGroupTokens.add(paramName);
-                seenBackendParams.add(paramName);
+                backendGroup.forEach(paramName => seenBackendParams.add(paramName));
+                countGroups.push(countGroup);
+                backendGroups.push(backendGroup);
             }
-            backendGroups.push(backendGroup);
         }
 
         syncJointGroupsInput(backendGroups);
-        return { ok: true, groups, backendGroups, leafGroupsByParam };
+        return { ok: true, groups, backendGroups, leafGroupsByParam, countGroups };
     }
 
     function addGridControls(input, preset) {
@@ -555,6 +1038,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const controls = document.createElement('div');
         controls.className = 'grid-parameter-controls hidden mt-2 flex flex-col gap-2';
         const paramName = input.dataset.param || input.name || '';
+        controls.dataset.paramName = paramName;
 
         const baseClass = 'grid-param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white';
         const leaves = Array.isArray(parsed) ? collectLeaves(parsed) : [{ path: [], value: parsed }];
@@ -562,6 +1046,9 @@ document.addEventListener('DOMContentLoaded', function() {
         controls.dataset.baseValue = JSON.stringify(parsed);
 
         leaves.forEach((leaf, index) => {
+            if (_isIgnoredSameAreaInterAreaPath(paramName, leaf.path)) {
+                return;
+            }
             const label = describeLeafLabel(paramName, leaf.path, index, controls.dataset.gridKind === 'array');
             const startValue = String(leaf.value ?? '');
             controls.insertAdjacentHTML('beforeend', `
@@ -583,6 +1070,7 @@ document.addEventListener('DOMContentLoaded', function() {
             `);
         });
 
+        _decorateInterAreaControlsBySourceArea(controls, paramName, '[data-grid-row="1"]');
         input.insertAdjacentElement('afterend', controls);
     }
 
@@ -597,11 +1085,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const controls = document.createElement('div');
         controls.className = 'single-array-controls mt-2 grid grid-cols-1 md:grid-cols-2 gap-2';
         controls.dataset.baseValue = JSON.stringify(parsed);
+        controls.dataset.paramName = paramName;
 
         const leaves = collectLeaves(parsed);
         const baseClass = 'single-array-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white';
 
         leaves.forEach((leaf, index) => {
+            if (_isIgnoredSameAreaInterAreaPath(paramName, leaf.path)) {
+                return;
+            }
             const label = describeLeafLabel(paramName, leaf.path, index, true);
             controls.insertAdjacentHTML('beforeend', `
                 <label class="flex flex-col gap-1" data-single-array-row="1" data-path="${escapeHtml(JSON.stringify(leaf.path))}" data-param-name="${escapeHtml(paramName)}">
@@ -611,7 +1103,161 @@ document.addEventListener('DOMContentLoaded', function() {
             `);
         });
 
+        _decorateInterAreaControlsBySourceArea(controls, paramName, '[data-single-array-row="1"]');
         input.insertAdjacentElement('afterend', controls);
+    }
+
+    function clearParamDynamicControls(input) {
+        if (!input || !input.parentElement) {
+            return;
+        }
+        const single = input.parentElement.querySelector('.single-array-controls');
+        if (single) {
+            single.remove();
+        }
+        const grid = input.parentElement.querySelector('.grid-parameter-controls');
+        if (grid) {
+            grid.remove();
+        }
+    }
+
+    function rebuildParamControls(input) {
+        if (!input) {
+            return;
+        }
+        const paramName = input.dataset.param || input.name || '';
+        clearParamDynamicControls(input);
+        addSingleArrayControls(input, input.value);
+        if (!simulationOnlyParams.has(paramName) && !fixedGridParams.has(paramName)) {
+            addGridControls(input, input.value);
+        }
+    }
+
+    function setStructuredParamValue(paramName, value) {
+        const input = getParamInput(paramName);
+        if (!input) {
+            return false;
+        }
+        const literal = toPythonLiteral(value);
+        ensureInputCanCarryValue(input, literal);
+        input.value = literal;
+        rebuildParamControls(input);
+        return true;
+    }
+
+    function buildFullInterAreaMatrixFromPopulationMatrix(popMatrix, popCount, areaCount) {
+        const shape = matrixShape(popMatrix);
+        if (!shape || shape[0] !== popCount || shape[1] !== popCount) {
+            return null;
+        }
+        const totalNodes = popCount * areaCount;
+        const fullMatrix = Array.from({ length: totalNodes }, () => Array(totalNodes).fill(0));
+        for (let src = 0; src < totalNodes; src += 1) {
+            for (let tgt = 0; tgt < totalNodes; tgt += 1) {
+                fullMatrix[src][tgt] = popMatrix[src % popCount][tgt % popCount];
+            }
+        }
+        return fullMatrix;
+    }
+
+    function updateInterAreaModeStatus() {
+        if (!elements.interAreaModeStatus) {
+            return;
+        }
+        elements.interAreaModeStatus.textContent = 'Inter-area connectivity is always shown as full 8x8 area-population matrices (frontal.E, frontal.I, ..., occipital.I). Same-area entries are ignored by the simulator.';
+    }
+
+    function ensureFullInterAreaMatrices() {
+        const popCount = getPopulationNames().length;
+        const areaCount = getAreaNames().length;
+        const totalNodes = popCount * areaCount;
+        if (popCount <= 0 || areaCount <= 0) {
+            return false;
+        }
+
+        let changed = false;
+        interAreaParamNames.forEach(paramName => {
+            const input = getParamInput(paramName);
+            if (!input) {
+                return;
+            }
+            const parsed = parseStructured(input.value);
+            const shape = matrixShape(parsed);
+            if (shape && shape[0] === totalNodes && shape[1] === totalNodes) {
+                return;
+            }
+            const nextValue = buildFullInterAreaMatrixFromPopulationMatrix(parsed, popCount, areaCount);
+            if (!nextValue) {
+                return;
+            }
+            changed = true;
+            setStructuredParamValue(paramName, nextValue);
+        });
+
+        if (changed) {
+            refreshLeafLabels();
+            refreshJointGroupsUi();
+            updateModeUi();
+        }
+        updateInterAreaModeStatus();
+        return changed;
+    }
+
+    function validateInterAreaMatricesAreFull() {
+        const popCount = getPopulationNames().length;
+        const areaCount = getAreaNames().length;
+        const totalNodes = popCount * areaCount;
+
+        function validateShapeOrGridShape(rawValue) {
+            const text = String(rawValue ?? '').trim();
+            if (text.toLowerCase().startsWith('grid=')) {
+                const spec = text.slice(5).trim();
+                if (!spec) {
+                    return false;
+                }
+                const parsed = parseStructured(spec);
+                if (!Array.isArray(parsed) || parsed.length === 0) {
+                    return false;
+                }
+                return parsed.every(candidate => {
+                    const shape = matrixShape(candidate);
+                    return Boolean(shape && shape[0] === totalNodes && shape[1] === totalNodes);
+                });
+            }
+            const shape = matrixShape(parseStructured(text));
+            return Boolean(shape && shape[0] === totalNodes && shape[1] === totalNodes);
+        }
+
+        for (const paramName of interAreaParamNames) {
+            const input = getParamInput(paramName);
+            if (!input) {
+                continue;
+            }
+            if (!validateShapeOrGridShape(input.value)) {
+                return {
+                    ok: false,
+                    message: `Parameter "${paramName}" must be a ${totalNodes}x${totalNodes} matrix.`,
+                };
+            }
+        }
+        return { ok: true };
+    }
+
+    function setupInterAreaMatrixUi() {
+        ensureFullInterAreaMatrices();
+        interAreaParamNames.forEach(paramName => {
+            const input = getParamInput(paramName);
+            if (!input) {
+                return;
+            }
+            input.addEventListener('input', () => {
+                updateInterAreaModeStatus();
+            });
+            input.addEventListener('change', () => {
+                updateInterAreaModeStatus();
+            });
+        });
+        updateInterAreaModeStatus();
     }
 
     function normalizeSingleArrayInput(input) {
@@ -627,12 +1273,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const out = JSON.parse(JSON.stringify(baseValue));
         const leaves = collectLeaves(baseValue);
+        const leafByPath = new Map();
+        leaves.forEach(leaf => {
+            leafByPath.set(leafPathKey(leaf.path), leaf);
+        });
         const rows = Array.from(controls.querySelectorAll('[data-single-array-row="1"]'));
 
         for (let idx = 0; idx < rows.length; idx += 1) {
             const row = rows[idx];
             const path = JSON.parse(row.dataset.path || '[]');
-            const template = leaves[idx] ? leaves[idx].value : null;
+            const templateLeaf = leafByPath.get(leafPathKey(path));
+            const template = templateLeaf ? templateLeaf.value : null;
             const raw = (row.querySelector('input')?.value ?? '').trim();
 
             if (typeof template === 'number') {
@@ -695,16 +1346,22 @@ document.addEventListener('DOMContentLoaded', function() {
         const leaves = collectLeaves(baseValue);
         const candidatePerLeaf = [];
         const startStructure = JSON.parse(JSON.stringify(baseValue));
-        const leafTokenByIndex = leaves.map(leaf => makeJointToken(paramName, leaf.path));
+        const visibleLeaves = rows.map(row => {
+            const path = JSON.parse(row.dataset.path || '[]');
+            const pathKey = leafPathKey(path);
+            const found = leaves.find(leaf => leafPathKey(leaf.path) === pathKey);
+            return found ? found : { path, value: null };
+        });
+        const leafTokenByIndex = visibleLeaves.map(leaf => makeJointToken(paramName, leaf.path));
         const leafPathToIndex = new Map();
-        leaves.forEach((leaf, idx) => {
+        visibleLeaves.forEach((leaf, idx) => {
             leafPathToIndex.set(leafPathKey(leaf.path), idx);
         });
 
         for (let idx = 0; idx < rows.length; idx += 1) {
             const row = rows[idx];
             const path = JSON.parse(row.dataset.path || '[]');
-            const template = leaves[idx] ? leaves[idx].value : null;
+            const template = visibleLeaves[idx] ? visibleLeaves[idx].value : null;
             const startRaw = (row.querySelector('[data-grid-role="start"]')?.value ?? '').trim();
             const stepRaw = (row.querySelector('[data-grid-role="step"]')?.value ?? '0').trim() || '0';
             const endRaw = (row.querySelector('[data-grid-role="end"]')?.value ?? '').trim();
@@ -790,11 +1447,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 const dim = dimensions[dimIndex];
                 if (dim.type === 'group') {
                     dim.indices.forEach(leafIdx => {
-                        setAtPath(out, leaves[leafIdx].path, candidatePerLeaf[leafIdx][choice]);
+                        setAtPath(out, visibleLeaves[leafIdx].path, candidatePerLeaf[leafIdx][choice]);
                     });
                     return;
                 }
-                setAtPath(out, leaves[dim.index].path, candidatePerLeaf[dim.index][choice]);
+                setAtPath(out, visibleLeaves[dim.index].path, candidatePerLeaf[dim.index][choice]);
             });
             return out;
         });
@@ -845,7 +1502,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Initialize UI
     createParameterSection();
+    setupInterAreaMatrixUi();
     refreshLeafLabels();
+    initializeAreaLocalState();
+    refreshAreaSelectorOptions();
     refreshJointGroupsUi();
 
     if (elements.container) {
@@ -873,13 +1533,31 @@ document.addEventListener('DOMContentLoaded', function() {
 
     const populationsInput = document.querySelector('.param-input[data-param="X"]');
     if (populationsInput) {
-        populationsInput.addEventListener('input', refreshLeafLabels);
-        populationsInput.addEventListener('change', refreshLeafLabels);
+        populationsInput.addEventListener('input', () => {
+            ensureFullInterAreaMatrices();
+            refreshLeafLabels();
+            updateInterAreaModeStatus();
+        });
+        populationsInput.addEventListener('change', () => {
+            ensureFullInterAreaMatrices();
+            refreshLeafLabels();
+            updateInterAreaModeStatus();
+        });
     }
     const areasInput = document.querySelector('.param-input[data-param="areas"]');
     if (areasInput) {
-        areasInput.addEventListener('input', refreshLeafLabels);
-        areasInput.addEventListener('change', refreshLeafLabels);
+        areasInput.addEventListener('input', () => {
+            ensureFullInterAreaMatrices();
+            refreshLeafLabels();
+            refreshAreaSelectorOptions();
+            updateInterAreaModeStatus();
+        });
+        areasInput.addEventListener('change', () => {
+            ensureFullInterAreaMatrices();
+            refreshLeafLabels();
+            refreshAreaSelectorOptions();
+            updateInterAreaModeStatus();
+        });
     }
     if (elements.container) {
         const _refreshOnNameControlEdit = (event) => {
@@ -891,11 +1569,28 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const paramName = row.dataset.paramName || '';
             if (paramName === 'X' || paramName === 'areas') {
+                ensureFullInterAreaMatrices();
                 refreshLeafLabels();
+                if (paramName === 'areas') {
+                    refreshAreaSelectorOptions();
+                }
+                updateInterAreaModeStatus();
             }
         };
         elements.container.addEventListener('input', _refreshOnNameControlEdit);
         elements.container.addEventListener('change', _refreshOnNameControlEdit);
+    }
+    if (elements.areaSelector) {
+        elements.areaSelector.addEventListener('change', (event) => {
+            const requestedIndex = Number.parseInt(String(event.target.value ?? '0'), 10);
+            const nextAreaIndex = Number.isInteger(requestedIndex) ? requestedIndex : 0;
+            captureAreaLocalState(activeAreaIndex);
+            activeAreaIndex = Math.max(0, Math.min(nextAreaIndex, areaLocalState.length - 1));
+            applyAreaLocalState(activeAreaIndex);
+            refreshLeafLabels();
+            refreshAreaSelectorOptions();
+            refreshJointGroupsUi();
+        });
     }
 
     function updateModeUi() {
@@ -963,6 +1658,15 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.form.addEventListener('submit', (event) => {
             const selected = document.querySelector('input[name="sim_run_mode"]:checked');
             const isGrid = selected && selected.value === 'grid';
+            let jointGroupResult = null;
+
+            ensureFullInterAreaMatrices();
+            const interAreaValidation = validateInterAreaMatricesAreFull();
+            if (!interAreaValidation.ok) {
+                event.preventDefault();
+                window.alert(interAreaValidation.message);
+                return;
+            }
 
             if (elements.repetitionsInput) {
                 const repetitions = Number(String(elements.repetitionsInput.value ?? '').trim());
@@ -983,6 +1687,69 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
             }
 
+            if (isGrid) {
+                jointGroupResult = normalizeJointGroupsInput();
+                if (!jointGroupResult.ok) {
+                    event.preventDefault();
+                    window.alert(jointGroupResult.message);
+                    return;
+                }
+            }
+
+            const gridCandidateCounts = new Map();
+            captureAreaLocalState(activeAreaIndex);
+            const areaNames = getAreaNames();
+            for (let areaIndex = 0; areaIndex < areaLocalState.length; areaIndex += 1) {
+                applyAreaLocalState(areaIndex);
+                const areaLabel = areaNames[areaIndex] || `area_${areaIndex}`;
+                for (const paramName of areaSpecificLocalParams) {
+                    const input = getParamInput(paramName);
+                    if (!input) {
+                        continue;
+                    }
+                    const singleResult = normalizeSingleArrayInput(input);
+                    if (!singleResult.ok) {
+                        event.preventDefault();
+                        window.alert(`Area "${areaLabel}": ${singleResult.message}`);
+                        return;
+                    }
+                    if (isGrid && !simulationOnlyParams.has(paramName) && !fixedGridParams.has(paramName)) {
+                        const areaQualifiedParam = `area_${areaIndex}.${paramName}`;
+                        const leafGroupsForParam = (jointGroupResult?.leafGroupsByParam.get(areaQualifiedParam))
+                            || (jointGroupResult?.leafGroupsByParam.get(paramName))
+                            || [];
+                        const areaGridResult = normalizeGridInput(input, leafGroupsForParam);
+                        if (!areaGridResult.ok) {
+                            event.preventDefault();
+                            window.alert(`Area "${areaLabel}": ${areaGridResult.message}`);
+                            return;
+                        }
+                        gridCandidateCounts.set(areaQualifiedParam, Number(areaGridResult.candidateCount || 1));
+                        Object.entries(areaGridResult.candidateCountsByToken || {}).forEach(([token, count]) => {
+                            const qualifiedToken = qualifyAreaToken(token, areaIndex);
+                            gridCandidateCounts.set(qualifiedToken, Number(count || 1));
+                        });
+                    }
+                    upsertHiddenFormValue(`area_${areaIndex}.${paramName}`, input.value);
+                }
+            }
+            applyAreaLocalState(activeAreaIndex);
+            refreshLeafLabels();
+            refreshAreaSelectorOptions();
+
+            // Area-local parameters are submitted through hidden area_{i}.* fields.
+            // Collapse the visible shared inputs to a single candidate so they do
+            // not add extra global grid dimensions.
+            for (const paramName of areaSpecificLocalParams) {
+                const input = getParamInput(paramName);
+                if (!input) {
+                    continue;
+                }
+                const collapsed = _firstCandidateLiteralFromGridSpec(input.value);
+                ensureInputCanCarryValue(input, collapsed);
+                input.value = collapsed;
+            }
+
             const params = Array.from(elements.form.querySelectorAll('.param-input'));
             for (const input of params) {
                 const singleResult = normalizeSingleArrayInput(input);
@@ -998,18 +1765,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            const jointGroupResult = normalizeJointGroupsInput();
-            if (!jointGroupResult.ok) {
-                event.preventDefault();
-                window.alert(jointGroupResult.message);
-                return;
-            }
-
-            const gridCandidateCounts = new Map();
-
             for (const input of params) {
                 const paramName = input.dataset.param || input.name;
-                if (simulationOnlyParams.has(paramName) || fixedGridParams.has(paramName)) {
+                if (
+                    simulationOnlyParams.has(paramName)
+                    || fixedGridParams.has(paramName)
+                    || areaSpecificLocalParamSet.has(paramName)
+                ) {
                     continue;
                 }
                 const leafGroupsForParam = jointGroupResult.leafGroupsByParam.get(paramName) || [];
@@ -1025,8 +1787,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
 
-            for (let index = 0; index < jointGroupResult.groups.length; index += 1) {
-                const group = jointGroupResult.groups[index];
+            const countGroups = Array.isArray(jointGroupResult.countGroups)
+                ? jointGroupResult.countGroups
+                : jointGroupResult.groups;
+            for (let index = 0; index < countGroups.length; index += 1) {
+                const group = countGroups[index];
                 const expectedCount = gridCandidateCounts.get(group[0]) || 1;
                 const mismatch = group.find(token => (gridCandidateCounts.get(token) || 1) !== expectedCount);
                 if (mismatch) {

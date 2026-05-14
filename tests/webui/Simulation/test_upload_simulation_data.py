@@ -322,7 +322,7 @@ def test_simulation_upload_remove_file_updates_module_state(
                 page.locator("text=Status: Files detected").wait_for(state="visible")
                 remove_button = page.get_by_role("button", name="Remove").first
                 remove_button.wait_for(state="visible")
-                remove_button.click()
+                _shared._click_locator(remove_button)
                 page.wait_for_load_state("domcontentloaded")
                 page_text = page.locator("body").inner_text()
                 assert "Status: Awaiting files" in page_text
@@ -370,11 +370,11 @@ def test_simulation_upload_complete_hagen_payload_is_semantically_loadable(
                 browser.close()
 
     loaded = webui_app_module._load_simulation_outputs()
-    assert loaded["times"] == payloads["times.pkl"]
-    assert loaded["gids"] == payloads["gids.pkl"]
-    assert loaded["dt"] == payloads["dt.pkl"]
-    assert loaded["tstop"] == payloads["tstop.pkl"]
-    assert loaded["network"] == payloads["network.pkl"]
+    assert loaded["times"] == [payloads["times.pkl"]]
+    assert loaded["gids"] == [payloads["gids.pkl"]]
+    assert loaded["dt"] == [payloads["dt.pkl"]]
+    assert loaded["tstop"] == [payloads["tstop.pkl"]]
+    assert loaded["network"] == [payloads["network.pkl"]]
     assert webui_app_module._simulation_trial_count(loaded) == 1
     assert webui_app_module._simulation_model_type(loaded) == "hagen"
 

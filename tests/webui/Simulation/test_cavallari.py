@@ -76,6 +76,19 @@ def _log_test_progress(message):
     _write_progress_line(text)
 
 
+def _click_locator(locator, timeout=30000):
+    """Click a locator with a fallback for transient Playwright stability checks."""
+    locator.wait_for(state="visible", timeout=timeout)
+    try:
+        locator.scroll_into_view_if_needed(timeout=timeout)
+    except Exception:
+        pass
+    try:
+        locator.click(timeout=timeout)
+    except Exception:
+        locator.click(timeout=timeout, force=True)
+
+
 def _ensure_import_paths():
     """Ensure the repository and WebUI directories are importable during the tests."""
     for entry in (str(REPO_ROOT), str(WEBUI_DIR)):
@@ -234,8 +247,39 @@ def _extract_zip(zip_path, destination):
 
 def _load_output_pickle(output_dir, filename):
     """Load a simulation output pickle file from a result directory."""
-    with open(output_dir / filename, "rb") as handle:
-        return pickle.load(handle)
+    direct_path = output_dir / filename
+    if direct_path.is_file():
+        with open(direct_path, "rb") as handle:
+            return pickle.load(handle)
+
+    bundle_path = output_dir / "simulation.pkl"
+    if not bundle_path.is_file():
+        legacy_bundle_path = output_dir / "sim_data.pkl"
+        bundle_path = legacy_bundle_path if legacy_bundle_path.is_file() else None
+    if bundle_path is None:
+        raise FileNotFoundError(f"Missing simulation output '{filename}' in {output_dir}.")
+
+    with open(bundle_path, "rb") as handle:
+        bundle = pickle.load(handle)
+
+    if isinstance(bundle, dict):
+        field_map = {
+            "times.pkl": "times",
+            "gids.pkl": "gids",
+            "dt.pkl": "dt",
+            "tstop.pkl": "tstop",
+            "network.pkl": "network",
+            "population_sizes.pkl": "population_sizes",
+            "vm.pkl": "vm",
+            "ampa.pkl": "ampa",
+            "gaba.pkl": "gaba",
+            "exc_state_events.pkl": "exc_state_events",
+        }
+        field = field_map.get(filename)
+        if field and field in bundle:
+            return bundle[field]
+
+    raise KeyError(f"Simulation bundle does not contain data for '{filename}'.")
 
 
 def _coerce_trial_payloads(payload):
@@ -659,13 +703,13 @@ def _navigate_to_cavallari_form(page, live_webui_server):
     """Navigate to the Cavallari simulation form and wait for its controls to finish loading."""
     page.goto(live_webui_server, wait_until="domcontentloaded")
 
-    page.locator("a[href='/simulation']").first.click()
+    _click_locator(page.locator("a[href='/simulation']").first)
     page.wait_for_url(f"{live_webui_server}/simulation", wait_until="domcontentloaded")
 
-    page.locator("a[href='/simulation/new_sim']").first.click()
+    _click_locator(page.locator("a[href='/simulation/new_sim']").first)
     page.wait_for_url(f"{live_webui_server}/simulation/new_sim", wait_until="domcontentloaded")
 
-    page.locator("a[href='/simulation/new_sim/cavallari']").first.click()
+    _click_locator(page.locator("a[href='/simulation/new_sim/cavallari']").first)
     page.wait_for_url(f"{live_webui_server}/simulation/new_sim/cavallari", wait_until="domcontentloaded")
     page.wait_for_function(
         """
@@ -858,7 +902,7 @@ def _run_cavallari_webui_job(live_webui_server, pytestconfig, configure_page):
                 form_data = _normalized_form_data_from_page(page)
                 _log_test_progress("submitting WebUI simulation")
 
-                page.locator("button[type='submit']").click()
+                _click_locator(page.locator("button[type='submit']"))
                 page.wait_for_url("**/job_status/*", wait_until="domcontentloaded")
                 job_id = Path(urlparse(page.url).path).name
                 _log_test_progress(f"submitted WebUI simulation as job {job_id}")

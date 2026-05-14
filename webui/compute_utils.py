@@ -1827,6 +1827,8 @@ def _extract_signal_and_meta_from_source(obj):
         "dt_ms": None,
         "decimation_factor": 1,
         "fs_hz": None,
+        "t_start_ms": None,
+        "t_stop_ms": None,
         "component_axis": None,
         "component_index": None,
     }
@@ -1850,6 +1852,16 @@ def _extract_signal_and_meta_from_source(obj):
         dt_ms = _first_numeric_from_column(obj, "dt_ms")
         decimation_factor = _first_numeric_from_column(obj, "decimation_factor")
         fs_hz = _first_numeric_from_column(obj, "fs_hz")
+        t_start_ms = _first_numeric_from_column(obj, "t_start_ms")
+        if t_start_ms is None:
+            t_start_ms = _first_numeric_from_column(obj, "time_start_ms")
+        if t_start_ms is None:
+            t_start_ms = _first_numeric_from_column(obj, "transient_ms")
+        if t_start_ms is None:
+            t_start_ms = _first_numeric_from_column(obj, "transient")
+        t_stop_ms = _first_numeric_from_column(obj, "t_stop_ms")
+        if t_stop_ms is None:
+            t_stop_ms = _first_numeric_from_column(obj, "time_stop_ms")
 
         if "metadata" in obj.columns:
             meta_series = obj["metadata"].dropna()
@@ -1867,6 +1879,18 @@ def _extract_signal_and_meta_from_source(obj):
                         decimation_factor = _safe_float(meta_value.get("decimation_factor"))
                     if fs_hz is None:
                         fs_hz = _safe_float(meta_value.get("fs_hz"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("t_start_ms"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("time_start_ms"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("transient_ms"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("transient"))
+                    if t_stop_ms is None:
+                        t_stop_ms = _safe_float(meta_value.get("t_stop_ms"))
+                    if t_stop_ms is None:
+                        t_stop_ms = _safe_float(meta_value.get("time_stop_ms"))
                     component_axis, component_index = _extract_cdm_component_meta(meta_value)
                     if component_axis is not None:
                         meta["component_axis"] = component_axis
@@ -1878,6 +1902,8 @@ def _extract_signal_and_meta_from_source(obj):
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
+        meta["t_start_ms"] = t_start_ms
+        meta["t_stop_ms"] = t_stop_ms
         component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component_axis"))
         if component_axis is None:
             component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component"))
@@ -1906,6 +1932,16 @@ def _extract_signal_and_meta_from_source(obj):
         dt_ms = _safe_float(obj.get("dt_ms"))
         decimation_factor = _safe_float(obj.get("decimation_factor"))
         fs_hz = _safe_float(obj.get("fs_hz"))
+        t_start_ms = _safe_float(obj.get("t_start_ms"))
+        if t_start_ms is None:
+            t_start_ms = _safe_float(obj.get("time_start_ms"))
+        if t_start_ms is None:
+            t_start_ms = _safe_float(obj.get("transient_ms"))
+        if t_start_ms is None:
+            t_start_ms = _safe_float(obj.get("transient"))
+        t_stop_ms = _safe_float(obj.get("t_stop_ms"))
+        if t_stop_ms is None:
+            t_stop_ms = _safe_float(obj.get("time_stop_ms"))
         component_axis, component_index = _extract_cdm_component_meta(obj)
         if component_axis is not None:
             meta["component_axis"] = component_axis
@@ -1919,6 +1955,18 @@ def _extract_signal_and_meta_from_source(obj):
                 decimation_factor = _safe_float(metadata.get("decimation_factor"))
             if fs_hz is None:
                 fs_hz = _safe_float(metadata.get("fs_hz"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("t_start_ms"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("time_start_ms"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("transient_ms"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("transient"))
+            if t_stop_ms is None:
+                t_stop_ms = _safe_float(metadata.get("t_stop_ms"))
+            if t_stop_ms is None:
+                t_stop_ms = _safe_float(metadata.get("time_stop_ms"))
             nested_axis, nested_index = _extract_cdm_component_meta(metadata)
             if meta["component_axis"] is None and nested_axis is not None:
                 meta["component_axis"] = nested_axis
@@ -1929,6 +1977,8 @@ def _extract_signal_and_meta_from_source(obj):
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
+        meta["t_start_ms"] = t_start_ms
+        meta["t_stop_ms"] = t_stop_ms
         if "sum" in obj:
             return obj.get("sum"), meta
         if "data" in obj:
@@ -4301,9 +4351,16 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 "data": proxy_area_payload if proxy_area_payload else proxy,
                 "proxy_method": method,
                 "dt_ms": dt_ms,
+                "t_start_ms": 0.0,
                 "decimation_factor": proxy_decimation_factor,
                 "fs_hz": None,
-                "metadata": {"dt_ms": dt_ms, "decimation_factor": proxy_decimation_factor, "fs_hz": None, "dt_source": dt_source},
+                "metadata": {
+                    "dt_ms": dt_ms,
+                    "t_start_ms": 0.0,
+                    "decimation_factor": proxy_decimation_factor,
+                    "fs_hz": None,
+                    "dt_source": dt_source,
+                },
             }
             if proxy_area_raw:
                 row["raw_signals"] = proxy_area_raw
@@ -4320,6 +4377,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 row["fs_hz"] = fs_hz
                 row["metadata"] = {
                     "dt_ms": float(dt_val),
+                    "t_start_ms": 0.0,
                     "decimation_factor": proxy_decimation_factor,
                     "fs_hz": fs_hz,
                     "dt_source": dt_source,
@@ -4932,10 +4990,14 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     "component_axis": component_axis,
                     "component_index": component_index,
                     "dt_ms": float(cdm_dt),
+                    "t_start_ms": float(transient),
+                    "t_stop_ms": float(cdm_tstop),
                     "decimation_factor": cdm_decimation_factor,
                     "fs_hz": fs_hz_after_decimation,
                     "metadata": {
                         "dt_ms": float(cdm_dt),
+                        "t_start_ms": float(transient),
+                        "t_stop_ms": float(cdm_tstop),
                         "decimation_factor": cdm_decimation_factor,
                         "fs_hz": fs_hz_after_decimation,
                         "component_axis": component_axis,
@@ -5098,6 +5160,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
 
         model = params.get("meeg_model") or "NYHeadModel"
         model_kwargs = _parse_literal_value(params.get("meeg_model_kwargs"), None)
+        model_kwargs = model_kwargs or {}
         requested_forward_mode = str(params.get("meeg_forward_mode") or "simultaneous_all_dipoles").strip().lower()
         if requested_forward_mode not in {"simultaneous_all_dipoles", "per_sensor_independent"}:
             requested_forward_mode = "simultaneous_all_dipoles"
@@ -5115,41 +5178,71 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         four_area_dipole_defaults = {
             "FourSphereVolumeConductor": np.array(
                 [
-                    [-20000.0, 20000.0, 78000.0],
-                    [-20000.0, -20000.0, 78000.0],
-                    [20000.0, -20000.0, 78000.0],
-                    [20000.0, 20000.0, 78000.0],
+                    # [frontal, parietal, temporal, occipital]
+                    # Hemisphere-constrained layout (z >= 0):
+                    # - frontal and occipital on opposite sides
+                    # - parietal near the top center
+                    # - temporal low, close to z=0, at approximately parietal radius
+                    [0.0, 65000.0, 43000.0],    # frontal
+                    [0.0, 0.0, 78000.0],        # parietal
+                    [77000.0, 0.0, 12000.0],    # temporal
+                    [0.0, -65000.0, 43000.0],   # occipital
                 ],
                 dtype=float,
             ),
             "InfiniteVolumeConductor": np.array(
                 [
-                    [-20000.0, 20000.0, 0.0],
-                    [-20000.0, -20000.0, 0.0],
-                    [20000.0, -20000.0, 0.0],
-                    [20000.0, 20000.0, 0.0],
+                    [0.0, 16000.0, 12000.0],    # frontal
+                    [0.0, 0.0, 20000.0],        # parietal
+                    [19300.0, 0.0, 5000.0],     # temporal
+                    [0.0, -16000.0, 12000.0],   # occipital
                 ],
                 dtype=float,
             ),
             "InfiniteHomogeneousVolCondMEG": np.array(
                 [
-                    [-20000.0, 20000.0, 0.0],
-                    [-20000.0, -20000.0, 0.0],
-                    [20000.0, -20000.0, 0.0],
-                    [20000.0, 20000.0, 0.0],
+                    [0.0, 16000.0, 12000.0],    # frontal
+                    [0.0, 0.0, 20000.0],        # parietal
+                    [19300.0, 0.0, 5000.0],     # temporal
+                    [0.0, -16000.0, 12000.0],   # occipital
                 ],
                 dtype=float,
             ),
             "SphericallySymmetricVolCondMEG": np.array(
                 [
-                    [-20000.0, 20000.0, 90000.0],
-                    [-20000.0, -20000.0, 90000.0],
-                    [20000.0, -20000.0, 90000.0],
-                    [20000.0, 20000.0, 90000.0],
+                    [0.0, 75000.0, 49500.0],    # frontal
+                    [0.0, 0.0, 90000.0],        # parietal
+                    [88900.0, 0.0, 14000.0],    # temporal
+                    [0.0, -75000.0, 49500.0],   # occipital
                 ],
                 dtype=float,
             ),
         }
+
+        four_sphere_radii = np.array([79000.0, 80000.0, 85000.0, 90000.0], dtype=float)
+        if model == "FourSphereVolumeConductor":
+            raw_radii = model_kwargs.get("radii")
+            if raw_radii is not None:
+                try:
+                    parsed_radii = np.asarray(raw_radii, dtype=float).reshape(-1)
+                    if (
+                        parsed_radii.size == 4
+                        and np.all(np.isfinite(parsed_radii))
+                        and np.all(parsed_radii > 0.0)
+                    ):
+                        four_sphere_radii = parsed_radii
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "Warning: invalid FourSphere radii in meeg_model_kwargs; using default radii [79000, 80000, 85000, 90000].",
+                        )
+                except Exception:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: could not parse FourSphere radii from meeg_model_kwargs; using default radii [79000, 80000, 85000, 90000].",
+                    )
 
         _append_job_output(job_status, job_id, f"Model: {model}")
         if force_per_sensor_mode:
@@ -5166,7 +5259,6 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 + ("per-sensor independent" if use_per_sensor_independent else "simultaneous all dipoles"),
             )
         potential = ncpi.FieldPotential()
-        model_kwargs = model_kwargs or {}
         is_meg = model in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}
         trial_payloads = []
         warned_cdm_1d = False
@@ -5176,7 +5268,27 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         warned_component_mode_xyz = False
         warned_component_mode_xyz_mismatch = False
         warned_fixed_four_area_dipoles = False
+        warned_four_sphere_sensor_clipped = False
+        warned_four_sphere_dipole_clipped = False
         axis_names = {0: "x", 1: "y", 2: "z"}
+
+        def _clip_locations_to_radius(locations, radius):
+            if locations is None:
+                return None, 0
+            arr = np.asarray(locations, dtype=float)
+            if arr.ndim == 1:
+                arr = arr.reshape(1, 3)
+            if arr.ndim != 2 or arr.shape[1] != 3:
+                raise ValueError("Locations must have shape (n, 3).")
+            max_radius = float(radius)
+            if max_radius <= 0.0 or (not np.isfinite(max_radius)):
+                return arr, 0
+            norms = np.linalg.norm(arr, axis=1)
+            mask = norms > max_radius
+            if np.any(mask):
+                scale = (max_radius / norms[mask]).reshape(-1, 1)
+                arr[mask] = arr[mask] * scale
+            return arr, int(np.count_nonzero(mask))
 
         def _coerce_area_cdm_entry(value, area_name):
             arr = np.asarray(value)
@@ -5399,7 +5511,14 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     trial_dipole_locations = np.array(ny_dipoles[:n_dip], dtype=float, copy=True)
             else:
                 if (not use_per_sensor_independent) and trial_sensor_locations is None:
-                    if model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
+                    if is_four_area_simulation:
+                        # For four-area runs, use a consistent default sensor placement
+                        # across forward models unless explicit sensor locations are provided.
+                        if model == "FourSphereVolumeConductor":
+                            trial_sensor_locations = np.array([[0.0, 0.0, float(four_sphere_radii[3])]])
+                        else:
+                            trial_sensor_locations = np.array([[0.0, 0.0, 92000.0]])
+                    elif model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
                         trial_sensor_locations = np.array([[0.0, 0.0, 90000.0]])
                     elif model == "InfiniteHomogeneousVolCondMEG":
                         trial_sensor_locations = np.array([[10000.0, 0.0, 0.0]])
@@ -5421,6 +5540,33 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     trial_dipole_locations = np.repeat(default_loc.reshape(1, 3), int(CDM.shape[0]), axis=0)
                 else:
                     trial_dipole_locations = default_loc
+
+            if model == "FourSphereVolumeConductor":
+                # Keep four-sphere dipole/sensor coordinates inside the model boundaries.
+                trial_dipole_locations, dipole_clipped = _clip_locations_to_radius(
+                    trial_dipole_locations,
+                    float(four_sphere_radii[0]),
+                )
+                if dipole_clipped > 0 and not warned_four_sphere_dipole_clipped:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Adjusted {dipole_clipped} dipole location(s) to the FourSphere inner radius ({float(four_sphere_radii[0]):g}).",
+                    )
+                    warned_four_sphere_dipole_clipped = True
+
+                if trial_sensor_locations is not None:
+                    trial_sensor_locations, sensor_clipped = _clip_locations_to_radius(
+                        trial_sensor_locations,
+                        float(four_sphere_radii[3]),
+                    )
+                    if sensor_clipped > 0 and not warned_four_sphere_sensor_clipped:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"Adjusted {sensor_clipped} sensor location(s) to the FourSphere outer radius ({float(four_sphere_radii[3]):g}).",
+                        )
+                        warned_four_sphere_sensor_clipped = True
 
             p_list, loc_list = potential._normalize_cdm_and_locations(CDM, trial_dipole_locations)
 
@@ -5608,12 +5754,22 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
             meeg_decimation = int(cdm_meta.get("decimation_factor", 1))
             meeg_fs = _safe_float(cdm_meta.get("fs_hz"))
+            meeg_t_start = _safe_float(cdm_meta.get("t_start_ms"))
+            meeg_t_stop = _safe_float(cdm_meta.get("t_stop_ms"))
             row = {
                 "data": meeg,
                 "dt_ms": meeg_dt_ms,
+                "t_start_ms": meeg_t_start,
+                "t_stop_ms": meeg_t_stop,
                 "decimation_factor": meeg_decimation,
                 "fs_hz": meeg_fs,
-                "metadata": {"dt_ms": meeg_dt_ms, "decimation_factor": meeg_decimation, "fs_hz": meeg_fs},
+                "metadata": {
+                    "dt_ms": meeg_dt_ms,
+                    "t_start_ms": meeg_t_start,
+                    "t_stop_ms": meeg_t_stop,
+                    "decimation_factor": meeg_decimation,
+                    "fs_hz": meeg_fs,
+                },
                 "source_cdm_file": os.path.basename(cdm_path),
             }
             if trial_count > 1:

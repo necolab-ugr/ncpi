@@ -137,7 +137,7 @@ def _set_custom_local_uploads(page, input_paths):
 def _select_custom_server_file_via_modal(page, field_name, file_path):
     """Choose a server-side file through the custom simulation file-browser modal."""
     card = page.locator(f'.custom-file-card[data-field="{field_name}"]').first
-    card.locator(".custom-mode-server-btn").click()
+    _shared._click_locator(card.locator(".custom-mode-server-btn"))
     page.evaluate(
         """([modeSelector, pathSelector, value]) => {
             document.querySelector(modeSelector).value = "server-path";
@@ -149,13 +149,13 @@ def _select_custom_server_file_via_modal(page, field_name, file_path):
             str(file_path),
         ],
     )
-    card.click()
+    _shared._click_locator(card)
     modal = page.locator("#custom-sim-server-file-modal")
     modal.wait_for(state="visible")
     modal.locator(f'input[name="custom-sim-server-file-selected"][value="{str(file_path)}"]').wait_for(
         state="attached"
     )
-    modal.locator("#custom-sim-server-file-select").click()
+    _shared._click_locator(modal.locator("#custom-sim-server-file-select"))
     modal.wait_for(state="hidden")
     server_path_value = page.locator(f"#{field_name}_server_path").input_value()
     assert server_path_value == str(file_path)
@@ -171,7 +171,7 @@ def _set_custom_server_paths(page, input_paths):
     }
     for field_name, file_path in field_map.items():
         card = page.locator(f'.custom-file-card[data-field="{field_name}"]').first
-        card.locator(".custom-mode-server-btn").click()
+        _shared._click_locator(card.locator(".custom-mode-server-btn"))
         page.evaluate(
             """([modeSelector, pathSelector, value]) => {
                 document.querySelector(modeSelector).value = "server-path";
@@ -506,7 +506,7 @@ def test_custom_simulation_form_requires_all_files_client_side(
                 page = browser.new_page()
                 _navigate_to_custom_simulation_form(page, live_webui_server)
                 start_url = page.url
-                page.locator('button[type="submit"]').click()
+                _shared._click_locator(page.locator('button[type="submit"]'))
                 error_box = page.locator("#custom-form-error")
                 error_box.wait_for(state="visible")
                 assert "Missing required custom files." in error_box.inner_text()
