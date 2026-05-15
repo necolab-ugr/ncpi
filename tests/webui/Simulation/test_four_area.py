@@ -643,8 +643,8 @@ def test_four_area_area_title_places_inter_area_macrogroup_entries_on_separate_r
     sim_data = {
         "times": [{}, {}],
         "gids": [{}, {}],
-        "dt": [0.2, 0.2],
-        "tstop": [5000.0, 5000.0],
+        "dt": [_shared.TEST_SIMULATION_DT_MS, _shared.TEST_SIMULATION_DT_MS],
+        "tstop": [_shared.TEST_SIMULATION_TSTOP_MS, _shared.TEST_SIMULATION_TSTOP_MS],
         "network": [
             {"areas": areas, "X": populations},
             {"areas": areas, "X": populations},

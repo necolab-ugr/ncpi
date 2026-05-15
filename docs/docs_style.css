@@ -107,6 +107,7 @@ a:hover {
 }
 
 .left-nav a,
+.left-nav summary.subnav,
 .right-nav a {
   display: block;
   border-radius: 999px;
@@ -118,8 +119,79 @@ a:hover {
   transition: all 0.22s ease;
 }
 
+.left-nav a.subnav,
+.left-nav summary.subnav {
+  margin-left: 1rem;
+  border-radius: 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding-top: 0.28rem;
+  padding-bottom: 0.28rem;
+  position: relative;
+  padding-right: 1.6rem;
+}
+
+.left-nav-collapse {
+  margin: 0;
+}
+
+.left-nav-collapse summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.left-nav-collapse summary::-webkit-details-marker {
+  display: none;
+}
+
+.left-nav summary.subnav::after {
+  content: "▸";
+  position: absolute;
+  right: 0.62rem;
+  top: 50%;
+  transform: translateY(-50%) rotate(0deg);
+  transform-origin: center;
+  transition: transform 0.2s ease;
+  font-size: 0.74rem;
+  color: var(--muted);
+}
+
+.left-nav-collapse[open] > summary.subnav::after {
+  transform: translateY(-50%) rotate(90deg);
+}
+
+.left-nav-collapse .nested-nav {
+  margin-top: 0.22rem;
+  margin-bottom: 0.06rem;
+  gap: 0.2rem;
+}
+
+.left-nav .subnav-group {
+  margin-left: 1.4rem;
+  margin-top: 0.2rem;
+  margin-bottom: 0.08rem;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.left-nav a.subnav2 {
+  margin-left: 2rem;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding-top: 0.24rem;
+  padding-bottom: 0.24rem;
+}
+
 .left-nav a.active,
 .left-nav a:hover,
+.left-nav summary.subnav.active,
+.left-nav summary.subnav:hover,
 .right-nav a.active,
 .right-nav a:hover {
   color: var(--ink);
@@ -233,6 +305,40 @@ pre code {
   border-radius: 12px;
   padding: 0.92rem;
   box-shadow: var(--shadow-soft);
+}
+
+.tutorial-option {
+  display: block;
+  color: inherit;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  min-height: 420px;
+  padding: 1.15rem;
+}
+
+.tutorial-option:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+  border-color: var(--line-strong);
+}
+
+.tutorial-option img {
+  display: block;
+  width: 100%;
+  height: 260px;
+  object-fit: contain;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  margin-bottom: 0.8rem;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.card-grid.tutorial-options {
+  grid-template-columns: repeat(2, minmax(340px, 1fr));
+  gap: 1.2rem;
+}
+
+.tutorial-option h2 {
+  margin-bottom: 0.42rem;
 }
 
 .link {

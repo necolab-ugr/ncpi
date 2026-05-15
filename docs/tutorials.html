@@ -17,6 +17,40 @@
         <li><a href="./index.html">Home</a></li>
         <li><a href="./installation.html">Installation</a></li>
         <li><a class="active" href="./tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/webui/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
         <li><a href="./api.html">API</a></li>
         <li><a href="./faq.html">FAQ</a></li>
         <li><a href="./contributing.html">Contributing</a></li>
@@ -27,13 +61,29 @@
 
     <main class="content">
       <article class="doc">
-        <section id="status">
+        <section id="overview">
           <h1>Tutorials</h1>
-          <p><span class="pill">Version 1.0</span> <span class="pill">Under Construction</span></p>
+          <p><span class="pill">Choose a Track</span></p>
           <p>
-            Tutorials are being migrated to the new documentation format. This section will include
-            step-by-step notebooks and workflows for simulation, feature extraction, inference, and analysis.
+            Select one of the tutorial tracks below. You can follow guided workflows through the WebUI
+            or work directly in Python using Jupyter notebooks.
           </p>
+        </section>
+
+        <section id="tracks">
+          <div class="card-grid tutorial-options">
+            <a class="card tutorial-option" href="./tutorials/webui-index.html">
+              <img src="./img/webui.png" alt="ncpi WebUI examples">
+              <h2>WebUI Examples</h2>
+              <p>Run interactive end-to-end workflows from the ncpi WebUI.</p>
+            </a>
+
+            <a class="card tutorial-option" href="./tutorials/jupyter-index.html">
+              <img src="https://upload.wikimedia.org/wikipedia/commons/3/38/Jupyter_logo.svg" alt="Jupyter notebooks">
+              <h2>Python Jupyter Notebooks</h2>
+              <p>Open notebook-based tutorials for Python workflows and reproducible analysis.</p>
+            </a>
+          </div>
         </section>
       </article>
     </main>
@@ -41,7 +91,8 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#status">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#tracks">Tracks</a></li>
       </ul>
     </aside>
   </div>
