@@ -11117,11 +11117,14 @@ def _get_globally_varying_params(sim_data):
     Returns:
         set: Set of parameter names that vary across trials
     """
-    if not sim_data or "grid_metadata" not in sim_data:
+    if not isinstance(sim_data, MappingABC):
         return set()
-    
-    grid_metadata = sim_data["grid_metadata"]
-    if "trials" not in grid_metadata or len(grid_metadata["trials"]) < 2:
+
+    grid_metadata = sim_data.get("grid_metadata")
+    if not isinstance(grid_metadata, dict):
+        return set()
+    trials = grid_metadata.get("trials")
+    if not isinstance(trials, list) or len(trials) < 2:
         return set()
     
     # Prefer the explicit changed_keys produced when metadata was built
@@ -11174,11 +11177,14 @@ def _simulation_trial_changed_params_for_title(sim_data, trial_idx, area_name=No
     Returns:
         str: Formatted parameter string with each parameter on a new line, or empty string
     """
-    if not sim_data or "grid_metadata" not in sim_data:
+    if not isinstance(sim_data, MappingABC):
         return ""
-    
-    grid_metadata = sim_data["grid_metadata"]
-    if "trials" not in grid_metadata or trial_idx < 0 or trial_idx >= len(grid_metadata["trials"]):
+
+    grid_metadata = sim_data.get("grid_metadata")
+    if not isinstance(grid_metadata, dict):
+        return ""
+    trials = grid_metadata.get("trials")
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
         return ""
     
     # Get only globally varying parameters

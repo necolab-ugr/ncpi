@@ -81,13 +81,13 @@ conda install -c conda-forge nest-simulator=3.8
 
 ### Extras shortcuts
 ```bash
-pip install "ncpi[hctsa]"           # hctsa backend support
 pip install "ncpi[parser]"          # extended parser backends
 pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
 pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[webui]"           # WebUI runtime backends
 pip install "ncpi[examples]"        # dependencies for example scripts
 pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[hctsa]"           # hctsa backend support
 ```
 
 ## 4) WebUI: installation and usage
@@ -98,9 +98,7 @@ The WebUI is available from the repository source (`webui/app.py`).
 After activating your Conda environment:
 
 ```bash
-git clone https://github.com/necolab-ugr/ncpi.git
-cd ncpi
-pip install -e ".[webui]"
+pip install "ncpi[webui]"
 ```
 
 ### Start WebUI
@@ -120,14 +118,25 @@ http://127.0.0.1:5000
 You can run the same command from Anaconda Prompt or PowerShell.
 If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
 
-### Optional backends note
+## 5) Optional backends notes
 Optional backends are listed in **Section 3 (Optional Dependencies)**. Install only the extras required by your workflow.
 
 ### hctsa note
 For hctsa-based features, install hctsa first: https://github.com/benfulcher/hctsa
 
-Then install MATLAB Engine for Python (for example from `<MATLAB_ROOT>/extern/engines/python`, or a compatible
-`matlabengine` pip package), and pass the hctsa repository path as `hctsa_folder`.
+The `hctsa` extra depends on the hctsa MATLAB toolbox and the MATLAB Engine for Python. Attempting to install a
+`matlabengine` pip package without MATLAB installed (or without a matching MATLAB Engine distribution) can fail or
+raise errors. The recommended approach is to install MATLAB first, then install the MATLAB Engine for Python from the
+MATLAB installation directory (see MathWorks docs: https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html),
+or otherwise ensure the engine distribution you install matches your MATLAB version. After that, install hctsa and
+pass the hctsa repository path as `hctsa_folder` when invoking hctsa-backed features in ncpi.
+
+### analysis (R) note
+The `analysis` extra enables R-backed analysis utilities via `rpy2`. Before installing `ncpi[analysis]` you must have R
+installed on your system (e.g. from https://cran.r-project.org/ or your package manager). Installing `rpy2` via pip
+or conda will fail if a suitable R installation and headers are not present. On many Linux systems you may need to
+install the system R development package (e.g. `r-base-dev` or similar) prior to installing the Python bindings.
+
 
 # Folder Structure
 
