@@ -10173,6 +10173,10 @@ def _analysis_selected_keys_path(create=False):
     return os.path.join(_analysis_data_dir(create=create), ".selected_simulation_keys.json")
 
 
+def _analysis_plot_config_path(create=False):
+    return os.path.join(_analysis_data_dir(create=create), ".plot_config.json")
+
+
 def _set_analysis_selected_simulation_keys(keys):
     selected = [
         str(key).strip()
@@ -10273,6 +10277,89 @@ def _clear_analysis_data_files():
     return removed_files
 
 
+def _analysis_data_signature(data_path=None):
+    path = data_path or _analysis_data_path()
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return {
+        "path": os.path.realpath(path),
+        "name": os.path.basename(path),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+    }
+
+
+def _clear_analysis_plot_config():
+    path = _analysis_plot_config_path()
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    _remove_dir_if_empty(_analysis_data_dir(create=False))
+
+
+def _save_analysis_plot_config(plot_action, form, data_path=None):
+    signature = _analysis_data_signature(data_path)
+    if not signature:
+        return
+    values = {}
+    for key in form.keys():
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            continue
+        values[clean_key] = [str(value) for value in form.getlist(key)]
+    payload = {
+        "plot_action": str(plot_action or "").strip(),
+        "data_signature": signature,
+        "values": values,
+    }
+    path = _analysis_plot_config_path(create=True)
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _load_analysis_plot_config():
+    path = _analysis_plot_config_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("data_signature") != _analysis_data_signature():
+        return None
+    values = payload.get("values")
+    if not isinstance(values, dict):
+        return None
+    normalized_values = {}
+    for key, raw_values in values.items():
+        if isinstance(raw_values, list):
+            normalized_values[str(key)] = [str(value) for value in raw_values]
+        else:
+            normalized_values[str(key)] = [str(raw_values)]
+    return {
+        "plot_action": str(payload.get("plot_action") or ""),
+        "values": normalized_values,
+    }
+
+
 @app.route("/analysis")
 def analysis():
     analysis_data_files = _list_analysis_data_files()
@@ -10342,6 +10429,15 @@ def analysis():
         simulation_model=simulation_model,
         simulation_welch_defaults=simulation_welch_defaults,
         meg_topomap_atlases=MEG_TOPO_ATLAS_OPTIONS,
+        topomap_montage_options=_topomap_montage_options(),
+        topomap_channel_type_options=TOPO_MAP_CHANNEL_TYPE_OPTIONS,
+        topomap_colormap_options=_topomap_colormap_options(),
+        topomap_contour_options=TOPO_MAP_CONTOUR_OPTIONS,
+        topomap_outline_options=TOPO_MAP_OUTLINE_OPTIONS,
+        topomap_extrapolate_options=TOPO_MAP_EXTRAPOLATE_OPTIONS,
+        topomap_image_interp_options=TOPO_MAP_IMAGE_INTERP_OPTIONS,
+        boxplot_colormap_options=_boxplot_colormap_options(),
+        analysis_plot_config=_load_analysis_plot_config(),
     )
 
 
@@ -12707,6 +12803,148 @@ MEG_TOPO_ATLAS_OPTIONS = [
 ]
 MEG_TOPO_ATLAS_VALUES = {item["value"] for item in MEG_TOPO_ATLAS_OPTIONS}
 
+MNE_BUILTIN_MONTAGE_FALLBACK = [
+    "standard_1005",
+    "standard_1020",
+    "standard_alphabetic",
+    "standard_postfixed",
+    "standard_prefixed",
+    "standard_primed",
+    "biosemi16",
+    "biosemi32",
+    "biosemi64",
+    "biosemi128",
+    "biosemi160",
+    "biosemi256",
+    "easycap-M1",
+    "easycap-M10",
+    "EGI_256",
+    "GSN-HydroCel-32",
+    "GSN-HydroCel-64_1.0",
+    "GSN-HydroCel-65_1.0",
+    "GSN-HydroCel-128",
+    "GSN-HydroCel-129",
+    "GSN-HydroCel-256",
+    "GSN-HydroCel-257",
+    "mgh60",
+    "mgh70",
+    "artinis-octamon",
+    "artinis-brite23",
+]
+
+COMMON_MATPLOTLIB_COLORMAPS = [
+    "viridis",
+    "plasma",
+    "inferno",
+    "magma",
+    "cividis",
+    "turbo",
+    "jet",
+    "coolwarm",
+    "bwr",
+    "seismic",
+    "RdBu_r",
+    "Spectral",
+    "PiYG",
+    "PRGn",
+    "BrBG",
+    "Blues",
+    "Greens",
+    "Reds",
+    "Purples",
+    "Greys",
+    "YlOrRd",
+    "YlGnBu",
+]
+
+TOPO_MAP_CHANNEL_TYPE_OPTIONS = [
+    {"value": "eeg", "label": "EEG"},
+    {"value": "seeg", "label": "sEEG"},
+    {"value": "ecog", "label": "ECoG"},
+    {"value": "dbs", "label": "DBS"},
+    {"value": "hbo", "label": "fNIRS HbO"},
+    {"value": "hbr", "label": "fNIRS HbR"},
+]
+TOPO_MAP_CONTOUR_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "0", "label": "None (0)"},
+    {"value": "3", "label": "3"},
+    {"value": "6", "label": "6"},
+    {"value": "10", "label": "10"},
+    {"value": "15", "label": "15"},
+]
+TOPO_MAP_OUTLINE_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "head", "label": "head"},
+    {"value": "skirt", "label": "skirt"},
+]
+TOPO_MAP_EXTRAPOLATE_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "auto", "label": "auto"},
+    {"value": "local", "label": "local"},
+    {"value": "head", "label": "head"},
+    {"value": "box", "label": "box"},
+]
+TOPO_MAP_IMAGE_INTERP_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "cubic", "label": "cubic"},
+    {"value": "linear", "label": "linear"},
+    {"value": "nearest", "label": "nearest"},
+]
+
+
+@functools.lru_cache(maxsize=1)
+def _topomap_montage_options():
+    try:
+        import mne
+
+        names = list(mne.channels.get_builtin_montages())
+    except Exception:
+        names = list(MNE_BUILTIN_MONTAGE_FALLBACK)
+
+    seen = set()
+    cleaned = []
+    for name in names:
+        text = str(name or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    if "standard_1005" not in seen:
+        cleaned.insert(0, "standard_1005")
+        seen.add("standard_1005")
+
+    preferred = [name for name in ("standard_1005", "standard_1020") if name in seen]
+    rest = sorted((name for name in cleaned if name not in preferred), key=str.lower)
+    return [{"value": name, "label": name} for name in [*preferred, *rest]]
+
+
+@functools.lru_cache(maxsize=1)
+def _common_colormap_options():
+    names = list(COMMON_MATPLOTLIB_COLORMAPS)
+    try:
+        import matplotlib
+
+        available = set(matplotlib.colormaps)
+        names = [name for name in names if name in available]
+    except Exception:
+        pass
+    return [{"value": name, "label": name} for name in names]
+
+
+def _topomap_colormap_options():
+    return [
+        {"value": "auto", "label": "Auto (bwr for comparisons, jet otherwise)"},
+        *_common_colormap_options(),
+    ]
+
+
+def _boxplot_colormap_options():
+    return [
+        {"value": "none", "label": "None"},
+        *_common_colormap_options(),
+    ]
+
 
 def _normalize_meg_atlas_name(atlas):
     atlas_norm = str(atlas or "").strip().lower()
@@ -12925,6 +13163,7 @@ def analysis_plot_boxplot():
     data_path = _analysis_data_path()
     if data_path is None:
         return _plot_error("No analysis dataframe found. Upload a .pkl file first.")
+    _save_analysis_plot_config("boxplot", request.form, data_path=data_path)
 
     group_col = request.form.get("boxplot_group_by")
     if not group_col:
@@ -13439,6 +13678,7 @@ def analysis_plot_topomap():
     data_path = _analysis_data_path()
     if data_path is None:
         return _plot_error("No analysis dataframe found. Upload a .pkl file first.")
+    _save_analysis_plot_config("topomap", request.form, data_path=data_path)
 
     group_col = request.form.get("topomap_group_by")
     if not group_col:
@@ -13458,12 +13698,18 @@ def analysis_plot_topomap():
     if group_col not in df.columns:
         return _plot_error(f'Grouping column "{group_col}" not found in the dataframe.')
 
-    sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
-    if sensor_col is None:
-        return _plot_error(
-            "Sensor/channel column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
-            popup_redirect_url=url_for("analysis"),
-        )
+    requested_sensor_col = str(request.form.get("topomap_sensor_col", "") or "").strip()
+    if requested_sensor_col:
+        if requested_sensor_col not in df.columns:
+            return _plot_error(f'Sensor column "{requested_sensor_col}" not found in the dataframe.')
+        sensor_col = requested_sensor_col
+    else:
+        sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
+        if sensor_col is None:
+            return _plot_error(
+                "Sensor/channel column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
+                popup_redirect_url=url_for("analysis"),
+            )
 
     value_col = request.form.get("topomap_value_col")
     if not value_col:
@@ -13537,19 +13783,73 @@ def analysis_plot_topomap():
         return _plot_error(f"ncpi is required for topomap plotting: {exc}", status=500)
     _log("ncpi loaded.")
 
-    # Parse numeric inputs for plotting
+    # Parse user-configurable plotting inputs.
     def _parse_float(value):
         try:
-            return float(value)
+            text = str(value).strip()
+            if text == "":
+                return None
+            return float(text)
         except (TypeError, ValueError):
             return None
 
-    head_radius = _parse_float(request.form.get("head-radius"))
-    head_pos_x = _parse_float(request.form.get("head-pos-x"))
+    def _parse_float_default(name, default):
+        parsed = _parse_float(request.form.get(name))
+        return default if parsed is None else parsed
+
+    def _parse_int(value):
+        try:
+            text = str(value).strip()
+            if text == "":
+                return None
+            return int(text)
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_int_default(name, default):
+        parsed = _parse_int(request.form.get(name))
+        return default if parsed is None else parsed
+
+    def _parse_optional_text(name):
+        value = str(request.form.get(name, "") or "").strip()
+        if value.lower() in {"", "none", "null", "default"}:
+            return None
+        return value
+
     show_colorbar = request.form.get("show-colorbar") is not None
     scale_mode = request.form.get("topomap_scale_mode", "section")
     use_diverging = grouping_mode == "compare_categories"
     compare_cmap = "bwr" if use_diverging else None
+    cohend_abs_threshold = _parse_float(request.form.get("topomap_cohend_abs_threshold"))
+    if cohend_abs_threshold is not None and cohend_abs_threshold < 0:
+        return _plot_error("Cohen's d filter threshold must be greater than or equal to 0.")
+    if grouping_mode == "compare_categories" and compare_method == "cohen_d" and cohend_abs_threshold:
+        _log(f"Cohen's d filter enabled: |d| >= {cohend_abs_threshold}.")
+
+    eeg_montage = _parse_optional_text("topomap_eeg_montage") or "standard_1005"
+    eeg_ch_type = _parse_optional_text("topomap_eeg_ch_type") or "eeg"
+    eeg_position_offset = (
+        _parse_float_default("topomap_position_y", 0.01),
+        _parse_float_default("topomap_position_z", -0.1),
+    )
+    eeg_sphere = _parse_float_default("topomap_sphere", 0.28)
+    eeg_res = _parse_int_default("topomap_res", 300)
+    eeg_contours = _parse_int(request.form.get("topomap_contours"))
+    eeg_outlines = _parse_optional_text("topomap_outlines")
+    eeg_extrapolate = _parse_optional_text("topomap_extrapolate")
+    eeg_image_interp = _parse_optional_text("topomap_image_interp")
+    eeg_show_sensors = request.form.get("topomap_show_sensors") is not None
+    eeg_vmin_user = _parse_float(request.form.get("topomap_vmin"))
+    eeg_vmax_user = _parse_float(request.form.get("topomap_vmax"))
+    if eeg_vmin_user is not None and eeg_vmax_user is not None and eeg_vmin_user > eeg_vmax_user:
+        return _plot_error("EEG topomap vmin must be <= vmax.")
+
+    eeg_cmap_raw = str(request.form.get("topomap_cmap", "auto") or "auto").strip()
+    eeg_cmap = (compare_cmap or "jet") if eeg_cmap_raw.lower() == "auto" else eeg_cmap_raw
+    eeg_colorbar_fmt = str(request.form.get("topomap_colorbar_fmt", "%0.2f") or "%0.2f").strip() or "%0.2f"
+    eeg_colorbar_label = _parse_optional_text("topomap_colorbar_label")
+    eeg_colorbar_label_fontsize = _parse_float(request.form.get("topomap_colorbar_label_fontsize"))
+    eeg_colorbar_tick_fontsize = _parse_float_default("topomap_colorbar_tick_fontsize", 8.0)
     meg_expected_count = None
     if topomap_signal_type == "meg":
         try:
@@ -13557,11 +13857,6 @@ def analysis_plot_topomap():
         except Exception as exc:
             return _plot_error(f"Unable to prepare MEG atlas '{meg_atlas}': {exc}")
         _log(f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions.")
-
-    sphere = "auto"
-    if head_radius is not None:
-        x = head_pos_x if head_pos_x is not None else 0.0
-        sphere = (x, 0.0, 0.0, head_radius)
 
     analysis = ncpi.Analysis(df_use)
 
@@ -13646,8 +13941,19 @@ def analysis_plot_topomap():
                 for label, comp_df in compare_results.items():
                     if comp_df.empty:
                         continue
-                    series = comp_df.set_index(sensor_col)["d"]
-                    items_local.append((label, series))
+                    series = pd.to_numeric(comp_df.set_index(sensor_col)["d"], errors="coerce")
+                    if cohend_abs_threshold:
+                        valid_values = series.dropna()
+                        retained = int((valid_values.abs() >= cohend_abs_threshold).sum())
+                        total = int(valid_values.size)
+                        series = series.where(series.abs() >= cohend_abs_threshold, 0.0)
+                        _log(
+                            f"Cohen's d filter for {label}, data_index={dim}: "
+                            f"retained {retained}/{total} sensors."
+                        )
+                    series = series.dropna()
+                    if not series.empty:
+                        items_local.append((label, series))
             else:
                 control_df = df_use[df_use[group_col] == control_group]
                 if dim == -1:
@@ -13817,18 +14123,32 @@ def analysis_plot_topomap():
                         hcp_accept=True,
                     )
                 else:
-                    im, _ = analysis.eeg_topomap(
+                    if eeg_vmin_user is not None:
+                        plot_vmin = eeg_vmin_user
+                    if eeg_vmax_user is not None:
+                        plot_vmax = eeg_vmax_user
+                    im = analysis.eeg_topomap(
                         series,
                         axes=ax,
                         show=False,
                         vmin=plot_vmin,
                         vmax=plot_vmax,
-                        cmap=compare_cmap,
-                        colorbar=False,
-                        sensors=True,
-                        montage="standard_1020",
-                        extrapolate="local",
-                        sphere=sphere,
+                        cmap=eeg_cmap,
+                        colorbar=show_colorbar,
+                        colorbar_fmt=eeg_colorbar_fmt,
+                        colorbar_label=eeg_colorbar_label,
+                        colorbar_label_fontsize=eeg_colorbar_label_fontsize,
+                        colorbar_tick_fontsize=eeg_colorbar_tick_fontsize,
+                        sensors=eeg_show_sensors,
+                        montage=eeg_montage,
+                        ch_type=eeg_ch_type,
+                        position_offset=eeg_position_offset,
+                        sphere=eeg_sphere,
+                        contours=eeg_contours,
+                        outlines=eeg_outlines,
+                        res=eeg_res,
+                        extrapolate=eeg_extrapolate,
+                        image_interp=eeg_image_interp,
                     )
             except Exception as exc:
                 plt.close(fig)
@@ -13850,8 +14170,6 @@ def analysis_plot_topomap():
                     message,
                     popup_redirect_url=url_for("analysis") if sensor_info_missing else None,
                 )
-            if show_colorbar and topomap_signal_type == "eeg" and im is not None:
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(label)
         row_cursor += rows_needed
 
@@ -15478,6 +15796,7 @@ def clear_analysis_data():
     removed_files = _clear_analysis_data_files()
     _clear_analysis_selection_mode()
     _clear_analysis_selected_simulation_keys()
+    _clear_analysis_plot_config()
     accept_header = (request.headers.get("Accept") or "").lower()
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if is_ajax or "application/json" in accept_header:
