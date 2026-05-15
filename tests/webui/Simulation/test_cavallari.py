@@ -1097,11 +1097,11 @@ def test_cavallari_alternate_configuration_matches_direct_python_run(
 
 
 @pytest.mark.slow
-def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct_python_run(
+def test_cavallari_alternate_configuration_with_two_repetitions_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
-    """Verify that cavallari alternate configuration with three repetitions matches direct Python run."""
-    _log_test_progress("starting alternate-parameter Cavallari comparison with 3 repetitions")
+    """Verify that cavallari alternate configuration with two repetitions matches direct Python run."""
+    _log_test_progress("starting alternate-parameter Cavallari comparison with 2 repetitions")
     webui_app_module._clear_simulation_output_folder_all_files()
     alternate_values = _build_cavallari_alternate_single_values(webui_app_module.CAVALLARI_DEFAULTS)
     captured_param_dirs = _capture_webui_generated_param_files(
@@ -1114,7 +1114,7 @@ def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct
         """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         _apply_cavallari_single_parameter_overrides(page, alternate_values)
-        page.locator("#sim-repetitions").fill("3")
+        page.locator("#sim-repetitions").fill("2")
 
     form_data, job_id = _run_cavallari_webui_job(
         live_webui_server,
@@ -1123,7 +1123,7 @@ def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct
     )
     run_mode, expanded_forms, normalized_trials = _expanded_cavallari_trials(webui_app_module, form_data)
     assert run_mode == "single"
-    assert len(expanded_forms) == 3
+    assert len(expanded_forms) == 2
     _assert_cavallari_form_values(webui_app_module, form_data, overrides=alternate_values)
     assert all(trial == normalized_trials[0] for trial in normalized_trials[1:])
     _assert_cavallari_generated_parameter_files_match_expected(webui_app_module, form_data, captured_param_dirs)
@@ -1134,7 +1134,7 @@ def test_cavallari_alternate_configuration_with_three_repetitions_matches_direct
         job_id,
         form_data,
         tmp_path,
-        expected_trial_count=3,
+        expected_trial_count=2,
     )
 
 

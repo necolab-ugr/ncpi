@@ -88,17 +88,7 @@ pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[webui]"           # WebUI runtime backends
 pip install "ncpi[examples]"        # dependencies for example scripts
 pip install "ncpi[tests]"           # test stack dependencies
-pip install "ncpi[all]"             # all optional extras
 ```
-
-### Optional extras map
-- **`hctsa`**: `h5py`, `matlabengine`.
-- **`parser`**: `h5py`, `mne`, `pyEDFlib`, `pyarrow` (with base `pandas` for tabular/parquet I/O).
-- **`fieldpotential`**: `LFPy`, `lfpykernels`, `lfpykit`, `h5py`, `neuron`, `mne`, `nibabel`.
-- **`analysis`**: `rpy2`, `mne`, `nibabel`, `pyvistaqt`, `PyQt5`.
-- **`webui`**: `Pillow`, `h5py`, `mne`, `nibabel`, `pyEDFlib`, `pyarrow`, `openpyxl`, `xlrd`.
-- **`examples`**: `h5py`, `LFPy`, `mpi4py`, `nest-simulator`, `neuron`, `pdf2image`, `seaborn`, `statsmodels`.
-- **`tests`**: `LFPy`, `h5py`, `lfpykernels`, `lfpykit`, `matlabengine`, `mne`, `nibabel`, `neuron`, `playwright`, `Pillow`, `pyEDFlib`, `pytest`, `rpy2`.
 
 ## 4) WebUI: installation and usage
 

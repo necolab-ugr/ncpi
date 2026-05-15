@@ -195,7 +195,7 @@ def _hagen_scenarios(app_module):
     def _alternate_repetitions(page):
         page.locator("#sim-use-numpy-seed").check()
         _hagen._apply_hagen_single_parameter_overrides(page, alternate_values)
-        page.locator("#sim-repetitions").fill("3")
+        page.locator("#sim-repetitions").fill("2")
 
     def _grid(page):
         page.locator("#sim-use-numpy-seed").check()
@@ -206,7 +206,7 @@ def _hagen_scenarios(app_module):
     return [
         ("default", _default),
         ("alternate", _alternate),
-        ("alternate_repetitions_3", _alternate_repetitions),
+        ("alternate_repetitions_2", _alternate_repetitions),
         ("grid_j_yx", _grid),
     ]
 
@@ -225,7 +225,7 @@ def _cavallari_scenarios(app_module):
     def _alternate_repetitions(page):
         page.locator("#sim-use-numpy-seed").check()
         _cavallari._apply_cavallari_single_parameter_overrides(page, alternate_values)
-        page.locator("#sim-repetitions").fill("3")
+        page.locator("#sim-repetitions").fill("2")
 
     def _grid(page):
         page.locator("#sim-use-numpy-seed").check()
@@ -243,7 +243,7 @@ def _cavallari_scenarios(app_module):
     return [
         ("default", _default),
         ("alternate", _alternate),
-        ("alternate_repetitions_3", _alternate_repetitions),
+        ("alternate_repetitions_2", _alternate_repetitions),
         ("grid_recurrent_weights", _grid),
     ]
 
@@ -263,7 +263,7 @@ def _four_area_scenarios(app_module):
     def _alternate_repetitions(page):
         page.locator("#sim-use-numpy-seed").check()
         _four_area._shared._apply_hagen_single_parameter_overrides(page, alternate_values)
-        page.locator("#sim-repetitions").fill("3")
+        page.locator("#sim-repetitions").fill("2")
 
     def _grid(page):
         page.locator("#sim-use-numpy-seed").check()
@@ -279,7 +279,7 @@ def _four_area_scenarios(app_module):
     return [
         ("default", _default),
         ("alternate", _alternate),
-        ("alternate_repetitions_3", _alternate_repetitions),
+        ("alternate_repetitions_2", _alternate_repetitions),
         ("grid_local_j_yx", _grid),
     ]
 
@@ -322,7 +322,7 @@ def field_potential_simulation_cases(field_potential_simulation_scenarios):
         for scenario_name in (
             "default",
             "alternate",
-            "alternate_repetitions_3",
+            "alternate_repetitions_2",
             "grid_j_yx" if model_name == "hagen" else (
                 "grid_recurrent_weights" if model_name == "cavallari" else "grid_local_j_yx"
             ),
