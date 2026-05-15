@@ -159,7 +159,7 @@ def test_meeg_per_sensor_independent_mode_constraints(
     assert "same number of dipole and sensor locations" in str(mismatch_failed["error"])
 
     four_area_payload = _write_pickle(
-        tmp_path / "cdm_four_area.pkl",
+        tmp_path / "four_area_cdm.pkl",
         [
             {
                 "sum": {

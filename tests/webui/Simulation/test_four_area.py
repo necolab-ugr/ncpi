@@ -23,8 +23,7 @@ FOUR_AREA_RELATIVE_MARGIN = 0.10
 # Keep alternate configuration scalar-only for UI stability in headless automation.
 # Array/matrix leaf edits are still covered in dedicated grid-sweep tests.
 FOUR_AREA_ALTERNATE_SCALAR_SCALES = {
-    "J_EE": 1.10,
-    "J_IE": 0.90,
+    "nu_ext": 1.10,
     "J_ext": 1.05,
 }
 FOUR_AREA_LOCAL_J_YX_MATRIX_SHAPE = (2, 2)

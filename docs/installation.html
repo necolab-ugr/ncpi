@@ -150,8 +150,10 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
             You can run the same command from Anaconda Prompt or PowerShell.
             If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
           </p>
+        </section>
 
-          <h3>Optional backends notes</h3>
+        <section id="backends">
+          <h2>5) Optional backends notes</h2>
           <p>Optional backends are listed in <strong>Section 3 (Optional Dependencies)</strong>. Install only the extras required by your workflow.</p>
 
           <h3>hctsa note</h3>
@@ -163,7 +165,7 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
             The <code>hctsa</code> extra depends on the hctsa MATLAB toolbox and the MATLAB Engine for Python. Attempting to install a
             <code>matlabengine</code> pip package without MATLAB installed (or without a matching MATLAB Engine distribution) can fail or
             raise errors. The recommended approach is to install MATLAB first, then install the MATLAB Engine for Python from the
-            MATLAB installation directory (see MathWorks docs: https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html),
+            MATLAB installation directory (see MathWorks docs: <a class="link" href="https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html">https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html</a>),
             or otherwise ensure the engine distribution you install matches your MATLAB version. After that, install hctsa and
             pass the hctsa repository path as <code>hctsa_folder</code> when invoking hctsa-backed features in ncpi.
           </p>
@@ -188,6 +190,7 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
         <li><a href="#windows">Windows</a></li>
         <li><a href="#optional">Optional Dependencies</a></li>
         <li><a href="#webui">WebUI</a></li>
+        <li><a href="#backends">Optional backends notes</a></li>
       </ul>
     </aside>
   </div>
