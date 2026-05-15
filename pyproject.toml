@@ -36,40 +36,35 @@ dependencies = [
     "scipy",
     "tqdm",
     "flask",
-    "werkzeug",
-    "pyarrow"
 ]
 
 [project.optional-dependencies]
-# hctsa (MATLAB backend) dependencies
-hctsa = [
-    "h5py",
-    "matlabengine",
-]
 
 # Dataset parser backends (FIF/EDF/HDF5/MAT variants)
 parser = [
     "h5py",
     "mne",
+    "pandas",
     "pyEDFlib",
+    "pyarrow",
 ]
 
-# Statistical analysis (R via rpy2)
+# Analysis module dependencies
 analysis = [
     "rpy2",
     "mne",
     "nibabel",
+    "pyvistaqt",
+    "PyQt5",
 ]
-# Field potential / kernel workflows
+
+# Field potential / kernel workflows + M/EEG utilities
 fieldpotential = [
     "LFPy",
     "lfpykernels",
     "lfpykit",
     "h5py",
     "neuron",
-]
-# M/EEG utilities (band/spectrum DFA/fEI)
-meeg = [
     "mne",
     "nibabel",
 ]
@@ -80,6 +75,10 @@ webui = [
     "h5py",
     "mne",
     "nibabel",
+    "pyEDFlib",
+    "pyarrow",
+    "openpyxl",
+    "xlrd",
 ]
 
 # Example notebooks/scripts
@@ -90,17 +89,23 @@ examples = [
     "nest-simulator",
     "neuron",
     "pdf2image",
-    "pycatch22",
     "seaborn",
-    "specparam",
     "statsmodels",
 ]
+
+# hctsa (MATLAB backend) dependencies
+hctsa = [
+    "h5py",
+    "matlabengine",
+]
+
 # Test dependencies (includes optional backends)
 tests = [
     "LFPy",
     "h5py",
     "lfpykernels",
     "lfpykit",
+    "nest-simulator",
     "matlabengine",
     "mne",
     "nibabel",
@@ -110,10 +115,6 @@ tests = [
     "pyEDFlib",
     "pytest",
     "rpy2",
-    "scikit-learn==1.5.0",
-    "sbi==0.24.0",
-    "specparam",
-    "torch",
 ]
 
 

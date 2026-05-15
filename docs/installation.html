@@ -118,10 +118,25 @@ conda install -c conda-forge nest-simulator=3.8</code></pre>
           <p><code>ncpi</code> supports optional extras. Install only what your workflow needs.</p>
 
           <h3>Extras shortcuts</h3>
-          <pre><code>pip install "ncpi[meeg]"            # M/EEG-related helpers
-pip install "ncpi[fieldpotential]"  # Kernel/CDM/LFP/MEEG workflows
-pip install "ncpi[analysis]"        # R-backed statistical analysis helpers
-pip install "ncpi[all]"             # Install all optional extras</code></pre>
+          <pre><code>pip install "ncpi[hctsa]"           # hctsa backend support
+pip install "ncpi[parser]"          # extended parser backends
+pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
+pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
+pip install "ncpi[webui]"           # WebUI runtime backends
+pip install "ncpi[examples]"        # dependencies for example scripts
+pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[all]"             # all optional extras</code></pre>
+
+          <h3>Optional extras map</h3>
+          <ul>
+            <li><strong><code>hctsa</code></strong>: <code>h5py</code>, <code>matlabengine</code>.</li>
+            <li><strong><code>parser</code></strong>: <code>h5py</code>, <code>mne</code>, <code>pyEDFlib</code>, <code>pyarrow</code> (with base <code>pandas</code> for tabular/parquet I/O).</li>
+            <li><strong><code>fieldpotential</code></strong>: <code>LFPy</code>, <code>lfpykernels</code>, <code>lfpykit</code>, <code>h5py</code>, <code>neuron</code>, <code>mne</code>, <code>nibabel</code>.</li>
+            <li><strong><code>analysis</code></strong>: <code>rpy2</code>, <code>mne</code>, <code>nibabel</code>, <code>pyvistaqt</code>, <code>PyQt5</code>.</li>
+            <li><strong><code>webui</code></strong>: <code>Pillow</code>, <code>h5py</code>, <code>mne</code>, <code>nibabel</code>, <code>pyEDFlib</code>, <code>pyarrow</code>, <code>openpyxl</code>, <code>xlrd</code>.</li>
+            <li><strong><code>examples</code></strong>: <code>h5py</code>, <code>LFPy</code>, <code>mpi4py</code>, <code>nest-simulator</code>, <code>neuron</code>, <code>pdf2image</code>, <code>seaborn</code>, <code>statsmodels</code>.</li>
+            <li><strong><code>tests</code></strong>: <code>LFPy</code>, <code>h5py</code>, <code>lfpykernels</code>, <code>lfpykit</code>, <code>matlabengine</code>, <code>mne</code>, <code>nibabel</code>, <code>neuron</code>, <code>playwright</code>, <code>Pillow</code>, <code>pyEDFlib</code>, <code>pytest</code>, <code>rpy2</code>.</li>
+          </ul>
         </section>
 
         <section id="webui">
@@ -147,37 +162,8 @@ pip install -e ".[webui]"</code></pre>
             If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
           </p>
 
-          <h3>Optional libraries by module</h3>
-          <ul>
-            <li>
-              <strong>Features</strong>
-              <ul>
-                <li><code>pycatch22</code>: catch22 feature set.</li>
-                <li><code>specparam</code>: spectral parameterization features.</li>
-                <li><code>mne</code>: frequency-band pipelines used by DFA/fEI workflows.</li>
-                <li><code>hctsa</code> stack: MATLAB Engine + <code>h5py</code> + hctsa repository.</li>
-              </ul>
-            </li>
-            <li>
-              <strong>FieldPotential</strong>
-              <ul>
-                <li><code>LFPy</code>, <code>lfpykernels</code>, <code>neuron</code>, <code>h5py</code>: kernel-based field potential workflows.</li>
-                <li><code>lfpykit</code>: EEG/MEG forward-model support.</li>
-              </ul>
-            </li>
-            <li>
-              <strong>Analysis</strong>
-              <ul>
-                <li><code>rpy2</code> plus R packages such as <code>lme4</code>, <code>emmeans</code>, and <code>buildmer</code> for mixed-model analysis.</li>
-              </ul>
-            </li>
-            <li>
-              <strong>Parser / MEEG ecosystem</strong>
-              <ul>
-                <li><code>mne</code>, <code>nibabel</code>, <code>pyEDFlib</code>, <code>h5py</code> for broader file-format coverage and neuroimaging interfaces.</li>
-              </ul>
-            </li>
-          </ul>
+          <h3>Optional backends note</h3>
+          <p>Optional backends are listed in <strong>Section 3 (Optional Dependencies)</strong>. Install only the extras required by your workflow.</p>
 
           <h3>hctsa note</h3>
           <p>

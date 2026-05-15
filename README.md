@@ -81,11 +81,24 @@ conda install -c conda-forge nest-simulator=3.8
 
 ### Extras shortcuts
 ```bash
-pip install "ncpi[meeg]"            # M/EEG-related helpers
-pip install "ncpi[fieldpotential]"  # Kernel/CDM/LFP/MEEG workflows
-pip install "ncpi[analysis]"        # R-backed statistical analysis helpers
-pip install "ncpi[all]"             # Install all optional extras
+pip install "ncpi[hctsa]"           # hctsa backend support
+pip install "ncpi[parser]"          # extended parser backends
+pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
+pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
+pip install "ncpi[webui]"           # WebUI runtime backends
+pip install "ncpi[examples]"        # dependencies for example scripts
+pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[all]"             # all optional extras
 ```
+
+### Optional extras map
+- **`hctsa`**: `h5py`, `matlabengine`.
+- **`parser`**: `h5py`, `mne`, `pyEDFlib`, `pyarrow` (with base `pandas` for tabular/parquet I/O).
+- **`fieldpotential`**: `LFPy`, `lfpykernels`, `lfpykit`, `h5py`, `neuron`, `mne`, `nibabel`.
+- **`analysis`**: `rpy2`, `mne`, `nibabel`, `pyvistaqt`, `PyQt5`.
+- **`webui`**: `Pillow`, `h5py`, `mne`, `nibabel`, `pyEDFlib`, `pyarrow`, `openpyxl`, `xlrd`.
+- **`examples`**: `h5py`, `LFPy`, `mpi4py`, `nest-simulator`, `neuron`, `pdf2image`, `seaborn`, `statsmodels`.
+- **`tests`**: `LFPy`, `h5py`, `lfpykernels`, `lfpykit`, `matlabengine`, `mne`, `nibabel`, `neuron`, `playwright`, `Pillow`, `pyEDFlib`, `pytest`, `rpy2`.
 
 ## 4) WebUI: installation and usage
 
@@ -117,22 +130,8 @@ http://127.0.0.1:5000
 You can run the same command from Anaconda Prompt or PowerShell.
 If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
 
-### Optional libraries by module
-- **Features**
-  - `pycatch22`: catch22 feature set.
-  - `specparam`: spectral parameterization features.
-  - `mne`: frequency-band pipelines used by DFA/fEI workflows.
-  - `hctsa` stack: MATLAB Engine + `h5py` + hctsa repository.
-
-- **FieldPotential**
-  - `LFPy`, `lfpykernels`, `neuron`, `h5py`: kernel-based field potential workflows.
-  - `lfpykit`: EEG/MEG forward-model support.
-
-- **Analysis**
-  - `rpy2` plus R packages such as `lme4`, `emmeans`, and `buildmer` for mixed-model analysis.
-
-- **Parser / MEEG ecosystem**
-  - `mne`, `nibabel`, `pyEDFlib`, `h5py` for broader file-format coverage and neuroimaging interfaces.
+### Optional backends note
+Optional backends are listed in **Section 3 (Optional Dependencies)**. Install only the extras required by your workflow.
 
 ### hctsa note
 For hctsa-based features, install hctsa first: https://github.com/benfulcher/hctsa
