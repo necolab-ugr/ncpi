@@ -656,7 +656,10 @@ def _hagen_param_input(page, param_name):
         if area_selector.count() > 0:
             area_selector.select_option(value=area_index)
         resolved_name = local_param
-    return page.locator(f'.param-input[data-param="{resolved_name}"]').first
+    visible_locator = page.locator(f'.param-input[data-param="{resolved_name}"]:visible')
+    if visible_locator.count() > 0:
+        return visible_locator.first
+    return page.locator(f'.param-input[data-param="{resolved_name}"]').last
 
 
 def _hagen_single_array_rows(page, param_name):
@@ -692,11 +695,21 @@ def _fill_hagen_array_param(page, param_name, values):
     page.wait_for_function(
         """
         ([selector, expectedCount]) => {
-            const input = document.querySelector(selector);
-            if (!input || !input.parentElement) {
-                return false;
+            const inputs = Array.from(document.querySelectorAll(selector));
+            for (const input of inputs) {
+                if (!input || !input.parentElement || input.offsetParent === null) {
+                    continue;
+                }
+                const controls = input.parentElement.querySelector('.single-array-controls');
+                if (!controls) {
+                    continue;
+                }
+                const count = controls.querySelectorAll('[data-single-array-row="1"] input').length;
+                if (count === expectedCount) {
+                    return true;
+                }
             }
-            return input.parentElement.querySelectorAll('.single-array-controls [data-single-array-row="1"] input').length === expectedCount;
+            return false;
         }
         """,
         arg=[f'.param-input[data-param="{resolved_name}"]', len(values)],

@@ -9,6 +9,7 @@ from werkzeug.serving import make_server
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SIMULATION_TESTS_DIR = Path(__file__).resolve().parent / "Simulation"
+FIELD_POTENTIAL_HELPERS_PATH = Path(__file__).resolve().parent / "FieldPotential" / "_field_potential_test_helpers.py"
 
 
 def _is_field_potential_test(request):
@@ -20,6 +21,10 @@ def _is_field_potential_test(request):
 
 def _load_simulation_test_module(filename, module_name):
     module_path = SIMULATION_TESTS_DIR / filename
+    return _load_test_module(module_path, module_name)
+
+
+def _load_test_module(module_path, module_name):
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -30,6 +35,8 @@ def _load_simulation_test_module(filename, module_name):
 _hagen = _load_simulation_test_module("test_hagen.py", "webui_sim_test_hagen")
 _cavallari = _load_simulation_test_module("test_cavallari.py", "webui_sim_test_cavallari")
 _four_area = _load_simulation_test_module("test_four_area.py", "webui_sim_test_four_area")
+_field_potential_helpers = _load_test_module(FIELD_POTENTIAL_HELPERS_PATH, "webui_fp_test_helpers")
+fake_field_potential_backend = _field_potential_helpers.fake_field_potential_backend
 
 # Field-potential tests intentionally reuse the same Simulation test helpers
 # used by the model-specific Simulation suites.

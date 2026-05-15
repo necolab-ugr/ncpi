@@ -225,13 +225,16 @@ def _run_python_four_area_reference_dataframes(app_module, form_data, output_roo
     return trial_dataframes
 
 
-def _independent_parse_four_area_value(raw_value, default):
+def _independent_parse_four_area_value(raw_value, default, key="<value>"):
     """Parse a four-area form value independently from the WebUI implementation."""
     if raw_value is None:
         return default
     text = str(raw_value).strip()
     if text == "":
         return default
+    if text.lower().startswith("grid="):
+        candidates = _independent_parse_four_area_grid_candidates(text, default, key)
+        return candidates[0] if candidates else default
     if isinstance(default, str):
         return text
     if isinstance(default, int) and not isinstance(default, bool):
@@ -267,11 +270,11 @@ def _independent_parse_four_area_grid_candidates(raw_value, default, key):
 
 def _independent_expected_four_area_trials(app_module, form_data):
     """Derive the expected four-area trial configurations directly from submitted form data."""
-    defaults = _four_area_default_grid_values(app_module)
+    defaults = app_module._simulation_grid_defaults("four_area")
     run_mode = str(form_data.get("sim_run_mode", "single")).strip().lower() or "single"
     repetitions = int(float(str(form_data.get("sim_repetitions", "1")).strip() or "1"))
 
-    grid_keys = [key for key in app_module.FOUR_AREA_GRID_KEYS if key in defaults]
+    grid_keys = list(defaults.keys())
     candidate_lists = {
         key: _independent_parse_four_area_grid_candidates(form_data.get(key), defaults[key], key)
         for key in grid_keys
@@ -298,17 +301,17 @@ def _independent_expected_four_area_trials(app_module, form_data):
         for area_index, area_name in enumerate(values["areas"]):
             key_prefix = f"area_{area_index}."
             area_params[area_name] = {
-                "N_X": _independent_parse_four_area_value(form_data.get(f"{key_prefix}N_X"), values["N_X"]),
-                "C_m_X": _independent_parse_four_area_value(form_data.get(f"{key_prefix}C_m_X"), values["C_m_X"]),
-                "tau_m_X": _independent_parse_four_area_value(form_data.get(f"{key_prefix}tau_m_X"), values["tau_m_X"]),
-                "E_L_X": _independent_parse_four_area_value(form_data.get(f"{key_prefix}E_L_X"), values["E_L_X"]),
-                "C_YX": _independent_parse_four_area_value(form_data.get(f"{key_prefix}C_YX"), values["C_YX"]),
-                "J_YX": _independent_parse_four_area_value(form_data.get(f"{key_prefix}J_YX"), values["J_YX"]),
-                "delay_YX": _independent_parse_four_area_value(form_data.get(f"{key_prefix}delay_YX"), values["delay_YX"]),
-                "tau_syn_YX": _independent_parse_four_area_value(form_data.get(f"{key_prefix}tau_syn_YX"), values["tau_syn_YX"]),
-                "n_ext": _independent_parse_four_area_value(form_data.get(f"{key_prefix}n_ext"), values["n_ext"]),
-                "nu_ext": float(_independent_parse_four_area_value(form_data.get(f"{key_prefix}nu_ext"), values["nu_ext"])),
-                "J_ext": float(_independent_parse_four_area_value(form_data.get(f"{key_prefix}J_ext"), values["J_ext"])),
+                "N_X": values[f"{key_prefix}N_X"],
+                "C_m_X": values[f"{key_prefix}C_m_X"],
+                "tau_m_X": values[f"{key_prefix}tau_m_X"],
+                "E_L_X": values[f"{key_prefix}E_L_X"],
+                "C_YX": values[f"{key_prefix}C_YX"],
+                "J_YX": values[f"{key_prefix}J_YX"],
+                "delay_YX": values[f"{key_prefix}delay_YX"],
+                "tau_syn_YX": values[f"{key_prefix}tau_syn_YX"],
+                "n_ext": values[f"{key_prefix}n_ext"],
+                "nu_ext": float(values[f"{key_prefix}nu_ext"]),
+                "J_ext": float(values[f"{key_prefix}J_ext"]),
             }
         network = {
             "areas": values["areas"],
