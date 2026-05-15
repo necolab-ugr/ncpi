@@ -5605,7 +5605,26 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         return model_obj.get_transformation_matrix(loc)
                 elif model == "InfiniteVolumeConductor":
                     InfiniteVol = potential._load_eegmegcalc_model("InfiniteVolumeConductor")
-                    model_obj = InfiniteVol(**model_kwargs)
+                    infinite_ctor_accepts_sensor_locations = False
+                    try:
+                        ctor_signature = inspect.signature(InfiniteVol)
+                        ctor_params = list(ctor_signature.parameters.values())
+                        if ctor_params:
+                            first_param = ctor_params[0]
+                            infinite_ctor_accepts_sensor_locations = (
+                                first_param.kind in (
+                                    inspect.Parameter.POSITIONAL_ONLY,
+                                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                )
+                                and first_param.name in {"sensor_locations", "r"}
+                            )
+                    except (TypeError, ValueError):
+                        infinite_ctor_accepts_sensor_locations = False
+
+                    if infinite_ctor_accepts_sensor_locations:
+                        model_obj = InfiniteVol(trial_sensor_locations, **model_kwargs)
+                    else:
+                        model_obj = InfiniteVol(**model_kwargs)
                     def get_M(loc):
                         r = trial_sensor_locations - loc
                         return model_obj.get_transformation_matrix(r)

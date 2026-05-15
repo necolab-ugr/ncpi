@@ -10,6 +10,7 @@ import threading
 import time
 import urllib.request
 import zipfile
+import re
 from contextlib import contextmanager
 from itertools import product
 from pathlib import Path
@@ -647,7 +648,15 @@ def _navigate_to_hagen_form(page, live_webui_server):
 
 def _hagen_param_input(page, param_name):
     """Return the locator for a Hagen parameter input field."""
-    return page.locator(f'.param-input[data-param="{param_name}"]').first
+    resolved_name = str(param_name)
+    area_match = re.fullmatch(r"area_(\d+)\.(.+)", resolved_name)
+    if area_match:
+        area_index, local_param = area_match.groups()
+        area_selector = page.locator("#four-area-selector").first
+        if area_selector.count() > 0:
+            area_selector.select_option(value=area_index)
+        resolved_name = local_param
+    return page.locator(f'.param-input[data-param="{resolved_name}"]').first
 
 
 def _hagen_single_array_rows(page, param_name):
@@ -676,6 +685,10 @@ def _fill_hagen_scalar_param(page, param_name, value):
 def _fill_hagen_array_param(page, param_name, values):
     """Fill all leaf inputs for an array-valued Hagen parameter."""
     rows = _hagen_single_array_rows(page, param_name)
+    resolved_name = str(param_name)
+    area_match = re.fullmatch(r"area_(\d+)\.(.+)", resolved_name)
+    if area_match:
+        resolved_name = area_match.group(2)
     page.wait_for_function(
         """
         ([selector, expectedCount]) => {
@@ -686,7 +699,7 @@ def _fill_hagen_array_param(page, param_name, values):
             return input.parentElement.querySelectorAll('.single-array-controls [data-single-array-row="1"] input').length === expectedCount;
         }
         """,
-        arg=[f'.param-input[data-param="{param_name}"]', len(values)],
+        arg=[f'.param-input[data-param="{resolved_name}"]', len(values)],
     )
     assert rows.count() == len(values), f"Unexpected leaf count for {param_name}: {rows.count()}"
     for idx, value in enumerate(values):
