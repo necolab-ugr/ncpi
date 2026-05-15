@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Docs | Installation</title>
+  <link rel="stylesheet" href="./docs_style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <img src="../img/ncpi_logo.png" alt="ncpi logo">
+        <div class="title">ncpi Documentation</div>
+      </div>
+      <ul class="left-nav">
+        <li><a href="./index.html">Home</a></li>
+        <li><a class="active" href="./installation.html">Installation</a></li>
+        <li><a href="./tutorials.html">Tutorials</a></li>
+        <li><a href="./api.html">API</a></li>
+        <li><a href="./faq.html">FAQ</a></li>
+        <li><a href="./contributing.html">Contributing</a></li>
+        <li><a href="./citation.html">Citation</a></li>
+        <li><a href="./credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="requirements">
+          <h1>Installation</h1>
+          <p>
+            <span class="pill">Version 1.0</span>
+            <span class="pill">Python >= 3.10</span>
+          </p>
+          <p><code>ncpi</code> requires <strong>Python 3.10+</strong>. We strongly recommend using a dedicated <strong>Conda</strong> environment.</p>
+          <p>
+            If you need to install Anaconda first, download it from the official page:
+            <a class="link" href="https://www.anaconda.com/download">https://www.anaconda.com/download</a>
+          </p>
+        </section>
+
+        <section id="unix">
+          <h2>1) Unix (Linux/macOS)</h2>
+          <h3>Base installation</h3>
+          <pre><code># Create environment
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+
+# Install ncpi
+pip install ncpi</code></pre>
+
+          <h3>NEST (for LIF simulation examples)</h3>
+          <p>If you run examples that depend on NEST (for example in <code>examples/simulation</code>), install it in the same environment:</p>
+          <pre><code>conda install -c conda-forge nest-simulator=3.8</code></pre>
+          <p>
+            If <code>nest-simulator</code> is not available for your platform/channel combination, follow the official NEST build/install
+            instructions:
+            <a class="link" href="https://nest-simulator.readthedocs.io/">https://nest-simulator.readthedocs.io/</a>
+          </p>
+        </section>
+
+        <section id="windows">
+          <h2>2) Windows</h2>
+          <h3>Base installation (native Windows Python)</h3>
+          <pre><code>conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi</code></pre>
+
+          <h3>NEST on Windows</h3>
+          <p>NEST-based examples are recommended via <strong>WSL2 (Ubuntu)</strong>, not native Windows.</p>
+          <pre><code># One-time WSL2 setup
+wsl --install -d Ubuntu</code></pre>
+
+          <p>Then, inside the Ubuntu/WSL shell:</p>
+          <pre><code>conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
+conda install -c conda-forge nest-simulator=3.8</code></pre>
+        </section>
+
+        <section id="optional">
+          <h2>3) Optional Dependencies</h2>
+          <p><code>ncpi</code> supports optional extras. Install only what your workflow needs.</p>
+
+          <h3>Extras shortcuts</h3>
+          <pre><code>pip install "ncpi[meeg]"            # M/EEG-related helpers
+pip install "ncpi[fieldpotential]"  # Kernel/CDM/LFP/MEEG workflows
+pip install "ncpi[analysis]"        # R-backed statistical analysis helpers
+pip install "ncpi[all]"             # Install all optional extras</code></pre>
+        </section>
+
+        <section id="webui">
+          <h2>4) WebUI: installation and usage</h2>
+          <p>The WebUI is available from the repository source (<code>webui/app.py</code>).</p>
+
+          <h3>Install WebUI dependencies</h3>
+          <p>After activating your Conda environment:</p>
+          <pre><code>git clone https://github.com/necolab-ugr/ncpi.git
+cd ncpi
+pip install -e ".[webui]"</code></pre>
+
+          <h3>Start WebUI</h3>
+          <p>From the repository root:</p>
+          <pre><code>python webui/app.py</code></pre>
+
+          <p>Then open:</p>
+          <pre><code>http://127.0.0.1:5000</code></pre>
+
+          <h3>Windows note</h3>
+          <p>
+            You can run the same command from Anaconda Prompt or PowerShell.
+            If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
+          </p>
+        </section>
+
+        <section id="optional-libraries">
+          <h2>Optional libraries by module</h2>
+          <ul>
+            <li>
+              <strong>Features</strong>
+              <ul>
+                <li><code>pycatch22</code>: catch22 feature set.</li>
+                <li><code>specparam</code>: spectral parameterization features.</li>
+                <li><code>mne</code>: frequency-band pipelines used by DFA/fEI workflows.</li>
+                <li><code>hctsa</code> stack: MATLAB Engine + <code>h5py</code> + hctsa repository.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>FieldPotential</strong>
+              <ul>
+                <li><code>LFPy</code>, <code>lfpykernels</code>, <code>neuron</code>, <code>h5py</code>: kernel-based field potential workflows.</li>
+                <li><code>lfpykit</code>: EEG/MEG forward-model support.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>Analysis</strong>
+              <ul>
+                <li><code>rpy2</code> plus R packages such as <code>lme4</code>, <code>emmeans</code>, and <code>buildmer</code> for mixed-model analysis.</li>
+              </ul>
+            </li>
+            <li>
+              <strong>Parser / MEEG ecosystem</strong>
+              <ul>
+                <li><code>mne</code>, <code>nibabel</code>, <code>pyEDFlib</code>, <code>h5py</code> for broader file-format coverage and neuroimaging interfaces.</li>
+              </ul>
+            </li>
+          </ul>
+        </section>
+
+        <section id="hctsa-note">
+          <h2>hctsa note</h2>
+          <p>
+            For hctsa-based features, install hctsa first:
+            <a class="link" href="https://github.com/benfulcher/hctsa">https://github.com/benfulcher/hctsa</a>
+          </p>
+          <p>
+            Then install MATLAB Engine for Python (for example from <code>&lt;MATLAB_ROOT&gt;/extern/engines/python</code>, or a compatible
+            <code>matlabengine</code> pip package), and pass the hctsa repository path as <code>hctsa_folder</code>.
+          </p>
+        </section>
+
+      </article>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#requirements">Requirements</a></li>
+        <li><a href="#unix">Unix</a></li>
+        <li><a href="#windows">Windows</a></li>
+        <li><a href="#optional">Optional Dependencies</a></li>
+        <li><a href="#webui">WebUI</a></li>
+        <li><a href="#optional-libraries">Optional Libraries</a></li>
+        <li><a href="#hctsa-note">hctsa Note</a></li>
+      </ul>
+    </aside>
+  </div>
+</body>
+</html>

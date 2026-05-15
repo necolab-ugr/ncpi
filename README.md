@@ -1,6 +1,4 @@
-> 🚧 **This repository is under active development, and features or documentation may still evolve. That said, version 
-> v0.2.6 marks a maturing stage of the project: it is functionally stable and has been thoroughly tested with all 
-> included examples, though some aspects may still change ahead of a full stable release** 🚧
+> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 1, 2026.**
 
 <div align="center">
 
@@ -11,264 +9,303 @@ ___
 
 </div>
 
-[Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html) | 
 [Documentation](https://necolab-ugr.github.io/ncpi/)
 
-`ncpi` is a Python package for model-based inference of neural circuit parameters from population-level 
-electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provides a rapid, reproducible, and robust 
-framework for estimating the most probable neural circuit parameters associated with an empirical observation, 
-streamlining traditionally complex workflows into a minimal amount of code. Check out the [example usage](#example-usage) 
-to see how `ncpi` can accelerate your research and unlock the full potential of **model-based neural inference**.
+`ncpi` is a Python package for model-based inference of neural circuit parameters from population-level
+electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provides a rapid, reproducible, and robust
+framework for estimating the most probable neural circuit parameters associated with an empirical observation,
+streamlining traditionally complex workflows into a minimal amount of code.
 
 # Key Features of `ncpi`
-- **All-in-one solution**: Streamline your workflow with a unified package that integrates state-of-the-art methods for
-both forward and inverse modeling of extracellular signals based on single-neuron network model simulations. `ncpi` 
-integrates tools to simulate realistic population-level neural signals, extract key neurophysiological features, 
-train inverse modeling approaches, predict circuit parameters, and ultimately benchmark candidate biomarkers, or 
-sets of biomarkers, as proxy markers of neural circuit dynamics.
-
-- **Biophysically grounded analysis**: Effortlessly decode experimental electrophysiological recordings using robust, 
-reproducible, and streamlined code—unlocking model-based biophysical insights in just a few lines.
-
-- **Flexible and extensible**: Seamlessly integrate ncpi into your workflow—use individual functionalities (e.g.,
-parameter inference techniques based on [sbi](https://sbi-dev.github.io/sbi)) with custom functions or deploy the full 
-inverse modelling pipeline. Designed for modularity, it adapts to your needs without constraints.
-
+- **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural
+  circuit simulations.
+- **Biophysically grounded analysis**: practical workflows to bridge electrophysiology and neural circuit parameters.
+- **Flexible and extensible**: use individual modules independently or run complete end-to-end pipelines.
 
 # Installation
 
-`ncpi` requires **Python 3.10 or higher**. `ncpi` can be run on both **Linux** and **Windows** when installed in an 
-**Anaconda** or **Miniconda** Python environment. To install `ncpi`, you can use `pip`; the package is available on 
-PyPI and can be installed directly from there. 
+`ncpi` requires **Python 3.10+**. We strongly recommend using a dedicated **Conda** environment.
+If you need to install Anaconda first, download it from the official page:
+https://www.anaconda.com/download
 
+## 1) Unix (Linux/macOS)
+
+### Base installation
 ```bash
-# Step 1: Create and activate a conda environment (recommended)
+# Create environment
 conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
 
-# Step 2: Install ncpi using pip
+# Install ncpi
 pip install ncpi
 ```
 
-**Note:** To run examples that include simulations of the LIF network model (e.g., in `example_full_pipeline.py`), 
-the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed (note also that to run **NEST** on Windows you must first install the 
-**Windows Subsystem for Linux (WSL)**). You can install a pre-built NEST package in Linux with:
+### NEST (for LIF simulation examples)
+If you run examples that depend on NEST (for example in `examples/simulation`), install it in the same environment:
 
 ```bash
 conda install -c conda-forge nest-simulator=3.8
- ```
-
-Optional dependencies by class:
-- `Features`: `pycatch22` (catch22), `specparam` (spectral features), `mne` (band/spectrum DFA/fEI), MATLAB Engine for Python + `h5py` + the hctsa repo (hctsa feature set; set `hctsa_folder` to the repo path).
-- `FieldPotential`: `LFPy`, `lfpykernels`, `neuron`, `h5py` (kernel workflow) and `lfpykit` (EEG/MEG forward models).
-- `Analysis`: `rpy2` plus R packages `lme4`, `emmeans`, and `buildmer` (depending on analysis methods used).
-- `Simulation` examples: `nest-simulator` for LIF network simulations.
-
-Install extras via pip (as needed):
-```bash
-pip install "ncpi[meeg]"
-pip install "ncpi[fieldpotential]"
-pip install "ncpi[analysis]"
-pip install "ncpi[all]"
 ```
 
-For hctsa, follow the hctsa installation instructions (https://github.com/benfulcher/hctsa), and install the MATLAB
-Engine for Python either from your MATLAB distribution (`<MATLAB_ROOT>/extern/engines/python`) or via a compatible
-`matlabengine` pip package (e.g., `pip install "matlabengine==24.2.2"`). Then pass the hctsa repo path as
-`hctsa_folder`.
+If `nest-simulator` is not available for your platform/channel combination, follow the official NEST build/install
+instructions: https://nest-simulator.readthedocs.io/
 
-If you encounter a binary incompatibility between your installed NumPy and scikit-learn packages after installing NEST—
-for example, an error like *numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, 
-got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
+## 2) Windows
+
+### Base installation (native Windows Python)
+```powershell
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
+```
+
+### NEST on Windows
+NEST-based examples are recommended via **WSL2 (Ubuntu)**, not native Windows.
+
+```powershell
+# One-time WSL2 setup
+wsl --install -d Ubuntu
+```
+
+Then, inside the Ubuntu/WSL shell:
+```bash
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
+conda install -c conda-forge nest-simulator=3.8
+```
+
+## 3) Optional Dependencies
+
+`ncpi` supports optional extras. Install only what your workflow needs.
+
+### Extras shortcuts
+```bash
+pip install "ncpi[meeg]"            # M/EEG-related helpers
+pip install "ncpi[fieldpotential]"  # Kernel/CDM/LFP/MEEG workflows
+pip install "ncpi[analysis]"        # R-backed statistical analysis helpers
+pip install "ncpi[all]"             # Install all optional extras
+```
+
+## 4) WebUI: installation and usage
+
+The WebUI is available from the repository source (`webui/app.py`).
+
+### Install WebUI dependencies
+After activating your Conda environment:
 
 ```bash
-pip uninstall scikit-learn numpy -y
-pip install scikit-learn==1.5.0 numpy
+git clone https://github.com/necolab-ugr/ncpi.git
+cd ncpi
+pip install -e ".[webui]"
 ```
+
+### Start WebUI
+From the repository root:
+
+```bash
+python webui/app.py
+```
+
+Then open:
+
+```text
+http://127.0.0.1:5000
+```
+
+### Windows note
+You can run the same command from Anaconda Prompt or PowerShell.
+If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
+
+### Optional libraries by module
+- **Features**
+  - `pycatch22`: catch22 feature set.
+  - `specparam`: spectral parameterization features.
+  - `mne`: frequency-band pipelines used by DFA/fEI workflows.
+  - `hctsa` stack: MATLAB Engine + `h5py` + hctsa repository.
+
+- **FieldPotential**
+  - `LFPy`, `lfpykernels`, `neuron`, `h5py`: kernel-based field potential workflows.
+  - `lfpykit`: EEG/MEG forward-model support.
+
+- **Analysis**
+  - `rpy2` plus R packages such as `lme4`, `emmeans`, and `buildmer` for mixed-model analysis.
+
+- **Parser / MEEG ecosystem**
+  - `mne`, `nibabel`, `pyEDFlib`, `h5py` for broader file-format coverage and neuroimaging interfaces.
+
+### hctsa note
+For hctsa-based features, install hctsa first: https://github.com/benfulcher/hctsa
+
+Then install MATLAB Engine for Python (for example from `<MATLAB_ROOT>/extern/engines/python`, or a compatible
+`matlabengine` pip package), and pass the hctsa repository path as `hctsa_folder`.
 
 # Folder Structure
 
-- `ncpi/`: Contains the source code for the library, organized into modules and classes.
-- `examples/`: Includes scripts used to reproduce the results presented in the reference papers (see [Citation](#Citation)).
-- `docs/`: Contains documentation for the library, including usage instructions, API references, and guides.
-- `img/`: Stores image assets for the project, such as the library logo.
-- `webui/`: Contains the web application of ncpi
-
+- `ncpi/`: core library modules (`Simulation`, `Features`, `FieldPotential`, `Inference`, `Analysis`, parser utilities).
+- `examples/`: reproducible scripts and simulation/inference examples.
+- `docs/`: active documentation pages (`index.html`, `installation.html`, `tutorials.html`, `api.html`, `faq.html`, `contributing.html`, `citation.html`, `credits.html`).
+- `img/`: shared visual assets (including the project logo).
+- `webui/`: ncpi web interface.
+- `tests/`: unit/integration/webui test suites.
 
 # Example Usage
+
+The example below follows a Gao-style synthetic setup: two Poisson generators are convolved with synaptic kernels to
+obtain AMPA and GABA currents, and their sum is used as a synthetic LFP
+(Gao et al., 2017: https://doi.org/10.1016/j.neuroimage.2017.06.078).
+
 ```python
-import ncpi
+import inspect
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error
-from sklearn.preprocessing import StandardScaler
-import inspect
+import ncpi
 
-# Parameters for generating simulated neural data
-n_neurons = 50           # Number of neurons in each simulated recording
-sim_time = 2000          # Total number of time points per sample 
-sampling_rate = 100      # Sampling rate in Hz
-n_samples = 1000        # Total number of samples (combined training + test set)
 
-def simulator(θ):
-    """
-    Simulates spike trains modulated by a shared sinusoidal signal and independent noise.
+RNG = np.random.default_rng(42)
+FS = 1000.0  # Hz
+DT = 1.0 / FS # s
+DURATION_S = 12.0 # s
+N_SAMPLES_SIGNAL = int(FS * DURATION_S) # number of time samples in the signal
+N_SAMPLES_DATASET = 1000  # number of synthetic LFP samples for training/testing
 
-    Parameters
-    ----------
-    θ : float
-        Controls the exponential decay of the synaptic kernel and the influence of the 
-        shared signal.
 
-    Returns
-    -------
-    spikes : ndarray of shape (n_neurons, sim_time)
-        Binary array representing spikes (1s) and no spikes (0s) for each neuron over time.
-    """
-    spikes = np.zeros((n_neurons, sim_time))
+def synaptic_kernel(tau_rise_ms, tau_decay_ms, fs_hz, support_ms=200.0):
+    # Exponential decay kernel with rise and decay times.
+    t = np.arange(0.0, support_ms / 1000.0, 1.0 / fs_hz)
+    k = np.exp(-t / (tau_decay_ms / 1000.0)) - np.exp(-t / (tau_rise_ms / 1000.0))
+    k[k < 0.0] = 0.0
+    k = k / (np.sum(k) + 1e-12)
+    return k
 
-    # Synaptic kernel
-    tau = sampling_rate * (θ + 0.01)
-    t_kernel = np.arange(int(sampling_rate * 4))
-    exp_kernel = np.exp(-t_kernel / tau)
 
-    # Sinusoidal shared signal
-    freq = 2.0  # Hz
-    time = np.arange(sim_time) / sampling_rate
-    shared_input = 0.5 * (1 + np.sin(2 * np.pi * freq * time))  # Values in [0, 1]
+K_AMPA = synaptic_kernel(tau_rise_ms=0.5, tau_decay_ms=2.0, fs_hz=FS)
+K_GABA = synaptic_kernel(tau_rise_ms=0.5, tau_decay_ms=7.0, fs_hz=FS)
 
-    for neuron in range(n_neurons):
-        # Independent signal for each neuron
-        private_input = np.random.rand(sim_time)
-        private_modulated = np.convolve(private_input, exp_kernel, mode='same')
 
-        # Combine shared and private inputs
-        k = 0.5 * θ # Mixing coefficient based on θ
-        modulated = private_modulated + k * np.convolve(shared_input, exp_kernel, mode='same')
+def poisson_spike_train(rate_hz, n_samples, rng):
+    # Discrete-time Poisson counts per sample bin (dt).
+    return rng.poisson(rate_hz * DT, size=n_samples).astype(float)
 
-        # Normalize combined modulation
-        modulated -= modulated.min()
-        modulated /= modulated.max()
 
-        # Generate spikes
-        spike_probs = modulated - 0.9
-        spikes[neuron] = np.random.rand(sim_time) < spike_probs
+def simulate_lfp(rate_exc_hz, rate_inh_hz, w_exc=1.0, w_inh=1.4):
+    # Simulate LFP with excitatory and inhibitory Poisson spike trains.
+    spikes_e = poisson_spike_train(rate_exc_hz, N_SAMPLES_SIGNAL, RNG)
+    spikes_i = poisson_spike_train(rate_inh_hz, N_SAMPLES_SIGNAL, RNG)
 
-    return spikes
+    i_ampa = w_exc * np.convolve(spikes_e, K_AMPA, mode="same")
+    i_gaba = -w_inh * np.convolve(spikes_i, K_GABA, mode="same")
+    lfp = i_ampa + i_gaba
 
+    return lfp, i_ampa, i_gaba
 
 
 if __name__ == "__main__":
-    # Define the bin size and number of bins for firing rate computation
-    bin_size = 100  # ms
-    bin_size = int(bin_size * sampling_rate / 1000)  # convert to time steps
-    n_bins = int(sim_time / bin_size) # Number of bins
-    
-    # Preallocate arrays for storing simulation output
-    sim_data = {
-        'X': np.zeros((n_samples, n_bins)),
-        'θ': np.zeros((n_samples, 1))
-    }
-    
-    # Create the simulation dataset
-    for sample in range(n_samples):
-        print(f'Creating sample {sample + 1} of {n_samples}', end='\r', flush=True)
-        # Generate a random parameter θ
-        θ = np.random.uniform(0, 0.5)
-        
-        # Simulate the spike train
-        spikes = simulator(θ)
-        
-        # Compute firing rates
-        fr = [
-            [np.sum(spikes[ii, jj * bin_size:(jj + 1) * bin_size])
-             for jj in range(n_bins)]
-             for ii in range(spikes.shape[0])
-        ]
-    
-        # Create a FieldPotential object
-        fp = ncpi.FieldPotential(kernel = False)    
-        
-        # Get the field potential proxy
-        proxy = fp.compute_proxy(method = 'FR', sim_data = {'FR': fr}, sim_step = None)
-        
-        # Save simulation data 
-        sim_data['X'][sample, :] = proxy
-        sim_data['θ'][sample, 0] = θ
-    
-    # If sim_data['θ'] is a 2D array with one column, reshape it to a 1D array
-    if sim_data['θ'].shape[1] == 1:
-        sim_data['θ'] = np.reshape(sim_data['θ'], (-1,))
-        
-    # Compute features
-    df = pd.DataFrame({'Data': sim_data['X'].tolist()})
-    features = ncpi.Features(method='catch22')
-    df = features.compute_features(df)
-    
-    # Split simulation data into 90% training and 10% test data
-    indices = np.arange(n_samples)
-    np.random.shuffle(indices)
-    split = int(0.9 * len(indices))
-    train_indices = indices[:split]
-    test_indices = indices[split:]
-    
-    X_train = np.array(df.iloc[train_indices].drop(columns=['Data'])['Features'].tolist())
-    X_test = np.array(df.iloc[test_indices].drop(columns=['Data'])['Features'].tolist())
-    θ_train = np.array(sim_data['θ'][train_indices])
-    θ_test = np.array(sim_data['θ'][test_indices])
-    
-    # Create the inference object and add simulation data
-    inference = ncpi.Inference(model='RandomForestRegressor',
-                               hyperparams={'n_estimators': 100,
-                                            'max_depth': 10,
-                                            'min_samples_split': 2})
-    inference.add_simulation_data(X_train, θ_train)
-    
-    # Create a scaler for the features
-    scaler = StandardScaler()
-    
-    # Train the model
-    sig = inspect.signature(inference.train)
-    if "scaler" in sig.parameters:
-        inference.train(param_grid=None, scaler=scaler)
-        # Evaluate the model using the test data
-        predictions = inference.predict(X_test, scaler=scaler)
-    else:
-        # Old package version: train() internally creates/uses a scaler already
-        # so just call without scaler.
-        inference.train(param_grid=None)
-        predictions = inference.predict(X_test)
-    
-    # Calculate MSE
-    mse = mean_squared_error(θ_test, predictions)
+    print("[1/7] Initializing configuration and feature engine...")
+    lfp_samples = []
+    ei_ratios = np.zeros(N_SAMPLES_DATASET, dtype=float)
+    feature_engine = ncpi.Features(method="catch22", params={"normalize": True})
 
-    
-    # Plot real vs predicted values
-    plt.figure(figsize=(8, 6))
-    plt.scatter(θ_test, predictions, alpha=0.5, label=f'MSE = {mse:.3f}')
-    plt.plot([θ_test.min(), θ_test.max()], [θ_test.min(), θ_test.max()], 'r--', label='Ideal Fit')
-    plt.xlabel('True θ')
-    plt.ylabel('Predicted θ')
-    plt.legend()
+    print("[2/7] Generating synthetic dataset...")
+    traces = None
+    for i in range(N_SAMPLES_DATASET):
+        # Sample a target E/I ratio and a total drive, then derive rates.
+        # This reduces ambiguity compared with drawing excitatory/inhibitory rates independently.
+        target_ei = RNG.uniform(0.20, 1.60)
+        total_rate = RNG.uniform(10.0, 24.0)
+        rate_inh = total_rate / (1.0 + target_ei)
+        rate_exc = total_rate - rate_inh
+
+        lfp, i_ampa, i_gaba = simulate_lfp(rate_exc, rate_inh)
+        lfp_samples.append(lfp)
+        ei_ratios[i] = target_ei
+
+        if i == 0:
+            traces = (lfp, i_ampa, i_gaba)
+        if (i + 1) % 50 == 0 or (i + 1) == N_SAMPLES_DATASET:
+            pct = 100.0 * (i + 1) / N_SAMPLES_DATASET
+            print(f"  -> Dataset progress: {i + 1}/{N_SAMPLES_DATASET} ({pct:.1f}%)")
+
+    print("  -> Computing catch22 features in parallel...")
+    def feature_progress(completed, total, percent):
+        if completed > 0 and (percent % 10 == 0 or completed == total):
+            print(f"  -> Feature progress: {completed}/{total} ({percent}%)")
+
+    catch22_features = np.asarray(
+        feature_engine.compute_features(
+            samples=lfp_samples,
+            n_jobs=None,
+            progress_callback=feature_progress,
+        ),
+        dtype=float,
+    )
+
+    print("[3/7] Splitting train/test data...")
+    idx = np.arange(N_SAMPLES_DATASET)
+    RNG.shuffle(idx)
+    split = int(0.8 * len(idx))
+    tr, te = idx[:split], idx[split:]
+    X_train, X_test = catch22_features[tr], catch22_features[te]
+    y_train, y_test = ei_ratios[tr], ei_ratios[te]
+
+    print("[4/7] Initializing inference model...")
+    model = ncpi.Inference(
+        model="RandomForestRegressor",
+        hyperparams={
+            "n_estimators": 300,
+            "max_depth": 20,
+            "min_samples_leaf": 1,
+            "max_features": "sqrt",
+            "random_state": 42,
+            "n_jobs": 1,
+        },
+    )
+    model.add_simulation_data(X_train, y_train)
+
+    print("[5/7] Training model...")
+    model.train(param_grid=None, scaler=None, seed=42)
+    print("[6/7] Computing predictions...")
+    y_pred = model.predict(X_test, scaler=None, n_jobs=1)
+ 
+    mse = mean_squared_error(y_test, y_pred)
+    print(f"Test MSE (E/I ratio): {mse:.5f}")
+
+    print("[7/7] Plotting results...")
+    fig, ax = plt.subplots(1, 1, figsize=(7, 6))
+    ax.scatter(y_test, y_pred, s=18, alpha=0.7, label="Predictions")
+    lo, hi = float(min(np.min(y_test), np.min(y_pred))), float(max(np.max(y_test), np.max(y_pred)))
+    ax.plot([lo, hi], [lo, hi], "k--", linewidth=1.1, label="Ideal fit")
+    ax.set_xlabel("Real E/I ratio")
+    ax.set_ylabel("Predicted E/I ratio")
+    ax.set_title("Predicted vs real E/I ratio")
+    ax.legend(frameon=False)
+    ax.text(
+        0.03,
+        0.95,
+        f"MSE = {mse:.5f}",
+        transform=ax.transAxes,
+        va="top",
+        ha="left",
+    )
+
+    plt.tight_layout()
     plt.show()
-
 ```
 
 # Tutorials
-If you're new to `ncpi`, we recommend starting with our 
-[Getting Started](https://necolab-ugr.github.io/ncpi/tutorials/getting_started.html)
-tutorial.
+Explore step-by-step tutorials and complete workflows at:
+https://necolab-ugr.github.io/ncpi/tutorials.html
 
 # Citation
 If you use `ncpi` in your research, please consider citing our work:
 
-**[1] Alejandro Orozco Valero, Víctor Rodríguez-González, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie, 
-Francisco Pelayo, Christian Morillas, Jesús Poza, Carlos Gómez & Pablo Martínez-Cañada**  
+**[1] Alejandro Orozco Valero, Victor Rodriguez-Gonzalez, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie,
+Francisco Pelayo, Christian Morillas, Jesus Poza, Carlos Gomez & Pablo Martinez-Canada**  
 *A Python toolbox for neural circuit parameter inference.*  
 npj Syst Biol Appl 11, 45 (2025).  
-https://doi.org/10.1038/s41540-025-00527-9  
+https://doi.org/10.1038/s41540-025-00527-9
 
 # Acknowledgements
-This work was supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31,funded by MCIN/AEI/10.13039/501100011033 
-and by “ERDF A way of making Europe”; and by “Junta de Andalucía” - Postdoctoral Fellowship Programme PAIDI 2021.
+This work was supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31, funded by MCIN/AEI/10.13039/501100011033
+and by ERDF "A way of making Europe"; and by Junta de Andalucia - Postdoctoral Fellowship Programme PAIDI 2021.
