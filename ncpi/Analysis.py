@@ -803,7 +803,7 @@ class Analysis:
             df_pair = df[df[group_col].isin([control_group, g])]
 
             out_rows: List[Tuple[str, float]] = []
-            for sensor, df_s in df_pair.groupby(sensor_col):
+            for sensor, df_s in df_pair.groupby(sensor_col, sort=False):
                 x = df_s.loc[df_s[group_col] == g, data_col].to_numpy(dtype=float)
                 y = df_s.loc[df_s[group_col] == control_group, data_col].to_numpy(dtype=float)
 
@@ -826,149 +826,187 @@ class Analysis:
     # ------------------------------------------------------------------
     # EEG plotting using MNE
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_eeg_info(
+        ch_names: List[str],
+        montage: str,
+        position_offset: Tuple[float, float],
+        ch_type: str = "eeg",
+    ) -> Any:
+        mne = tools.dynamic_import("mne")
+
+        if len(position_offset) != 2:
+            raise ValueError("position_offset must be a tuple/list of length 2: (y_offset, z_offset).")
+
+        info = mne.create_info(ch_names=ch_names, sfreq=250, ch_types=[ch_type] * len(ch_names))
+        std_montage = mne.channels.make_standard_montage(montage)
+
+        ch_pos = {
+            ch: std_montage.get_positions()["ch_pos"][ch]
+            for ch in ch_names
+            if ch in std_montage.get_positions()["ch_pos"]
+        }
+
+        if not ch_pos:
+            raise ValueError(f"None of the channels {ch_names} found in montage '{montage}'.")
+
+        y_off, z_off = position_offset
+        for ch in ch_pos:
+            ch_pos[ch] = ch_pos[ch].copy()
+            ch_pos[ch][1] += y_off
+            ch_pos[ch][2] += z_off
+
+        new_montage = mne.channels.make_dig_montage(ch_pos=ch_pos, coord_frame="head")
+        info.set_montage(new_montage)
+        return info
+    
     def eeg_topomap(
         self,
-        values: Union[Sequence[float], np.ndarray, Mapping[str, float], pd.Series],
+        values=None,
+        ch_names=None,
         *,
-        ch_names: Optional[Sequence[str]] = None,
-        montage: Union[str, Any] = "standard_1020",
-        info: Optional[Any] = None,
-        ch_type: str = "eeg",
-        units: Optional[str] = None,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
-        cmap: Optional[str] = None,
-        sensors: bool = True,
-        outlines: Union[str, dict] = "head",
-        sphere: Union[str, Tuple[float, float, float, float]] = "auto",
-        axes: Optional[Any] = None,
-        show: bool = True,
-        colorbar: bool = True,
-        colorbar_label_fontsize: Optional[float] = None,
-        colorbar_tick_fontsize: Optional[float] = None,
-        res: int = 64,
-        extrapolate: str = "auto",
-        image_interp: str = "cubic",
+        position_offset,
+        sensor_col="sensor",
+        data_col="data",
+        data_index=-1,
+        montage="standard_1005",
+        ch_type="eeg",
+        sphere=0.28,
+        cmap="jet",
+        vmin=None,
+        vmax=None,
+        colorbar=True,
+        colorbar_fmt="%0.2f",
+        colorbar_label=None,
+        colorbar_label_fontsize=None,
+        colorbar_tick_fontsize=8,
+        sensors=None,
+        outlines=None,
+        contours=None,
+        res=300,
+        extrapolate=None,
+        image_interp=None,
+        axes=None,
+        show=True,
+        title=None,
+        names=None,
     ):
-        """Plot an EEG topomap using MNE, adapting to any montage / channel configuration.
-        """
-
         if not tools.ensure_module("mne"):
             raise ImportError("mne is required for eeg_topomap but is not installed.")
 
-        mne = tools.dynamic_import("mne")
+        import matplotlib.pyplot as plt
         mne_viz = tools.dynamic_import("mne", "viz")
 
-        # Normalize values + channel names
-        if isinstance(values, pd.Series):
-            ch_names_in = list(values.index.astype(str))
-            data = values.to_numpy(dtype=float)
-        elif isinstance(values, Mapping):
-            ch_names_in = [str(k) for k in values.keys()]
-            data = np.asarray(list(values.values()), dtype=float)
-        else:
-            data = np.asarray(values, dtype=float)
-            if ch_names is None:
-                raise ValueError("When `values` is array-like, you must provide `ch_names`.")
-            ch_names_in = [str(c) for c in ch_names]
-
-        if data.ndim != 1:
-            raise ValueError(f"values must be 1D (n_channels,), got shape {data.shape}.")
-        if len(ch_names_in) != data.shape[0]:
-            raise ValueError(f"Length mismatch: {len(ch_names_in)} channel names vs {data.shape[0]} values.")
-
-        # Build or validate Info
-        if info is None:
-            info_use = mne.create_info(ch_names=ch_names_in, sfreq=1.0, ch_types=[ch_type] * len(ch_names_in))
-        else:
-            missing = [c for c in ch_names_in if c not in info["ch_names"]]
-            if missing:
-                raise ValueError(f"Provided info is missing channels: {missing}")
-            info_use = info.copy()
-
-        # Apply montage
-        if montage is not None:
-            try:
-                if isinstance(montage, str):
-                    mont = mne.channels.make_standard_montage(montage)
+        # Paso A — Resolver datos y nombres de canales
+        if values is None:
+            df = self._as_dataframe()
+            if sensor_col not in df.columns:
+                raise ValueError(f"Column '{sensor_col}' not found in data.")
+            if data_col not in df.columns:
+                raise ValueError(f"Column '{data_col}' not found in data.")
+            if df.empty:
+                raise ValueError("DataFrame is empty.")
+            ch_names_in = []
+            data_vals = []
+            for sensor, group in df.groupby(sensor_col, sort=False):
+                raw = group[data_col].values
+                if data_index == -1:
+                    if len(raw) != 1:
+                        raise ValueError(
+                            f"data_index=-1 expects a scalar per sensor, but sensor '{sensor}' has {len(raw)} rows."
+                        )
+                    val = float(raw[0])
+                elif data_index is None:
+                    val = float(np.mean(raw))
                 else:
-                    mont = montage
-                info_use.set_montage(mont, match_case=False, on_missing="ignore")
-            except Exception as e:
-                raise ValueError(f"Failed to set montage {montage!r}: {e}") from e
+                    if data_index >= len(raw):
+                        raise IndexError(
+                            f"data_index={data_index} out of range for sensor '{sensor}' with {len(raw)} rows."
+                        )
+                    val = float(raw[data_index])
+                ch_names_in.append(str(sensor))
+                data_vals.append(val)
+            data_arr = np.asarray(data_vals, dtype=float)
+        else:
+            if isinstance(values, pd.Series):
+                ch_names_in = list(values.index.astype(str))
+                data_arr = values.to_numpy(dtype=float)
+            elif isinstance(values, Mapping):
+                ch_names_in = [str(k) for k in values.keys()]
+                data_arr = np.asarray(list(values.values()), dtype=float)
+            else:
+                data_arr = np.asarray(values, dtype=float)
+                if ch_names is None:
+                    raise ValueError("When values is array-like, ch_names is required.")
+                ch_names_in = [str(c) for c in ch_names]
 
-        # Ensure channel order matches data
-        if info_use["ch_names"] != ch_names_in:
-            info_tmp = mne.create_info(
-                ch_names=ch_names_in, sfreq=info_use["sfreq"], ch_types=[ch_type] * len(ch_names_in)
-            )
-            try:
-                info_tmp.set_montage(info_use.get_montage(), match_case=False, on_missing="ignore")
-            except Exception:
-                pass
-            info_use = info_tmp
+        if data_arr.ndim != 1:
+            raise ValueError(f"values must be 1D, got shape {data_arr.shape}.")
+        if len(ch_names_in) != data_arr.shape[0]:
+            raise ValueError(f"Length mismatch: {len(ch_names_in)} channel names vs {data_arr.shape[0]} values.")
 
-        # MNE has changed the topomap API across versions.
-        # We therefore build keyword arguments dynamically based on the installed MNE.
-        import inspect
+        # Paso B — Validar position_offset
+        if len(position_offset) != 2 or not all(isinstance(v, (int, float)) for v in position_offset):
+            raise ValueError("position_offset must be a tuple/list of two numbers: (y_offset, z_offset).")
 
-        sig = inspect.signature(mne_viz.plot_topomap)
-        supported = set(sig.parameters.keys())
+        # Paso C — Crear Info
+        info_use = self._make_eeg_info(ch_names_in, montage, position_offset, ch_type)
 
-        kwargs = dict(
-            axes=axes,
-            show=show,
-            cmap=cmap,
-            sensors=sensors,
-            outlines=outlines,
-            sphere=sphere,
-            res=res,
-            extrapolate=extrapolate,
-            image_interp=image_interp,
+        # Paso D — All-zeros
+        if np.all(data_arr == 0):
+            cmap = "Greys"
+            colorbar = False
+            vmin = vmax = 0.0
+
+        # Paso E — vmin/vmax
+        if vmin is None:
+            vmin = float(np.nanmin(data_arr))
+        if vmax is None:
+            vmax = float(np.nanmax(data_arr))
+        if vmin > vmax:
+            raise ValueError(f"vmin ({vmin}) must be <= vmax ({vmax}).")
+
+        # Paso F — Plot
+        # Match the legacy plots.py call by default. Optional MNE kwargs are
+        # forwarded only when explicitly provided, because forcing them can
+        # change interpolation/contours across MNE versions.
+        topomap_kwargs = {"sphere": sphere, "res": res}
+        if sensors is not None:
+            topomap_kwargs["sensors"] = sensors
+        if outlines is not None:
+            topomap_kwargs["outlines"] = outlines
+        if contours is not None:
+            topomap_kwargs["contours"] = contours
+        if extrapolate is not None:
+            topomap_kwargs["extrapolate"] = extrapolate
+        if image_interp is not None:
+            topomap_kwargs["image_interp"] = image_interp
+
+        im, _ = mne_viz.plot_topomap(
+            data_arr, info_use, axes=axes, cmap=cmap, show=False,
+            **topomap_kwargs,
         )
+        im.set_clim(vmin, vmax)
 
-        # Optional colorbar support (older MNE may not accept it)
-        needs_manual_colorbar = colorbar and "colorbar" not in supported
-        if "colorbar" in supported:
-            kwargs["colorbar"] = colorbar
+        # Paso G — Colorbar manual
+        if colorbar:
+            mid = vmin + (vmax - vmin) / 2
+            cbar = plt.colorbar(
+                im, ax=axes if axes is not None else im.axes,
+                fraction=0.046, pad=0.0, format=colorbar_fmt, ticks=[vmin, mid, vmax],
+            )
+            cbar.ax.tick_params(labelsize=colorbar_tick_fontsize)
+            if colorbar_label:
+                cbar.set_label(colorbar_label, fontsize=colorbar_label_fontsize)
 
-        # If we need to add the colorbar manually, defer show so the figure
-        # is not rendered yet when we modify its layout.
-        if needs_manual_colorbar:
-            kwargs["show"] = False
+        # Paso H — Título y show
+        if title:
+            (axes if axes is not None else im.axes).set_title(title)
+        if show:
+            plt.show()
 
-        # Value range support differs across versions: either (vmin, vmax) or vlim
-        if "vmin" in supported or "vmax" in supported:
-            if "vmin" in supported:
-                kwargs["vmin"] = vmin
-            if "vmax" in supported:
-                kwargs["vmax"] = vmax
-        elif "vlim" in supported:
-            kwargs["vlim"] = (vmin, vmax)
-
-        im, cn = mne_viz.plot_topomap(data, info_use, **kwargs)
-
-        if needs_manual_colorbar:
-            ax_used = axes if axes is not None else im.axes
-            cb = ax_used.figure.colorbar(im, ax=ax_used)
-            if units is not None:
-                cb.set_label(units, fontsize=colorbar_label_fontsize)
-            if colorbar_tick_fontsize is not None:
-                cb.ax.tick_params(labelsize=colorbar_tick_fontsize)
-            if show:
-                import matplotlib.pyplot as plt
-                plt.show()
-        elif colorbar:
-            # MNE native colorbar: find the colorbar axes matplotlib added
-            fig = (axes if axes is not None else im.axes).figure
-            for cb_ax in fig.axes:
-                if cb_ax.get_label() == "<colorbar>":
-                    if units is not None:
-                        cb_ax.set_ylabel(units, fontsize=colorbar_label_fontsize)
-                    if colorbar_tick_fontsize is not None:
-                        cb_ax.tick_params(labelsize=colorbar_tick_fontsize)
-
-        return im, cn
+        return im
 
     # --------------
     # MEG plotting
