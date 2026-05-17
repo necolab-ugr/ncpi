@@ -5479,6 +5479,8 @@ def _copy_parse_config(base_cfg, *, fields):
         max_seconds=base_cfg.max_seconds,
         drop_bads=base_cfg.drop_bads,
         zscore=base_cfg.zscore,
+        zscore_after_epoch=getattr(base_cfg, "zscore_after_epoch", False),
+        exclude_last_epoch=getattr(base_cfg, "exclude_last_epoch", False),
         aggregate_over=base_cfg.aggregate_over,
         aggregate_method=base_cfg.aggregate_method,
         aggregate_labels=base_cfg.aggregate_labels,
@@ -5954,6 +5956,8 @@ def _build_parse_config_from_form(form):
 
     data_source_kind = (form.get("data_source_kind") or "").strip()
     zscore = str(form.get("parser_zscore", "")).lower() in {"1", "true", "on", "yes"}
+    zscore_after_epoch = str(form.get("parser_zscore_after_epoch", "")).lower() in {"1", "true", "on", "yes"}
+    exclude_last_epoch = str(form.get("parser_exclude_last_epoch", "")).lower() in {"1", "true", "on", "yes"}
     epoching_enabled = str(form.get("parser_enable_epoching", "")).lower() in {"1", "true", "on", "yes"}
     aggregate_enabled = str(form.get("parser_enable_aggregate", "")).lower() in {"1", "true", "on", "yes"}
     epoch_length_s = _optional_float(form.get("parser_epoch_length_s")) if epoching_enabled else None
@@ -5994,6 +5998,10 @@ def _build_parse_config_from_form(form):
         if aggregate_method not in {"sum", "mean", "median"}:
             raise ValueError("Aggregate method must be one of: sum, mean, median.")
         aggregate_labels = _parse_aggregate_labels(form.get("parser_aggregate_labels"))
+        if aggregate_labels is None:
+            aggregate_label_value = (form.get("parser_aggregate_label_value") or "").strip()
+            if aggregate_label_value:
+                aggregate_labels = {str(dim): aggregate_label_value for dim in aggregate_over}
 
     fs_locator = (form.get("parser_fs_locator") or "").strip() or None
     fs_source = (form.get("parser_fs_source") or "").strip()
@@ -6177,6 +6185,8 @@ def _build_parse_config_from_form(form):
             segment_t0_s=segment_t0_s,
             segment_t1_s=segment_t1_s,
             zscore=zscore,
+            zscore_after_epoch=zscore_after_epoch,
+            exclude_last_epoch=exclude_last_epoch,
             aggregate_over=aggregate_over,
             aggregate_method=aggregate_method,
             aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -6215,6 +6225,8 @@ def _build_parse_config_from_form(form):
         segment_t0_s=segment_t0_s,
         segment_t1_s=segment_t1_s,
         zscore=zscore,
+        zscore_after_epoch=zscore_after_epoch,
+        exclude_last_epoch=exclude_last_epoch,
         aggregate_over=aggregate_over,
         aggregate_method=aggregate_method,
         aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},

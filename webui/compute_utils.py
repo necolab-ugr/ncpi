@@ -2312,14 +2312,58 @@ def _build_feature_method_params(method, params, df):
         welch_kwargs = _parse_dict_param(params, "specparam_welch_kwargs") or {}
         nperseg = _parse_int_param(params, "specparam_welch_nperseg", default=None)
         noverlap = _parse_int_param(params, "specparam_welch_noverlap", default=None)
+        nfft = _parse_int_param(params, "specparam_welch_nfft", default=None)
+        window = _get_param(params, "specparam_welch_window", None)
+        detrend = _get_param(params, "specparam_welch_detrend", None)
+        scaling = _get_param(params, "specparam_welch_scaling", None)
+        average = _get_param(params, "specparam_welch_average", None)
         if nperseg is not None:
             welch_kwargs["nperseg"] = int(nperseg)
         if noverlap is not None:
             welch_kwargs["noverlap"] = int(noverlap)
+        if nfft is not None:
+            welch_kwargs["nfft"] = int(nfft)
+        if window:
+            welch_kwargs["window"] = str(window)
+        if detrend:
+            welch_kwargs["detrend"] = False if str(detrend) == "none" else str(detrend)
+        if scaling:
+            welch_kwargs["scaling"] = str(scaling)
+        if average:
+            welch_kwargs["average"] = str(average)
         if welch_kwargs:
             method_params["welch_kwargs"] = welch_kwargs
 
-        model_kwargs = _parse_dict_param(params, "specparam_model_kwargs")
+        model_kwargs = _parse_dict_param(params, "specparam_model_kwargs") or {}
+        peak_threshold = _parse_float_param(params, "specparam_model_peak_threshold", default=None)
+        min_peak_height = _parse_float_param(params, "specparam_model_min_peak_height", default=None)
+        max_n_peaks = _parse_int_param(params, "specparam_model_max_n_peaks", default=None)
+        peak_width_limits = _parse_range_pair(
+            params,
+            "specparam_model_peak_width_min",
+            "specparam_model_peak_width_max",
+        )
+        aperiodic_mode = _get_param(params, "specparam_model_aperiodic_mode", None)
+        verbose_value = _get_param(params, "specparam_model_verbose", None)
+        requested_metrics = []
+        if _parse_bool_param(params, "specparam_model_metric_gof_adjrsquared", default=False):
+            requested_metrics.append("gof_adjrsquared")
+        if _parse_bool_param(params, "specparam_model_metric_error_mse", default=False):
+            requested_metrics.append("error_mse")
+        if peak_threshold is not None:
+            model_kwargs["peak_threshold"] = float(peak_threshold)
+        if min_peak_height is not None:
+            model_kwargs["min_peak_height"] = float(min_peak_height)
+        if max_n_peaks is not None:
+            model_kwargs["max_n_peaks"] = int(max_n_peaks)
+        if peak_width_limits is not None:
+            model_kwargs["peak_width_limits"] = tuple(peak_width_limits)
+        if aperiodic_mode:
+            model_kwargs["aperiodic_mode"] = str(aperiodic_mode)
+        if verbose_value:
+            model_kwargs["verbose"] = _parse_bool(verbose_value, default=False)
+        if requested_metrics:
+            model_kwargs["metrics"] = requested_metrics
         if model_kwargs:
             method_params["model_kwargs"] = model_kwargs
 
@@ -2331,6 +2375,11 @@ def _build_feature_method_params(method, params, df):
         gof_r2 = _parse_float_param(params, "specparam_threshold_gof_rsquared", default=None)
         if gof_r2 is not None:
             thresholds["gof_rsquared"] = float(gof_r2)
+        for idx in range(1, 4):
+            threshold_name = _get_param(params, f"specparam_threshold_metric_{idx}_name", None)
+            threshold_value = _parse_float_param(params, f"specparam_threshold_metric_{idx}_value", default=None)
+            if threshold_name and threshold_value is not None:
+                thresholds[str(threshold_name)] = float(threshold_value)
         if thresholds:
             method_params["metric_thresholds"] = thresholds
 
@@ -2344,6 +2393,171 @@ def _build_feature_method_params(method, params, df):
         "chunksize": chunksize,
         "start_method": start_method,
     }
+
+
+_SPECPARAM_OUTPUT_PATHS = {
+    "aperiodic_exponent": "aperiodic_params.1",
+    "aperiodic_offset": "aperiodic_params.0",
+    "peak_cf": "peak_cf",
+    "peak_pw": "peak_pw",
+    "peak_bw": "peak_bw",
+    "n_peaks": "n_peaks",
+    "gof_rsquared": "metrics.gof_rsquared",
+    "gof_adjrsquared": "metrics.gof_adjrsquared",
+    "error_mse": "metrics.error_mse",
+    "valid": "valid",
+}
+
+
+def _is_missing_feature_value(value):
+    if value is None:
+        return True
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float):
+        return not np.isfinite(value)
+    if isinstance(value, np.ndarray):
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            return _is_missing_feature_value(arr.item())
+        return False
+    try:
+        missing = pd.isna(value)
+    except Exception:
+        return False
+    if isinstance(missing, (bool, np.bool_)):
+        return bool(missing)
+    return False
+
+
+def _coerce_feature_value(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        arr = np.asarray(value).squeeze()
+        if arr.ndim == 0:
+            return arr.item()
+        return arr
+    return value
+
+
+def _get_specparam_path_value(feature, path):
+    if not isinstance(feature, MappingABC):
+        return np.nan
+    current = feature
+    for part in str(path or "").split("."):
+        if part == "":
+            return np.nan
+        if isinstance(current, MappingABC):
+            if part not in current:
+                return np.nan
+            current = current.get(part)
+            continue
+        if isinstance(current, (list, tuple, np.ndarray)) and part.isdigit():
+            arr = np.asarray(current).squeeze()
+            idx = int(part)
+            if idx < 0 or idx >= arr.size:
+                return np.nan
+            current = arr.reshape(-1)[idx]
+            continue
+        return np.nan
+    return _coerce_feature_value(current)
+
+
+def _get_specparam_exponent(feature):
+    value = _get_specparam_path_value(feature, "aperiodic_params.1")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return value if np.isfinite(value) else np.nan
+
+
+def _is_valid_specparam_feature(feature):
+    if isinstance(feature, MappingABC):
+        if "valid" in feature:
+            return bool(feature.get("valid"))
+        return np.isfinite(_get_specparam_exponent(feature))
+    return not _is_missing_feature_value(feature)
+
+
+def _specparam_output_path_from_params(params):
+    output_key = str(_get_param(params, "specparam_output_key", "full_dict") or "full_dict").strip()
+    if output_key in {"", "full", "dict", "full_dict"}:
+        return "full_dict", None
+    if output_key == "custom":
+        custom_path = str(_get_param(params, "specparam_output_path", "") or "").strip()
+        if not custom_path:
+            raise ValueError("Custom specparam output requires a non-empty output path.")
+        return output_key, custom_path
+    if output_key not in _SPECPARAM_OUTPUT_PATHS:
+        raise ValueError(f"Unsupported specparam output value: {output_key}")
+    return output_key, _SPECPARAM_OUTPUT_PATHS[output_key]
+
+
+def _postprocess_specparam_output(output_df, params, job_status=None, job_id=None):
+    if "Features" not in output_df.columns:
+        return output_df
+
+    def _log(message):
+        if job_status is not None and job_id is not None:
+            _append_job_output(job_status, job_id, message)
+
+    output_key, output_path = _specparam_output_path_from_params(params)
+    drop_invalid = _parse_bool_param(params, "specparam_drop_invalid_rows", default=False)
+    reject_nonpositive_exponent = _parse_bool_param(
+        params,
+        "specparam_reject_nonpositive_exponent",
+        default=False,
+    )
+
+    features = list(output_df["Features"].tolist())
+    fit_valid = pd.Series(
+        [_is_valid_specparam_feature(feature) for feature in features],
+        index=output_df.index,
+        dtype=bool,
+    )
+    exponent = pd.Series(
+        [_get_specparam_exponent(feature) for feature in features],
+        index=output_df.index,
+        dtype="float64",
+    )
+
+    if output_path is not None:
+        values = [_get_specparam_path_value(feature, output_path) for feature in features]
+        if reject_nonpositive_exponent and output_path == "aperiodic_params.1":
+            values = [
+                np.nan if (not np.isfinite(exp_value) or exp_value <= 0.0) else value
+                for value, exp_value in zip(values, exponent.tolist())
+            ]
+        output_df = output_df.copy()
+        output_df["Features"] = values
+        _log(f"Specparam output field selected: {output_path}.")
+
+    if drop_invalid:
+        keep_mask = fit_valid.copy()
+        if output_path is not None:
+            output_missing = output_df["Features"].map(_is_missing_feature_value)
+            keep_mask &= ~output_missing
+        if reject_nonpositive_exponent:
+            keep_mask &= exponent.gt(0.0).fillna(False)
+        rows_before = int(len(output_df))
+        output_df = output_df.loc[keep_mask].reset_index(drop=True)
+        rows_after = int(len(output_df))
+        _log(f"Specparam post-processing dropped {rows_before - rows_after} invalid/NaN row(s).")
+    elif reject_nonpositive_exponent and output_path != "aperiodic_params.1":
+        _log(
+            "Specparam non-positive exponent rejection is only applied to row dropping, "
+            "or when the selected output is aperiodic exponent."
+        )
+
+    return output_df
+
+
+def _postprocess_features_output(method, output_df, params, job_status=None, job_id=None):
+    if method == "specparam":
+        return _postprocess_specparam_output(output_df, params, job_status, job_id)
+    return output_df
 
 
 
@@ -2898,6 +3112,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
         _append_job_output(job_status, job_id, "Attaching computed features to dataframe.")
         output_df["FeatureMethod"] = method
+        output_df = _postprocess_features_output(method, output_df, params, job_status, job_id)
 
         # By default, persist features into the same parsed dataframe pickle.
         input_df_path = params['file_paths'].get('data_file')
