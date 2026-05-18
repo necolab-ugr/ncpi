@@ -144,7 +144,6 @@
             parserSegmentT1S: '',
             parserZscore: false,
             parserZscoreAfterEpoch: false,
-            parserExcludeLastEpoch: false,
             parserEnableAggregate: false,
             parserAggregateOverSelected: ['sensor'],
             parserAggregateMethod: 'sum',
@@ -291,7 +290,6 @@
                     'parserSegmentT1S',
                     'parserZscore',
                     'parserZscoreAfterEpoch',
-                    'parserExcludeLastEpoch',
                     'parserEnableAggregate',
                     'parserAggregateOverSelected',
                     'parserAggregateMethod',
@@ -1971,7 +1969,6 @@
                 this.parserSegmentT1S = '';
                 this.parserZscore = false;
                 this.parserZscoreAfterEpoch = false;
-                this.parserExcludeLastEpoch = false;
                 this.parserEnableAggregate = false;
                 this.parserAggregateOverSelected = ['sensor'];
                 this.parserAggregateMethod = 'sum';
@@ -3132,7 +3129,6 @@
                     }
                     lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
                     lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
-                    lines.push(`    exclude_last_epoch=${this.parserExcludeLastEpoch ? 'True' : 'False'},`);
                     if (this.parserEnableAggregate) {
                         const aggDims = (this.parserAggregateOverSelected || [])
                             .map((item) => String(item || '').trim())
@@ -3235,7 +3231,6 @@
                 }
                 lines.push(`    zscore=${zscoreFlag},`);
                 lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
-                lines.push(`    exclude_last_epoch=${this.parserExcludeLastEpoch ? 'True' : 'False'},`);
                 if (this.parserEnableAggregate) {
                     const aggDims = (this.parserAggregateOverSelected || [])
                         .map((item) => String(item || '').trim())
@@ -4610,7 +4605,7 @@
                                     <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                         <input type="checkbox" x-model="parserZscore"
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                        Apply z-score normalization
+                                        Apply z-score before epoching
                                     </label>
                                     <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                         <input type="checkbox" x-model="parserZscoreAfterEpoch"
@@ -4879,7 +4874,7 @@
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                     <input type="checkbox" x-model="parserZscore"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Apply z-score normalization
+                                    Apply z-score before epoching
                                 </label>
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
                                     <input type="checkbox" x-model="parserZscoreAfterEpoch"
@@ -4996,14 +4991,11 @@
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                     </label>
                                 </div>
-                                <label x-show="parserEnableEpoching" x-cloak class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                    <input type="checkbox" x-model="parserExcludeLastEpoch"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Exclude last epoch
-                                </label>
+                                <p x-show="parserEnableEpoching" x-cloak class="text-xs text-gray-500 dark:text-gray-100">
+                                    If any final epoch is shorter than the rest, the final epoch is excluded automatically for every sample.
+                                </p>
                                 <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
                                 <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscoreAfterEpoch ? '1' : '0'">
-                                <input type="hidden" name="parser_exclude_last_epoch" :value="parserExcludeLastEpoch ? '1' : '0'">
                             </div>
                         </template>
                     </div>
