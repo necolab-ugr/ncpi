@@ -336,6 +336,7 @@
                     }
                 }
                 this.persistSimulationLocalFiles(this.simulationLocalFiles || []);
+                this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
             },
             saveComputeFlowSnapshot(choice) {
                 const normalized = this.normalizeComputeFlowChoice(choice);
@@ -434,7 +435,12 @@
             },
             setSimulationSourceMode(mode) {
                 const nextMode = mode === 'upload' ? 'upload' : 'server-path';
-                if (this.simulationSourceMode === nextMode) return;
+                if (this.simulationSourceMode === nextMode) {
+                    if (nextMode === 'server-path') {
+                        this.syncAdditionalFileSourceModeWithDataSource();
+                    }
+                    return;
+                }
                 this.simulationSourceMode = nextMode;
                 this.parserFilenameFormat = '';
                 this.parserError = '';
@@ -455,6 +461,7 @@
                 this.appendSimulationSelection = false;
                 if (nextMode === 'server-path') {
                     this.clearSimulationUploadInput();
+                    this.syncAdditionalFileSourceModeWithDataSource();
                 }
             },
             openSimulationFolderPicker(append = false) {
@@ -670,6 +677,8 @@
                 if (!current.includes(selectedPath)) current.push(selectedPath);
                 this.simulationFolderPaths = current;
                 this.simulationFolderPath = current.length > 0 ? current[0] : '';
+                this.simulationSourceMode = 'server-path';
+                this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                 await this.inspectSimulationFolderPath();
             },
             async removeSimulationFolderPath(path) {
@@ -841,6 +850,55 @@
                 };
                 await this.inspectSimulationFolderPath();
             },
+            isServerDataFolderMode() {
+                return this.computeFlowChoice === 'new-data' && this.simulationSourceMode === 'server-path';
+            },
+            selectedServerDataFolderPath() {
+                if (!this.isServerDataFolderMode()) return '';
+                const analysisPath = Array.isArray(this.parserAnalysisFolderPaths)
+                    ? String(this.parserAnalysisFolderPaths[0] || '').trim()
+                    : '';
+                if (analysisPath) return analysisPath;
+                const primaryPath = String(this.simulationFolderPath || '').trim();
+                if (primaryPath) return primaryPath;
+                const folderPaths = Array.isArray(this.simulationFolderPaths)
+                    ? this.simulationFolderPaths.map((item) => String(item || '').trim()).filter((item) => item.length > 0)
+                    : [];
+                return folderPaths.length > 0 ? folderPaths[0] : '';
+            },
+            clearAdditionalLocalFiles() {
+                const input = document.getElementById('additional-file-input');
+                if (input) input.value = '';
+                this.additionalLocalFiles = [];
+                this.additionalFileDropActive = false;
+            },
+            syncAdditionalFileSourceModeWithDataSource(options = {}) {
+                if (!this.isServerDataFolderMode()) return;
+                const hadLocalFiles = (this.additionalLocalFiles || []).length > 0;
+                this.additionalFileSourceMode = 'server-path';
+                this.additionalFileDropActive = false;
+                if (options.clearLocalFiles) {
+                    this.clearAdditionalLocalFiles();
+                    if (hadLocalFiles && !(this.additionalServerFilePaths || []).length) {
+                        this.metadataInfo = null;
+                        this.metadataError = '';
+                    }
+                }
+            },
+            detectedSamplingFrequencyHz() {
+                const hint = Number(this.parserInfo?.fs_hint_hz);
+                if (Number.isFinite(hint) && hint > 0) return hint;
+                if (String(this.parserFsSource || '').trim() === '__numeric__') {
+                    const manual = Number(this.parserFsManual);
+                    if (Number.isFinite(manual) && manual > 0) return manual;
+                }
+                return '';
+            },
+            detectedSamplingFrequencyNperseg() {
+                const fsHz = this.detectedSamplingFrequencyHz();
+                if (!fsHz) return '';
+                return String(Math.max(1, Math.round(Number(fsHz))));
+            },
             async chooseServerDirectory() {
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
                 if (!selectedPath) {
@@ -884,8 +942,13 @@
                 }
             },
             setAdditionalFileSourceMode(mode) {
-                if (this.additionalFileSourceMode === mode) return;
-                this.additionalFileSourceMode = mode;
+                const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+                if (nextMode === 'upload' && this.isServerDataFolderMode()) {
+                    this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
+                    return;
+                }
+                if (this.additionalFileSourceMode === nextMode) return;
+                this.additionalFileSourceMode = nextMode;
                 this.additionalFileDropActive = false;
             },
             openAdditionalLocalFilePicker() {
@@ -922,11 +985,13 @@
                 await this.inspectAllAdditionalFiles();
             },
             async openServerFileBrowser() {
+                this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                 this.serverFileBrowserError = '';
                 this.serverFileBrowserOpen = true;
-                const startPath = this.additionalServerFilePaths.length > 0
+                const selectedDataFolder = this.selectedServerDataFolderPath();
+                const startPath = selectedDataFolder || (this.additionalServerFilePaths.length > 0
                     ? this.additionalServerFilePaths[this.additionalServerFilePaths.length - 1].replace(/[^/\\]*$/, '').replace(/[/\\]$/, '')
-                    : '';
+                    : '');
                 await this.loadServerFileBrowser(startPath);
             },
             async loadServerFileBrowser(path) {
@@ -1616,11 +1681,13 @@
                     this.parserAnalysisFolderPaths = [token.value];
                     this.parserAnalysisFolderNames = [];
                     this.ensureDataLocatorMatchesSelectedFolder();
+                    this.syncAdditionalFileSourceModeWithDataSource();
                     return;
                 }
                 this.parserAnalysisFolderNames = [token.value];
                 this.parserAnalysisFolderPaths = [];
                 this.ensureDataLocatorMatchesSelectedFolder();
+                this.syncAdditionalFileSourceModeWithDataSource();
             },
             parserSelectedFolderCount() {
                 let selectedCount = 0;
@@ -1651,6 +1718,7 @@
                     ? [currentName]
                     : (availableNames.length > 0 ? [availableNames[0]] : []);
                 this.ensureDataLocatorMatchesSelectedFolder();
+                this.syncAdditionalFileSourceModeWithDataSource();
             },
             ensureDataLocatorMatchesSelectedFolder() {
                 const allowed = this.parserDataLocatorCandidates();
@@ -1852,6 +1920,7 @@
                 this.empiricalUploadSummary = '';
                 this.clearEmpiricalUploadInput();
                 this.resetParserConfig();
+                this.syncAdditionalFileSourceModeWithDataSource();
             },
             resetParserConfig() {
                 this.parserInfo = null;
@@ -2046,6 +2115,7 @@
                 const previousFolderPath = String(this.simulationFolderPath || '').trim();
                 try {
                     this.simulationSourceMode = 'server-path';
+                    this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                     this.clearSimulationUploadInput();
                     this.simulationLocalFiles = [];
                     const buildInspectFormData = (inspectMode) => {
@@ -3750,8 +3820,14 @@
                             @drop.prevent="onAdditionalFileDrop($event)">
                             <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
                                 <button type="button" @click.stop="setAdditionalFileSourceMode('upload')"
+                                    :disabled="isServerDataFolderMode()"
+                                    :title="isServerDataFolderMode() ? 'Server data folders use server metadata files.' : ''"
                                     class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                    :class="additionalFileSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    :class="additionalFileSourceMode === 'upload'
+                                        ? 'border-primary bg-primary/10 text-primary font-semibold'
+                                        : (isServerDataFolderMode()
+                                            ? 'border-gray-200 dark:border-[#323b67] text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed'
+                                            : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300')">
                                     Local files
                                 </button>
                                 <button type="button" @click.stop="setAdditionalFileSourceMode('server-path')"
@@ -5087,7 +5163,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range min (Hz)</span>
-                                    <input type="number" step="any" name="specparam_freq_min" value="1.0"
+                                    <input type="number" step="any" name="specparam_freq_min" value="5.0"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
@@ -5108,8 +5184,9 @@
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch nperseg</span>
                                     <input type="number" step="1" min="1" name="specparam_welch_nperseg"
+                                        :value="detectedSamplingFrequencyNperseg()"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
+                                        :placeholder="detectedSamplingFrequencyNperseg() || 'Optional'">
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch noverlap</span>
@@ -5182,19 +5259,19 @@
                             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak threshold</span>
-                                    <input type="number" step="any" name="specparam_model_peak_threshold"
+                                    <input type="number" step="any" name="specparam_model_peak_threshold" value="1.0"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Min peak height</span>
-                                    <input type="number" step="any" name="specparam_model_min_peak_height"
+                                    <input type="number" step="any" name="specparam_model_min_peak_height" value="0"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Max number of peaks</span>
-                                    <input type="number" step="1" min="0" name="specparam_model_max_n_peaks"
+                                    <input type="number" step="1" min="0" name="specparam_model_max_n_peaks" value="5"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
@@ -5203,13 +5280,13 @@
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak width min</span>
-                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_min"
+                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_min" value="10.0"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak width max</span>
-                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_max"
+                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_max" value="50.0"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
@@ -5221,7 +5298,7 @@
                                     <select name="specparam_model_aperiodic_mode"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="">Default</option>
-                                        <option value="fixed">fixed</option>
+                                        <option value="fixed" selected>fixed</option>
                                         <option value="knee">knee</option>
                                     </select>
                                 </label>
@@ -5267,7 +5344,7 @@
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Threshold gof_rsquared</span>
-                                    <input type="number" min="0" max="1" step="any" name="specparam_threshold_gof_rsquared"
+                                    <input type="number" min="0" max="1" step="any" name="specparam_threshold_gof_rsquared" value="0.8"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
@@ -5304,7 +5381,7 @@
                                     <select name="specparam_output_key"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <option value="full_dict">Full specparam dictionary</option>
-                                        <option value="aperiodic_exponent">Aperiodic exponent</option>
+                                        <option value="aperiodic_exponent" selected>Aperiodic exponent</option>
                                         <option value="aperiodic_offset">Aperiodic offset</option>
                                         <option value="peak_cf">Selected peak CF</option>
                                         <option value="peak_pw">Selected peak PW</option>
@@ -5332,17 +5409,17 @@
                                     Debug mode
                                 </label>
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="specparam_normalize" value="1"
+                                    <input type="checkbox" name="specparam_normalize" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Normalize each sample
                                 </label>
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="specparam_drop_invalid_rows" value="1"
+                                    <input type="checkbox" name="specparam_drop_invalid_rows" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Drop invalid/NaN feature rows
                                 </label>
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="specparam_reject_nonpositive_exponent" value="1"
+                                    <input type="checkbox" name="specparam_reject_nonpositive_exponent" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Reject non-positive exponent
                                 </label>
