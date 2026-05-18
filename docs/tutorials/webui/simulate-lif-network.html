@@ -61,19 +61,41 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
+        <section id="overview">
           <h1>Simulate a LIF Network</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
-          <p><a class="link" href="../webui-index.html">Back to WebUI Tutorials Index</a></p>
+          <p>
+            <span class="pill">WebUI</span>
+            <span class="pill">Hagen Model</span>
+            <span class="pill">Single Trial</span>
+          </p>
+          <p>
+            This tutorial runs a single-trial Hagen simulation with default parameters, changing only
+            <code>local_num_threads=32</code> and <code>NumPy seed=10</code>. Then it opens Analysis,
+            loads all detected simulation files, and generates a raster plot of spikes.
+          </p>
         </section>
+
+        <section id="video">
+          <h2>Recorded Walkthrough</h2>
+          <p>
+            The video below is expected at:
+            <code>docs/tutorials/automation/videos/simulate-lif-network-raster.webm</code>
+          </p>
+          <video controls preload="metadata" poster="../automation/videos/simulate-lif-network-raster-poster.png">
+            <source src="../automation/videos/simulate-lif-network-raster.webm" type="video/webm">
+            Your browser does not support the video tag.
+          </video>
+        </section>
+
+        <p><a class="link" href="../webui-index.html">Back to WebUI Tutorials Index</a></p>
       </article>
     </main>
 
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#video">Recorded Walkthrough</a></li>
       </ul>
     </aside>
   </div>
