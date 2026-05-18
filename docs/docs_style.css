@@ -48,11 +48,13 @@ a:hover {
 .layout {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) 260px;
+  grid-template-areas: "left content right";
   min-height: 100vh;
 }
 
 .sidebar-left,
 .sidebar-right {
+  grid-area: left;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -65,6 +67,7 @@ a:hover {
 }
 
 .sidebar-right {
+  grid-area: right;
   border-right: 0;
   border-left: 1px solid var(--line);
 }
@@ -210,6 +213,8 @@ a:hover {
 }
 
 .content {
+  grid-area: content;
+  min-width: 0;
   padding: 24px 28px 34px;
 }
 
@@ -282,6 +287,19 @@ pre code {
   color: #0d3f63;
 }
 
+img,
+video,
+iframe {
+  max-width: 100%;
+  height: auto;
+}
+
+table {
+  width: 100%;
+  display: block;
+  overflow-x: auto;
+}
+
 .pill {
   display: inline-block;
   padding: 0.18rem 0.58rem;
@@ -333,7 +351,7 @@ pre code {
 }
 
 .card-grid.tutorial-options {
-  grid-template-columns: repeat(2, minmax(340px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1.2rem;
 }
 
@@ -354,6 +372,10 @@ pre code {
 @media (max-width: 1040px) {
   .layout {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "left"
+      "content"
+      "right";
   }
 
   .sidebar-left,
@@ -365,10 +387,53 @@ pre code {
   }
 
   .content {
-    padding: 14px;
+    padding: 16px;
   }
 
   .card-grid {
     grid-template-columns: 1fr;
+  }
+
+  .card-grid.tutorial-options {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .content {
+    padding: 12px;
+  }
+
+  section {
+    padding: 1rem;
+  }
+
+  .brand {
+    margin-bottom: 12px;
+  }
+
+  .left-nav a,
+  .left-nav summary.subnav,
+  .right-nav a {
+    font-size: 0.84rem;
+    padding: 0.34rem 0.66rem;
+  }
+
+  .left-nav a.subnav2 {
+    margin-left: 1.5rem;
+    font-size: 0.76rem;
+  }
+
+  .tutorial-option {
+    min-height: auto;
+    padding: 0.95rem;
+  }
+
+  .tutorial-option img {
+    height: 200px;
+  }
+
+  pre {
+    padding: 0.78rem;
   }
 }
