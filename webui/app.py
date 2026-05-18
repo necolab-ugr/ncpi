@@ -1,4 +1,5 @@
 import os
+import copy
 import shutil
 import subprocess
 import signal
@@ -14,6 +15,7 @@ import inspect
 import re
 import traceback
 import functools
+import textwrap
 from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -128,11 +130,26 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".tsv"
+    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".ds", ".tsv", ".vhdr", ".dat"
 }
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
+
+
+def _is_supported_ctf_dataset_path(path):
+    return os.path.isdir(path) and Path(str(path)).suffix.lower() == ".ds"
+
+
+def _is_supported_parser_regular_file(path):
+    return os.path.isfile(path) and Path(str(path)).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
+
+
+def _is_supported_parser_path(path):
+    return _is_supported_ctf_dataset_path(path) or _is_supported_parser_regular_file(path)
+
+
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX = "__file_extracted_sep__"
 FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
 FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
@@ -333,6 +350,41 @@ FOUR_AREA_GRID_KEYS = [
     "inter_area.J_YX",
     "inter_area.delay_YX",
 ]
+
+FOUR_AREA_LOCAL_OVERRIDE_KEYS = [
+    "N_X",
+    "C_m_X",
+    "tau_m_X",
+    "E_L_X",
+    "C_YX",
+    "J_YX",
+    "delay_YX",
+    "tau_syn_YX",
+    "n_ext",
+    "nu_ext",
+    "J_ext",
+]
+
+FOUR_AREA_LOCAL_OVERRIDE_LITERAL_KEYS = {
+    "N_X",
+    "C_m_X",
+    "tau_m_X",
+    "E_L_X",
+    "C_YX",
+    "J_YX",
+    "delay_YX",
+    "tau_syn_YX",
+    "n_ext",
+}
+
+
+def _four_area_area_override_defaults(areas=None):
+    area_names = list(areas or FOUR_AREA_DEFAULTS["areas"])
+    defaults = {}
+    for area_index in range(len(area_names)):
+        for key in FOUR_AREA_LOCAL_OVERRIDE_KEYS:
+            defaults[f"area_{area_index}.{key}"] = copy.deepcopy(FOUR_AREA_DEFAULTS[key])
+    return defaults
 
 PREDEFINED_KERNEL_ANALYSIS_PARAMS_RELATIVE_PATHS = {
     "hagen": os.path.join(
@@ -1239,6 +1291,7 @@ def _simulation_grid_defaults(model_type):
         "inter_area.J_YX": FOUR_AREA_DEFAULTS["inter_area.J_YX"],
         "inter_area.delay_YX": FOUR_AREA_DEFAULTS["inter_area.delay_YX"],
     }
+    defaults.update(_four_area_area_override_defaults(defaults["areas"]))
     return defaults
 
 
@@ -2496,7 +2549,13 @@ def _collect_empirical_folder_files(folder_path):
         raise ValueError(f"Empirical folder does not exist: {root}")
 
     matches = []
-    for current_root, _, files in os.walk(root):
+    if _is_supported_ctf_dataset_path(root):
+        return [root]
+    for current_root, dirs, files in os.walk(root):
+        ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
+        dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
+        for name in ctf_dirs:
+            matches.append(os.path.join(current_root, name))
         for name in files:
             ext = Path(name).suffix.lower()
             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -2515,7 +2574,13 @@ def _collect_simulation_folder_files(folder_path):
         raise ValueError(f"Simulation outputs folder does not exist: {root}")
 
     matches = []
-    for current_root, _, files in os.walk(root):
+    if _is_supported_ctf_dataset_path(root):
+        return [root]
+    for current_root, dirs, files in os.walk(root):
+        ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
+        dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
+        for name in ctf_dirs:
+            matches.append(os.path.join(current_root, name))
         for name in files:
             ext = Path(name).suffix.lower()
             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -2787,66 +2852,79 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
         branch_directories = defaultdict(set)
         branch_dir_ext_files = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
-        for current_root, _, files in os.walk(root):
-            rel_dir = os.path.relpath(current_root, root)
-            rel_dir_posix = _to_posix_relpath(rel_dir)
-            if rel_dir_posix == ".":
-                dir_depth = 0
-            else:
-                dir_depth = len([token for token in rel_dir_posix.split("/") if token])
-            if dir_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
+        def _append_folder_entry(full_path, name, ext):
+            rel_path = _to_posix_relpath(os.path.relpath(full_path, root))
+            rel_parts = [token for token in rel_path.split("/") if token]
+            file_depth = max(0, len(rel_parts) - 1)
+            if file_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
                 raise ValueError(
-                    f"{kind_label} folder '{folder_name}' exceeds the maximum supported nested depth "
-                    f"({FEATURES_MAX_SUBFOLDER_DEPTH}) at '{current_root}'."
+                    f"{kind_label} folder '{folder_name}' contains a data source deeper than the supported "
+                    f"{FEATURES_MAX_SUBFOLDER_DEPTH} nested levels: '{full_path}'."
                 )
-            if rel_dir_posix != ".":
-                parts = [token for token in rel_dir_posix.split("/") if token]
-                branch_name = parts[0]
-                branch_rel_dir = "/".join(parts[1:]) if len(parts) > 1 else "."
-                branch_directories[branch_name].add(branch_rel_dir or ".")
+            row = {
+                "path": full_path,
+                "name": str(name),
+                "extension": ext,
+                "folder_path": root,
+                "folder_name": folder_name,
+                "relative_path": rel_path,
+            }
+            if len(rel_parts) >= 2:
+                level1_subfolder = rel_parts[0]
+                subfolder_relative_path = "/".join(rel_parts[1:])
+                subfolder_relative_dir = _to_posix_relpath(os.path.dirname(subfolder_relative_path))
+                row["level1_subfolder"] = level1_subfolder
+                row["subfolder_relative_path"] = subfolder_relative_path
+                row["subfolder_relative_dir"] = subfolder_relative_dir
+                branch_directories[level1_subfolder].add(subfolder_relative_dir or ".")
+                branch_dir_ext_files[level1_subfolder][subfolder_relative_dir][ext].append(row)
+            else:
+                row["level1_subfolder"] = ""
+                row["subfolder_relative_path"] = rel_parts[0] if rel_parts else row["name"]
+                row["subfolder_relative_dir"] = "."
+            folder_entries.append(row)
+            extension_counts[ext] += 1
+            return row
 
-            for name in files:
-                ext = Path(name).suffix.lower()
-                if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
-                    continue
-                full_path = os.path.join(current_root, name)
-                if not os.path.isfile(full_path):
-                    skipped_unreadable_paths[root].append(full_path)
-                    skipped_unreadable_by_ext[root][ext or "(no extension)"] += 1
-                    if os.path.islink(full_path):
-                        skipped_broken_symlink_paths[root].append(full_path)
-                    continue
-                rel_path = _to_posix_relpath(os.path.relpath(full_path, root))
-                rel_parts = [token for token in rel_path.split("/") if token]
-                file_depth = max(0, len(rel_parts) - 1)
-                if file_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
-                    raise ValueError(
-                        f"{kind_label} folder '{folder_name}' contains a file deeper than the supported "
-                        f"{FEATURES_MAX_SUBFOLDER_DEPTH} nested levels: '{full_path}'."
-                    )
-                row = {
-                    "path": full_path,
-                    "name": str(name),
-                    "extension": ext,
-                    "folder_path": root,
-                    "folder_name": folder_name,
-                    "relative_path": rel_path,
-                }
-                if len(rel_parts) >= 2:
-                    level1_subfolder = rel_parts[0]
-                    subfolder_relative_path = "/".join(rel_parts[1:])
-                    subfolder_relative_dir = _to_posix_relpath(os.path.dirname(subfolder_relative_path))
-                    row["level1_subfolder"] = level1_subfolder
-                    row["subfolder_relative_path"] = subfolder_relative_path
-                    row["subfolder_relative_dir"] = subfolder_relative_dir
-                    branch_directories[level1_subfolder].add(subfolder_relative_dir or ".")
-                    branch_dir_ext_files[level1_subfolder][subfolder_relative_dir][ext].append(row)
+        if _is_supported_ctf_dataset_path(root):
+            _append_folder_entry(root, os.path.basename(root), ".ds")
+        else:
+            for current_root, dirnames, files in os.walk(root):
+                ctf_dirnames = [name for name in dirnames if Path(name).suffix.lower() == ".ds"]
+                dirnames[:] = [name for name in dirnames if Path(name).suffix.lower() != ".ds"]
+                rel_dir = os.path.relpath(current_root, root)
+                rel_dir_posix = _to_posix_relpath(rel_dir)
+                if rel_dir_posix == ".":
+                    dir_depth = 0
                 else:
-                    row["level1_subfolder"] = ""
-                    row["subfolder_relative_path"] = rel_parts[0] if rel_parts else row["name"]
-                    row["subfolder_relative_dir"] = "."
-                folder_entries.append(row)
-                extension_counts[ext] += 1
+                    dir_depth = len([token for token in rel_dir_posix.split("/") if token])
+                if dir_depth > FEATURES_MAX_SUBFOLDER_DEPTH:
+                    raise ValueError(
+                        f"{kind_label} folder '{folder_name}' exceeds the maximum supported nested depth "
+                        f"({FEATURES_MAX_SUBFOLDER_DEPTH}) at '{current_root}'."
+                    )
+                if rel_dir_posix != ".":
+                    parts = [token for token in rel_dir_posix.split("/") if token]
+                    branch_name = parts[0]
+                    branch_rel_dir = "/".join(parts[1:]) if len(parts) > 1 else "."
+                    branch_directories[branch_name].add(branch_rel_dir or ".")
+                for name in ctf_dirnames:
+                    full_path = os.path.join(current_root, name)
+                    if os.path.isdir(full_path):
+                        _append_folder_entry(full_path, name, ".ds")
+
+                for name in files:
+                    ext = Path(name).suffix.lower()
+                    if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
+                        continue
+                    full_path = os.path.join(current_root, name)
+                    if not os.path.isfile(full_path):
+                        skipped_unreadable_paths[root].append(full_path)
+                        skipped_unreadable_by_ext[root][ext or "(no extension)"] += 1
+                        if os.path.islink(full_path):
+                            skipped_broken_symlink_paths[root].append(full_path)
+                        continue
+                    _append_folder_entry(full_path, name, ext)
 
         folder_entries.sort(key=lambda item: item["path"])
 
@@ -3036,6 +3114,20 @@ def _collect_supported_folder_file_entries(folder_paths, kind_label, data_file_s
                     and str(item.get("subfolder_relative_dir") or ".") == selected_dir
                     and str(item.get("extension") or "").lower() == selected_data_extension.lower()
                 ]
+                if not branch_rows and selected_data_extension.lower() == ".ds":
+                    branch_ds_rows = [
+                        item for item in folder_entries
+                        if str(item.get("level1_subfolder") or "") == branch
+                        and str(item.get("extension") or "").lower() == ".ds"
+                    ]
+                    if len(branch_ds_rows) == 1:
+                        branch_rows = branch_ds_rows
+                    elif len(branch_ds_rows) > 1:
+                        structure_warnings.append(
+                            f"Subfolder '{branch}' contains multiple '.ds' datasets and none matched "
+                            f"the reference directory '{selected_dir}' — skipped."
+                        )
+                        continue
                 if not branch_rows:
                     structure_warnings.append(
                         f"Subfolder '{branch}' has no data file at '{selected_dir}' with extension "
@@ -3216,7 +3308,7 @@ def _validate_simulation_file_path(file_path):
     candidate = os.path.realpath((file_path or "").strip())
     if not candidate:
         raise ValueError("Provide a simulation output file path.")
-    if not os.path.isfile(candidate):
+    if not _is_supported_parser_path(candidate):
         raise ValueError(f"Simulation output file does not exist: {candidate}")
     ext = Path(candidate).suffix.lower()
     if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
@@ -3234,6 +3326,16 @@ def _extract_filename_text_chains(file_name):
     if not stem:
         return []
     return [tok for tok in stem.split("_") if tok.strip()]
+
+
+def _extract_filename_text_parts_by_separator(file_name):
+    stem = Path(str(file_name or "")).stem
+    if not stem:
+        return {}
+    return {
+        "underscore": [tok.strip() for tok in stem.split("_") if tok.strip()],
+        "hyphen": [tok.strip() for tok in stem.split("-") if tok.strip()],
+    }
 
 
 _FILENAME_FORMAT_TOKEN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -3364,34 +3466,42 @@ def _filter_named_items_by_filename_format(items, get_name, format_spec):
 
 
 def _build_file_extracted_virtual_fields(file_names):
-    chain_rows = [_extract_filename_text_chains(name) for name in (file_names or [])]
-    max_chains = max((len(row) for row in chain_rows), default=0)
     fields = []
+    separator_specs = [("underscore", "_"), ("hyphen", "-")]
+    split_rows = [_extract_filename_text_parts_by_separator(name) for name in (file_names or [])]
 
-    for idx in range(max_chains):
-        ordered_values = []
-        seen = set()
-        for row in chain_rows:
-            if idx >= len(row):
-                continue
-            token = str(row[idx] or "").strip()
-            if not token:
-                continue
-            key = token.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            ordered_values.append(token)
-        if not ordered_values:
+    for sep_name, sep_char in separator_specs:
+        rows = [row.get(sep_name) or [] for row in split_rows]
+        max_parts = max((len(parts) for parts in rows), default=0)
+        if max_parts <= 1:
             continue
-        preview = "/".join(ordered_values[:6])
-        if len(ordered_values) > 6:
-            preview += "/..."
-        fields.append({
-            "key": f"{FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX}{idx}",
-            "label": f"file extracted: {preview}",
-            "values": ordered_values,
-        })
+        for idx in range(max_parts):
+            ordered_values = []
+            seen = set()
+            for parts in rows:
+                if idx >= len(parts):
+                    continue
+                token = str(parts[idx] or "").strip()
+                if not token:
+                    continue
+                key = token.lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered_values.append(token)
+            if not ordered_values:
+                continue
+            preview = "/".join(ordered_values[:6])
+            if len(ordered_values) > 6:
+                preview += "/..."
+            fields.append({
+                "key": f"{FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX}{sep_name}__{idx}",
+                "label": f"file extracted: '{sep_char}' block {idx + 1} -> {preview}",
+                "values": ordered_values,
+                "separator": sep_char,
+                "separator_name": sep_name,
+                "index": idx,
+            })
 
     return fields
 
@@ -3454,32 +3564,54 @@ def _attach_file_extracted_virtual_field(description, file_names, filename_forma
     return enriched
 
 
-def _file_extracted_chain_index(locator):
+def _file_extracted_locator_spec(locator):
     if not isinstance(locator, str):
         return None
-    if locator == FILE_EXTRACTED_VIRTUAL_FIELD:
+    raw = str(locator).strip()
+    if raw == FILE_EXTRACTED_VIRTUAL_FIELD:
         # Backward compatibility with previous single extracted field.
-        return -1
-    if not locator.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
+        return {"separator_name": "underscore", "separator": "_", "index": -1}
+    if raw.startswith(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):
+        suffix = raw[len(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):].strip()
+        if "__" not in suffix:
+            return None
+        sep_name, idx_raw = suffix.split("__", 1)
+        sep_name = sep_name.strip().lower()
+        if sep_name not in {"underscore", "hyphen"} or not idx_raw.isdigit():
+            return None
+        return {
+            "separator_name": sep_name,
+            "separator": "_" if sep_name == "underscore" else "-",
+            "index": int(idx_raw),
+        }
+    if not raw.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
         return None
-    suffix = locator[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
+    suffix = raw[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
     if not suffix.isdigit():
         return None
-    return int(suffix)
+    return {"separator_name": "underscore", "separator": "_", "index": int(suffix)}
+
+
+def _file_extracted_chain_index(locator):
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
+        return None
+    return int(spec["index"])
 
 
 def _resolve_file_extracted_value(file_name, locator):
-    index = _file_extracted_chain_index(locator)
-    if index is None:
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
         return None
-    chains = _extract_filename_text_chains(file_name)
-    if not chains:
+    parts = _extract_filename_text_parts_by_separator(file_name).get(str(spec["separator_name"])) or []
+    if not parts:
         return None
+    index = int(spec["index"])
     if index < 0:
-        return chains[-1]
-    if index >= len(chains):
+        return parts[-1]
+    if index >= len(parts):
         return None
-    return chains[index]
+    return parts[index]
 
 
 def _resolve_file_token_value(file_name, locator, filename_format_spec):
@@ -4133,6 +4265,52 @@ def _summarize_value_for_ui(value):
     return summary
 
 
+def _summarize_lazy_hdf5_key_for_ui(source_obj, key_name):
+    key = str(key_name or "").strip()
+    if not key:
+        return None
+
+    file_path = str(getattr(source_obj, "file_path", "") or "").strip()
+    group_path = str(getattr(source_obj, "group_path", "/") or "/").strip() or "/"
+    if not file_path:
+        return None
+
+    try:
+        import h5py  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        with h5py.File(file_path, "r") as h5f:
+            if group_path not in h5f:
+                return None
+            group = h5f[group_path]
+            if key not in group:
+                return None
+            node = group[key]
+            if isinstance(node, h5py.Dataset):
+                shape = [int(dim) for dim in node.shape]
+                dtype = str(node.dtype)
+                return {
+                    "python_type": "HDF5 dataset",
+                    "dtype": dtype,
+                    "shape": shape,
+                    "detail": "Lazy-loaded MATLAB v7.3 dataset (metadata only).",
+                }
+            if isinstance(node, h5py.Group):
+                child_count = len(list(node.keys()))
+                return {
+                    "python_type": "HDF5 group",
+                    "dtype": "",
+                    "shape": [int(child_count)],
+                    "detail": f"Lazy-loaded MATLAB v7.3 group with {child_count} key(s).",
+                }
+    except Exception:
+        return None
+
+    return None
+
+
 def _describe_source_fields_for_ui(source_obj, candidate_fields, source_type):
     details = []
     lazy_mapping = bool(getattr(source_obj, "__lazy_hdf5__", False))
@@ -4142,6 +4320,17 @@ def _describe_source_fields_for_ui(source_obj, candidate_fields, source_type):
             continue
         origin = "dataframe" if source_type == "dataframe" else "field"
         if lazy_mapping and "." not in locator and "[" not in locator and locator != "__self__":
+            lazy_summary = _summarize_lazy_hdf5_key_for_ui(source_obj, locator)
+            if lazy_summary is not None:
+                details.append({
+                    "field": locator,
+                    "origin": origin,
+                    "python_type": lazy_summary.get("python_type") or "HDF5 key",
+                    "dtype": lazy_summary.get("dtype") or "",
+                    "shape": lazy_summary.get("shape"),
+                    "detail": lazy_summary.get("detail") or "Lazy-loaded MATLAB v7.3 key.",
+                })
+                continue
             details.append({
                 "field": locator,
                 "origin": origin,
@@ -4264,16 +4453,18 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
         preview = ", ".join(values[:5])
         if len(values) > 5:
             preview += ", ..."
-        position = _file_extracted_chain_index(key)
+        locator_spec = _file_extracted_locator_spec(key)
         token_name = _file_token_locator_name(key)
         usage_examples = []
         if token_name:
             usage_examples.append(
                 f"Represents the `{token_name}` token extracted from the filename format."
             )
-        elif position is not None and position >= 0:
+        elif locator_spec is not None and int(locator_spec.get("index", -1)) >= 0:
+            position = int(locator_spec.get("index", 0))
+            separator_char = str(locator_spec.get("separator") or "_")
             usage_examples.append(
-                f"Represents token position {position + 1} extracted from file names."
+                f"Represents block {position + 1} extracted from file names using separator '{separator_char}'."
             )
         usage_examples.append(
             "Use this virtual field as Group/Condition locator when file names encode categories."
@@ -4700,6 +4891,54 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename
     )
 
 
+def _name_candidates_from_selected_data_files(folder_entries, folder_contexts, apply_folder_prefix=False):
+    rows_by_root = defaultdict(list)
+    for row in folder_entries or []:
+        root = str(row.get("folder_path") or "").strip()
+        if root:
+            rows_by_root[root].append(row)
+
+    names = []
+    seen = set()
+    for context in folder_contexts or []:
+        if not isinstance(context, dict):
+            continue
+        folder_path = str(context.get("folder_path") or "").strip()
+        folder_name = str(context.get("folder_name") or "").strip()
+        selected_ext = str(context.get("selected_data_extension") or "").strip().lower()
+        selected_rel = str(context.get("selected_data_file") or "").strip()
+        selected_rel_dir = str(Path(selected_rel).parent).strip() if selected_rel and not selected_rel.startswith("__ext__:") else ""
+        if selected_rel_dir in {"", "."}:
+            selected_rel_dir = "."
+
+        # Build suggestions from all files that belong to the same selected
+        # subfolder pattern (same extension + same relative directory), not
+        # only the single sample-selected file per folder.
+        pool = []
+        for row in rows_by_root.get(folder_path, []):
+            row_ext = str(row.get("extension") or "").strip().lower()
+            if selected_ext and row_ext != selected_ext:
+                continue
+            row_rel_dir = str(row.get("subfolder_relative_dir") or ".").strip() or "."
+            if selected_rel and not selected_rel.startswith("__ext__:") and row_rel_dir != selected_rel_dir:
+                continue
+            pool.append(row)
+
+        source_items = pool if pool else list(context.get("matched_data_files") or [])
+        for item in source_items:
+            if not isinstance(item, dict):
+                continue
+            base_name = str(item.get("name") or item.get("logical_name") or "").strip()
+            if not base_name:
+                continue
+            value = _prefixed_file_name(base_name, folder_name, apply_prefix=apply_folder_prefix)
+            if value in seen:
+                continue
+            seen.add(value)
+            names.append(value)
+    return names
+
+
 def _aggregate_candidate_metadata_from_file_entries(folder_entries):
     combined_candidates = []
     seen_candidates = set()
@@ -4999,7 +5238,7 @@ def _safe_channel_name_count(value):
     return None
 
 
-def _infer_axis_defaults_from_values(data_value, ch_names_value=None):
+def _infer_axis_defaults_from_values(data_value, ch_names_value=None, ids_value=None):
     shape = _safe_array_shape(data_value)
     if not shape:
         return {
@@ -5030,10 +5269,22 @@ def _infer_axis_defaults_from_values(data_value, ch_names_value=None):
         if channel_matches:
             axis_channels = min(channel_matches)
 
-    remaining = [idx for idx in range(ndim) if idx not in {axis_samples, axis_channels}]
+    axis_ids = -1
+    ids_count = _safe_channel_name_count(ids_value)
+    if ids_count is not None and ids_count > 0:
+        id_matches = [
+            idx for idx, dim in enumerate(shape)
+            if dim == ids_count and idx not in {axis_samples, axis_channels}
+        ]
+        if id_matches:
+            axis_ids = min(id_matches)
+
+    remaining = [idx for idx in range(ndim) if idx not in {axis_samples, axis_channels, axis_ids}]
     remaining.sort()
-    axis_ids = remaining[0] if len(remaining) >= 1 else -1
-    axis_epochs = remaining[1] if len(remaining) >= 2 else -1
+    axis_epochs = remaining[0] if len(remaining) >= 1 else -1
+    if axis_ids < 0 and len(remaining) >= 2:
+        axis_ids = remaining[0]
+        axis_epochs = remaining[1]
 
     return {
         "axis_samples": int(axis_samples),
@@ -5228,6 +5479,8 @@ def _copy_parse_config(base_cfg, *, fields):
         max_seconds=base_cfg.max_seconds,
         drop_bads=base_cfg.drop_bads,
         zscore=base_cfg.zscore,
+        zscore_after_epoch=getattr(base_cfg, "zscore_after_epoch", False),
+        exclude_last_epoch=getattr(base_cfg, "exclude_last_epoch", False),
         aggregate_over=base_cfg.aggregate_over,
         aggregate_method=base_cfg.aggregate_method,
         aggregate_labels=base_cfg.aggregate_labels,
@@ -5421,7 +5674,10 @@ def _describe_parser_source(path):
                 ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
             ),
             "recording_type": _pick_field_guess(candidates, ["recording_type", "modality", "recording", "type"]),
-            "subject_id": _pick_field_guess(candidates, ["subject_id", "subject", "subj", "participant"]),
+            "subject_id": _pick_field_guess(
+                candidates,
+                ["subject_id", "sub_ids", "subid", "subject", "subj", "participant", "id", "ids"],
+            ),
             "group": _pick_field_guess(candidates, ["group", "cohort", "class"]),
             "species": _pick_field_guess(candidates, ["species", "animal", "organism"]),
             "condition": _pick_field_guess(candidates, ["condition", "state", "task"]),
@@ -5443,7 +5699,14 @@ def _describe_parser_source(path):
                 ch_for_axes = _extract_dataframe_channel_names(source_obj, defaults.get("ch_names"))
         except Exception:
             ch_for_axes = None
-        defaults.update(_infer_axis_defaults_from_values(data_for_axes, ch_for_axes))
+        ids_for_axes = None
+        try:
+            subj_col = str(defaults.get("subject_id") or "").strip()
+            if subj_col and subj_col in source_obj.columns:
+                ids_for_axes = [str(v) for v in source_obj[subj_col].dropna().tolist()]
+        except Exception:
+            ids_for_axes = None
+        defaults.update(_infer_axis_defaults_from_values(data_for_axes, ch_for_axes, ids_for_axes))
         if fs_hint_hz is None and defaults["fs"] and defaults["fs"] in source_obj.columns:
             fs_series = pd.to_numeric(source_obj[defaults["fs"]], errors="coerce").dropna()
             if not fs_series.empty:
@@ -5597,7 +5860,11 @@ def _describe_parser_source(path):
         resolved_data = _resolve_locator_value(source_obj, data_guess)
         ch_guess = defaults.get("ch_names")
         resolved_ch_names = _resolve_locator_value(source_obj, ch_guess) if ch_guess else None
-        defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names))
+        resolved_ids = None
+        subject_guess = str(defaults.get("subject_id") or "").strip()
+        if subject_guess:
+            resolved_ids = _resolve_locator_value(source_obj, subject_guess)
+        defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names, resolved_ids))
         sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
         source_format = str(source_obj.get("__source_format__") or "").strip().lower()
         if source_format == "edf":
@@ -5661,7 +5928,11 @@ def _describe_parser_source(path):
     resolved_data = _resolve_locator_value(source_obj, data_guess)
     ch_guess = defaults.get("ch_names")
     resolved_ch_names = _resolve_locator_value(source_obj, ch_guess) if ch_guess else None
-    defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names))
+    resolved_ids = None
+    subject_guess = str(defaults.get("subject_id") or "").strip()
+    if subject_guess:
+        resolved_ids = _resolve_locator_value(source_obj, subject_guess)
+    defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names, resolved_ids))
     sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
     payload = {
         "source_type": "object",
@@ -5685,6 +5956,8 @@ def _build_parse_config_from_form(form):
 
     data_source_kind = (form.get("data_source_kind") or "").strip()
     zscore = str(form.get("parser_zscore", "")).lower() in {"1", "true", "on", "yes"}
+    zscore_after_epoch = str(form.get("parser_zscore_after_epoch", "")).lower() in {"1", "true", "on", "yes"}
+    exclude_last_epoch = str(form.get("parser_exclude_last_epoch", "")).lower() in {"1", "true", "on", "yes"}
     epoching_enabled = str(form.get("parser_enable_epoching", "")).lower() in {"1", "true", "on", "yes"}
     aggregate_enabled = str(form.get("parser_enable_aggregate", "")).lower() in {"1", "true", "on", "yes"}
     epoch_length_s = _optional_float(form.get("parser_epoch_length_s")) if epoching_enabled else None
@@ -5725,6 +5998,10 @@ def _build_parse_config_from_form(form):
         if aggregate_method not in {"sum", "mean", "median"}:
             raise ValueError("Aggregate method must be one of: sum, mean, median.")
         aggregate_labels = _parse_aggregate_labels(form.get("parser_aggregate_labels"))
+        if aggregate_labels is None:
+            aggregate_label_value = (form.get("parser_aggregate_label_value") or "").strip()
+            if aggregate_label_value:
+                aggregate_labels = {str(dim): aggregate_label_value for dim in aggregate_over}
 
     fs_locator = (form.get("parser_fs_locator") or "").strip() or None
     fs_source = (form.get("parser_fs_source") or "").strip()
@@ -5908,6 +6185,8 @@ def _build_parse_config_from_form(form):
             segment_t0_s=segment_t0_s,
             segment_t1_s=segment_t1_s,
             zscore=zscore,
+            zscore_after_epoch=zscore_after_epoch,
+            exclude_last_epoch=exclude_last_epoch,
             aggregate_over=aggregate_over,
             aggregate_method=aggregate_method,
             aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -5946,6 +6225,8 @@ def _build_parse_config_from_form(form):
         segment_t0_s=segment_t0_s,
         segment_t1_s=segment_t1_s,
         zscore=zscore,
+        zscore_after_epoch=zscore_after_epoch,
+        exclude_last_epoch=exclude_last_epoch,
         aggregate_over=aggregate_over,
         aggregate_method=aggregate_method,
         aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -6564,6 +6845,32 @@ def _build_four_area_network_params(form):
     inter_area_delay_YX = _parse_literal(
         form, "inter_area.delay_YX", FOUR_AREA_DEFAULTS["inter_area.delay_YX"]
     )
+    area_local_params = {}
+    local_defaults = {
+        "N_X": N_X,
+        "C_m_X": C_m_X,
+        "tau_m_X": tau_m_X,
+        "E_L_X": E_L_X,
+        "C_YX": C_YX,
+        "J_YX": J_YX,
+        "delay_YX": delay_YX,
+        "tau_syn_YX": tau_syn_YX,
+        "n_ext": n_ext,
+        "nu_ext": nu_ext,
+        "J_ext": J_ext,
+    }
+
+    for area_index, area_name in enumerate(areas):
+        area_key_prefix = f"area_{area_index}."
+        area_values = {}
+        for local_key in FOUR_AREA_LOCAL_OVERRIDE_KEYS:
+            field_key = f"{area_key_prefix}{local_key}"
+            if local_key in FOUR_AREA_LOCAL_OVERRIDE_LITERAL_KEYS:
+                parsed_value = _parse_literal(form, field_key, copy.deepcopy(local_defaults[local_key]))
+            else:
+                parsed_value = _parse_float(form, field_key, local_defaults[local_key])
+            area_values[local_key] = parsed_value
+        area_local_params[area_name] = area_values
 
     _ensure_length(X, "X", 2)
     _ensure_length(N_X, "N_X", 2)
@@ -6598,6 +6905,19 @@ def _build_four_area_network_params(form):
             f"({pop_count}x{pop_count}) or a full area-population matrix ({total_nodes}x{total_nodes})."
         )
 
+    for area_name, params in area_local_params.items():
+        _ensure_length(params["N_X"], f"area_params[{area_name}].N_X", 2)
+        _ensure_length(params["C_m_X"], f"area_params[{area_name}].C_m_X", 2)
+        _ensure_length(params["tau_m_X"], f"area_params[{area_name}].tau_m_X", 2)
+        _ensure_length(params["E_L_X"], f"area_params[{area_name}].E_L_X", 2)
+        _ensure_matrix(params["C_YX"], f"area_params[{area_name}].C_YX", 2, 2)
+        _ensure_matrix(params["J_YX"], f"area_params[{area_name}].J_YX", 2, 2)
+        _ensure_matrix(params["delay_YX"], f"area_params[{area_name}].delay_YX", 2, 2)
+        _ensure_matrix(params["tau_syn_YX"], f"area_params[{area_name}].tau_syn_YX", 2, 2)
+        _ensure_length(params["n_ext"], f"area_params[{area_name}].n_ext", 2)
+        params["nu_ext"] = float(params["nu_ext"])
+        params["J_ext"] = float(params["J_ext"])
+
     return "\n".join([
         "# Parameters defining a four-area cortical network model in which the Hagen et al. local LIF microcircuit is",
         "# replicated and coupled across four cortical areas. Local network parameters match the Hagen model.",
@@ -6626,6 +6946,8 @@ def _build_four_area_network_params(form):
         f"    # The external drives reflects inputs from other brain areas, subcortical structures and background noise",
         f"    J_ext={J_ext},",
         f"    model={_format_value(model)},",
+        f"    # Area-specific local overrides use the selected values from the WebUI area selector.",
+        f"    area_params={_format_value(area_local_params)},",
         f"    # Inter-area connectivity can be specified as either:",
         f"    # - population-level matrices ({pop_count}x{pop_count}), shared across area pairs, or",
         f"    # - full area-population matrices ({total_nodes}x{total_nodes}) for complete customization.",
@@ -8434,13 +8756,16 @@ def features_load_data():
 def features_browse_dirs():
     requested = (request.args.get("path") or "").strip()
     requested_history_key = (request.args.get("history_key") or "").strip()
-    if requested:
-        current = os.path.realpath(os.path.expanduser(requested))
-    else:
-        current = _path_history_start_directory(
-            default_value=os.path.realpath(os.path.expanduser("~")),
-            history_key=requested_history_key,
-        )
+    try:
+        if requested:
+            current = os.path.realpath(os.path.expanduser(requested))
+        else:
+            current = _path_history_start_directory(
+                default_value=os.path.realpath(os.path.expanduser("~")),
+                history_key=requested_history_key,
+            )
+    except (TypeError, ValueError, OSError) as exc:
+        return jsonify({"error": f"Invalid directory path: {exc}"}), 400
 
     if not os.path.isdir(current):
         return jsonify({"error": f"Not a directory: {current}"}), 400
@@ -8480,6 +8805,8 @@ def features_browse_dirs():
         return jsonify({"error": f"Permission denied: {current}"}), 403
     except OSError as exc:
         return jsonify({"error": f"Failed to list directory: {exc}"}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to browse directory: {exc}"}), 400
 
     dirs.sort(key=lambda item: item["name"].lower())
     if include_files:
@@ -8584,7 +8911,7 @@ def features_select_folder():
             if not picked or picked in seen:
                 continue
             seen.add(picked)
-            if not os.path.isfile(picked):
+            if not os.path.isfile(picked) and not _is_supported_ctf_dataset_path(picked):
                 return None, jsonify({"error": f"Selected path is not a file: {picked}"}), 400
             ext = Path(picked).suffix.lower()
             if allowed_exts:
@@ -8987,8 +9314,13 @@ def features_parser_inspect():
                 folder_summaries,
                 filename_format_spec=filename_format_spec,
             )
+            selected_name_candidates = _name_candidates_from_selected_data_files(
+                folder_entries,
+                folder_contexts,
+                apply_folder_prefix=(len(folder_summaries) > 1),
+            )
             if not name_candidates:
-                name_candidates = combined_logical_names
+                name_candidates = selected_name_candidates or combined_logical_names
             extension_profiles = [
                 profile
                 for folder_profile in folder_profiles
@@ -9065,8 +9397,13 @@ def features_parser_inspect():
                 folder_summaries,
                 filename_format_spec=filename_format_spec,
             )
+            selected_name_candidates = _name_candidates_from_selected_data_files(
+                folder_entries,
+                folder_contexts,
+                apply_folder_prefix=(len(folder_summaries) > 1),
+            )
             if not name_candidates:
-                name_candidates = combined_logical_names
+                name_candidates = selected_name_candidates or combined_logical_names
             extension_profiles = [
                 profile
                 for folder_profile in folder_profiles
@@ -9092,7 +9429,7 @@ def features_parser_inspect():
                 upload_entries.append({"path": temp_path, "name": upl_name, "folder_name": upl_name})
             for srv_path in metadata_server_paths:
                 real_path = os.path.realpath(srv_path)
-                if not os.path.isfile(real_path):
+                if not _is_supported_parser_path(real_path):
                     return jsonify({"error": f"Server file not found: {srv_path}"}), 400
                 srv_name = os.path.basename(real_path)
                 ext = Path(srv_name).suffix.lower()
@@ -9248,7 +9585,10 @@ def features_parser_inspect():
                     ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
                 ),
                 "recording_type": _pick_field_guess(selected_data_candidates, ["recording_type", "modality", "recording", "type"]),
-                "subject_id": _pick_field_guess(selected_data_candidates, ["subject_id", "subject", "subj", "participant"]),
+                "subject_id": _pick_field_guess(
+                    selected_data_candidates,
+                    ["subject_id", "sub_ids", "subid", "subject", "subj", "participant", "id", "ids"],
+                ),
                 "group": _pick_field_guess(selected_data_candidates, ["group", "cohort", "class"]),
                 "species": _pick_field_guess(selected_data_candidates, ["species", "animal", "organism"]),
                 "condition": _pick_field_guess(selected_data_candidates, ["condition", "state", "task"]),
@@ -9850,6 +10190,10 @@ def _analysis_selected_keys_path(create=False):
     return os.path.join(_analysis_data_dir(create=create), ".selected_simulation_keys.json")
 
 
+def _analysis_plot_config_path(create=False):
+    return os.path.join(_analysis_data_dir(create=create), ".plot_config.json")
+
+
 def _set_analysis_selected_simulation_keys(keys):
     selected = [
         str(key).strip()
@@ -9950,6 +10294,89 @@ def _clear_analysis_data_files():
     return removed_files
 
 
+def _analysis_data_signature(data_path=None):
+    path = data_path or _analysis_data_path()
+    if not path or not os.path.isfile(path):
+        return None
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return {
+        "path": os.path.realpath(path),
+        "name": os.path.basename(path),
+        "size": int(stat.st_size),
+        "mtime_ns": int(stat.st_mtime_ns),
+    }
+
+
+def _clear_analysis_plot_config():
+    path = _analysis_plot_config_path()
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    _remove_dir_if_empty(_analysis_data_dir(create=False))
+
+
+def _save_analysis_plot_config(plot_action, form, data_path=None):
+    signature = _analysis_data_signature(data_path)
+    if not signature:
+        return
+    values = {}
+    for key in form.keys():
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            continue
+        values[clean_key] = [str(value) for value in form.getlist(key)]
+    payload = {
+        "plot_action": str(plot_action or "").strip(),
+        "data_signature": signature,
+        "values": values,
+    }
+    path = _analysis_plot_config_path(create=True)
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f)
+        os.replace(tmp_path, path)
+    except OSError:
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+def _load_analysis_plot_config():
+    path = _analysis_plot_config_path()
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except (OSError, ValueError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if payload.get("data_signature") != _analysis_data_signature():
+        return None
+    values = payload.get("values")
+    if not isinstance(values, dict):
+        return None
+    normalized_values = {}
+    for key, raw_values in values.items():
+        if isinstance(raw_values, list):
+            normalized_values[str(key)] = [str(value) for value in raw_values]
+        else:
+            normalized_values[str(key)] = [str(raw_values)]
+    return {
+        "plot_action": str(payload.get("plot_action") or ""),
+        "values": normalized_values,
+    }
+
+
 @app.route("/analysis")
 def analysis():
     analysis_data_files = _list_analysis_data_files()
@@ -10018,6 +10445,16 @@ def analysis():
         simulation_trials=simulation_trials,
         simulation_model=simulation_model,
         simulation_welch_defaults=simulation_welch_defaults,
+        meg_topomap_atlases=MEG_TOPO_ATLAS_OPTIONS,
+        topomap_montage_options=_topomap_montage_options(),
+        topomap_channel_type_options=TOPO_MAP_CHANNEL_TYPE_OPTIONS,
+        topomap_colormap_options=_topomap_colormap_options(),
+        topomap_contour_options=TOPO_MAP_CONTOUR_OPTIONS,
+        topomap_outline_options=TOPO_MAP_OUTLINE_OPTIONS,
+        topomap_extrapolate_options=TOPO_MAP_EXTRAPOLATE_OPTIONS,
+        topomap_image_interp_options=TOPO_MAP_IMAGE_INTERP_OPTIONS,
+        boxplot_colormap_options=_boxplot_colormap_options(),
+        analysis_plot_config=_load_analysis_plot_config(),
     )
 
 
@@ -10318,7 +10755,7 @@ def _simulation_default_welch_preview(sim_data):
     return params
 
 
-def _format_trial_param_value(value, max_len=32):
+def _format_trial_param_value(value, max_len=None):
     if isinstance(value, float):
         text = f"{value:.6g}"
     elif isinstance(value, (int, bool)):
@@ -10331,9 +10768,264 @@ def _format_trial_param_value(value, max_len=32):
         except Exception:
             text = repr(value)
     text = str(text)
-    if len(text) > max_len:
-        return text[: max_len - 3] + "..."
+    if isinstance(max_len, int) and max_len > 0 and len(text) > max_len:
+        return text[:max_len]
     return text
+
+
+def _simulation_trial_population_names(sim_data, trial_idx=0):
+    try:
+        trial = _simulation_trial_data(sim_data, trial_idx)
+        trial_network = trial.get("network", {})
+        if isinstance(trial_network, dict):
+            pops = trial_network.get("X")
+            if isinstance(pops, (list, tuple)):
+                return [str(pop) for pop in pops]
+    except Exception:
+        pass
+    net = sim_data.get("network", {}) or {}
+    if isinstance(net, dict):
+        pops = net.get("X")
+        if isinstance(pops, (list, tuple)):
+            return [str(pop) for pop in pops]
+    if isinstance(net, list) and net:
+        first = net[0]
+        if isinstance(first, dict):
+            pops = first.get("X")
+            if isinstance(pops, (list, tuple)):
+                return [str(pop) for pop in pops]
+    return []
+
+
+def _format_connection_entries(matrix, source_labels, target_labels, max_entries=10):
+    arr = np.asarray(matrix, dtype=float)
+    if arr.ndim != 2:
+        return _format_trial_param_value(matrix)
+    rows, cols = arr.shape
+    if len(source_labels) != rows or len(target_labels) != cols:
+        return _format_trial_param_value(matrix)
+
+    entries = []
+    for row_idx in range(rows):
+        for col_idx in range(cols):
+            value = float(arr[row_idx, col_idx])
+            if not np.isfinite(value) or abs(value) <= 1e-15:
+                continue
+            entries.append(f"{source_labels[row_idx]}->{target_labels[col_idx]}={value:.6g}")
+
+    if not entries:
+        return "all zero"
+    if len(entries) > max_entries:
+        shown = entries[:max_entries]
+        shown.append(f"+{len(entries) - max_entries} more")
+        return "; ".join(shown)
+    return "; ".join(entries)
+
+
+def _format_four_area_inter_area_value(sim_data, trial_idx, value):
+    try:
+        arr = np.asarray(value, dtype=float)
+    except Exception:
+        return _format_trial_param_value(value)
+    if arr.ndim != 2:
+        return _format_trial_param_value(value)
+
+    areas = [str(area) for area in _simulation_area_names(sim_data, trial_idx)]
+    pops = [str(pop) for pop in _simulation_trial_population_names(sim_data, trial_idx)]
+    if not areas or not pops:
+        return _format_trial_param_value(value)
+
+    pop_count = len(pops)
+    area_count = len(areas)
+    total_nodes = pop_count * area_count
+    rows, cols = arr.shape
+
+    if rows == pop_count and cols == pop_count:
+        return _format_connection_entries(arr, pops, pops, max_entries=8)
+
+    if rows == total_nodes and cols == total_nodes:
+        node_labels = [f"{area}.{pop}" for area in areas for pop in pops]
+        entries = []
+        for row_idx in range(rows):
+            src_area_idx = row_idx // pop_count
+            for col_idx in range(cols):
+                tgt_area_idx = col_idx // pop_count
+                # Runtime skips same-area inter-area entries (pre_area == post_area),
+                # so do not surface them in changed-parameter summaries.
+                if src_area_idx == tgt_area_idx:
+                    continue
+                weight = float(arr[row_idx, col_idx])
+                if not np.isfinite(weight) or abs(weight) <= 1e-15:
+                    continue
+                entries.append(f"{node_labels[row_idx]}->{node_labels[col_idx]}={weight:.6g}")
+        if not entries:
+            return "all zero (same-area entries ignored)"
+        if len(entries) > 12:
+            shown = entries[:12]
+            shown.append(f"+{len(entries) - 12} more")
+            return "; ".join(shown)
+        return "; ".join(entries)
+
+    return _format_trial_param_value(value)
+
+
+def _matrix_varying_index_pairs_from_trials(sim_data, key, tol=1e-12):
+    """
+    Return matrix index pairs that vary across trials for the given changed key.
+    The comparison is done element-wise over all available trial values for
+    that key (from grid metadata).
+    """
+    meta = sim_data.get("grid_metadata") if isinstance(sim_data, MappingABC) else None
+    if not isinstance(meta, dict):
+        return None, None
+    trials = meta.get("trials")
+    if not isinstance(trials, list) or not trials:
+        return None, None
+
+    matrices = []
+    matrix_shape = None
+    for entry in trials:
+        if not isinstance(entry, dict):
+            continue
+        changed = entry.get("changed")
+        if not isinstance(changed, dict) or key not in changed:
+            continue
+        try:
+            arr = np.asarray(changed.get(key), dtype=float)
+        except Exception:
+            return None, None
+        if arr.ndim != 2:
+            return None, None
+        if matrix_shape is None:
+            matrix_shape = arr.shape
+        elif arr.shape != matrix_shape:
+            return None, None
+        matrices.append(arr)
+
+    if not matrices:
+        return None, None
+    if len(matrices) == 1:
+        return matrices[0], []
+
+    base = matrices[0]
+    diff_mask = np.zeros(base.shape, dtype=bool)
+    for arr in matrices[1:]:
+        finite_both = np.isfinite(base) & np.isfinite(arr)
+        equal_finite = finite_both & (np.abs(arr - base) <= tol)
+        both_nonfinite = (~np.isfinite(base)) & (~np.isfinite(arr))
+        equal_mask = equal_finite | both_nonfinite
+        diff_mask |= ~equal_mask
+
+    varying_pairs = list(zip(*np.where(diff_mask)))
+    return base, varying_pairs
+
+
+def _format_four_area_inter_area_changed_entries(
+    sim_data,
+    trial_idx,
+    key,
+    max_entries=12,
+    tol=1e-12,
+    target_area_name=None,
+):
+    """
+    For a given inter_area matrix key, return a compact string listing only
+    matrix entries that vary across trials/configurations.
+    """
+    meta = sim_data.get("grid_metadata") if isinstance(sim_data, MappingABC) else None
+    if not isinstance(meta, dict):
+        return ""
+    trials = meta.get("trials")
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return ""
+
+    trial_entry = trials[trial_idx]
+    if not isinstance(trial_entry, dict):
+        return ""
+    changed = trial_entry.get("changed")
+    if not isinstance(changed, dict) or key not in changed:
+        return ""
+
+    try:
+        arr_cur = np.asarray(changed.get(key), dtype=float)
+    except Exception:
+        return ""
+    if arr_cur.ndim != 2:
+        return ""
+
+    _, varying_pairs = _matrix_varying_index_pairs_from_trials(sim_data, key, tol=tol)
+    if varying_pairs is None:
+        return ""
+    if not varying_pairs:
+        return ""
+
+    areas = [str(area) for area in _simulation_area_names(sim_data, trial_idx)]
+    pops = [str(pop) for pop in _simulation_trial_population_names(sim_data, trial_idx)]
+    if not areas or not pops:
+        return ""
+
+    pop_count = len(pops)
+    area_count = len(areas)
+    rows, cols = arr_cur.shape
+
+    entries = []
+    # pop-pop matrix
+    if rows == pop_count and cols == pop_count:
+        # In area-specific subplot titles we only show area-resolved entries.
+        # A pop-pop inter-area matrix is shared across area pairs and cannot be
+        # attributed to one target area directly, so skip it in that context.
+        if target_area_name is not None:
+            return ""
+        for r, c in varying_pairs:
+            if r < 0 or c < 0 or r >= rows or c >= cols:
+                continue
+            value = float(arr_cur[r, c])
+            if not np.isfinite(value):
+                continue
+            entries.append(f"{pops[r]}->{pops[c]}={value:.6g}")
+
+    # node-node full matrix
+    elif rows == pop_count * area_count and cols == pop_count * area_count:
+        node_labels = [f"{area}.{pop}" for area in areas for pop in pops]
+        target_name_norm = str(target_area_name).strip().lower() if target_area_name is not None else None
+        for r, c in varying_pairs:
+            if r < 0 or c < 0 or r >= rows or c >= cols:
+                continue
+            src_area_idx = r // pop_count
+            tgt_area_idx = c // pop_count
+            # skip same-area entries as runtime ignores them
+            if src_area_idx == tgt_area_idx:
+                continue
+            if target_name_norm is not None:
+                tgt_area_name = str(areas[tgt_area_idx]).strip().lower()
+                if tgt_area_name != target_name_norm:
+                    continue
+            value = float(arr_cur[r, c])
+            if not np.isfinite(value):
+                continue
+            entries.append(f"{node_labels[r]}->{node_labels[c]}={value:.6g}")
+
+    else:
+        return ""
+
+    if not entries:
+        return ""
+    if len(entries) > max_entries:
+        shown = entries[:max_entries]
+        shown.append(f"+{len(entries) - max_entries} more")
+        return "; ".join(shown)
+    return "; ".join(entries)
+
+
+def _format_changed_param_text(sim_data, trial_idx, key, value):
+    key_text = str(key)
+    if key_text.startswith("inter_area."):
+        param_name = key_text.split(".", 1)[1]
+        if _simulation_model_type(sim_data) == "four_area":
+            resolved = _format_four_area_inter_area_value(sim_data, trial_idx, value)
+            return f"{param_name}: {resolved}"
+        return f"{param_name}: {_format_trial_param_value(value)}"
+    return f"{key_text}={_format_trial_param_value(value)}"
 
 
 def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
@@ -10356,7 +11048,7 @@ def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
     for key in changed_keys:
         if key not in changed:
             continue
-        parts.append(f"{key}={_format_trial_param_value(changed[key])}")
+        parts.append(_format_changed_param_text(sim_data, trial_idx, key, changed[key]))
     if not parts:
         return ""
     if len(parts) > max_params:
@@ -10365,12 +11057,278 @@ def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
     return ", ".join(parts)
 
 
-def _simulation_trial_plot_title(sim_data, trial_idx, suffix):
+def _simulation_trial_changed_param_names_text(sim_data, trial_idx, max_params=2):
+    meta = sim_data.get("grid_metadata")
+    if not isinstance(meta, dict):
+        return ""
+    changed_keys = meta.get("changed_keys")
+    trials = meta.get("trials")
+    if not isinstance(changed_keys, list) or not changed_keys:
+        return ""
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return ""
+    trial_entry = trials[trial_idx]
+    if not isinstance(trial_entry, dict):
+        return ""
+    changed = trial_entry.get("changed")
+    if not isinstance(changed, dict):
+        return ""
+
+    names = []
+    for key in changed_keys:
+        if key not in changed:
+            continue
+        key_text = str(key)
+        if key_text.startswith("inter_area."):
+            key_text = key_text.split(".", 1)[1]
+        names.append(key_text)
+
+    if not names:
+        return ""
+    if len(names) > max_params:
+        remaining = len(names) - max_params
+        names = names[:max_params] + [f"+{remaining} more"]
+    return ", ".join(names)
+
+
+def _wrap_plot_title_text(text, width=88):
+    lines = []
+    for raw_line in str(text or "").splitlines() or [""]:
+        if not raw_line:
+            lines.append("")
+            continue
+        wrapped = textwrap.wrap(
+            raw_line,
+            width=max(20, int(width)),
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        lines.extend(wrapped if wrapped else [raw_line])
+    return "\n".join(lines)
+
+
+def _expand_macrogroup_entries_for_title(param_label, compact_entries):
+    """
+    Expand compact semicolon-separated macrogroup entries into per-row lines.
+    Example: "a=1; b=2" -> ["J_YX: a=1", "J_YX: b=2"].
+    """
+    label = str(param_label or "").strip()
+    text = str(compact_entries or "").strip()
+    if not text:
+        return []
+    chunks = [chunk.strip() for chunk in text.split(";") if chunk.strip()]
+    if not chunks:
+        return []
+    if not label:
+        return chunks
+    return [f"{label}: {chunk}" for chunk in chunks]
+
+
+def _get_globally_varying_params(sim_data):
+    """
+    Extract parameters that vary across all trials in the grid.
+    
+    Args:
+        sim_data: Simulation data dictionary containing grid_metadata
+        
+    Returns:
+        set: Set of parameter names that vary across trials
+    """
+    if not isinstance(sim_data, MappingABC):
+        return set()
+
+    grid_metadata = sim_data.get("grid_metadata")
+    if not isinstance(grid_metadata, dict):
+        return set()
+    trials = grid_metadata.get("trials")
+    if not isinstance(trials, list) or len(trials) < 2:
+        return set()
+    
+    # Prefer the explicit changed_keys produced when metadata was built
+    changed_keys = grid_metadata.get("changed_keys")
+    if isinstance(changed_keys, list) and changed_keys:
+        return {str(k) for k in changed_keys}
+
+    # Fallback: derive varying keys from trial.changed maps.
+    trials = grid_metadata.get("trials")
+    if not isinstance(trials, list) or not trials:
+        return set()
+    changed_maps = []
+    for entry in trials:
+        if not isinstance(entry, dict):
+            continue
+        changed = entry.get("changed")
+        if isinstance(changed, dict):
+            changed_maps.append(changed)
+    if not changed_maps:
+        return set()
+
+    all_params = set()
+    for changed in changed_maps:
+        all_params.update(str(k) for k in changed.keys())
+    varying_params = set()
+    for param_name in all_params:
+        series = []
+        for changed in changed_maps:
+            if param_name in changed:
+                series.append(changed.get(param_name))
+        if len(series) < 2:
+            continue
+        base = series[0]
+        if any(not _values_equal_for_grid(value, base) for value in series[1:]):
+            varying_params.add(param_name)
+
+    return varying_params
+
+
+def _simulation_trial_changed_params_for_title(sim_data, trial_idx, area_name=None):
+    """
+    Format parameters that vary across trials for display in plot title.
+    Each parameter is placed on a separate line, sorted alphabetically.
+    Only includes globally varying parameters (not trial-specific changes).
+    
+    Args:
+        sim_data: Simulation data dictionary
+        trial_idx: Index of the current trial
+        
+    Returns:
+        str: Formatted parameter string with each parameter on a new line, or empty string
+    """
+    if not isinstance(sim_data, MappingABC):
+        return ""
+
+    grid_metadata = sim_data.get("grid_metadata")
+    if not isinstance(grid_metadata, dict):
+        return ""
+    trials = grid_metadata.get("trials")
+    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+        return ""
+    
+    # Get only globally varying parameters
+    varying_params = _get_globally_varying_params(sim_data)
+    if not varying_params:
+        return ""
+    
+    trial_data = grid_metadata["trials"][trial_idx]
+    if not isinstance(trial_data, dict):
+        return ""
+    changed_map = trial_data.get("changed") if isinstance(trial_data.get("changed"), dict) else {}
+    
+    model_type = _simulation_model_type(sim_data)
+    area_idx = None
+    area_local_prefix = None
+    area_specific_mode = (
+        model_type == "four_area"
+        and isinstance(area_name, str)
+        and str(area_name).strip() != ""
+    )
+    if area_specific_mode:
+        try:
+            area_names = [str(name) for name in _simulation_area_names(sim_data, trial_idx)]
+            target = str(area_name).strip().lower()
+            for idx, name in enumerate(area_names):
+                if str(name).strip().lower() == target:
+                    area_idx = int(idx)
+                    area_local_prefix = f"area_{idx}."
+                    break
+            if area_idx is None:
+                area_specific_mode = False
+        except Exception:
+            area_specific_mode = False
+
+    # Extract and format only the varying parameters using the existing
+    # formatter so inter-area values and complex structures are displayed
+    # consistently with other parts of the UI.
+    param_lines = []
+    for param_name in sorted(varying_params):  # Sort for consistent ordering
+        # values for globally changing parameters are stored inside the
+        # trial's 'changed' mapping in the grid metadata
+        if param_name not in changed_map:
+            continue
+        value = changed_map.get(param_name)
+
+        if area_specific_mode:
+            key_text = str(param_name)
+            # Keep only area-local params for the selected area and
+            # inter-area entries targeting that area.
+            if key_text.startswith("area_"):
+                if not (area_local_prefix and key_text.startswith(area_local_prefix)):
+                    continue
+                local_key = key_text[len(area_local_prefix):]
+                param_lines.append(f"{local_key}={_format_trial_param_value(value)}")
+                continue
+            if key_text.startswith("inter_area."):
+                compact_entries = _format_four_area_inter_area_changed_entries(
+                    sim_data,
+                    trial_idx,
+                    param_name,
+                    target_area_name=area_name,
+                )
+                if compact_entries:
+                    macro_label = key_text.split(".", 1)[1]
+                    param_lines.extend(
+                        _expand_macrogroup_entries_for_title(macro_label, compact_entries)
+                    )
+                continue
+            # Exclude global/shared parameters from per-area subplot titles.
+            continue
+
+        # For four-area inter-area matrices, only show the specific matrix
+        # entries that differ across trials/configurations (to avoid huge
+        # expanded matrices appearing in subplot titles).
+        try:
+            if str(param_name).startswith("inter_area.") and _simulation_model_type(sim_data) == "four_area":
+                # param_name includes the 'inter_area.' prefix; compute changed
+                # sub-entries and format them compactly. If no element-level
+                # differences are detected, skip adding this parameter to the
+                # title to avoid dumping entire matrices into titles.
+                compact_entries = _format_four_area_inter_area_changed_entries(sim_data, trial_idx, param_name)
+                if compact_entries:
+                    macro_label = str(param_name).split(".", 1)[1]
+                    expanded_lines = _expand_macrogroup_entries_for_title(
+                        macro_label,
+                        compact_entries,
+                    )
+                    param_lines.extend(expanded_lines)
+                    formatted = ""
+                else:
+                    formatted = ""
+                if not formatted:
+                    continue
+            else:
+                formatted = _format_changed_param_text(sim_data, trial_idx, param_name, value)
+        except Exception:
+            formatted = f"{param_name}={_format_trial_param_value(value)}"
+        if formatted:
+            param_lines.append(formatted)
+    
+    # Join with newlines so each parameter is on its own row
+    return "\n".join(param_lines) if param_lines else ""
+
+
+def _simulation_trial_plot_title(sim_data, trial_idx, suffix, area_name=None):
+    """
+    Generate plot title for a simulation trial showing only globally varying
+    parameters, each on its own line. Falls back to the concise name-only
+    summary when no global variations are present.
+    """
     base = f"Trial {trial_idx} {suffix}".strip()
-    changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
-    if changed:
-        return f"{base}\n{changed}"
-    return base
+
+    # Use the globally varying-parameter formatter so titles only show
+    # parameters that change across the entire grid and place each on a
+    # separate row to avoid overlap in subplot layouts.
+    changed_lines = _simulation_trial_changed_params_for_title(
+        sim_data,
+        trial_idx,
+        area_name=area_name,
+    )
+    if changed_lines:
+        base_wrapped = _wrap_plot_title_text(base, width=56)
+        changed_strict = "\n".join(
+            str(line) for line in str(changed_lines).splitlines() if str(line).strip()
+        )
+        return f"{base_wrapped}\n{changed_strict}" if changed_strict else base_wrapped
+    return _wrap_plot_title_text(base)
 
 
 def _simulation_trial_legend_label(sim_data, trial_idx):
@@ -10450,16 +11408,21 @@ def _simulation_group_trials_by_configuration(sim_data, trial_indices):
     return grouped
 
 
-def _simulation_configuration_legend_label(sim_data, configuration_index, trial_indices):
-    changed = ""
-    for trial_idx in trial_indices:
-        changed = _simulation_trial_changed_params_text(sim_data, trial_idx)
-        if changed:
-            break
+def _simulation_configuration_legend_label(sim_data, configuration_index, trial_indices, area_name=None):
     base = f"config {configuration_index}"
-    if changed:
-        return f"{base} | {changed}"
-    return base
+    for trial_idx in trial_indices:
+        changed_lines = _simulation_trial_changed_params_for_title(
+            sim_data,
+            trial_idx,
+            area_name=area_name,
+        )
+        if changed_lines:
+            base_wrapped = _wrap_plot_title_text(base, width=56)
+            changed_strict = "\n".join(
+                str(line) for line in str(changed_lines).splitlines() if str(line).strip()
+            )
+            return f"{base_wrapped}\n{changed_strict}" if changed_strict else base_wrapped
+    return _wrap_plot_title_text(base, width=56)
 
 
 def _population_color(name, idx, total_populations=None):
@@ -10557,6 +11520,52 @@ def _population_colors_for_plot(times_by_population, gids_by_population, populat
             preferred = f"C{idx % 10}"
         colors[name] = preferred
     return ordered, colors
+
+
+def _ensure_ei_legend_entries(ax, population_colors):
+    if ax is None:
+        return
+    try:
+        handles, labels = ax.get_legend_handles_labels()
+    except Exception:
+        handles, labels = [], []
+    existing = {str(label).strip().upper() for label in labels if str(label).strip()}
+    if "E" in existing and "I" in existing:
+        return
+
+    try:
+        from matplotlib.lines import Line2D
+    except Exception:
+        return
+
+    pop_colors = population_colors if isinstance(population_colors, dict) else {}
+    if "E" not in existing:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker=".",
+                linestyle="None",
+                color=pop_colors.get("E", "C0"),
+                markersize=5,
+                label="E",
+            )
+        )
+        labels.append("E")
+    if "I" not in existing:
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker=".",
+                linestyle="None",
+                color=pop_colors.get("I", "C1"),
+                markersize=5,
+                label="I",
+            )
+        )
+        labels.append("I")
+    ax.legend(handles=handles, labels=labels, fontsize=7, loc="best")
 
 
 def _spike_rate(times, dt, tstop):
@@ -10670,9 +11679,11 @@ def _to_1d_signal(value):
         return arr
     if arr.ndim == 2:
         if arr.shape[0] == 3:
-            return arr[2]
+            # Vector signal (x, y, z, t): use vector magnitude across components.
+            return np.linalg.norm(arr, axis=0)
         if arr.shape[1] == 3:
-            return arr[:, 2]
+            # Vector signal (t, x, y, z): use vector magnitude across components.
+            return np.linalg.norm(arr, axis=1)
         if arr.shape[0] <= arr.shape[1]:
             return np.sum(arr, axis=0)
         return np.sum(arr, axis=1)
@@ -10747,6 +11758,9 @@ def _effective_dt_ms_from_payload_row(row):
             return None
         return val
 
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+
     if not isinstance(row, MappingABC):
         return None
 
@@ -10778,6 +11792,61 @@ def _effective_dt_ms_from_payload_row(row):
     if decimation is None or decimation <= 0:
         decimation = 1.0
     return float(dt_ms) * float(decimation)
+
+
+def _effective_t_start_ms_from_payload_row(row):
+    def _as_mapping(value):
+        if isinstance(value, MappingABC):
+            return value
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            try:
+                parsed = ast.literal_eval(text)
+            except Exception:
+                return None
+            if isinstance(parsed, MappingABC):
+                return parsed
+        return None
+
+    def _safe_float(value):
+        try:
+            val = float(value)
+        except Exception:
+            return None
+        if not np.isfinite(val):
+            return None
+        return val
+
+    if isinstance(row, pd.Series):
+        row = row.to_dict()
+    if not isinstance(row, MappingABC):
+        return 0.0
+
+    start_val = (
+        _safe_float(row.get("t_start_ms"))
+        if row.get("t_start_ms") is not None
+        else _safe_float(row.get("time_start_ms"))
+    )
+    if start_val is None:
+        start_val = _safe_float(row.get("transient_ms"))
+    if start_val is None:
+        start_val = _safe_float(row.get("transient"))
+
+    metadata = _as_mapping(row.get("metadata"))
+    if metadata is not None and start_val is None:
+        start_val = (
+            _safe_float(metadata.get("t_start_ms"))
+            if metadata.get("t_start_ms") is not None
+            else _safe_float(metadata.get("time_start_ms"))
+        )
+        if start_val is None:
+            start_val = _safe_float(metadata.get("transient_ms"))
+        if start_val is None:
+            start_val = _safe_float(metadata.get("transient"))
+
+    return float(start_val) if start_val is not None else 0.0
 
 
 def _field_potential_payload_to_area_series(payload, model, areas, trial_idx):
@@ -11748,6 +12817,231 @@ def _pick_value_column(df, exclude):
     return None
 
 
+MEG_TOPO_ATLAS_OPTIONS = [
+    {"value": "dk", "label": "Desikan-Killiany (DK / aparc)"},
+    {"value": "destrieux", "label": "Destrieux (aparc.a2009s)"},
+    {"value": "hcpmmp1", "label": "HCP-MMP1"},
+    {"value": "hcpmmp1_combined", "label": "HCP-MMP1 combined"},
+    {"value": "aparc_sub", "label": "aparc_sub"},
+]
+MEG_TOPO_ATLAS_VALUES = {item["value"] for item in MEG_TOPO_ATLAS_OPTIONS}
+
+MNE_BUILTIN_MONTAGE_FALLBACK = [
+    "standard_1005",
+    "standard_1020",
+    "standard_alphabetic",
+    "standard_postfixed",
+    "standard_prefixed",
+    "standard_primed",
+    "biosemi16",
+    "biosemi32",
+    "biosemi64",
+    "biosemi128",
+    "biosemi160",
+    "biosemi256",
+    "easycap-M1",
+    "easycap-M10",
+    "EGI_256",
+    "GSN-HydroCel-32",
+    "GSN-HydroCel-64_1.0",
+    "GSN-HydroCel-65_1.0",
+    "GSN-HydroCel-128",
+    "GSN-HydroCel-129",
+    "GSN-HydroCel-256",
+    "GSN-HydroCel-257",
+    "mgh60",
+    "mgh70",
+    "artinis-octamon",
+    "artinis-brite23",
+]
+
+COMMON_MATPLOTLIB_COLORMAPS = [
+    "viridis",
+    "plasma",
+    "inferno",
+    "magma",
+    "cividis",
+    "turbo",
+    "jet",
+    "coolwarm",
+    "bwr",
+    "seismic",
+    "RdBu_r",
+    "Spectral",
+    "PiYG",
+    "PRGn",
+    "BrBG",
+    "Blues",
+    "Greens",
+    "Reds",
+    "Purples",
+    "Greys",
+    "YlOrRd",
+    "YlGnBu",
+]
+
+TOPO_MAP_CHANNEL_TYPE_OPTIONS = [
+    {"value": "eeg", "label": "EEG"},
+    {"value": "seeg", "label": "sEEG"},
+    {"value": "ecog", "label": "ECoG"},
+    {"value": "dbs", "label": "DBS"},
+    {"value": "hbo", "label": "fNIRS HbO"},
+    {"value": "hbr", "label": "fNIRS HbR"},
+]
+TOPO_MAP_CONTOUR_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "0", "label": "None (0)"},
+    {"value": "3", "label": "3"},
+    {"value": "6", "label": "6"},
+    {"value": "10", "label": "10"},
+    {"value": "15", "label": "15"},
+]
+TOPO_MAP_OUTLINE_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "head", "label": "head"},
+    {"value": "skirt", "label": "skirt"},
+]
+TOPO_MAP_EXTRAPOLATE_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "auto", "label": "auto"},
+    {"value": "local", "label": "local"},
+    {"value": "head", "label": "head"},
+    {"value": "box", "label": "box"},
+]
+TOPO_MAP_IMAGE_INTERP_OPTIONS = [
+    {"value": "", "label": "MNE default"},
+    {"value": "cubic", "label": "cubic"},
+    {"value": "linear", "label": "linear"},
+    {"value": "nearest", "label": "nearest"},
+]
+
+
+@functools.lru_cache(maxsize=1)
+def _topomap_montage_options():
+    try:
+        import mne
+
+        names = list(mne.channels.get_builtin_montages())
+    except Exception:
+        names = list(MNE_BUILTIN_MONTAGE_FALLBACK)
+
+    seen = set()
+    cleaned = []
+    for name in names:
+        text = str(name or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        cleaned.append(text)
+    if "standard_1005" not in seen:
+        cleaned.insert(0, "standard_1005")
+        seen.add("standard_1005")
+
+    preferred = [name for name in ("standard_1005", "standard_1020") if name in seen]
+    rest = sorted((name for name in cleaned if name not in preferred), key=str.lower)
+    return [{"value": name, "label": name} for name in [*preferred, *rest]]
+
+
+@functools.lru_cache(maxsize=1)
+def _common_colormap_options():
+    names = list(COMMON_MATPLOTLIB_COLORMAPS)
+    try:
+        import matplotlib
+
+        available = set(matplotlib.colormaps)
+        names = [name for name in names if name in available]
+    except Exception:
+        pass
+    return [{"value": name, "label": name} for name in names]
+
+
+def _topomap_colormap_options():
+    return [
+        {"value": "auto", "label": "Auto (bwr for comparisons, jet otherwise)"},
+        *_common_colormap_options(),
+    ]
+
+
+def _boxplot_colormap_options():
+    return [
+        {"value": "none", "label": "None"},
+        *_common_colormap_options(),
+    ]
+
+
+def _normalize_meg_atlas_name(atlas):
+    atlas_norm = str(atlas or "").strip().lower()
+    alias_to_parc = {
+        "dk": "aparc",
+        "desikan": "aparc",
+        "desikan-killiany": "aparc",
+        "aparc": "aparc",
+        "destrieux": "aparc.a2009s",
+        "aparc.a2009s": "aparc.a2009s",
+        "hcp-mmp": "HCPMMP1",
+        "hcp": "HCPMMP1",
+        "glasser": "HCPMMP1",
+        "hcpmmp1": "HCPMMP1",
+        "hcp-mmp-combined": "HCPMMP1_combined",
+        "glasser-combined": "HCPMMP1_combined",
+        "hcpmmp1_combined": "HCPMMP1_combined",
+        "aparc-sub": "aparc_sub",
+        "khan": "aparc_sub",
+        "aparc_sub": "aparc_sub",
+    }
+    return alias_to_parc.get(atlas_norm, str(atlas or "").strip())
+
+
+def _meg_expected_region_count(atlas, *, subject="fsaverage", subjects_dir=None):
+    try:
+        import mne
+    except Exception as exc:
+        raise ImportError(f"mne is required for MEG topographic plotting: {exc}") from exc
+    try:
+        import nibabel  # noqa: F401
+    except Exception as exc:
+        raise ImportError(f"nibabel is required for MEG topographic plotting: {exc}") from exc
+    parc = _normalize_meg_atlas_name(atlas)
+
+    subjects_dir_path = Path(subjects_dir).expanduser() if subjects_dir else None
+    if subjects_dir_path is not None:
+        subjects_dir_path.mkdir(parents=True, exist_ok=True)
+
+    fsaverage_dir = Path(mne.datasets.fetch_fsaverage(subjects_dir=subjects_dir_path, verbose=False))
+    subjects_dir_resolved = fsaverage_dir.parent
+    subject_dir = subjects_dir_resolved / subject
+    if not subject_dir.exists():
+        raise ValueError(f"Subject directory not found: {subject_dir}")
+
+    label_dir = subject_dir / "label"
+    if parc in {"HCPMMP1", "HCPMMP1_combined"} and subject == "fsaverage":
+        lh_annot = label_dir / f"lh.{parc}.annot"
+        rh_annot = label_dir / f"rh.{parc}.annot"
+        if not (lh_annot.exists() and rh_annot.exists()):
+            mne.datasets.fetch_hcp_mmp_parcellation(
+                subjects_dir=subjects_dir_resolved,
+                combine=True,
+                accept=True,
+                verbose=False,
+            )
+    elif parc == "aparc_sub" and subject == "fsaverage":
+        mne.datasets.fetch_aparc_sub_parcellation(subjects_dir=subjects_dir_resolved, verbose=False)
+
+    labels = mne.read_labels_from_annot(
+        subject=subject,
+        parc=parc,
+        hemi="both",
+        subjects_dir=subjects_dir_resolved,
+        sort=True,
+        verbose=False,
+    )
+    labels = [
+        lb for lb in labels
+        if not any(token in lb.name.lower() for token in ("unknown", "corpuscallosum", "medialwall"))
+    ]
+    return len(labels)
+
+
 @app.route("/analysis/columns", methods=["POST"])
 def analysis_columns():
     _remember_path_history_from_form(request.form, "analysis_columns")
@@ -11892,6 +13186,7 @@ def analysis_plot_boxplot():
     data_path = _analysis_data_path()
     if data_path is None:
         return _plot_error("No analysis dataframe found. Upload a .pkl file first.")
+    _save_analysis_plot_config("boxplot", request.form, data_path=data_path)
 
     group_col = request.form.get("boxplot_group_by")
     if not group_col:
@@ -12406,6 +13701,7 @@ def analysis_plot_topomap():
     data_path = _analysis_data_path()
     if data_path is None:
         return _plot_error("No analysis dataframe found. Upload a .pkl file first.")
+    _save_analysis_plot_config("topomap", request.form, data_path=data_path)
 
     group_col = request.form.get("topomap_group_by")
     if not group_col:
@@ -12425,12 +13721,18 @@ def analysis_plot_topomap():
     if group_col not in df.columns:
         return _plot_error(f'Grouping column "{group_col}" not found in the dataframe.')
 
-    sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
-    if sensor_col is None:
-        return _plot_error(
-            "Sensor/channel column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
-            popup_redirect_url=url_for("analysis"),
-        )
+    requested_sensor_col = str(request.form.get("topomap_sensor_col", "") or "").strip()
+    if requested_sensor_col:
+        if requested_sensor_col not in df.columns:
+            return _plot_error(f'Sensor column "{requested_sensor_col}" not found in the dataframe.')
+        sensor_col = requested_sensor_col
+    else:
+        sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
+        if sensor_col is None:
+            return _plot_error(
+                "Sensor/channel column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
+                popup_redirect_url=url_for("analysis"),
+            )
 
     value_col = request.form.get("topomap_value_col")
     if not value_col:
@@ -12443,6 +13745,14 @@ def analysis_plot_topomap():
     if df_use.empty:
         return _plot_error("No valid rows found for the selected group and sensor columns.")
     _log(f"Topomap settings: group_col={group_col}, value_col={value_col}, mode={grouping_mode}.")
+    topomap_signal_type = str(request.form.get("topomap_signal_type", "eeg") or "eeg").strip().lower()
+    if topomap_signal_type not in {"eeg", "meg"}:
+        return _plot_error("Invalid topographic plot type. Select EEG or MEG.")
+    meg_atlas = str(request.form.get("topomap_meg_atlas", "dk") or "dk").strip()
+    if topomap_signal_type == "meg":
+        if meg_atlas.lower() not in MEG_TOPO_ATLAS_VALUES:
+            return _plot_error("Invalid MEG atlas selection.")
+        _log(f"MEG topographic plotting selected with atlas={meg_atlas}.")
 
     def _infer_vector_length(values):
         lengths = set()
@@ -12496,24 +13806,80 @@ def analysis_plot_topomap():
         return _plot_error(f"ncpi is required for topomap plotting: {exc}", status=500)
     _log("ncpi loaded.")
 
-    # Parse numeric inputs for plotting
+    # Parse user-configurable plotting inputs.
     def _parse_float(value):
         try:
-            return float(value)
+            text = str(value).strip()
+            if text == "":
+                return None
+            return float(text)
         except (TypeError, ValueError):
             return None
 
-    head_radius = _parse_float(request.form.get("head-radius"))
-    head_pos_x = _parse_float(request.form.get("head-pos-x"))
+    def _parse_float_default(name, default):
+        parsed = _parse_float(request.form.get(name))
+        return default if parsed is None else parsed
+
+    def _parse_int(value):
+        try:
+            text = str(value).strip()
+            if text == "":
+                return None
+            return int(text)
+        except (TypeError, ValueError):
+            return None
+
+    def _parse_int_default(name, default):
+        parsed = _parse_int(request.form.get(name))
+        return default if parsed is None else parsed
+
+    def _parse_optional_text(name):
+        value = str(request.form.get(name, "") or "").strip()
+        if value.lower() in {"", "none", "null", "default"}:
+            return None
+        return value
+
     show_colorbar = request.form.get("show-colorbar") is not None
     scale_mode = request.form.get("topomap_scale_mode", "section")
     use_diverging = grouping_mode == "compare_categories"
     compare_cmap = "bwr" if use_diverging else None
+    cohend_abs_threshold = _parse_float(request.form.get("topomap_cohend_abs_threshold"))
+    if cohend_abs_threshold is not None and cohend_abs_threshold < 0:
+        return _plot_error("Cohen's d filter threshold must be greater than or equal to 0.")
+    if grouping_mode == "compare_categories" and compare_method == "cohen_d" and cohend_abs_threshold:
+        _log(f"Cohen's d filter enabled: |d| >= {cohend_abs_threshold}.")
 
-    sphere = "auto"
-    if head_radius is not None:
-        x = head_pos_x if head_pos_x is not None else 0.0
-        sphere = (x, 0.0, 0.0, head_radius)
+    eeg_montage = _parse_optional_text("topomap_eeg_montage") or "standard_1005"
+    eeg_ch_type = _parse_optional_text("topomap_eeg_ch_type") or "eeg"
+    eeg_position_offset = (
+        _parse_float_default("topomap_position_y", 0.01),
+        _parse_float_default("topomap_position_z", -0.1),
+    )
+    eeg_sphere = _parse_float_default("topomap_sphere", 0.28)
+    eeg_res = _parse_int_default("topomap_res", 300)
+    eeg_contours = _parse_int(request.form.get("topomap_contours"))
+    eeg_outlines = _parse_optional_text("topomap_outlines")
+    eeg_extrapolate = _parse_optional_text("topomap_extrapolate")
+    eeg_image_interp = _parse_optional_text("topomap_image_interp")
+    eeg_show_sensors = request.form.get("topomap_show_sensors") is not None
+    eeg_vmin_user = _parse_float(request.form.get("topomap_vmin"))
+    eeg_vmax_user = _parse_float(request.form.get("topomap_vmax"))
+    if eeg_vmin_user is not None and eeg_vmax_user is not None and eeg_vmin_user > eeg_vmax_user:
+        return _plot_error("EEG topomap vmin must be <= vmax.")
+
+    eeg_cmap_raw = str(request.form.get("topomap_cmap", "auto") or "auto").strip()
+    eeg_cmap = (compare_cmap or "jet") if eeg_cmap_raw.lower() == "auto" else eeg_cmap_raw
+    eeg_colorbar_fmt = str(request.form.get("topomap_colorbar_fmt", "%0.2f") or "%0.2f").strip() or "%0.2f"
+    eeg_colorbar_label = _parse_optional_text("topomap_colorbar_label")
+    eeg_colorbar_label_fontsize = _parse_float(request.form.get("topomap_colorbar_label_fontsize"))
+    eeg_colorbar_tick_fontsize = _parse_float_default("topomap_colorbar_tick_fontsize", 8.0)
+    meg_expected_count = None
+    if topomap_signal_type == "meg":
+        try:
+            meg_expected_count = _meg_expected_region_count(meg_atlas, subject="fsaverage", subjects_dir=None)
+        except Exception as exc:
+            return _plot_error(f"Unable to prepare MEG atlas '{meg_atlas}': {exc}")
+        _log(f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions.")
 
     analysis = ncpi.Analysis(df_use)
 
@@ -12598,8 +13964,19 @@ def analysis_plot_topomap():
                 for label, comp_df in compare_results.items():
                     if comp_df.empty:
                         continue
-                    series = comp_df.set_index(sensor_col)["d"]
-                    items_local.append((label, series))
+                    series = pd.to_numeric(comp_df.set_index(sensor_col)["d"], errors="coerce")
+                    if cohend_abs_threshold:
+                        valid_values = series.dropna()
+                        retained = int((valid_values.abs() >= cohend_abs_threshold).sum())
+                        total = int(valid_values.size)
+                        series = series.where(series.abs() >= cohend_abs_threshold, 0.0)
+                        _log(
+                            f"Cohen's d filter for {label}, data_index={dim}: "
+                            f"retained {retained}/{total} sensors."
+                        )
+                    series = series.dropna()
+                    if not series.empty:
+                        items_local.append((label, series))
             else:
                 control_df = df_use[df_use[group_col] == control_group]
                 if dim == -1:
@@ -12610,7 +13987,7 @@ def analysis_plot_topomap():
                     )
                 control_series = (
                     pd.DataFrame({sensor_col: control_df[sensor_col], "value": control_values})
-                    .groupby(sensor_col)["value"]
+                    .groupby(sensor_col, sort=False)["value"]
                     .mean()
                     .dropna()
                 )
@@ -12626,7 +14003,7 @@ def analysis_plot_topomap():
                         )
                     group_series = (
                         pd.DataFrame({sensor_col: group_df[sensor_col], "value": group_values})
-                        .groupby(sensor_col)["value"]
+                        .groupby(sensor_col, sort=False)["value"]
                         .mean()
                         .dropna()
                     )
@@ -12645,7 +14022,7 @@ def analysis_plot_topomap():
                     )
                 series = (
                     pd.DataFrame({sensor_col: df_use.loc[df_use[group_col] == g, sensor_col], "value": series_data})
-                    .groupby(sensor_col)["value"]
+                    .groupby(sensor_col, sort=False)["value"]
                     .mean()
                     .dropna()
                 )
@@ -12731,6 +14108,7 @@ def analysis_plot_topomap():
             c = idx % cols
             ax = fig.add_subplot(gs[r, c])
             try:
+                im = None
                 plot_vmin = section_vmin
                 plot_vmax = section_vmax
                 if scale_mode == "plot":
@@ -12743,22 +14121,61 @@ def analysis_plot_topomap():
                         plot_vmax = None
                     if use_diverging:
                         plot_vmin, plot_vmax = _symmetric_limits(plot_vmin, plot_vmax)
-                im, _ = analysis.eeg_topomap(
-                    series,
-                    axes=ax,
-                    show=False,
-                    vmin=plot_vmin,
-                    vmax=plot_vmax,
-                    cmap=compare_cmap,
-                    colorbar=False,
-                    sensors=True,
-                    montage="standard_1020",
-                    extrapolate="local",
-                    sphere=sphere,
-                )
+                if topomap_signal_type == "meg":
+                    values = series.to_numpy(dtype=float)
+                    if meg_expected_count is not None and values.size != int(meg_expected_count):
+                        plt.close(fig)
+                        return _plot_error(
+                            f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions, "
+                            f"but plot '{label}' has {values.size}. "
+                            "Ensure the selected sensor/region set matches the atlas size."
+                        )
+                    analysis.meg_surface(
+                        values=values,
+                        atlas=meg_atlas,
+                        subject="fsaverage",
+                        hemisphere="both",
+                        views="lat",
+                        cmap=compare_cmap or "coolwarm",
+                        vmin=plot_vmin,
+                        vmax=plot_vmax,
+                        colorbar=show_colorbar,
+                        show=False,
+                        axes=ax,
+                        auto_fetch=True,
+                        hcp_accept=True,
+                    )
+                else:
+                    if eeg_vmin_user is not None:
+                        plot_vmin = eeg_vmin_user
+                    if eeg_vmax_user is not None:
+                        plot_vmax = eeg_vmax_user
+                    im = analysis.eeg_topomap(
+                        series,
+                        axes=ax,
+                        show=False,
+                        vmin=plot_vmin,
+                        vmax=plot_vmax,
+                        cmap=eeg_cmap,
+                        colorbar=show_colorbar,
+                        colorbar_fmt=eeg_colorbar_fmt,
+                        colorbar_label=eeg_colorbar_label,
+                        colorbar_label_fontsize=eeg_colorbar_label_fontsize,
+                        colorbar_tick_fontsize=eeg_colorbar_tick_fontsize,
+                        sensors=eeg_show_sensors,
+                        montage=eeg_montage,
+                        ch_type=eeg_ch_type,
+                        position_offset=eeg_position_offset,
+                        sphere=eeg_sphere,
+                        contours=eeg_contours,
+                        outlines=eeg_outlines,
+                        res=eeg_res,
+                        extrapolate=eeg_extrapolate,
+                        image_interp=eeg_image_interp,
+                    )
             except Exception as exc:
                 plt.close(fig)
-                message = f"Topomap plotting failed: {exc}"
+                message = f"{'MEG' if topomap_signal_type == 'meg' else 'Topomap'} plotting failed: {exc}"
                 lower = message.lower()
                 sensor_info_missing = any(
                     token in lower
@@ -12776,8 +14193,6 @@ def analysis_plot_topomap():
                     message,
                     popup_redirect_url=url_for("analysis") if sensor_info_missing else None,
                 )
-            if show_colorbar:
-                fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
             ax.set_title(label)
         row_cursor += rows_needed
 
@@ -12814,8 +14229,12 @@ def analysis_plot_topomap():
 
     image_bytes = _trim_whitespace(output.getvalue())
     return _render_analysis_plot(
-        title="Topomap result",
-        subtitle="EEG topographic plot.",
+        title=f"{'MEG' if topomap_signal_type == 'meg' else 'EEG'} topomap result",
+        subtitle=(
+            f"MEG atlas topographic plot ({meg_atlas})."
+            if topomap_signal_type == "meg"
+            else "EEG topographic plot."
+        ),
         image_bytes=image_bytes,
         log_output=log_buffer.getvalue(),
     )
@@ -12826,6 +14245,16 @@ def analysis_plot_simulation():
     plot_type = (request.form.get("sim_plot_type") or "raster").strip().lower()
     selected_keys = [s for s in request.form.getlist("sim_selected_file_keys") if isinstance(s, str) and s.strip()]
     selected_sim_files, selected_fp_paths = _parse_selected_analysis_file_keys(selected_keys)
+    plot_log_lines = []
+    plot_log_seen = set()
+
+    def _plot_log_warning(message):
+        text = str(message or "").strip()
+        if not text or text in plot_log_seen:
+            return
+        plot_log_seen.add(text)
+        plot_log_lines.append(text)
+        app.logger.warning(text)
 
     fp_time_types = {"proxy", "cdm", "lfp", "meeg"}
     fp_psd_types = {"proxy_psd", "cdm_psd", "lfp_psd", "meeg_psd"}
@@ -12833,6 +14262,10 @@ def analysis_plot_simulation():
     allowed_types = {"raster", "firing_rates"} | fp_plot_types
     if plot_type not in allowed_types:
         return _analysis_plot_error(f"Unsupported simulation plot type: {plot_type}", status=400)
+    if plot_type in {"cdm", "cdm_psd", "meeg", "meeg_psd"}:
+        _plot_log_warning(
+            "Warning: this plot computes vector magnitude (module) before rendering time traces and PSD."
+        )
 
     def _coerce_selected_sim_payload(payload):
         if isinstance(payload, list):
@@ -13208,9 +14641,9 @@ def analysis_plot_simulation():
             return ""
         return " Source: " + ", ".join(used_files) + "."
 
-    def _plot_trial_title(trial_idx, suffix):
+    def _plot_trial_title(trial_idx, suffix, area_name=None):
         if sim_data is not None:
-            return _simulation_trial_plot_title(sim_data, trial_idx, suffix)
+            return _simulation_trial_plot_title(sim_data, trial_idx, suffix, area_name=area_name)
         return f"Trial {trial_idx} {suffix}".strip()
 
     try:
@@ -13363,6 +14796,33 @@ def analysis_plot_simulation():
     def _safe_dt_ms_from_row(row):
         return _effective_dt_ms_from_payload_row(row)
 
+    def _safe_t_stop_ms_from_row(row):
+        if isinstance(row, pd.Series):
+            row = row.to_dict()
+        if not isinstance(row, MappingABC):
+            return None
+        t_stop = row.get("t_stop_ms")
+        if t_stop is None:
+            t_stop = row.get("time_stop_ms")
+        if t_stop is None:
+            metadata = row.get("metadata")
+            if isinstance(metadata, str):
+                text = metadata.strip()
+                if text:
+                    try:
+                        metadata = ast.literal_eval(text)
+                    except Exception:
+                        metadata = None
+            if isinstance(metadata, MappingABC):
+                t_stop = metadata.get("t_stop_ms")
+                if t_stop is None:
+                    t_stop = metadata.get("time_stop_ms")
+        try:
+            t_stop_val = float(t_stop)
+        except Exception:
+            return None
+        return t_stop_val if np.isfinite(t_stop_val) else None
+
     def _to_channels_time(value):
         arr = np.asarray(value, dtype=float)
         if arr.ndim == 1:
@@ -13372,13 +14832,11 @@ def analysis_plot_simulation():
                 return np.array(arr, copy=True)
             return np.array(arr.T, copy=True)
         if arr.ndim == 3:
-            # MEG can come as (n_sensors, 3, n_times); reduce vector components to magnitude.
+            # MEG can come as (n_sensors, 3, n_times); use vector magnitude for each sensor.
             if arr.shape[1] == 3:
-                mag = np.linalg.norm(arr, axis=1)
-                return _to_channels_time(mag)
+                return np.array(np.linalg.norm(arr, axis=1), copy=True)
             if arr.shape[2] == 3:
-                mag = np.linalg.norm(arr, axis=2)
-                return _to_channels_time(mag)
+                return np.array(np.linalg.norm(arr, axis=2), copy=True)
             return np.array(arr.reshape((-1, arr.shape[-1])), copy=True)
         return np.array(arr.reshape((1, -1)), copy=True)
 
@@ -13395,14 +14853,15 @@ def analysis_plot_simulation():
     def _extract_lfp_series_by_area(trial_idx, area_names):
         row = _trial_row_from_payload(cdm_payload, trial_idx)
         if not isinstance(row, MappingABC):
-            return {}, None
+            return {}, None, 0.0
         probe_outputs = row.get("probe_outputs")
         if isinstance(probe_outputs, MappingABC) and "GaussCylinderPotential" in probe_outputs:
             row = dict(probe_outputs.get("GaussCylinderPotential") or {})
         elif str(row.get("probe", "")).strip() != "GaussCylinderPotential":
-            return {}, None
+            return {}, None, 0.0
 
         dt_local = _safe_dt_ms_from_row(row)
+        t_start_local = _effective_t_start_ms_from_payload_row(row)
         sum_signal = row.get("sum")
         raw_signals = row.get("raw_signals")
         data_signal = row.get("data")
@@ -13437,7 +14896,7 @@ def analysis_plot_simulation():
                 shared = _to_channels_time(data_signal)
                 for area_name in normalized_areas:
                     area_map[area_name] = np.array(shared, copy=True)
-            return area_map, dt_local
+            return area_map, dt_local, t_start_local
 
         global_sig = None
         if isinstance(sum_signal, MappingABC):
@@ -13451,24 +14910,33 @@ def analysis_plot_simulation():
         elif data_signal is not None:
             global_sig = _to_channels_time(data_signal)
         if global_sig is None:
-            return {}, dt_local
-        return {"global": global_sig}, dt_local
+            return {}, dt_local, t_start_local
+        return {"global": global_sig}, dt_local, t_start_local
 
     def _extract_meeg_series(trial_idx):
         row = _trial_row_from_payload(meeg_payload, trial_idx)
         if not isinstance(row, MappingABC):
-            return {}, None
+            return {}, None, 0.0
         dt_local = _safe_dt_ms_from_row(row)
+        t_start_local = _effective_t_start_ms_from_payload_row(row)
+        t_stop_local = _safe_t_stop_ms_from_row(row)
         data = row.get("data")
         if data is None:
             data = row.get("sum")
         if data is None:
-            return {}, dt_local
+            return {}, dt_local, t_start_local
         try:
             series = _to_channels_time(data)
         except Exception:
-            return {}, dt_local
-        return {"global": series}, dt_local
+            return {}, dt_local, t_start_local
+        if dt_local is not None and dt_local > 0 and series.shape[1] > 0:
+            t_start_local = _resolve_series_start_ms(
+                t_start_local,
+                dt_local,
+                series.shape[1],
+                t_stop_local,
+            )
+        return {"global": series}, dt_local, t_start_local
 
     def _parse_channel_selection(max_channels):
         tokens = [str(v).strip() for v in request.form.getlist("sim_channel_indices") if str(v).strip()]
@@ -13510,6 +14978,28 @@ def analysis_plot_simulation():
         hi = float(max(t_start, t_end))
         return (axis >= lo) & (axis <= hi)
 
+    def _resolve_series_start_ms(explicit_start_ms, dt_ms, signal_len, trial_tstop_ms):
+        try:
+            start_val = float(explicit_start_ms)
+        except Exception:
+            start_val = 0.0
+        if np.isfinite(start_val) and abs(start_val) > 1e-12:
+            return start_val
+        try:
+            dt_val = float(dt_ms)
+            n_val = int(signal_len)
+            tstop_val = float(trial_tstop_ms)
+        except Exception:
+            return 0.0
+        if not np.isfinite(dt_val) or dt_val <= 0.0 or n_val <= 0:
+            return 0.0
+        if not np.isfinite(tstop_val) or tstop_val <= 0.0:
+            return 0.0
+        inferred_start = tstop_val - (n_val * dt_val)
+        if np.isfinite(inferred_start) and inferred_start > 0.0:
+            return float(inferred_start)
+        return 0.0
+
     if plot_type in {"lfp", "lfp_psd", "meeg", "meeg_psd"}:
         if plot_type in {"lfp_psd", "meeg_psd"} and cdm_psd_mode != "separate":
             return _analysis_plot_error(
@@ -13529,9 +15019,9 @@ def analysis_plot_simulation():
         first_series_map = {}
         if trial_indices:
             if plot_type in {"lfp", "lfp_psd"}:
-                first_series_map, _ = _extract_lfp_series_by_area(trial_indices[0], area_names)
+                first_series_map, _, _ = _extract_lfp_series_by_area(trial_indices[0], area_names)
             else:
-                first_series_map, _ = _extract_meeg_series(trial_indices[0])
+                first_series_map, _, _ = _extract_meeg_series(trial_indices[0])
         first_key = area_names[0] if (area_names and area_names[0] in first_series_map) else ("global" if "global" in first_series_map else None)
         if first_key is None or first_key not in first_series_map:
             return _analysis_plot_error(
@@ -13583,7 +15073,7 @@ def analysis_plot_simulation():
             fig, axs = plt.subplots(total_rows, area_cols, figsize=(5.4 * area_cols, 3.5 * total_rows), dpi=160, squeeze=False)
             plotted_any = False
             for trial_pos, trial_idx in enumerate(trial_indices):
-                area_map, dt_local = _extract_lfp_series_by_area(trial_idx, area_names)
+                area_map, dt_local, t_start_local = _extract_lfp_series_by_area(trial_idx, area_names)
                 for area_idx, area_name in enumerate(area_names):
                     grid_row = trial_pos * area_rows + (area_idx // area_cols)
                     grid_col = area_idx % area_cols
@@ -13598,13 +15088,17 @@ def analysis_plot_simulation():
                         ax.axis("off")
                         continue
                     if plot_type == "lfp":
-                        t_sig = np.arange(sig.shape[1], dtype=float) * dt_sig
+                        t_sig = float(t_start_local) + (np.arange(sig.shape[1], dtype=float) * dt_sig)
                         mask_t = _time_mask_or_full(t_sig, time_start, time_end)
+                        if not np.any(mask_t):
+                            mask_t = np.ones(sig.shape[1], dtype=bool)
+                            _plot_log_warning(
+                                f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                                f"trial {trial_idx} area '{area_name}' LFP samples; plotting full available range instead."
+                            )
                         area_plotted = False
                         for ch_idx in selected_channels:
                             if ch_idx >= sig.shape[0]:
-                                continue
-                            if not np.any(mask_t):
                                 continue
                             ax.plot(t_sig[mask_t], sig[ch_idx, :][mask_t], linewidth=0.9)
                             area_plotted = True
@@ -13612,7 +15106,7 @@ def analysis_plot_simulation():
                         ax.set_ylabel("LFP (a.u.)")
                         if np.any(mask_t):
                             ax.set_xlim(float(np.min(t_sig[mask_t])), float(np.max(t_sig[mask_t])))
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP", area_name=area_name))
                         plotted_any = plotted_any or area_plotted
                     else:
                         fs = 1000.0 / max(dt_sig, 1e-9)
@@ -13629,7 +15123,7 @@ def analysis_plot_simulation():
                                 plotted_any = True
                         ax.set_xlabel("f (Hz)")
                         ax.set_ylabel("PSD (a.u./Hz)")
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP PSD"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} LFP PSD", area_name=area_name))
                         ax.grid(alpha=0.2)
                 for extra_idx in range(len(area_names), area_rows * area_cols):
                     grid_row = trial_pos * area_rows + (extra_idx // area_cols)
@@ -13649,9 +15143,9 @@ def analysis_plot_simulation():
             for pos, trial_idx in enumerate(trial_indices):
                 ax = flat_ax[pos]
                 if plot_type in {"lfp", "lfp_psd"}:
-                    series_map, dt_local = _extract_lfp_series_by_area(trial_idx, [])
+                    series_map, dt_local, t_start_local = _extract_lfp_series_by_area(trial_idx, [])
                 else:
-                    series_map, dt_local = _extract_meeg_series(trial_idx)
+                    series_map, dt_local, t_start_local = _extract_meeg_series(trial_idx)
                 sig = series_map.get("global")
                 if sig is None:
                     ax.axis("off")
@@ -13662,13 +15156,18 @@ def analysis_plot_simulation():
                     ax.axis("off")
                     continue
                 if plot_type in {"lfp", "meeg"}:
-                    t_sig = np.arange(sig.shape[1], dtype=float) * dt_sig
+                    t_sig = float(t_start_local) + (np.arange(sig.shape[1], dtype=float) * dt_sig)
                     mask_t = _time_mask_or_full(t_sig, time_start, time_end)
+                    if not np.any(mask_t):
+                        mask_t = np.ones(sig.shape[1], dtype=bool)
+                        _plot_log_warning(
+                            f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                            f"trial {trial_idx} {'LFP' if plot_type == 'lfp' else 'EEG/MEG'} samples; "
+                            "plotting full available range instead."
+                        )
                     trial_plotted = False
                     for ch_idx in selected_channels:
                         if ch_idx >= sig.shape[0]:
-                            continue
-                        if not np.any(mask_t):
                             continue
                         ax.plot(t_sig[mask_t], sig[ch_idx, :][mask_t], linewidth=0.9)
                         trial_plotted = True
@@ -13723,7 +15222,7 @@ def analysis_plot_simulation():
             title="Simulation outputs",
             subtitle=subtitle,
             image_bytes=output.getvalue(),
-            log_output="",
+            log_output="\n".join(plot_log_lines),
             simulation_repeat_controls=simulation_repeat_controls,
         )
 
@@ -13835,8 +15334,13 @@ def analysis_plot_simulation():
                 )
                 plotted_any = False
                 for cfg_pos, (cfg_idx, cfg_trial_indices) in enumerate(configuration_groups):
-                    cfg_label = _simulation_configuration_legend_label(sim_data, cfg_idx, cfg_trial_indices)
                     for area_idx, area_name in enumerate(areas):
+                        cfg_label = _simulation_configuration_legend_label(
+                            sim_data,
+                            cfg_idx,
+                            cfg_trial_indices,
+                            area_name=area_name,
+                        )
                         grid_row = cfg_pos * area_rows + (area_idx // area_cols)
                         grid_col = area_idx % area_cols
                         ax = axs[grid_row][grid_col]
@@ -13852,7 +15356,7 @@ def analysis_plot_simulation():
                             ax.axis("off")
                             continue
                         ax.semilogy(ref_freqs[mask], mean_psd[mask], linewidth=1.2, color="C0")
-                        ax.set_title(f"{cfg_label} | {area_name} PSD")
+                        ax.set_title(f"{cfg_label}\n{area_name} PSD")
                         ax.set_xlabel("f (Hz)")
                         ax.set_ylabel("PSD (a.u./Hz)")
                         ax.grid(alpha=0.2)
@@ -13943,7 +15447,7 @@ def analysis_plot_simulation():
                         ax.semilogy(freqs[mask], psd[mask], linewidth=1.0, color="C0")
                         ax.set_xlabel("f (Hz)")
                         ax.set_ylabel("PSD (a.u./Hz)")
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} PSD"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} PSD", area_name=area_name))
                         ax.grid(alpha=0.2)
                         plotted_any = True
                     for extra_idx in range(len(areas), area_rows * area_cols):
@@ -14036,6 +15540,8 @@ def analysis_plot_simulation():
                         areas,
                         trial_idx,
                     )
+                    cdm_row_for_time = _trial_row_from_payload(cdm_payload, trial_idx)
+                    cdm_t_start_ms = _effective_t_start_ms_from_payload_row(cdm_row_for_time)
                     missing = [area for area in areas if area not in area_series]
                     if missing:
                         return _analysis_plot_error(
@@ -14081,9 +15587,9 @@ def analysis_plot_simulation():
                         ax.set_ylabel("gid")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} raster"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} raster", area_name=area_name))
                         if trial_pos == 0 and area_idx == 0:
-                            ax.legend(fontsize=7, loc="best")
+                            _ensure_ei_legend_entries(ax, population_colors)
 
                     elif plot_type == "firing_rates":
                         area_times = times.get(area_name, {})
@@ -14110,25 +15616,38 @@ def analysis_plot_simulation():
                         ax.set_ylabel(r"$\nu_X$ (spikes/$\Delta t$)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(time_start, time_end)
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} rates"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} rates", area_name=area_name))
                         if trial_pos == 0 and area_idx == 0:
                             ax.legend(fontsize=7, loc="best")
 
                     elif plot_type in {"proxy", "cdm"}:
-                        cdm = np.asarray(area_series[area_name], dtype=float)
-                        dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
-                        if dt_local is None:
+                        cdm = _to_1d_signal(area_series.get(area_name, []))
+                        if cdm.size == 0:
                             continue
-                        t_cdm = np.arange(cdm.size, dtype=float) * dt_local
+                        dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
+                        if dt_local is None or not np.isfinite(dt_local) or dt_local <= 0.0:
+                            continue
+                        trial_tstop_ms = float(tstop) if tstop is not None else None
+                        start_ms = _resolve_series_start_ms(
+                            cdm_t_start_ms,
+                            dt_local,
+                            cdm.size,
+                            trial_tstop_ms,
+                        )
+                        t_cdm = start_ms + (np.arange(cdm.size, dtype=float) * dt_local)
                         mask_t = _time_mask_or_full(t_cdm, time_start, time_end)
                         if not np.any(mask_t):
-                            continue
+                            mask_t = np.ones(cdm.size, dtype=bool)
+                            _plot_log_warning(
+                                f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                                f"trial {trial_idx} area '{area_name}' CDM/proxy samples; plotting full available range instead."
+                            )
                         ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                         ax.set_ylabel("Field potential (a.u.)")
                         ax.set_xlabel("t (ms)")
                         ax.set_xlim(float(np.min(t_cdm[mask_t])), float(np.max(t_cdm[mask_t])))
                         suffix = "field potential" if plot_type == "proxy" else "CDM"
-                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} {suffix}"))
+                        ax.set_title(_plot_trial_title(trial_idx, f"| {area_name} {suffix}", area_name=area_name))
                         plotted_any = True
                 # Hide unused cells in this trial's area grid block.
                 for extra_idx in range(len(areas), area_rows * area_cols):
@@ -14194,7 +15713,7 @@ def analysis_plot_simulation():
                     ax.set_xlabel("t (ms)")
                     ax.set_title(_plot_trial_title(trial_idx, "raster"))
                     if pos == 0:
-                        ax.legend(fontsize=7, loc="best")
+                        _ensure_ei_legend_entries(ax, population_colors)
                     ax.set_xlim(time_start, time_end)
 
                 elif plot_type == "firing_rates":
@@ -14228,16 +15747,29 @@ def analysis_plot_simulation():
                         [],
                         trial_idx,
                     )
-                    cdm = np.asarray(series_by_area.get("global", []), dtype=float)
+                    cdm = _to_1d_signal(series_by_area.get("global", []))
                     if cdm.size == 0:
                         continue
                     dt_local = float(dt_fp) if dt_fp is not None else (float(dt) if dt is not None else None)
-                    if dt_local is None:
+                    if dt_local is None or not np.isfinite(dt_local) or dt_local <= 0.0:
                         continue
-                    t_cdm = np.arange(cdm.size, dtype=float) * dt_local
+                    cdm_row_for_time = _trial_row_from_payload(cdm_payload, trial_idx)
+                    cdm_t_start_ms = _effective_t_start_ms_from_payload_row(cdm_row_for_time)
+                    trial_tstop_ms = float(tstop) if tstop is not None else None
+                    start_ms = _resolve_series_start_ms(
+                        cdm_t_start_ms,
+                        dt_local,
+                        cdm.size,
+                        trial_tstop_ms,
+                    )
+                    t_cdm = start_ms + (np.arange(cdm.size, dtype=float) * dt_local)
                     mask_t = _time_mask_or_full(t_cdm, time_start, time_end)
                     if not np.any(mask_t):
-                        continue
+                        mask_t = np.ones(cdm.size, dtype=bool)
+                        _plot_log_warning(
+                            f"Requested time window [{time_start:g}, {time_end:g}] ms does not overlap "
+                            f"trial {trial_idx} CDM/proxy samples; plotting full available range instead."
+                        )
                     ax.plot(t_cdm[mask_t], cdm[mask_t], color="C0", linewidth=1.0)
                     ax.set_ylabel("Field potential (a.u.)")
                     ax.set_xlabel("t (ms)")
@@ -14277,7 +15809,7 @@ def analysis_plot_simulation():
         title="Simulation outputs",
         subtitle=subtitle,
         image_bytes=output.getvalue(),
-        log_output="",
+        log_output="\n".join(plot_log_lines),
         simulation_repeat_controls=simulation_repeat_controls,
     )
 
@@ -14287,6 +15819,7 @@ def clear_analysis_data():
     removed_files = _clear_analysis_data_files()
     _clear_analysis_selection_mode()
     _clear_analysis_selected_simulation_keys()
+    _clear_analysis_plot_config()
     accept_header = (request.headers.get("Accept") or "").lower()
     is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
     if is_ajax or "application/json" in accept_header:
@@ -15814,12 +17347,6 @@ def job_status_page(job_id):
     computation_type = request.args.get('computation_type') 
     # Pass the job_id to the template for use in Alpine.js
     return render_template("loading_page.html", job_id=job_id, computation_type=computation_type, pending=False)
-
-@app.route("/job_status_pending")
-def job_status_pending():
-    """Renders the loading page before a job id is assigned (used for uploads)."""
-    computation_type = request.args.get('computation_type')
-    return render_template("loading_page.html", job_id="", computation_type=computation_type, pending=True)
 
 
 @app.route("/cancel_job/<job_id>", methods=["POST"])

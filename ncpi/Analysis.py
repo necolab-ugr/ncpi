@@ -803,7 +803,7 @@ class Analysis:
             df_pair = df[df[group_col].isin([control_group, g])]
 
             out_rows: List[Tuple[str, float]] = []
-            for sensor, df_s in df_pair.groupby(sensor_col):
+            for sensor, df_s in df_pair.groupby(sensor_col, sort=False):
                 x = df_s.loc[df_s[group_col] == g, data_col].to_numpy(dtype=float)
                 y = df_s.loc[df_s[group_col] == control_group, data_col].to_numpy(dtype=float)
 
@@ -826,436 +826,528 @@ class Analysis:
     # ------------------------------------------------------------------
     # EEG plotting using MNE
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _make_eeg_info(
+        ch_names: List[str],
+        montage: str,
+        position_offset: Tuple[float, float],
+        ch_type: str = "eeg",
+    ) -> Any:
+        mne = tools.dynamic_import("mne")
+
+        if len(position_offset) != 2:
+            raise ValueError("position_offset must be a tuple/list of length 2: (y_offset, z_offset).")
+
+        info = mne.create_info(ch_names=ch_names, sfreq=250, ch_types=[ch_type] * len(ch_names))
+        std_montage = mne.channels.make_standard_montage(montage)
+
+        ch_pos = {
+            ch: std_montage.get_positions()["ch_pos"][ch]
+            for ch in ch_names
+            if ch in std_montage.get_positions()["ch_pos"]
+        }
+
+        if not ch_pos:
+            raise ValueError(f"None of the channels {ch_names} found in montage '{montage}'.")
+
+        y_off, z_off = position_offset
+        for ch in ch_pos:
+            ch_pos[ch] = ch_pos[ch].copy()
+            ch_pos[ch][1] += y_off
+            ch_pos[ch][2] += z_off
+
+        new_montage = mne.channels.make_dig_montage(ch_pos=ch_pos, coord_frame="head")
+        info.set_montage(new_montage)
+        return info
+    
     def eeg_topomap(
         self,
-        values: Union[Sequence[float], np.ndarray, Mapping[str, float], pd.Series],
+        values=None,
+        ch_names=None,
         *,
-        ch_names: Optional[Sequence[str]] = None,
-        montage: Union[str, Any] = "standard_1020",
-        info: Optional[Any] = None,
-        ch_type: str = "eeg",
-        units: Optional[str] = None,
-        vmin: Optional[float] = None,
-        vmax: Optional[float] = None,
-        cmap: Optional[str] = None,
-        sensors: bool = True,
-        outlines: Union[str, dict] = "head",
-        sphere: Union[str, Tuple[float, float, float, float]] = "auto",
-        axes: Optional[Any] = None,
-        show: bool = True,
-        colorbar: bool = True,
-        colorbar_label_fontsize: Optional[float] = None,
-        colorbar_tick_fontsize: Optional[float] = None,
-        res: int = 64,
-        extrapolate: str = "auto",
-        image_interp: str = "cubic",
+        position_offset,
+        sensor_col="sensor",
+        data_col="data",
+        data_index=-1,
+        montage="standard_1005",
+        ch_type="eeg",
+        sphere=0.28,
+        cmap="jet",
+        vmin=None,
+        vmax=None,
+        colorbar=True,
+        colorbar_fmt="%0.2f",
+        colorbar_label=None,
+        colorbar_label_fontsize=None,
+        colorbar_tick_fontsize=8,
+        sensors=None,
+        outlines=None,
+        contours=None,
+        res=300,
+        extrapolate=None,
+        image_interp=None,
+        axes=None,
+        show=True,
+        title=None,
+        names=None,
     ):
-        """Plot an EEG topomap using MNE, adapting to any montage / channel configuration.
-        """
-
         if not tools.ensure_module("mne"):
             raise ImportError("mne is required for eeg_topomap but is not installed.")
 
-        mne = tools.dynamic_import("mne")
+        import matplotlib.pyplot as plt
         mne_viz = tools.dynamic_import("mne", "viz")
 
-        # Normalize values + channel names
-        if isinstance(values, pd.Series):
-            ch_names_in = list(values.index.astype(str))
-            data = values.to_numpy(dtype=float)
-        elif isinstance(values, Mapping):
-            ch_names_in = [str(k) for k in values.keys()]
-            data = np.asarray(list(values.values()), dtype=float)
-        else:
-            data = np.asarray(values, dtype=float)
-            if ch_names is None:
-                raise ValueError("When `values` is array-like, you must provide `ch_names`.")
-            ch_names_in = [str(c) for c in ch_names]
-
-        if data.ndim != 1:
-            raise ValueError(f"values must be 1D (n_channels,), got shape {data.shape}.")
-        if len(ch_names_in) != data.shape[0]:
-            raise ValueError(f"Length mismatch: {len(ch_names_in)} channel names vs {data.shape[0]} values.")
-
-        # Build or validate Info
-        if info is None:
-            info_use = mne.create_info(ch_names=ch_names_in, sfreq=1.0, ch_types=[ch_type] * len(ch_names_in))
-        else:
-            missing = [c for c in ch_names_in if c not in info["ch_names"]]
-            if missing:
-                raise ValueError(f"Provided info is missing channels: {missing}")
-            info_use = info.copy()
-
-        # Apply montage
-        if montage is not None:
-            try:
-                if isinstance(montage, str):
-                    mont = mne.channels.make_standard_montage(montage)
+        # Paso A — Resolver datos y nombres de canales
+        if values is None:
+            df = self._as_dataframe()
+            if sensor_col not in df.columns:
+                raise ValueError(f"Column '{sensor_col}' not found in data.")
+            if data_col not in df.columns:
+                raise ValueError(f"Column '{data_col}' not found in data.")
+            if df.empty:
+                raise ValueError("DataFrame is empty.")
+            ch_names_in = []
+            data_vals = []
+            for sensor, group in df.groupby(sensor_col, sort=False):
+                raw = group[data_col].values
+                if data_index == -1:
+                    if len(raw) != 1:
+                        raise ValueError(
+                            f"data_index=-1 expects a scalar per sensor, but sensor '{sensor}' has {len(raw)} rows."
+                        )
+                    val = float(raw[0])
+                elif data_index is None:
+                    val = float(np.mean(raw))
                 else:
-                    mont = montage
-                info_use.set_montage(mont, match_case=False, on_missing="ignore")
-            except Exception as e:
-                raise ValueError(f"Failed to set montage {montage!r}: {e}") from e
+                    if data_index >= len(raw):
+                        raise IndexError(
+                            f"data_index={data_index} out of range for sensor '{sensor}' with {len(raw)} rows."
+                        )
+                    val = float(raw[data_index])
+                ch_names_in.append(str(sensor))
+                data_vals.append(val)
+            data_arr = np.asarray(data_vals, dtype=float)
+        else:
+            if isinstance(values, pd.Series):
+                ch_names_in = list(values.index.astype(str))
+                data_arr = values.to_numpy(dtype=float)
+            elif isinstance(values, Mapping):
+                ch_names_in = [str(k) for k in values.keys()]
+                data_arr = np.asarray(list(values.values()), dtype=float)
+            else:
+                data_arr = np.asarray(values, dtype=float)
+                if ch_names is None:
+                    raise ValueError("When values is array-like, ch_names is required.")
+                ch_names_in = [str(c) for c in ch_names]
 
-        # Ensure channel order matches data
-        if info_use["ch_names"] != ch_names_in:
-            info_tmp = mne.create_info(
-                ch_names=ch_names_in, sfreq=info_use["sfreq"], ch_types=[ch_type] * len(ch_names_in)
-            )
-            try:
-                info_tmp.set_montage(info_use.get_montage(), match_case=False, on_missing="ignore")
-            except Exception:
-                pass
-            info_use = info_tmp
+        if data_arr.ndim != 1:
+            raise ValueError(f"values must be 1D, got shape {data_arr.shape}.")
+        if len(ch_names_in) != data_arr.shape[0]:
+            raise ValueError(f"Length mismatch: {len(ch_names_in)} channel names vs {data_arr.shape[0]} values.")
 
-        # MNE has changed the topomap API across versions.
-        # We therefore build keyword arguments dynamically based on the installed MNE.
-        import inspect
+        # Paso B — Validar position_offset
+        if len(position_offset) != 2 or not all(isinstance(v, (int, float)) for v in position_offset):
+            raise ValueError("position_offset must be a tuple/list of two numbers: (y_offset, z_offset).")
 
-        sig = inspect.signature(mne_viz.plot_topomap)
-        supported = set(sig.parameters.keys())
+        # Paso C — Crear Info
+        info_use = self._make_eeg_info(ch_names_in, montage, position_offset, ch_type)
 
-        kwargs = dict(
-            axes=axes,
-            show=show,
-            cmap=cmap,
-            sensors=sensors,
-            outlines=outlines,
-            sphere=sphere,
-            res=res,
-            extrapolate=extrapolate,
-            image_interp=image_interp,
+        # Paso D — All-zeros
+        if np.all(data_arr == 0):
+            cmap = "Greys"
+            colorbar = False
+            vmin = vmax = 0.0
+
+        # Paso E — vmin/vmax
+        if vmin is None:
+            vmin = float(np.nanmin(data_arr))
+        if vmax is None:
+            vmax = float(np.nanmax(data_arr))
+        if vmin > vmax:
+            raise ValueError(f"vmin ({vmin}) must be <= vmax ({vmax}).")
+
+        # Paso F — Plot
+        # Match the legacy plots.py call by default. Optional MNE kwargs are
+        # forwarded only when explicitly provided, because forcing them can
+        # change interpolation/contours across MNE versions.
+        topomap_kwargs = {"sphere": sphere, "res": res}
+        if sensors is not None:
+            topomap_kwargs["sensors"] = sensors
+        if outlines is not None:
+            topomap_kwargs["outlines"] = outlines
+        if contours is not None:
+            topomap_kwargs["contours"] = contours
+        if extrapolate is not None:
+            topomap_kwargs["extrapolate"] = extrapolate
+        if image_interp is not None:
+            topomap_kwargs["image_interp"] = image_interp
+
+        im, _ = mne_viz.plot_topomap(
+            data_arr, info_use, axes=axes, cmap=cmap, show=False,
+            **topomap_kwargs,
         )
+        im.set_clim(vmin, vmax)
 
-        # Optional colorbar support (older MNE may not accept it)
-        needs_manual_colorbar = colorbar and "colorbar" not in supported
-        if "colorbar" in supported:
-            kwargs["colorbar"] = colorbar
+        # Paso G — Colorbar manual
+        if colorbar:
+            mid = vmin + (vmax - vmin) / 2
+            cbar = plt.colorbar(
+                im, ax=axes if axes is not None else im.axes,
+                fraction=0.046, pad=0.0, format=colorbar_fmt, ticks=[vmin, mid, vmax],
+            )
+            cbar.ax.tick_params(labelsize=colorbar_tick_fontsize)
+            if colorbar_label:
+                cbar.set_label(colorbar_label, fontsize=colorbar_label_fontsize)
 
-        # If we need to add the colorbar manually, defer show so the figure
-        # is not rendered yet when we modify its layout.
-        if needs_manual_colorbar:
-            kwargs["show"] = False
+        # Paso H — Título y show
+        if title:
+            (axes if axes is not None else im.axes).set_title(title)
+        if show:
+            plt.show()
 
-        # Value range support differs across versions: either (vmin, vmax) or vlim
-        if "vmin" in supported or "vmax" in supported:
-            if "vmin" in supported:
-                kwargs["vmin"] = vmin
-            if "vmax" in supported:
-                kwargs["vmax"] = vmax
-        elif "vlim" in supported:
-            kwargs["vlim"] = (vmin, vmax)
-
-        im, cn = mne_viz.plot_topomap(data, info_use, **kwargs)
-
-        if needs_manual_colorbar:
-            ax_used = axes if axes is not None else im.axes
-            cb = ax_used.figure.colorbar(im, ax=ax_used)
-            if units is not None:
-                cb.set_label(units, fontsize=colorbar_label_fontsize)
-            if colorbar_tick_fontsize is not None:
-                cb.ax.tick_params(labelsize=colorbar_tick_fontsize)
-            if show:
-                import matplotlib.pyplot as plt
-                plt.show()
-        elif colorbar:
-            # MNE native colorbar: find the colorbar axes matplotlib added
-            fig = (axes if axes is not None else im.axes).figure
-            for cb_ax in fig.axes:
-                if cb_ax.get_label() == "<colorbar>":
-                    if units is not None:
-                        cb_ax.set_ylabel(units, fontsize=colorbar_label_fontsize)
-                    if colorbar_tick_fontsize is not None:
-                        cb_ax.tick_params(labelsize=colorbar_tick_fontsize)
-
-        return im, cn
+        return im
 
     # --------------
     # MEG plotting
     # --------------
     def meg_surface(
         self,
-        region_values: Mapping[str, float] | Sequence[Tuple[str, float]] | Sequence[float],
+        values: Union[Sequence[float], np.ndarray, pd.Series],
         *,
-        atlas: Optional[str] = None,
-        region_coords: Optional[Mapping[str, Sequence[float]]] = None,
+        atlas: str = "dk",
+        subject: str = "fsaverage",
         subjects_dir: Optional[str] = None,
         surface: str = "inflated",
         hemisphere: str = "both",
-        sphere_radius: float = 1.0,
-        n_surface: int = 40,
+        views: Union[str, Sequence[str]] = "lat",
         cmap: str = "coolwarm",
         vmin: Optional[float] = None,
         vmax: Optional[float] = None,
-        alpha: float = 0.9,
-        title: Optional[str] = None,
-        units: Optional[str] = None,
+        center: Optional[float] = None,
+        alpha: float = 1.0,
+        smoothing_steps: Optional[int] = 5,
+        colorbar: bool = True,
+        colorbar_kwargs: Optional[Mapping[str, Any]] = None,
+        cortex: Union[str, Tuple[Any, ...]] = "low_contrast",
+        background: str = "white",
+        size: Union[int, Tuple[int, int]] = (1000, 600),
         show: bool = True,
-        ax=None,
-    ):
-        """Plot a simple 3D MEG surface using region values.
+        axes: Optional[Any] = None,
+        auto_fetch: bool = True,
+        hcp_accept: bool = False,
+        verbose: Optional[Union[bool, str, int]] = None,
+        **brain_kwargs: Any,
+    ) -> Tuple[Any, Any, List[str]]:
+        """Plot parcel-wise MEG values on a cortical surface using MNE.
 
-        If `atlas="desikan"`, this maps values to the Desikan-Killiany parcellation
-        on the fsaverage surface (requires `mne`). Otherwise, a spherical surface is
-        used with inverse-distance interpolation.
+        This function is atlas-only by design. It maps one value per cortical
+        parcel to the corresponding atlas labels, expands to vertex-wise data,
+        and renders a brain surface plot.
+
+        The `atlas` argument accepts any parcellation name readable by
+        ``mne.read_labels_from_annot(subject=..., parc=atlas, ...)``. A few common
+        aliases are normalized (e.g., ``"dk"`` -> ``"aparc"``).
 
         Parameters
         ----------
-        region_values:
-            Mapping of region_name -> value, sequence of (region_name, value), or
-            a sequence of 68 values when atlas="desikan" (ordered by label name within
-            hemisphere: all LH labels then all RH labels).
+        values:
+            1D array-like with one value per atlas parcel. Order is:
+            sorted left-hemisphere labels followed by sorted right-hemisphere labels
+            (after removing ``unknown``, ``corpuscallosum``, and ``medialwall`` labels).
         atlas:
-            Optional atlas name. Supported: "desikan".
-        region_coords:
-            Optional mapping from region_name to (x, y, z) coordinates (used when atlas is None).
+            Atlas/parcellation name (MNE/FreeSurfer annotation name).
+        subject:
+            FreeSurfer subject name for which the atlas is defined.
         subjects_dir:
-            FreeSurfer subjects directory for fsaverage (optional when atlas="desikan";
-            if None, fsaverage is fetched via MNE).
+            Directory where subject surfaces and atlas files are read/downloaded.
+            If None, MNE default location is used.
         surface:
-            Surface name for fsaverage (e.g., "inflated", "pial", "white") when atlas="desikan".
+            Surface name (e.g., ``"inflated"``, ``"pial"``, ``"white"``).
         hemisphere:
-            "lh", "rh", or "both" (used when atlas="desikan").
-        sphere_radius:
-            Radius of the spherical surface.
-        n_surface:
-            Number of points per surface dimension (controls mesh resolution).
+            Hemisphere display mode: ``"lh"``, ``"rh"``, ``"both"``, or ``"split"``.
+        views:
+            Brain view(s), passed to MNE Brain.
         cmap:
-            Matplotlib colormap name.
+            Colormap name.
         vmin, vmax:
-            Color scale limits. If None, derived from interpolated values.
+            Color limits. If None, inferred from `values`.
+        center:
+            Optional center for diverging colormaps.
         alpha:
-            Surface alpha (transparency).
-        title:
-            Optional plot title.
+            Overlay opacity.
+        smoothing_steps:
+            Smoothing steps passed to ``Brain.add_data`` before screenshot rendering.
+        colorbar:
+            Whether to show colorbar.
+        colorbar_kwargs:
+            Optional keyword arguments forwarded to Matplotlib ``fig.colorbar``
+            (for example ``{"ticks": [-1, 0, 1]}``).
+        cortex:
+            Cortex style passed to MNE Brain.
+        background:
+            Background color.
+        size:
+            Figure size passed to MNE Brain.
         show:
-            Whether to show the plot immediately.
-        ax:
-            Optional existing 3D axis to plot into.
+            Whether to show the Matplotlib figure immediately.
+        axes:
+            Optional Matplotlib axes where the rendered brain image will be drawn.
+            If None, a new figure and axes are created.
+        auto_fetch:
+            If True, auto-fetches `fsaverage` when needed. For non-fsaverage subjects,
+            this function expects the subject to already exist in `subjects_dir`.
+        hcp_accept:
+            Required only when downloading HCP-MMP files and they are not already present.
+            Set True to accept HCP-MMP license terms.
+        verbose:
+            MNE verbosity setting.
+        **brain_kwargs:
+            Extra keyword arguments forwarded to MNE Brain constructor.
 
         Returns
         -------
-        fig, ax:
-            Matplotlib figure and axis handles.
+        fig, ax, label_order:
+            Matplotlib figure/axes and the label-name order used to map input values.
         """
-        import hashlib
-        import warnings
-        import matplotlib.pyplot as plt
-        from matplotlib import cm
-        from matplotlib.colors import Normalize
-
-        if region_values is None:
-            raise ValueError("region_values must be provided.")
-
-        if atlas is None:
-            if isinstance(region_values, Mapping):
-                region_dict = dict(region_values)
-            else:
-                region_dict = dict(region_values)
-
-            if len(region_dict) == 0:
-                raise ValueError("region_values is empty.")
-
-            if region_coords is None:
-                warnings.warn(
-                    "region_coords not provided; using synthetic coordinates derived from region names.",
-                    RuntimeWarning,
-                    stacklevel=2,
-                )
-                region_coords = {}
-
-            names = list(region_dict.keys())
-            values = np.asarray([float(region_dict[n]) for n in names], dtype=float)
-
-            coords = []
-            for name in names:
-                if name in region_coords:
-                    xyz = np.asarray(region_coords[name], dtype=float).reshape(-1)
-                    if xyz.shape[0] != 3:
-                        raise ValueError(f"region_coords['{name}'] must be a 3D coordinate.")
-                    coords.append(xyz)
-                else:
-                    h = hashlib.md5(name.encode("utf-8")).hexdigest()
-                    u = int(h[:8], 16) / 0xFFFFFFFF
-                    v = int(h[8:16], 16) / 0xFFFFFFFF
-                    theta = 2.0 * np.pi * u
-                    phi = np.arccos(2.0 * v - 1.0)
-                    x = sphere_radius * np.sin(phi) * np.cos(theta)
-                    y = sphere_radius * np.sin(phi) * np.sin(theta)
-                    z = sphere_radius * np.cos(phi)
-                    coords.append(np.array([x, y, z], dtype=float))
-
-            coords = np.asarray(coords, dtype=float)
-
-            u = np.linspace(0.0, 2.0 * np.pi, n_surface)
-            v = np.linspace(0.0, np.pi, n_surface)
-            uu, vv = np.meshgrid(u, v)
-            x = sphere_radius * np.cos(uu) * np.sin(vv)
-            y = sphere_radius * np.sin(uu) * np.sin(vv)
-            z = sphere_radius * np.cos(vv)
-
-            mesh = np.stack([x.ravel(), y.ravel(), z.ravel()], axis=1)
-            pts = coords
-
-            d = np.linalg.norm(mesh[:, None, :] - pts[None, :, :], axis=2)
-            eps = 1e-6
-            d = np.maximum(d, eps)
-            w = 1.0 / (d ** 2)
-            v_interp = (w * values[None, :]).sum(axis=1) / w.sum(axis=1)
-            v_interp = v_interp.reshape(x.shape)
-
-            if vmin is None:
-                vmin = float(np.nanmin(v_interp))
-            if vmax is None:
-                vmax = float(np.nanmax(v_interp))
-
-            norm = Normalize(vmin=vmin, vmax=vmax)
-            colors = cm.get_cmap(cmap)(norm(v_interp))
-
-            if ax is None:
-                fig = plt.figure(figsize=(6, 6))
-                ax = fig.add_subplot(111, projection="3d")
-            else:
-                fig = ax.figure
-
-            ax.plot_surface(
-                x,
-                y,
-                z,
-                facecolors=colors,
-                rstride=1,
-                cstride=1,
-                linewidth=0,
-                antialiased=False,
-                alpha=alpha,
-            )
-            ax.set_box_aspect([1, 1, 1])
-            ax.set_xticks([])
-            ax.set_yticks([])
-            ax.set_zticks([])
-
-            mappable = cm.ScalarMappable(norm=norm, cmap=cmap)
-            mappable.set_array(v_interp)
-            cb = fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
-            if units is not None:
-                cb.set_label(units)
-
-            if title:
-                ax.set_title(title)
-
-            if show:
-                plt.show()
-
-            return fig, ax
-
-        if atlas.lower() != "desikan":
-            raise ValueError("Only atlas='desikan' is supported currently.")
-
-        if hemisphere not in {"lh", "rh", "both"}:
-            raise ValueError("hemisphere must be one of {'lh','rh','both'}.")
-
         if not tools.ensure_module("mne"):
             raise ImportError("mne is required for atlas-based MEG surface plotting.")
+        if not tools.ensure_module("nibabel"):
+            raise ImportError(
+                "nibabel is required for meg_surface (MNE needs it to read cortical surfaces). "
+                "Install it with: pip install nibabel"
+            )
         mne = tools.dynamic_import("mne")
+        from pathlib import Path
 
-        import os as _os
-        if subjects_dir is None:
-            subjects_dir = _os.path.dirname(mne.datasets.fetch_fsaverage(verbose=False))
+        if hemisphere not in {"lh", "rh", "both", "split"}:
+            raise ValueError("hemisphere must be one of {'lh', 'rh', 'both', 'split'}.")
 
-        labels = mne.read_labels_from_annot(
-            subject="fsaverage",
-            parc="aparc",
-            subjects_dir=subjects_dir,
-        )
+        atlas_norm = atlas.strip().lower()
+        alias_to_parc: Dict[str, str] = {
+            "dk": "aparc",
+            "desikan": "aparc",
+            "desikan-killiany": "aparc",
+            "aparc": "aparc",
+            "destrieux": "aparc.a2009s",
+            "aparc.a2009s": "aparc.a2009s",
+            "hcp-mmp": "HCPMMP1",
+            "hcp": "HCPMMP1",
+            "glasser": "HCPMMP1",
+            "hcpmmp1": "HCPMMP1",
+            "hcp-mmp-combined": "HCPMMP1_combined",
+            "glasser-combined": "HCPMMP1_combined",
+            "hcpmmp1_combined": "HCPMMP1_combined",
+            "aparc-sub": "aparc_sub",
+            "khan": "aparc_sub",
+            "aparc_sub": "aparc_sub",
+        }
+        parc = alias_to_parc.get(atlas_norm, atlas.strip())
 
-        def _is_valid_label(label):
-            name = label.name.lower()
-            return ("unknown" not in name) and ("corpuscallosum" not in name)
+        arr = np.asarray(values, dtype=float).reshape(-1)
+        if arr.size == 0:
+            raise ValueError("values must contain at least one element.")
+        if not np.all(np.isfinite(arr)):
+            raise ValueError("values must contain only finite numeric values.")
 
-        labels = [lab for lab in labels if _is_valid_label(lab)]
-        labels_lh = sorted([lab for lab in labels if lab.hemi == "lh"], key=lambda x: x.name)
-        labels_rh = sorted([lab for lab in labels if lab.hemi == "rh"], key=lambda x: x.name)
-        label_order = labels_lh + labels_rh
+        subjects_dir_path = Path(subjects_dir).expanduser() if subjects_dir is not None else None
+        if subjects_dir_path is not None:
+            subjects_dir_path.mkdir(parents=True, exist_ok=True)
 
-        if isinstance(region_values, Mapping):
-            region_dict = dict(region_values)
-            values = []
-            for lab in label_order:
-                if lab.name in region_dict:
-                    values.append(float(region_dict[lab.name]))
-                else:
-                    raise ValueError(f"Missing value for label '{lab.name}'.")
-            values = np.asarray(values, dtype=float)
-        elif isinstance(region_values, (Sequence, np.ndarray)):
-            values = np.asarray(region_values, dtype=float)
+        if auto_fetch and subject == "fsaverage":
+            subjects_dir_resolved = Path(
+                mne.datasets.fetch_fsaverage(subjects_dir=subjects_dir_path, verbose=verbose)
+            ).parent
         else:
-            raise ValueError("region_values must be a mapping or a sequence.")
-
-        if values.shape[0] != len(label_order):
+            if subjects_dir_path is None:
+                cfg = mne.get_config("SUBJECTS_DIR", default=None)
+                subjects_dir_resolved = Path(cfg).expanduser() if cfg else None
+            else:
+                subjects_dir_resolved = subjects_dir_path
+            if subjects_dir_resolved is None:
+                raise ValueError(
+                    "subjects_dir is required when auto_fetch=False and SUBJECTS_DIR is not configured."
+                )
+        subject_dir = subjects_dir_resolved / subject
+        if not subject_dir.exists():
             raise ValueError(
-                f"Expected {len(label_order)} values for atlas='desikan', got {values.shape[0]}."
+                f"Subject directory not found: {subject_dir}. "
+                "Provide a valid subject or enable auto_fetch with subject='fsaverage'."
+            )
+
+        label_dir = subject_dir / "label"
+        if parc in {"HCPMMP1", "HCPMMP1_combined"} and subject == "fsaverage":
+            lh_annot = label_dir / f"lh.{parc}.annot"
+            rh_annot = label_dir / f"rh.{parc}.annot"
+            if not (lh_annot.exists() and rh_annot.exists()):
+                if not hcp_accept:
+                    raise ValueError(
+                        f"Parcellation '{parc}' is not available locally for fsaverage. "
+                        "Set hcp_accept=True to accept the license and download it."
+                    )
+                mne.datasets.fetch_hcp_mmp_parcellation(
+                    subjects_dir=subjects_dir_resolved,
+                    combine=True,
+                    accept=True,
+                    verbose=verbose,
+                )
+        elif parc == "aparc_sub" and subject == "fsaverage":
+            mne.datasets.fetch_aparc_sub_parcellation(subjects_dir=subjects_dir_resolved, verbose=verbose)
+
+        try:
+            labels = mne.read_labels_from_annot(
+                subject=subject,
+                parc=parc,
+                hemi="both",
+                subjects_dir=subjects_dir_resolved,
+                sort=True,
+                verbose=verbose,
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"Could not read atlas/parcellation '{parc}' for subject '{subject}'. "
+                f"Ensure lh.{parc}.annot and rh.{parc}.annot exist in "
+                f"{subject_dir / 'label'}."
+            ) from exc
+
+        def _is_plot_label(name: str) -> bool:
+            n = name.lower()
+            excluded = ("unknown", "corpuscallosum", "medialwall")
+            return not any(e in n for e in excluded)
+
+        labels = [lab for lab in labels if _is_plot_label(lab.name)]
+        labels_lh = [lab for lab in labels if lab.hemi == "lh"]
+        labels_rh = [lab for lab in labels if lab.hemi == "rh"]
+        label_order = [lab.name for lab in labels_lh + labels_rh]
+
+        if arr.shape[0] != len(label_order):
+            raise ValueError(
+                f"Atlas '{parc}' expects {len(label_order)} values "
+                f"(LH {len(labels_lh)} + RH {len(labels_rh)}), got {arr.shape[0]}."
             )
 
         if vmin is None:
-            vmin = float(np.nanmin(values))
+            vmin = float(np.nanmin(arr))
         if vmax is None:
-            vmax = float(np.nanmax(values))
+            vmax = float(np.nanmax(arr))
+        if vmin > vmax:
+            raise ValueError(f"vmin ({vmin}) must be <= vmax ({vmax}).")
 
-        norm = Normalize(vmin=vmin, vmax=vmax)
-        cmap_obj = cm.get_cmap(cmap)
-
-        if ax is None:
-            fig = plt.figure(figsize=(8, 6))
-            ax = fig.add_subplot(111, projection="3d")
-        else:
-            fig = ax.figure
-
-        def _plot_hemi(hemi, labels_hemi, vals_hemi):
-            surf_path = _os.path.join(subjects_dir, "fsaverage", "surf", f"{hemi}.{surface}")
-            if not _os.path.exists(surf_path):
-                raise ValueError(f"Surface file not found: {surf_path}")
-            verts, faces = mne.read_surface(surf_path)
-
-            data = np.full((verts.shape[0],), np.nan, dtype=float)
-            for lab, val in zip(labels_hemi, vals_hemi):
-                data[lab.vertices] = val
-
-            face_vals = np.nanmean(data[faces], axis=1)
-            face_vals = np.where(np.isfinite(face_vals), face_vals, vmin)
-            face_colors = cmap_obj(norm(face_vals))
-
-            surf = ax.plot_trisurf(
-                verts[:, 0],
-                verts[:, 1],
-                verts[:, 2],
-                triangles=faces,
-                linewidth=0.0,
-                antialiased=False,
-                alpha=alpha,
-                shade=False,
+        lh_surface_path = subject_dir / "surf" / f"lh.{surface}"
+        rh_surface_path = subject_dir / "surf" / f"rh.{surface}"
+        if not lh_surface_path.exists() or not rh_surface_path.exists():
+            raise ValueError(
+                f"Surface '{surface}' not found in subject surf directory "
+                f"({subject_dir / 'surf'})."
             )
-            surf.set_facecolor(face_colors)
+        n_lh_vertices = mne.read_surface(str(lh_surface_path), verbose=verbose)[0].shape[0]
+        n_rh_vertices = mne.read_surface(str(rh_surface_path), verbose=verbose)[0].shape[0]
 
-        if hemisphere in {"lh", "both"}:
-            _plot_hemi("lh", labels_lh, values[: len(labels_lh)])
-        if hemisphere in {"rh", "both"}:
-            _plot_hemi("rh", labels_rh, values[len(labels_lh):])
+        data_lh = np.full(n_lh_vertices, np.nan, dtype=float)
+        data_rh = np.full(n_rh_vertices, np.nan, dtype=float)
+        lh_vals = arr[: len(labels_lh)]
+        rh_vals = arr[len(labels_lh):]
 
-        ax.set_box_aspect([1, 1, 1])
-        ax.set_xticks([])
-        ax.set_yticks([])
-        ax.set_zticks([])
+        for label, val in zip(labels_lh, lh_vals):
+            data_lh[label.vertices] = float(val)
+        for label, val in zip(labels_rh, rh_vals):
+            data_rh[label.vertices] = float(val)
 
-        mappable = cm.ScalarMappable(norm=norm, cmap=cmap_obj)
-        mappable.set_array(values)
-        cb = fig.colorbar(mappable, ax=ax, shrink=0.6, pad=0.05)
-        if units is not None:
-            cb.set_label(units)
+        if np.isnan(data_lh).any():
+            data_lh = np.nan_to_num(data_lh, nan=vmin)
+        if np.isnan(data_rh).any():
+            data_rh = np.nan_to_num(data_rh, nan=vmin)
 
-        if title:
-            ax.set_title(title)
+        import inspect
+        import matplotlib.pyplot as plt
+        from matplotlib import cm as mpl_cm
+        from matplotlib.colors import Normalize
+
+        fmid = center if center is not None else (vmin + vmax) / 2.0
+
+        Brain = mne.viz.get_brain_class()
+        brain_sig = inspect.signature(Brain)
+        accepted_brain_kwargs = set(brain_sig.parameters)
+        brain_args_common: Dict[str, Any] = dict(
+            cortex=cortex,
+            size=size,
+            background=background,
+            subjects_dir=str(subjects_dir_resolved),
+            views=views,
+            show=False,
+        )
+        brain_args_common.update(brain_kwargs)
+        brain_args_common = {k: v for k, v in brain_args_common.items() if k in accepted_brain_kwargs}
+
+        def _render_hemi(hemi_render: str, data_hemi: np.ndarray) -> np.ndarray:
+            brain = Brain(subject, hemi_render, surface, **brain_args_common)
+            add_sig = inspect.signature(brain.add_data)
+            accepted_add_kwargs = set(add_sig.parameters)
+            add_kwargs: Dict[str, Any] = dict(
+                fmin=vmin,
+                fmid=fmid,
+                fmax=vmax,
+                center=center,
+                colormap=cmap,
+                alpha=alpha,
+                smoothing_steps=smoothing_steps,
+                colorbar=False,
+                verbose=verbose,
+            )
+            add_kwargs = {k: v for k, v in add_kwargs.items() if k in accepted_add_kwargs}
+            brain.add_data(data_hemi, hemi=hemi_render, **add_kwargs)
+            # Some MNE/pyvista versions need an explicit render before screenshot.
+            if hasattr(brain, "_renderer") and hasattr(brain._renderer, "plotter"):
+                try:
+                    brain._renderer.plotter.render()
+                except Exception:
+                    pass
+            try:
+                img = brain.screenshot(mode="rgb", time_viewer=False)
+            except TypeError:
+                img = brain.screenshot()
+            finally:
+                if hasattr(brain, "close"):
+                    brain.close()
+            return np.asarray(img)
+
+        if hemisphere == "lh":
+            img = _render_hemi("lh", data_lh)
+        elif hemisphere == "rh":
+            img = _render_hemi("rh", data_rh)
+        else:
+            img_lh = _render_hemi("lh", data_lh)
+            img_rh = _render_hemi("rh", data_rh)
+            h = min(img_lh.shape[0], img_rh.shape[0])
+            img_lh = img_lh[:h, ...]
+            img_rh = img_rh[:h, ...]
+            gap = np.full((h, 16, img_lh.shape[2]), 255, dtype=img_lh.dtype)
+            img = np.concatenate([img_lh, gap, img_rh], axis=1)
+
+        if axes is None:
+            if isinstance(size, tuple):
+                figsize = (max(6.0, size[0] / 150.0), max(4.0, size[1] / 150.0))
+            else:
+                figsize = (8.0, 5.0)
+            fig, ax = plt.subplots(figsize=figsize)
+        else:
+            ax = axes
+            fig = ax.figure
+        fig.patch.set_facecolor(background)
+        ax.set_facecolor(background)
+        ax.imshow(img)
+        ax.set_axis_off()
+
+        if colorbar:
+            norm = Normalize(vmin=vmin, vmax=vmax)
+            mappable = mpl_cm.ScalarMappable(norm=norm, cmap=mpl_cm.get_cmap(cmap))
+            mappable.set_array(arr)
+            cb_kwargs = dict(colorbar_kwargs) if colorbar_kwargs is not None else {}
+            if "ticks" not in cb_kwargs:
+                cb_kwargs["ticks"] = np.linspace(vmin, vmax, 3)
+            fig.colorbar(mappable, ax=ax, fraction=0.046, pad=0.03, **cb_kwargs)
 
         if show:
             plt.show()
 
-        return fig, ax
+        return fig, ax, label_order

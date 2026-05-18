@@ -32,6 +32,8 @@
     window.__preselectedSimulationKeys = {{ preselected_simulation_keys | tojson }};
     window.__preselectedSimulationItems = {{ preselected_simulation_items | tojson }};
     window.__simulationWelchDefaults = {{ simulation_welch_defaults | tojson }};
+    window.__megTopomapAtlases = {{ meg_topomap_atlases | tojson }};
+    window.__analysisPlotConfig = {{ analysis_plot_config | tojson }};
     window.__webuiRuntime = {{ webui_runtime | tojson }};
 </script>
 <style>
@@ -69,6 +71,7 @@
             serverFileBrowserSelectedPath: '',
             analysisServerSelectedPath: '',
             analysisLastLoadedSource: '',
+            savedPlotConfig: (window.__analysisPlotConfig || null),
             analysisBrowseRequestId: 0,
             detectedSimulationSyncTimer: null,
             detectedSimulationSyncPending: false,
@@ -94,7 +97,12 @@
             topomapLastGroupColumn: '',
             topomapGroupBy: '',
             topomapValueCol: '',
+            topomapSensorCol: '',
             topomapMode: 'per_sensor',
+            topomapCompareMethod: 'raw',
+            topomapSignalType: 'eeg',
+            topomapMegAtlas: 'dk',
+            topomapMegAtlasOptions: (window.__megTopomapAtlases || []),
             hasExistingData: {{ 'true' if has_analysis_dataframe else 'false' }},
             existingDataFiles: (window.__analysisDataFiles || []),
             featureDataFiles: (window.__featureDataFiles || []),
@@ -576,6 +584,8 @@
                 this.boxplotLastGroupColumn = '';
                 this.topomapGroupBy = '';
                 this.topomapValueCol = '';
+                this.topomapSensorCol = '';
+                this.topomapCompareMethod = 'raw';
                 this.topomapControlGroup = '';
                 this.topomapGroupValues = [];
                 this.topomapGroupValuesError = '';
@@ -621,6 +631,98 @@
                     this.activeTab = this.tabOrder[idx - 1];
                 }
             },
+            restoreSavedPlotConfig() {
+                const config = this.savedPlotConfig || {};
+                const values = config && typeof config.values === 'object' && config.values !== null ? config.values : {};
+                if (!Object.keys(values).length) {
+                    return;
+                }
+                const first = (name, fallback = '') => {
+                    const raw = values[name];
+                    if (Array.isArray(raw)) {
+                        return raw.length ? String(raw[0] ?? '') : fallback;
+                    }
+                    if (raw === undefined || raw === null) {
+                        return fallback;
+                    }
+                    return String(raw);
+                };
+                const has = (name) => Object.prototype.hasOwnProperty.call(values, name);
+
+                const plotAction = String(config.plot_action || '').trim();
+                if (plotAction === 'boxplot' || plotAction === 'topomap') {
+                    this.activeTab = plotAction;
+                }
+
+                this.boxplotGroupBy = first('boxplot_group_by', this.boxplotGroupBy);
+                this.boxplotValueCol = first('boxplot_value_col', this.boxplotValueCol);
+                this.boxplotShowCohen = has('boxplot_show_cohend');
+                this.boxplotControlGroup = first('boxplot_control_group', this.boxplotControlGroup);
+
+                this.topomapSignalType = first('topomap_signal_type', this.topomapSignalType);
+                this.topomapMegAtlas = first('topomap_meg_atlas', this.topomapMegAtlas);
+                this.topomapMode = first('topomap_grouping_mode', this.topomapMode);
+                this.topomapCompareMethod = first('topomap_compare_method', this.topomapCompareMethod);
+                this.topomapGroupBy = first('topomap_group_by', this.topomapGroupBy);
+                this.topomapControlGroup = first('topomap_control_group', this.topomapControlGroup);
+                this.topomapValueCol = first('topomap_value_col', this.topomapValueCol);
+                this.topomapSensorCol = first('topomap_sensor_col', this.topomapSensorCol);
+
+                const applyDomValues = () => {
+                    const root = this.$root || document;
+                    const form = root.querySelector ? root.querySelector('form') : null;
+                    if (!form) {
+                        return;
+                    }
+                    const checkboxNames = [
+                        'boxplot_showfliers',
+                        'boxplot_show_cohend',
+                        'topomap_show_sensors',
+                        'show-colorbar',
+                    ];
+                    const fieldNames = new Set([...Object.keys(values), ...checkboxNames]);
+                    for (const name of fieldNames) {
+                        const controls = Array.from(form.elements).filter((el) => el && el.name === name);
+                        if (!controls.length) {
+                            continue;
+                        }
+                        const raw = values[name];
+                        const selectedValues = Array.isArray(raw)
+                            ? raw.map((value) => String(value ?? ''))
+                            : (raw === undefined || raw === null ? [] : [String(raw)]);
+                        const firstValue = selectedValues.length ? selectedValues[0] : '';
+                        for (const el of controls) {
+                            const type = String(el.type || '').toLowerCase();
+                            if (type === 'checkbox') {
+                                el.checked = selectedValues.length > 0
+                                    && (controls.length === 1 || selectedValues.includes(String(el.value || 'on')));
+                            } else if (type === 'radio') {
+                                el.checked = selectedValues.includes(String(el.value || ''));
+                            } else if (el.multiple && el.options) {
+                                for (const option of el.options) {
+                                    option.selected = selectedValues.includes(String(option.value));
+                                }
+                            } else {
+                                el.value = firstValue;
+                            }
+                            el.dispatchEvent(new Event('input', { bubbles: true }));
+                            el.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                    }
+                    if (this.boxplotGroupBy) {
+                        this.fetchGroupValues(this.boxplotGroupBy, 'boxplot');
+                    }
+                    if (this.topomapGroupBy) {
+                        this.fetchGroupValues(this.topomapGroupBy, 'topomap');
+                    }
+                };
+
+                if (typeof this.$nextTick === 'function') {
+                    this.$nextTick(applyDomValues);
+                } else {
+                    setTimeout(applyDomValues, 0);
+                }
+            },
             init() {
                 if (this.hasExistingData) {
                     const name = this.currentDataFile();
@@ -630,7 +732,7 @@
                         this.uploads['dataframe-upload'] = { name: name, uploaded: true, persisted: true };
                         this.setAnalysisUploadKind('dataframe');
                     }
-                    this.loadColumnsFromServer();
+                    this.loadColumnsFromServer().then(() => this.restoreSavedPlotConfig());
                     return;
                 }
 
@@ -857,6 +959,8 @@
                     this.boxplotLastGroupColumn = '';
                     this.topomapGroupBy = '';
                     this.topomapValueCol = '';
+                    this.topomapSensorCol = '';
+                    this.topomapCompareMethod = 'raw';
                     this.topomapControlGroup = '';
                     this.topomapGroupValues = [];
                     this.topomapGroupValuesError = '';
@@ -887,6 +991,8 @@
                 this.boxplotLastGroupColumn = '';
                 this.topomapGroupBy = '';
                 this.topomapValueCol = '';
+                this.topomapSensorCol = '';
+                this.topomapCompareMethod = 'raw';
                 this.topomapControlGroup = '';
                 this.topomapGroupValues = [];
                 this.topomapGroupValuesError = '';
@@ -1168,6 +1274,8 @@
                 this.boxplotLastGroupColumn = '';
                 this.topomapGroupBy = '';
                 this.topomapValueCol = '';
+                this.topomapSensorCol = '';
+                this.topomapCompareMethod = 'raw';
                 this.topomapControlGroup = '';
                 this.topomapGroupValues = [];
                 this.topomapGroupValuesError = '';
@@ -1790,8 +1898,12 @@
                                             <div class="sm:col-span-2">
                                                 <label class="block text-xs font-medium text-slate-700 dark:text-slate-300"
                                                     for="boxplot-colormap">Colormap</label>
-                                                <input id="boxplot-colormap" name="boxplot_colormap" type="text" value="viridis"
-                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                                <select id="boxplot-colormap" name="boxplot_colormap"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in boxplot_colormap_options %}
+                                                        <option value="{{ opt.value }}" {% if opt.value == 'viridis' %}selected{% endif %}>{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
                                             </div>
                                             <div class="sm:col-span-2">
                                                 <label class="block text-xs font-medium text-slate-700 dark:text-slate-300"
@@ -1861,6 +1973,47 @@
                         <div class="mt-6 border-t border-slate-200 dark:border-slate-700 pt-6">
                             <div class="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
                                 <div class="sm:col-span-6">
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300">Signal type</label>
+                                    <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <label class="relative flex items-start gap-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                                            <input
+                                                class="mt-1 h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                id="topomap-signal-eeg" name="topomap_signal_type" type="radio" value="eeg"
+                                                x-model="topomapSignalType" />
+                                            <span>
+                                                <span class="font-medium text-slate-900 dark:text-slate-300">EEG</span>
+                                                <span class="block text-xs text-slate-500 dark:text-slate-400">Default scalp topomap.</span>
+                                            </span>
+                                        </label>
+                                        <label class="relative flex items-start gap-3 rounded-md border border-slate-200 dark:border-slate-700 p-3">
+                                            <input
+                                                class="mt-1 h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
+                                                id="topomap-signal-meg" name="topomap_signal_type" type="radio" value="meg"
+                                                x-model="topomapSignalType" />
+                                            <span>
+                                                <span class="font-medium text-slate-900 dark:text-slate-300">MEG</span>
+                                                <span class="block text-xs text-slate-500 dark:text-slate-400">Atlas-based cortical surface plot.</span>
+                                            </span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3" x-show="topomapSignalType === 'meg'" x-cloak>
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="topomap-meg-atlas">MEG atlas</label>
+                                    <div class="mt-2">
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="topomap-meg-atlas" name="topomap_meg_atlas" x-model="topomapMegAtlas">
+                                            <template x-for="atlasOpt in topomapMegAtlasOptions" :key="atlasOpt.value">
+                                                <option :value="atlasOpt.value" x-text="atlasOpt.label"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                        Region count in the selected data must match atlas region count.
+                                    </p>
+                                </div>
+                                <div class="sm:col-span-6">
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300">Grouping mode</label>
                                     <div class="mt-3 space-y-3">
                                         <div class="relative flex items-start">
@@ -1897,7 +2050,7 @@
                                                 <input
                                                     class="h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
                                                     id="topomap-compare-raw" name="topomap_compare_method" type="radio" value="raw"
-                                                    checked />
+                                                    x-model="topomapCompareMethod" />
                                             </div>
                                             <div class="ml-3 text-sm leading-6">
                                                 <label class="font-medium text-slate-900 dark:text-slate-300" for="topomap-compare-raw">Subtract raw values</label>
@@ -1908,13 +2061,24 @@
                                             <div class="flex h-6 items-center">
                                                 <input
                                                     class="h-4 w-4 rounded-full border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary"
-                                                    id="topomap-compare-cohen" name="topomap_compare_method" type="radio" value="cohen_d" />
+                                                    id="topomap-compare-cohen" name="topomap_compare_method" type="radio" value="cohen_d"
+                                                    x-model="topomapCompareMethod" />
                                             </div>
                                             <div class="ml-3 text-sm leading-6">
                                                 <label class="font-medium text-slate-900 dark:text-slate-300" for="topomap-compare-cohen">Cohen's d</label>
                                                 <p class="text-slate-500 dark:text-slate-400">Plot Cohen's d effect sizes vs the control group.</p>
                                             </div>
                                         </div>
+                                    </div>
+                                </div>
+                                <div class="sm:col-span-3" x-show="topomapMode === 'compare_categories' && topomapCompareMethod === 'cohen_d'" x-cloak>
+                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
+                                        for="topomap-cohend-abs-threshold">Minimum |Cohen's d|</label>
+                                    <div class="mt-2">
+                                        <input
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="topomap-cohend-abs-threshold" name="topomap_cohend_abs_threshold"
+                                            type="number" min="0" step="any" placeholder="No filter" />
                                     </div>
                                 </div>
                                 <div class="sm:col-span-3">
@@ -1970,33 +2134,136 @@
                                     <p x-show="!columnsLoading && !dfColumns.length" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Upload a dataframe to enable column selection.</p>
                                 </div>
 
-                                <div class="sm:col-span-3">
+                                <div class="sm:col-span-3" x-show="topomapSignalType === 'eeg'" x-cloak>
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
-                                        for="head-radius">Radius of the head circumference</label>
+                                        for="topomap-sensor-col">Sensor column</label>
                                     <div class="mt-2">
-                                        <input
-                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
-                                            id="head-radius" name="head-radius" type="text" value="0.095" />
+                                        <select
+                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
+                                            id="topomap-sensor-col" name="topomap_sensor_col" x-model="topomapSensorCol"
+                                            :disabled="!dfColumns.length || columnsLoading">
+                                            <option value="">Auto-detect sensor/channel</option>
+                                            <template x-for="col in dfColumns" :key="col">
+                                                <option :value="col" x-text="col"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                        Leave empty to auto-detect sensor, channel, ch, or electrode.
+                                    </p>
+                                </div>
+
+                                <div class="sm:col-span-6" x-show="topomapSignalType === 'eeg'" x-cloak>
+                                    <div class="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
+                                        <h4 class="text-sm font-semibold text-slate-900 dark:text-slate-200">EEG topomap options</h4>
+                                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                            These options are passed to ncpi.Analysis.eeg_topomap.
+                                        </p>
+                                        <div class="mt-3 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-6">
+                                            <div class="sm:col-span-3">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-eeg-montage">Montage</label>
+                                                <select id="topomap-eeg-montage" name="topomap_eeg_montage"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_montage_options %}
+                                                        <option value="{{ opt.value }}" {% if opt.value == 'standard_1005' %}selected{% endif %}>{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-3">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-eeg-ch-type">Channel type</label>
+                                                <select id="topomap-eeg-ch-type" name="topomap_eeg_ch_type"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_channel_type_options %}
+                                                        <option value="{{ opt.value }}" {% if opt.value == 'eeg' %}selected{% endif %}>{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-position-y">Position offset Y</label>
+                                                <input id="topomap-position-y" name="topomap_position_y" type="text" value="0.01"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-position-z">Position offset Z</label>
+                                                <input id="topomap-position-z" name="topomap_position_z" type="text" value="-0.1"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-sphere">Sphere</label>
+                                                <input id="topomap-sphere" name="topomap_sphere" type="text" value="0.28"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-cmap">Colormap</label>
+                                                <select id="topomap-cmap" name="topomap_cmap"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_colormap_options %}
+                                                        <option value="{{ opt.value }}" {% if opt.value == 'auto' %}selected{% endif %}>{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-vmin">vmin</label>
+                                                <input id="topomap-vmin" name="topomap_vmin" type="text" placeholder="auto"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-vmax">vmax</label>
+                                                <input id="topomap-vmax" name="topomap_vmax" type="text" placeholder="auto"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-res">Resolution</label>
+                                                <input id="topomap-res" name="topomap_res" type="text" value="300"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-contours">Contours</label>
+                                                <select id="topomap-contours" name="topomap_contours"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_contour_options %}
+                                                        <option value="{{ opt.value }}">{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-outlines">Outlines</label>
+                                                <select id="topomap-outlines" name="topomap_outlines"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_outline_options %}
+                                                        <option value="{{ opt.value }}">{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-extrapolate">Extrapolate</label>
+                                                <select id="topomap-extrapolate" name="topomap_extrapolate"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_extrapolate_options %}
+                                                        <option value="{{ opt.value }}">{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-2">
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-image-interp">Image interpolation</label>
+                                                <select id="topomap-image-interp" name="topomap_image_interp"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary">
+                                                    {% for opt in topomap_image_interp_options %}
+                                                        <option value="{{ opt.value }}">{{ opt.label }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                            <div class="sm:col-span-2 flex items-end">
+                                                <label class="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
+                                                    <input checked id="topomap-show-sensors" name="topomap_show_sensors" type="checkbox"
+                                                        class="h-4 w-4 rounded border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-primary focus:ring-primary dark:checked:bg-primary dark:checked:border-primary" />
+                                                    Show sensors
+                                                </label>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="sm:col-span-3">
-                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
-                                        for="head-pos-x">Position of the head on the x-axis</label>
-                                    <div class="mt-2">
-                                        <input
-                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
-                                            id="head-pos-x" name="head-pos-x" type="text" value="0.0" />
-                                    </div>
-                                </div>
-                                <div class="sm:col-span-3">
-                                    <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
-                                        for="electrode-size">Size of the electrodes</label>
-                                    <div class="mt-2">
-                                        <input
-                                            class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
-                                            id="electrode-size" name="electrode-size" type="text" value="0.6" />
-                                    </div>
-                                </div>
+
                                 <div class="sm:col-span-6">
                                     <div class="mt-2 rounded-lg border border-slate-200 dark:border-slate-700 p-4">
                                         <h4 class="text-sm font-semibold text-slate-900 dark:text-slate-200">Colorbar options</h4>
@@ -2019,6 +2286,26 @@
                                                     <option value="section" selected>Same scale per column index</option>
                                                     <option value="plot">Independent scale per plot</option>
                                                 </select>
+                                            </div>
+                                            <div class="sm:col-span-2" x-show="topomapSignalType === 'eeg'" x-cloak>
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-colorbar-fmt">Tick format</label>
+                                                <input id="topomap-colorbar-fmt" name="topomap_colorbar_fmt" type="text" value="%0.2f"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-2" x-show="topomapSignalType === 'eeg'" x-cloak>
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-colorbar-label">Colorbar label</label>
+                                                <input id="topomap-colorbar-label" name="topomap_colorbar_label" type="text" placeholder="optional"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-1" x-show="topomapSignalType === 'eeg'" x-cloak>
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-colorbar-label-fontsize">Label size</label>
+                                                <input id="topomap-colorbar-label-fontsize" name="topomap_colorbar_label_fontsize" type="text" placeholder="auto"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
+                                            </div>
+                                            <div class="sm:col-span-1" x-show="topomapSignalType === 'eeg'" x-cloak>
+                                                <label class="block text-xs font-medium text-slate-700 dark:text-slate-300" for="topomap-colorbar-tick-fontsize">Tick size</label>
+                                                <input id="topomap-colorbar-tick-fontsize" name="topomap_colorbar_tick_fontsize" type="text" value="8"
+                                                    class="mt-2 block w-full rounded-md border-0 py-1.5 text-xs text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary" />
                                             </div>
                                         </div>
                                     </div>
@@ -2226,7 +2513,7 @@
                         formaction="{{ url_for('analysis_plot_topomap') }}"
                         data-plot-action="topomap"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
-                        :disabled="!dfColumns.length || columnsLoading || !topomapGroupBy || !topomapValueCol || (topomapMode === 'compare_categories' && !topomapControlGroup)">
+                        :disabled="!dfColumns.length || columnsLoading || !topomapGroupBy || !topomapValueCol || (topomapMode === 'compare_categories' && !topomapControlGroup) || (topomapSignalType === 'meg' && !topomapMegAtlas)">
                         Plot topomap
                     </button>
                 </template>

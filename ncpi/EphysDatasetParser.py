@@ -494,7 +494,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat, .set, .fif, .edf, .tsv paths
+      - .npy, .json, .mat, .set, .fif, .edf, .ds, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -604,6 +604,101 @@ class EphysDatasetParser:
                         "Verify the dataset path and that the file is available on disk."
                     )
                 return _load_edf_with_pyedflib(path), source_file
+
+            if suffix == ".ds":
+                if not path.is_dir():
+                    raise ValueError(
+                        f"CTF dataset does not exist or is not a directory: '{path}'. "
+                        "CTF recordings must be provided as the .ds folder."
+                    )
+                _require_mne("CTF .ds loading")
+                import mne  # type: ignore
+
+                return mne.io.read_raw_ctf(str(path), preload=self.config.preload, verbose=False), source_file
+
+            if suffix in {".vhdr", ".dat"}:
+                def _read_vhdr_refs(vhdr_path: Path) -> tuple[Optional[str], Optional[str]]:
+                    data_file_val = None
+                    marker_file_val = None
+                    with vhdr_path.open("r", encoding="utf-8", errors="ignore") as f:
+                        for raw_line in f:
+                            line = raw_line.strip()
+                            if not line or line.startswith(";") or "=" not in line:
+                                continue
+                            key_part, value_part = line.split("=", 1)
+                            key = key_part.strip().lower()
+                            value = value_part.strip()
+                            if key == "datafile":
+                                data_file_val = value
+                            elif key == "markerfile":
+                                marker_file_val = value
+                    return data_file_val, marker_file_val
+
+                def _validate_vhdr_and_companions(vhdr_path: Path) -> tuple[Path, Path]:
+                    if not vhdr_path.is_file():
+                        raise ValueError(
+                            f"BrainVision header file does not exist or is not a regular file: '{vhdr_path}'."
+                        )
+                    data_file_val, marker_file_val = _read_vhdr_refs(vhdr_path)
+                    missing = []
+                    if not data_file_val:
+                        missing.append("DataFile entry in .vhdr")
+                    if not marker_file_val:
+                        missing.append("MarkerFile entry in .vhdr")
+                    if missing:
+                        raise ValueError(
+                            f"Invalid .vhdr file '{vhdr_path}': missing {', '.join(missing)}."
+                        )
+
+                    data_path = (vhdr_path.parent / data_file_val).resolve()
+                    vmrk_path = (vhdr_path.parent / marker_file_val).resolve()
+                    if not data_path.is_file():
+                        raise ValueError(
+                            f"Missing BrainVision data file referenced by .vhdr: '{data_path}'"
+                        )
+                    if not vmrk_path.is_file():
+                        raise ValueError(
+                            f"Missing BrainVision .vmrk file referenced by .vhdr: '{vmrk_path}'"
+                        )
+                    return data_path, vmrk_path
+
+                vhdr_path = path
+                if suffix == ".dat":
+                    if not path.is_file():
+                        raise ValueError(
+                            f"BrainVision data file does not exist or is not a regular file: '{path}'."
+                        )
+
+                    candidates = sorted(path.parent.glob("*.vhdr"))
+                    if not candidates:
+                        raise ValueError(
+                            f"Could not find a companion .vhdr file next to BrainVision data file '{path}'."
+                        )
+
+                    selected_vhdr = None
+                    for candidate in candidates:
+                        data_file_val, _ = _read_vhdr_refs(candidate)
+                        if not data_file_val:
+                            continue
+                        candidate_data_path = (candidate.parent / data_file_val).resolve()
+                        if candidate_data_path == path.resolve():
+                            selected_vhdr = candidate
+                            break
+
+                    if selected_vhdr is None and len(candidates) == 1:
+                        selected_vhdr = candidates[0]
+
+                    if selected_vhdr is None:
+                        raise ValueError(
+                            "Found multiple .vhdr files and could not uniquely match one to "
+                            f"the BrainVision data file '{path}'."
+                        )
+                    vhdr_path = selected_vhdr
+
+                _validate_vhdr_and_companions(vhdr_path)
+                _require_mne("BrainVision loading (.vhdr/.dat)")
+                import mne
+                return mne.io.read_raw_brainvision(str(vhdr_path), preload=self.config.preload, verbose=False), source_file
 
             if suffix in (".csv", ".parquet", ".tsv"):
                 if not tools.ensure_module("pandas"):

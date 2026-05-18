@@ -173,6 +173,15 @@
                                             </button>
                                         </div>
                                     </div>
+                                    <div class="mt-2 hidden w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/50 px-3 py-2 text-xs text-slate-700 dark:text-slate-300"
+                                        data-role="top-level-preview">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="font-semibold text-slate-800 dark:text-slate-200">Top-level folder content</span>
+                                            <span class="font-mono text-[11px] text-slate-500 dark:text-slate-400" data-role="top-level-preview-counts"></span>
+                                        </div>
+                                        <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400" data-role="top-level-preview-status"></p>
+                                        <div class="mt-2 hidden flex-wrap gap-1.5" data-role="top-level-preview-list"></div>
+                                    </div>
                                 </div>
                             </div>
                             <div class="input-group">
@@ -230,6 +239,15 @@
                                                 <span class="material-symbols-outlined text-sm leading-none">close</span>
                                             </button>
                                         </div>
+                                    </div>
+                                    <div class="mt-2 hidden w-full rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900/50 px-3 py-2 text-xs text-slate-700 dark:text-slate-300"
+                                        data-role="top-level-preview">
+                                        <div class="flex items-center justify-between gap-2">
+                                            <span class="font-semibold text-slate-800 dark:text-slate-200">Top-level folder content</span>
+                                            <span class="font-mono text-[11px] text-slate-500 dark:text-slate-400" data-role="top-level-preview-counts"></span>
+                                        </div>
+                                        <p class="mt-1 text-[11px] text-slate-500 dark:text-slate-400" data-role="top-level-preview-status"></p>
+                                        <div class="mt-2 hidden flex-wrap gap-1.5" data-role="top-level-preview-list"></div>
                                     </div>
                                 </div>
                             </div>
@@ -492,10 +510,8 @@
                         </div>
                         <div class="input-group">
                             <label class="input-label" for="component">Component</label>
-                            <p class="input-subtext">Select dipole component axis (x, y, z) or all components. This applies to dipole probes only; scalar probes (e.g., GaussCylinderPotential) keep all channels.</p>
+                            <p class="input-subtext">Select z-component or all components. This applies to dipole probes only; scalar probes (e.g., GaussCylinderPotential) keep all channels.</p>
                             <select class="input-field" id="component" name="cdm_component">
-                                <option value="x">x</option>
-                                <option value="y">y</option>
                                 <option selected="" value="z">z</option>
                                 <option value="xyz">xyz (all)</option>
                             </select>
@@ -568,7 +584,7 @@
                             data-source-mode-input="meeg_cdm_file_source_mode"
                             class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                             <input class="hidden" type="file" id="meegCdmFile" name="meeg_cdm_file" accept=".pkl" />
-                            <input type="hidden" name="meeg_cdm_file_source_mode" value="server-path" />
+                            <input type="hidden" name="meeg_cdm_file_source_mode" value="{{ 'auto-detected' if default_meeg.cdm_exists else 'upload' }}" />
                             <input type="hidden" name="meeg_cdm_file_server_path" value="{{ default_meeg.cdm if default_meeg.cdm_exists else '' }}" />
                             <span class="material-symbols-outlined text-slate-400">upload_file</span>
                             <span class="text-xs font-bold lowercase tracking-wider text-slate-500">CDM (.pkl)</span>
@@ -590,8 +606,12 @@
                         Add one or more dipole positions (<code>X,Y,Z</code>). Units: mm for NYHeadModel, um for other models.
                     </p>
                     <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                        In the four-area simulation model, exactly 4 dipole positions are required and mapped to:
-                        frontal, parietal, temporal, occipital.
+                        For NYHeadModel, dipole positions are fixed and auto-assigned to internal 10-20-aligned cortical targets used by its
+                        per-sensor independent forward simulation mode.
+                    </p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        In the four-area simulation model, dipole positions are fixed to four approximate cortical areas
+                        (frontal, parietal, temporal, occipital) and cannot be edited.
                     </p>
                     <div class="rounded-xl border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-900/40">
                         <div id="meegDipoleRows" class="space-y-2"></div>
@@ -624,15 +644,21 @@
                 <div class="space-y-2 md:col-span-2">
                     <label class="block text-sm font-bold text-slate-700 dark:text-slate-200 mb-1" for="meegForwardMode">Forward simulation mode</label>
                     <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                        NYHeadModel always uses per-sensor independent simulation. For all other models, choose between
-                        independent per-sensor simulation and simultaneous multi-dipole simulation.
+                        <strong>Simulate all dipoles simultaneously:</strong> all dipoles contribute to every sensor at once.
+                        For Hagen/Cavallari-style inputs, the same CDM is replicated across configured dipoles.
+                        In four-area simulations, this mode uses fixed dipoles for frontal/parietal/temporal/occipital and each dipole receives its area CDM.
+                    </p>
+                    <p class="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                        <strong>Per-sensor independent simulation:</strong> sensor <em>i</em> is computed only from dipole <em>i</em>.
+                        For non-NYHead models, you must configure the same number of sensors and dipoles; the same CDM is used for all dipoles.
+                        NYHeadModel always uses this mode automatically. This mode is not available for four-area simulations.
                     </p>
                     <select
                         class="block w-full rounded-lg border-slate-300 dark:border-slate-700 dark:bg-slate-900 focus:ring-primary focus:border-primary sm:text-sm h-11"
                         id="meegForwardMode"
                         name="meeg_forward_mode">
                         <option value="simultaneous_all_dipoles" selected="">Simulate all dipoles simultaneously</option>
-                        <option value="per_sensor_independent">Per-sensor independent simulation</option>
+                        <option value="per_sensor_independent" {% if detected_simulation_model == "four_area" %}disabled{% endif %}>Per-sensor independent simulation</option>
                     </select>
                 </div>
             </div>
@@ -791,7 +817,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const biophysAddBtn = document.getElementById('biophysAddBtn');
     const biophysHidden = document.getElementById('biophysHidden');
     const availableBiophysOptions = {{ biophys_options | tojson }};
-    const preferredBiophysDefaults = ['set_Ih_linearized_hay2011', 'set_pas_hay2011'];
+    const preferredBiophysDefaults = ['set_Ih_linearized_hay2011', 'make_cell_uniform'];
     const defaultBiophysItems = preferredBiophysDefaults.filter((name) => availableBiophysOptions.includes(name));
     if (defaultBiophysItems.length === 0 && availableBiophysOptions.length > 0) {
         defaultBiophysItems.push(availableBiophysOptions[0]);
@@ -1074,6 +1100,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingFolderHistoryKey = KERNEL_SERVER_FOLDER_HISTORY_KEY;
     let pendingFileHistoryKey = KERNEL_SERVER_FILE_HISTORY_KEY;
     const kernelServerModeEnabled = Boolean((window.__webuiRuntime || {}).is_server_runtime);
+    const KERNEL_TOP_LEVEL_PREVIEW_ITEMS_MAX = 24;
 
     const normalizeKernelBrowseSourceMode = (value) => {
         const raw = String(value || '').trim().toLowerCase();
@@ -1117,6 +1144,10 @@ document.addEventListener('DOMContentLoaded', () => {
             localStagedPath: rememberedLocalStagedByField.output_sim_path || '',
             localLabel: basenameFromFolderPath(rememberedLocalStagedByField.output_sim_path || ''),
         },
+    };
+    const kernelPathPreviewStateByField = {
+        mc_folder: { lastPath: '', requestToken: 0 },
+        output_sim_path: { lastPath: '', requestToken: 0 },
     };
 
     const getFolderSelectionState = (hiddenInput) => {
@@ -1162,6 +1193,10 @@ document.addEventListener('DOMContentLoaded', () => {
             serverSummary: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="server-summary"]') : null,
             serverPath: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="server-path"]') : null,
             serverClear: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="server-clear"]') : null,
+            topLevelPreview: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="top-level-preview"]') : null,
+            topLevelPreviewCounts: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="top-level-preview-counts"]') : null,
+            topLevelPreviewStatus: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="top-level-preview-status"]') : null,
+            topLevelPreviewList: kernelMcFolderUploadCard ? kernelMcFolderUploadCard.querySelector('[data-role="top-level-preview-list"]') : null,
         },
         output_sim_path: {
             card: kernelOutputSimUploadCard,
@@ -1181,6 +1216,10 @@ document.addEventListener('DOMContentLoaded', () => {
             serverSummary: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="server-summary"]') : null,
             serverPath: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="server-path"]') : null,
             serverClear: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="server-clear"]') : null,
+            topLevelPreview: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="top-level-preview"]') : null,
+            topLevelPreviewCounts: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="top-level-preview-counts"]') : null,
+            topLevelPreviewStatus: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="top-level-preview-status"]') : null,
+            topLevelPreviewList: kernelOutputSimUploadCard ? kernelOutputSimUploadCard.querySelector('[data-role="top-level-preview-list"]') : null,
         },
     };
 
@@ -1222,6 +1261,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (cfg.serverSummary) cfg.serverSummary.classList.add('hidden');
             if (cfg.serverPath) cfg.serverPath.textContent = '';
             updateKernelSubmitAvailability();
+            refreshKernelPathTopLevelPreview(fieldName);
             return;
         }
 
@@ -1234,6 +1274,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (cfg.localSummary) cfg.localSummary.classList.add('hidden');
         if (cfg.localName) cfg.localName.textContent = '';
         updateKernelSubmitAvailability();
+        refreshKernelPathTopLevelPreview(fieldName);
     };
 
     const setKernelPathCardMode = (fieldName, mode) => {
@@ -1285,6 +1326,129 @@ document.addEventListener('DOMContentLoaded', () => {
             cfg.uploadProgressPercent.textContent = Number.isFinite(percent)
                 ? `${Math.round(Number(percent))}%`
                 : '';
+        }
+    };
+
+    const _setKernelTopLevelPreviewHidden = (cfg) => {
+        if (!cfg || !cfg.topLevelPreview) return;
+        cfg.topLevelPreview.classList.add('hidden');
+        if (cfg.topLevelPreviewCounts) cfg.topLevelPreviewCounts.textContent = '';
+        if (cfg.topLevelPreviewStatus) cfg.topLevelPreviewStatus.textContent = '';
+        if (cfg.topLevelPreviewList) {
+            cfg.topLevelPreviewList.classList.add('hidden');
+            cfg.topLevelPreviewList.innerHTML = '';
+        }
+    };
+
+    const _setKernelTopLevelPreviewLoading = (cfg) => {
+        if (!cfg || !cfg.topLevelPreview) return;
+        cfg.topLevelPreview.classList.remove('hidden');
+        if (cfg.topLevelPreviewCounts) cfg.topLevelPreviewCounts.textContent = '';
+        if (cfg.topLevelPreviewStatus) cfg.topLevelPreviewStatus.textContent = 'Loading top-level content...';
+        if (cfg.topLevelPreviewList) {
+            cfg.topLevelPreviewList.classList.add('hidden');
+            cfg.topLevelPreviewList.innerHTML = '';
+        }
+    };
+
+    const _setKernelTopLevelPreviewError = (cfg, message) => {
+        if (!cfg || !cfg.topLevelPreview) return;
+        cfg.topLevelPreview.classList.remove('hidden');
+        if (cfg.topLevelPreviewCounts) cfg.topLevelPreviewCounts.textContent = '';
+        if (cfg.topLevelPreviewStatus) cfg.topLevelPreviewStatus.textContent = String(message || 'Failed to inspect folder content.');
+        if (cfg.topLevelPreviewList) {
+            cfg.topLevelPreviewList.classList.add('hidden');
+            cfg.topLevelPreviewList.innerHTML = '';
+        }
+    };
+
+    const _renderKernelTopLevelPreview = (cfg, dirs, files) => {
+        if (!cfg || !cfg.topLevelPreview) return;
+        const dirEntries = Array.isArray(dirs) ? dirs : [];
+        const fileEntries = Array.isArray(files) ? files : [];
+        cfg.topLevelPreview.classList.remove('hidden');
+        if (cfg.topLevelPreviewCounts) {
+            cfg.topLevelPreviewCounts.textContent = `${dirEntries.length} dirs · ${fileEntries.length} files`;
+        }
+        if (cfg.topLevelPreviewStatus) {
+            cfg.topLevelPreviewStatus.textContent = (dirEntries.length === 0 && fileEntries.length === 0)
+                ? 'Selected folder is empty.'
+                : '';
+        }
+        if (!cfg.topLevelPreviewList) return;
+
+        cfg.topLevelPreviewList.innerHTML = '';
+        const tokens = [];
+        for (const item of dirEntries) {
+            const name = String(item?.name || '').trim();
+            if (name) tokens.push({ name: `${name}/`, isDir: true });
+        }
+        for (const item of fileEntries) {
+            const name = String(item?.name || '').trim();
+            if (name) tokens.push({ name, isDir: false });
+        }
+
+        const limitedTokens = tokens.slice(0, KERNEL_TOP_LEVEL_PREVIEW_ITEMS_MAX);
+        for (const token of limitedTokens) {
+            const chip = document.createElement('span');
+            chip.className = token.isDir
+                ? 'inline-flex items-center rounded border border-slate-300 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 px-1.5 py-0.5 text-[10px] font-mono text-slate-700 dark:text-slate-200'
+                : 'inline-flex items-center rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-1.5 py-0.5 text-[10px] font-mono text-slate-600 dark:text-slate-300';
+            chip.textContent = token.name;
+            cfg.topLevelPreviewList.appendChild(chip);
+        }
+        if (tokens.length > limitedTokens.length) {
+            const remainder = document.createElement('span');
+            remainder.className = 'inline-flex items-center rounded border border-dashed border-slate-300 dark:border-slate-700 px-1.5 py-0.5 text-[10px] text-slate-500 dark:text-slate-400';
+            remainder.textContent = `+${tokens.length - limitedTokens.length} more`;
+            cfg.topLevelPreviewList.appendChild(remainder);
+        }
+        cfg.topLevelPreviewList.classList.toggle('hidden', tokens.length === 0);
+    };
+
+    const refreshKernelPathTopLevelPreview = async (fieldName) => {
+        const cfg = kernelPathCardsByField[fieldName];
+        const state = folderSelectionStateByName[fieldName];
+        const previewState = kernelPathPreviewStateByField[fieldName];
+        if (!cfg || !state || !previewState) return;
+
+        const mode = normalizeKernelBrowseSourceMode(state.mode);
+        const selectedPath = mode === 'local-upload'
+            ? String(state.localStagedPath || '').trim()
+            : String(state.serverPath || '').trim();
+
+        if (!selectedPath) {
+            previewState.lastPath = '';
+            _setKernelTopLevelPreviewHidden(cfg);
+            return;
+        }
+        if (previewState.lastPath === selectedPath) {
+            return;
+        }
+
+        previewState.lastPath = selectedPath;
+        previewState.requestToken += 1;
+        const requestToken = previewState.requestToken;
+        _setKernelTopLevelPreviewLoading(cfg);
+
+        try {
+            const params = new URLSearchParams();
+            params.set('path', selectedPath);
+            params.set('include_files', '1');
+            const response = await fetch(`{{ url_for("features_browse_dirs") }}?${params.toString()}`, { method: 'GET' });
+            const payload = await response.json().catch(() => ({}));
+            if (requestToken !== previewState.requestToken) return;
+            if (!response.ok) {
+                throw new Error(payload.error || 'Failed to inspect folder content.');
+            }
+            _renderKernelTopLevelPreview(
+                cfg,
+                Array.isArray(payload.dirs) ? payload.dirs : [],
+                Array.isArray(payload.files) ? payload.files : [],
+            );
+        } catch (error) {
+            if (requestToken !== previewState.requestToken) return;
+            _setKernelTopLevelPreviewError(cfg, error && error.message ? error.message : 'Failed to inspect folder content.');
         }
     };
 
@@ -2556,10 +2720,16 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const fourAreaDipoleDefaults = {
         NYHeadModel: [[-35.0, -20.0, 60.0], [-10.0, -55.0, 50.0], [25.0, -35.0, 45.0], [20.0, 5.0, 62.0]],
-        FourSphereVolumeConductor: [[-20000.0, 20000.0, 78000.0], [-20000.0, -20000.0, 78000.0], [20000.0, -20000.0, 78000.0], [20000.0, 20000.0, 78000.0]],
-        InfiniteVolumeConductor: [[-20000.0, 20000.0, 0.0], [-20000.0, -20000.0, 0.0], [20000.0, -20000.0, 0.0], [20000.0, 20000.0, 0.0]],
-        InfiniteHomogeneousVolCondMEG: [[-20000.0, 20000.0, 0.0], [-20000.0, -20000.0, 0.0], [20000.0, -20000.0, 0.0], [20000.0, 20000.0, 0.0]],
-        SphericallySymmetricVolCondMEG: [[-20000.0, 20000.0, 90000.0], [-20000.0, -20000.0, 90000.0], [20000.0, -20000.0, 90000.0], [20000.0, 20000.0, 90000.0]],
+        FourSphereVolumeConductor: [[0.0, 65000.0, 43000.0], [0.0, 0.0, 78000.0], [77000.0, 0.0, 12000.0], [0.0, -65000.0, 43000.0]],
+        InfiniteVolumeConductor: [[0.0, 16000.0, 12000.0], [0.0, 0.0, 20000.0], [19300.0, 0.0, 5000.0], [0.0, -16000.0, 12000.0]],
+        InfiniteHomogeneousVolCondMEG: [[0.0, 16000.0, 12000.0], [0.0, 0.0, 20000.0], [19300.0, 0.0, 5000.0], [0.0, -16000.0, 12000.0]],
+        SphericallySymmetricVolCondMEG: [[0.0, 75000.0, 49500.0], [0.0, 0.0, 90000.0], [88900.0, 0.0, 14000.0], [0.0, -75000.0, 49500.0]],
+    };
+    const fourAreaSensorDefaults = {
+        FourSphereVolumeConductor: [[0.0, 0.0, 92000.0]],
+        InfiniteVolumeConductor: [[0.0, 0.0, 92000.0]],
+        InfiniteHomogeneousVolCondMEG: [[0.0, 0.0, 92000.0]],
+        SphericallySymmetricVolCondMEG: [[0.0, 0.0, 92000.0]],
     };
 
     const createCoordRow = (group, values = [0, 0, 0], fixedLabel = '') => {
@@ -2652,6 +2822,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isNy) {
             return;
         }
+        if (isFourAreaSimulation) {
+            const defaultFourAreaSensors = fourAreaSensorDefaults[modelSelect.value] || [[0, 0, 92000]];
+            defaultFourAreaSensors.forEach((coords) => sensorRows.appendChild(createCoordRow('sensor', coords, '')));
+            return;
+        }
         const defaults = modelDefaults[modelSelect.value] || modelDefaults.NYHeadModel;
         const initialSensors = Array.isArray(defaults.sensors) ? defaults.sensors : [];
         if (initialSensors.length === 0) {
@@ -2665,7 +2840,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const isNy = modelSelect && modelSelect.value === 'NYHeadModel';
         const dipoleCount = dipoleRows ? dipoleRows.children.length : 0;
         if (dipoleAddBtn) {
-            dipoleAddBtn.disabled = Boolean(isNy) || (isFourAreaSimulation && dipoleCount >= 4);
+            dipoleAddBtn.disabled = Boolean(isNy) || Boolean(isFourAreaSimulation) || (isFourAreaSimulation && dipoleCount >= 4);
             dipoleAddBtn.classList.toggle('opacity-50', dipoleAddBtn.disabled);
             dipoleAddBtn.classList.toggle('cursor-not-allowed', dipoleAddBtn.disabled);
         }
@@ -2685,9 +2860,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 btn.classList.toggle('cursor-not-allowed', lock);
             });
             dipoleRows.querySelectorAll('input[data-dipole-axis]').forEach((input) => {
-                input.disabled = Boolean(isNy);
+                input.disabled = Boolean(isNy) || Boolean(isFourAreaSimulation);
             });
-            dipoleRows.classList.toggle('opacity-60', Boolean(isNy));
+            dipoleRows.classList.toggle('opacity-60', Boolean(isNy) || Boolean(isFourAreaSimulation));
         }
         if (sensorRows) {
             sensorRows.querySelectorAll('[data-sensor-remove]').forEach((btn) => {
@@ -2701,17 +2876,24 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         }
         if (forwardModeSelect) {
+            const currentValue = String(forwardModeSelect.value || '').trim();
             if (isNy) {
-                const currentValue = String(forwardModeSelect.value || '').trim();
                 if (currentValue && currentValue !== 'per_sensor_independent') {
-                    forwardModeSelect.dataset.lastNonNyValue = currentValue;
+                    forwardModeSelect.dataset.lastNonForcedValue = currentValue;
                 }
                 forwardModeSelect.value = 'per_sensor_independent';
                 forwardModeSelect.disabled = true;
                 forwardModeSelect.classList.add('opacity-60', 'cursor-not-allowed');
+            } else if (isFourAreaSimulation) {
+                if (currentValue && currentValue !== 'simultaneous_all_dipoles') {
+                    forwardModeSelect.dataset.lastNonForcedValue = currentValue;
+                }
+                forwardModeSelect.value = 'simultaneous_all_dipoles';
+                forwardModeSelect.disabled = true;
+                forwardModeSelect.classList.add('opacity-60', 'cursor-not-allowed');
             } else {
-                const previous = String(forwardModeSelect.dataset.lastNonNyValue || '').trim();
-                if (forwardModeSelect.value === 'per_sensor_independent' && previous) {
+                const previous = String(forwardModeSelect.dataset.lastNonForcedValue || '').trim();
+                if (!forwardModeSelect.value && previous) {
                     forwardModeSelect.value = previous;
                 }
                 if (!forwardModeSelect.value) {
@@ -2767,6 +2949,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const isNy = modelSelect && modelSelect.value === 'NYHeadModel';
+            const requestedMode = forwardModeSelect ? String(forwardModeSelect.value || '').trim() : 'simultaneous_all_dipoles';
+            if (isFourAreaSimulation && requestedMode === 'per_sensor_independent') {
+                event.preventDefault();
+                window.alert('Per-sensor independent simulation is not available for the four-area model.');
+                return;
+            }
             if (isNy) {
                 if (dipoleHidden) dipoleHidden.value = '';
                 if (sensorHidden) sensorHidden.value = '';
@@ -2778,15 +2966,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 window.alert('Dipole locations must contain numeric X, Y, Z coordinates.');
                 return;
             }
-            if (isFourAreaSimulation && parsedDipoles.rows.length !== 4) {
-                event.preventDefault();
-                window.alert('Four-area model requires exactly 4 dipole locations: frontal, parietal, temporal, occipital.');
-                return;
-            }
             const parsedSensors = readCoordRows(sensorRows, 'sensor');
             if (!parsedSensors.ok || parsedSensors.rows.length === 0) {
                 event.preventDefault();
                 window.alert('Sensor locations must contain at least one numeric X, Y, Z coordinate.');
+                return;
+            }
+            if (!isFourAreaSimulation && requestedMode === 'per_sensor_independent' && parsedDipoles.rows.length !== parsedSensors.rows.length) {
+                event.preventDefault();
+                window.alert('Per-sensor independent simulation requires the same number of dipole and sensor locations.');
                 return;
             }
             syncLocationHiddenInputs();

@@ -378,6 +378,7 @@ _PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
 _FOLD_PROGRESS_RE = re.compile(r"Fold\s+(\d+)\s*/\s*(\d+)")
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
+FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX = "__file_extracted_sep__"
 FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
 FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
@@ -397,31 +398,63 @@ def _extract_filename_text_chains(file_name):
     return [tok.strip() for tok in stem.split("_") if tok.strip()]
 
 
-def _file_extracted_chain_index(locator):
+def _extract_filename_text_parts_by_separator(file_name):
+    stem = os.path.splitext(os.path.basename(str(file_name or "")))[0]
+    if not stem:
+        return {}
+    return {
+        "underscore": [tok.strip() for tok in stem.split("_") if tok.strip()],
+        "hyphen": [tok.strip() for tok in stem.split("-") if tok.strip()],
+    }
+
+
+def _file_extracted_locator_spec(locator):
     if not isinstance(locator, str):
         return None
-    if locator == FILE_EXTRACTED_VIRTUAL_FIELD:
-        return -1
-    if not locator.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
+    raw = str(locator).strip()
+    if raw == FILE_EXTRACTED_VIRTUAL_FIELD:
+        return {"separator_name": "underscore", "separator": "_", "index": -1}
+    if raw.startswith(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):
+        suffix = raw[len(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX):].strip()
+        if "__" not in suffix:
+            return None
+        sep_name, idx_raw = suffix.split("__", 1)
+        sep_name = sep_name.strip().lower()
+        if sep_name not in {"underscore", "hyphen"} or not idx_raw.isdigit():
+            return None
+        return {
+            "separator_name": sep_name,
+            "separator": "_" if sep_name == "underscore" else "-",
+            "index": int(idx_raw),
+        }
+    if not raw.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):
         return None
-    suffix = locator[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
+    suffix = raw[len(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX):].strip()
     if not suffix.isdigit():
         return None
-    return int(suffix)
+    return {"separator_name": "underscore", "separator": "_", "index": int(suffix)}
+
+
+def _file_extracted_chain_index(locator):
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
+        return None
+    return int(spec["index"])
 
 
 def _resolve_file_extracted_value(file_name, locator):
-    index = _file_extracted_chain_index(locator)
-    if index is None:
+    spec = _file_extracted_locator_spec(locator)
+    if spec is None:
         return None
-    chains = _extract_filename_text_chains(file_name)
-    if not chains:
+    parts = _extract_filename_text_parts_by_separator(file_name).get(str(spec["separator_name"])) or []
+    if not parts:
         return None
+    index = int(spec["index"])
     if index < 0:
-        return chains[-1]
-    if index >= len(chains):
+        return parts[-1]
+    if index >= len(parts):
         return None
-    return chains[index]
+    return parts[index]
 
 
 _FILENAME_FORMAT_TOKEN_NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
@@ -863,6 +896,17 @@ def _load_uploaded_source_bytes(name, ext, content):
                 except OSError:
                     pass
 
+    if ext == ".ds":
+        raise ValueError(
+            "CTF .ds datasets are directories and cannot be parsed from a single uploaded file. "
+            "Use Server upload/path selection and select the folder that contains the .ds dataset."
+        )
+
+    if ext in {".vhdr", ".dat"}:
+        raise ValueError(
+            f"BrainVision {ext} requires companion files (.vhdr, .eeg/.dat, .vmrk) in the same folder. "
+            "Use server-path selection (folder on disk), not single-file upload."
+        )
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
@@ -878,10 +922,23 @@ def _load_uploaded_source_path(path, name=None, ext=None):
     safe_path = str(path or "")
     if not safe_path or not os.path.exists(safe_path):
         raise ValueError(f"Uploaded file path does not exist: '{safe_path}'.")
+    safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
+    ext = str(ext or os.path.splitext(safe_name)[1] or os.path.splitext(safe_path)[1]).lower()
+
+    if ext == ".ds":
+        if not os.path.isdir(safe_path):
+            raise ValueError(
+                f"CTF dataset path is not a .ds directory: '{safe_path}'. "
+                "Use server upload/path selection for CTF datasets."
+            )
+        try:
+            import mne
+        except Exception as exc:
+            raise ValueError(f"mne is required to parse .ds CTF datasets: {exc}")
+        return mne.io.read_raw_ctf(safe_path, preload=True, verbose=False)
+
     if not os.path.isfile(safe_path):
         raise ValueError(f"Uploaded path is not a regular file: '{safe_path}'.")
-    safe_name = str(name or os.path.basename(safe_path) or "uploaded_file")
-    ext = str(ext or os.path.splitext(safe_name)[1]).lower()
 
     if ext in {".pkl", ".pickle"}:
         try:
@@ -937,7 +994,17 @@ def _load_uploaded_source_path(path, name=None, ext=None):
         except ImportError as exc:
             raise ValueError(f"pyEDFlib is required to parse .edf files: {exc}")
 
+    if ext in {".vhdr", ".dat"}:
+        try:
+            from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+            parser = EphysDatasetParser(ParseConfig(preload=True))
+            source_obj, _ = parser._load_source(safe_path)
+            return source_obj
+        except Exception as exc:
+            raise ValueError(f"Failed to parse BrainVision file '{safe_name}': {exc}")
+
     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
+
 
 
 def _flatten_matlab_ch_names(raw):
@@ -1081,6 +1148,38 @@ def _try_resolve_additional_metadata_ch_names(ch_locator, additional_metadata_pa
             values.append(token)
 
     return values if values else None
+
+
+def _discover_neighbor_tabular_metadata_paths(source_path, max_files=64):
+    """Collect nearby tabular metadata files next to a source file/directory."""
+    base = str(source_path or "").strip()
+    if not base:
+        return []
+    base_dir = base if os.path.isdir(base) else os.path.dirname(base)
+    if not base_dir or not os.path.isdir(base_dir):
+        return []
+
+    allowed_exts = {".csv", ".tsv", ".xlsx", ".xls", ".parquet", ".feather"}
+    out = []
+    seen = set()
+    try:
+        for name in sorted(os.listdir(base_dir)):
+            full = os.path.join(base_dir, name)
+            if not os.path.isfile(full):
+                continue
+            ext = os.path.splitext(name)[1].lower()
+            if ext not in allowed_exts:
+                continue
+            real = os.path.realpath(full)
+            if real in seen:
+                continue
+            seen.add(real)
+            out.append({"path": real, "name": os.path.basename(real)})
+            if len(out) >= max_files:
+                break
+    except Exception:
+        return out
+    return out
 
 
 def _structure_signature_for_value(value, depth=0, max_depth=2):
@@ -1564,6 +1663,47 @@ def _safe_float(value):
         return None
 
 
+def _normalize_cdm_component_axis(value):
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        token = value.strip().lower()
+    else:
+        numeric = _safe_float(value)
+        if numeric is not None and float(numeric).is_integer():
+            token = str(int(numeric))
+        else:
+            token = str(value).strip().lower()
+    if token in {"x", "0"}:
+        return "x"
+    if token in {"y", "1"}:
+        return "y"
+    if token in {"z", "2"}:
+        return "z"
+    if token in {"xyz", "all", "3", "3d"}:
+        return "xyz"
+    return None
+
+
+def _cdm_component_axis_index(axis):
+    normalized = _normalize_cdm_component_axis(axis)
+    axis_to_index = {"x": 0, "y": 1, "z": 2}
+    return axis_to_index.get(normalized)
+
+
+def _extract_cdm_component_meta(value):
+    if not isinstance(value, MappingABC):
+        return None, None
+    axis = _normalize_cdm_component_axis(value.get("component_axis"))
+    if axis is None:
+        axis = _normalize_cdm_component_axis(value.get("component"))
+    if axis is None:
+        axis = _normalize_cdm_component_axis(value.get("component_index"))
+    if axis is None:
+        axis = _normalize_cdm_component_axis(value.get("component_label"))
+    return axis, _cdm_component_axis_index(axis)
+
+
 def _is_trial_sequence(value):
     if not isinstance(value, (list, tuple)):
         return False
@@ -1683,15 +1823,47 @@ def _first_numeric_from_column(df, column_name):
 
 
 def _extract_signal_and_meta_from_source(obj):
-    meta = {"dt_ms": None, "decimation_factor": 1, "fs_hz": None}
+    meta = {
+        "dt_ms": None,
+        "decimation_factor": 1,
+        "fs_hz": None,
+        "t_start_ms": None,
+        "t_stop_ms": None,
+        "component_axis": None,
+        "component_index": None,
+    }
     dipole_probe_priority = ("CurrentDipoleMoment", "KernelApproxCurrentDipoleMoment")
+
+    def _first_non_empty_from_column(df, column_name):
+        if column_name not in df.columns:
+            return None
+        series = df[column_name].dropna()
+        if series.empty:
+            return None
+        for value in series:
+            if isinstance(value, str):
+                if value.strip():
+                    return value
+                continue
+            return value
+        return None
 
     if isinstance(obj, pd.DataFrame):
         dt_ms = _first_numeric_from_column(obj, "dt_ms")
         decimation_factor = _first_numeric_from_column(obj, "decimation_factor")
         fs_hz = _first_numeric_from_column(obj, "fs_hz")
+        t_start_ms = _first_numeric_from_column(obj, "t_start_ms")
+        if t_start_ms is None:
+            t_start_ms = _first_numeric_from_column(obj, "time_start_ms")
+        if t_start_ms is None:
+            t_start_ms = _first_numeric_from_column(obj, "transient_ms")
+        if t_start_ms is None:
+            t_start_ms = _first_numeric_from_column(obj, "transient")
+        t_stop_ms = _first_numeric_from_column(obj, "t_stop_ms")
+        if t_stop_ms is None:
+            t_stop_ms = _first_numeric_from_column(obj, "time_stop_ms")
 
-        if "metadata" in obj.columns and (dt_ms is None or fs_hz is None or decimation_factor is None):
+        if "metadata" in obj.columns:
             meta_series = obj["metadata"].dropna()
             if not meta_series.empty:
                 meta_value = meta_series.iloc[0]
@@ -1707,12 +1879,41 @@ def _extract_signal_and_meta_from_source(obj):
                         decimation_factor = _safe_float(meta_value.get("decimation_factor"))
                     if fs_hz is None:
                         fs_hz = _safe_float(meta_value.get("fs_hz"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("t_start_ms"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("time_start_ms"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("transient_ms"))
+                    if t_start_ms is None:
+                        t_start_ms = _safe_float(meta_value.get("transient"))
+                    if t_stop_ms is None:
+                        t_stop_ms = _safe_float(meta_value.get("t_stop_ms"))
+                    if t_stop_ms is None:
+                        t_stop_ms = _safe_float(meta_value.get("time_stop_ms"))
+                    component_axis, component_index = _extract_cdm_component_meta(meta_value)
+                    if component_axis is not None:
+                        meta["component_axis"] = component_axis
+                    if component_index is not None:
+                        meta["component_index"] = int(component_index)
 
         if decimation_factor is None or decimation_factor <= 0:
             decimation_factor = 1
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
+        meta["t_start_ms"] = t_start_ms
+        meta["t_stop_ms"] = t_stop_ms
+        component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component_axis"))
+        if component_axis is None:
+            component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component"))
+        if component_axis is None:
+            component_axis = _normalize_cdm_component_axis(_first_non_empty_from_column(obj, "component_index"))
+        if component_axis is not None:
+            meta["component_axis"] = component_axis
+        component_index = _cdm_component_axis_index(meta.get("component_axis"))
+        if component_index is not None:
+            meta["component_index"] = int(component_index)
         signal_column = "sum" if "sum" in obj.columns else ("data" if "data" in obj.columns else None)
         if signal_column is not None and not obj.empty:
             selected_row = obj.iloc[0]
@@ -1731,6 +1932,21 @@ def _extract_signal_and_meta_from_source(obj):
         dt_ms = _safe_float(obj.get("dt_ms"))
         decimation_factor = _safe_float(obj.get("decimation_factor"))
         fs_hz = _safe_float(obj.get("fs_hz"))
+        t_start_ms = _safe_float(obj.get("t_start_ms"))
+        if t_start_ms is None:
+            t_start_ms = _safe_float(obj.get("time_start_ms"))
+        if t_start_ms is None:
+            t_start_ms = _safe_float(obj.get("transient_ms"))
+        if t_start_ms is None:
+            t_start_ms = _safe_float(obj.get("transient"))
+        t_stop_ms = _safe_float(obj.get("t_stop_ms"))
+        if t_stop_ms is None:
+            t_stop_ms = _safe_float(obj.get("time_stop_ms"))
+        component_axis, component_index = _extract_cdm_component_meta(obj)
+        if component_axis is not None:
+            meta["component_axis"] = component_axis
+        if component_index is not None:
+            meta["component_index"] = int(component_index)
         metadata = obj.get("metadata")
         if isinstance(metadata, MappingABC):
             if dt_ms is None:
@@ -1739,11 +1955,30 @@ def _extract_signal_and_meta_from_source(obj):
                 decimation_factor = _safe_float(metadata.get("decimation_factor"))
             if fs_hz is None:
                 fs_hz = _safe_float(metadata.get("fs_hz"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("t_start_ms"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("time_start_ms"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("transient_ms"))
+            if t_start_ms is None:
+                t_start_ms = _safe_float(metadata.get("transient"))
+            if t_stop_ms is None:
+                t_stop_ms = _safe_float(metadata.get("t_stop_ms"))
+            if t_stop_ms is None:
+                t_stop_ms = _safe_float(metadata.get("time_stop_ms"))
+            nested_axis, nested_index = _extract_cdm_component_meta(metadata)
+            if meta["component_axis"] is None and nested_axis is not None:
+                meta["component_axis"] = nested_axis
+            if meta["component_index"] is None and nested_index is not None:
+                meta["component_index"] = int(nested_index)
         if decimation_factor is None or decimation_factor <= 0:
             decimation_factor = 1
         meta["dt_ms"] = dt_ms
         meta["decimation_factor"] = int(decimation_factor)
         meta["fs_hz"] = fs_hz
+        meta["t_start_ms"] = t_start_ms
+        meta["t_stop_ms"] = t_stop_ms
         if "sum" in obj:
             return obj.get("sum"), meta
         if "data" in obj:
@@ -2077,14 +2312,58 @@ def _build_feature_method_params(method, params, df):
         welch_kwargs = _parse_dict_param(params, "specparam_welch_kwargs") or {}
         nperseg = _parse_int_param(params, "specparam_welch_nperseg", default=None)
         noverlap = _parse_int_param(params, "specparam_welch_noverlap", default=None)
+        nfft = _parse_int_param(params, "specparam_welch_nfft", default=None)
+        window = _get_param(params, "specparam_welch_window", None)
+        detrend = _get_param(params, "specparam_welch_detrend", None)
+        scaling = _get_param(params, "specparam_welch_scaling", None)
+        average = _get_param(params, "specparam_welch_average", None)
         if nperseg is not None:
             welch_kwargs["nperseg"] = int(nperseg)
         if noverlap is not None:
             welch_kwargs["noverlap"] = int(noverlap)
+        if nfft is not None:
+            welch_kwargs["nfft"] = int(nfft)
+        if window:
+            welch_kwargs["window"] = str(window)
+        if detrend:
+            welch_kwargs["detrend"] = False if str(detrend) == "none" else str(detrend)
+        if scaling:
+            welch_kwargs["scaling"] = str(scaling)
+        if average:
+            welch_kwargs["average"] = str(average)
         if welch_kwargs:
             method_params["welch_kwargs"] = welch_kwargs
 
-        model_kwargs = _parse_dict_param(params, "specparam_model_kwargs")
+        model_kwargs = _parse_dict_param(params, "specparam_model_kwargs") or {}
+        peak_threshold = _parse_float_param(params, "specparam_model_peak_threshold", default=None)
+        min_peak_height = _parse_float_param(params, "specparam_model_min_peak_height", default=None)
+        max_n_peaks = _parse_int_param(params, "specparam_model_max_n_peaks", default=None)
+        peak_width_limits = _parse_range_pair(
+            params,
+            "specparam_model_peak_width_min",
+            "specparam_model_peak_width_max",
+        )
+        aperiodic_mode = _get_param(params, "specparam_model_aperiodic_mode", None)
+        verbose_value = _get_param(params, "specparam_model_verbose", None)
+        requested_metrics = []
+        if _parse_bool_param(params, "specparam_model_metric_gof_adjrsquared", default=False):
+            requested_metrics.append("gof_adjrsquared")
+        if _parse_bool_param(params, "specparam_model_metric_error_mse", default=False):
+            requested_metrics.append("error_mse")
+        if peak_threshold is not None:
+            model_kwargs["peak_threshold"] = float(peak_threshold)
+        if min_peak_height is not None:
+            model_kwargs["min_peak_height"] = float(min_peak_height)
+        if max_n_peaks is not None:
+            model_kwargs["max_n_peaks"] = int(max_n_peaks)
+        if peak_width_limits is not None:
+            model_kwargs["peak_width_limits"] = tuple(peak_width_limits)
+        if aperiodic_mode:
+            model_kwargs["aperiodic_mode"] = str(aperiodic_mode)
+        if verbose_value:
+            model_kwargs["verbose"] = _parse_bool(verbose_value, default=False)
+        if requested_metrics:
+            model_kwargs["metrics"] = requested_metrics
         if model_kwargs:
             method_params["model_kwargs"] = model_kwargs
 
@@ -2096,6 +2375,11 @@ def _build_feature_method_params(method, params, df):
         gof_r2 = _parse_float_param(params, "specparam_threshold_gof_rsquared", default=None)
         if gof_r2 is not None:
             thresholds["gof_rsquared"] = float(gof_r2)
+        for idx in range(1, 4):
+            threshold_name = _get_param(params, f"specparam_threshold_metric_{idx}_name", None)
+            threshold_value = _parse_float_param(params, f"specparam_threshold_metric_{idx}_value", default=None)
+            if threshold_name and threshold_value is not None:
+                thresholds[str(threshold_name)] = float(threshold_value)
         if thresholds:
             method_params["metric_thresholds"] = thresholds
 
@@ -2109,6 +2393,171 @@ def _build_feature_method_params(method, params, df):
         "chunksize": chunksize,
         "start_method": start_method,
     }
+
+
+_SPECPARAM_OUTPUT_PATHS = {
+    "aperiodic_exponent": "aperiodic_params.1",
+    "aperiodic_offset": "aperiodic_params.0",
+    "peak_cf": "peak_cf",
+    "peak_pw": "peak_pw",
+    "peak_bw": "peak_bw",
+    "n_peaks": "n_peaks",
+    "gof_rsquared": "metrics.gof_rsquared",
+    "gof_adjrsquared": "metrics.gof_adjrsquared",
+    "error_mse": "metrics.error_mse",
+    "valid": "valid",
+}
+
+
+def _is_missing_feature_value(value):
+    if value is None:
+        return True
+    if isinstance(value, np.generic):
+        value = value.item()
+    if isinstance(value, float):
+        return not np.isfinite(value)
+    if isinstance(value, np.ndarray):
+        arr = np.asarray(value)
+        if arr.ndim == 0:
+            return _is_missing_feature_value(arr.item())
+        return False
+    try:
+        missing = pd.isna(value)
+    except Exception:
+        return False
+    if isinstance(missing, (bool, np.bool_)):
+        return bool(missing)
+    return False
+
+
+def _coerce_feature_value(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        arr = np.asarray(value).squeeze()
+        if arr.ndim == 0:
+            return arr.item()
+        return arr
+    return value
+
+
+def _get_specparam_path_value(feature, path):
+    if not isinstance(feature, MappingABC):
+        return np.nan
+    current = feature
+    for part in str(path or "").split("."):
+        if part == "":
+            return np.nan
+        if isinstance(current, MappingABC):
+            if part not in current:
+                return np.nan
+            current = current.get(part)
+            continue
+        if isinstance(current, (list, tuple, np.ndarray)) and part.isdigit():
+            arr = np.asarray(current).squeeze()
+            idx = int(part)
+            if idx < 0 or idx >= arr.size:
+                return np.nan
+            current = arr.reshape(-1)[idx]
+            continue
+        return np.nan
+    return _coerce_feature_value(current)
+
+
+def _get_specparam_exponent(feature):
+    value = _get_specparam_path_value(feature, "aperiodic_params.1")
+    try:
+        value = float(value)
+    except (TypeError, ValueError):
+        return np.nan
+    return value if np.isfinite(value) else np.nan
+
+
+def _is_valid_specparam_feature(feature):
+    if isinstance(feature, MappingABC):
+        if "valid" in feature:
+            return bool(feature.get("valid"))
+        return np.isfinite(_get_specparam_exponent(feature))
+    return not _is_missing_feature_value(feature)
+
+
+def _specparam_output_path_from_params(params):
+    output_key = str(_get_param(params, "specparam_output_key", "full_dict") or "full_dict").strip()
+    if output_key in {"", "full", "dict", "full_dict"}:
+        return "full_dict", None
+    if output_key == "custom":
+        custom_path = str(_get_param(params, "specparam_output_path", "") or "").strip()
+        if not custom_path:
+            raise ValueError("Custom specparam output requires a non-empty output path.")
+        return output_key, custom_path
+    if output_key not in _SPECPARAM_OUTPUT_PATHS:
+        raise ValueError(f"Unsupported specparam output value: {output_key}")
+    return output_key, _SPECPARAM_OUTPUT_PATHS[output_key]
+
+
+def _postprocess_specparam_output(output_df, params, job_status=None, job_id=None):
+    if "Features" not in output_df.columns:
+        return output_df
+
+    def _log(message):
+        if job_status is not None and job_id is not None:
+            _append_job_output(job_status, job_id, message)
+
+    output_key, output_path = _specparam_output_path_from_params(params)
+    drop_invalid = _parse_bool_param(params, "specparam_drop_invalid_rows", default=False)
+    reject_nonpositive_exponent = _parse_bool_param(
+        params,
+        "specparam_reject_nonpositive_exponent",
+        default=False,
+    )
+
+    features = list(output_df["Features"].tolist())
+    fit_valid = pd.Series(
+        [_is_valid_specparam_feature(feature) for feature in features],
+        index=output_df.index,
+        dtype=bool,
+    )
+    exponent = pd.Series(
+        [_get_specparam_exponent(feature) for feature in features],
+        index=output_df.index,
+        dtype="float64",
+    )
+
+    if output_path is not None:
+        values = [_get_specparam_path_value(feature, output_path) for feature in features]
+        if reject_nonpositive_exponent and output_path == "aperiodic_params.1":
+            values = [
+                np.nan if (not np.isfinite(exp_value) or exp_value <= 0.0) else value
+                for value, exp_value in zip(values, exponent.tolist())
+            ]
+        output_df = output_df.copy()
+        output_df["Features"] = values
+        _log(f"Specparam output field selected: {output_path}.")
+
+    if drop_invalid:
+        keep_mask = fit_valid.copy()
+        if output_path is not None:
+            output_missing = output_df["Features"].map(_is_missing_feature_value)
+            keep_mask &= ~output_missing
+        if reject_nonpositive_exponent:
+            keep_mask &= exponent.gt(0.0).fillna(False)
+        rows_before = int(len(output_df))
+        output_df = output_df.loc[keep_mask].reset_index(drop=True)
+        rows_after = int(len(output_df))
+        _log(f"Specparam post-processing dropped {rows_before - rows_after} invalid/NaN row(s).")
+    elif reject_nonpositive_exponent and output_path != "aperiodic_params.1":
+        _log(
+            "Specparam non-positive exponent rejection is only applied to row dropping, "
+            "or when the selected output is aperiodic exponent."
+        )
+
+    return output_df
+
+
+def _postprocess_features_output(method, output_df, params, job_status=None, job_id=None):
+    if method == "specparam":
+        return _postprocess_specparam_output(output_df, params, job_status, job_id)
+    return output_df
 
 
 
@@ -2229,6 +2678,7 @@ def _apply_additional_file_metadata(
                 locator_name
                 and locator_name not in {FILE_ID_METADATA_LITERAL}
                 and not locator_name.startswith(FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX)
+                and not locator_name.startswith(FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX)
             ):
                 source_candidates.append(locator_name)
             source_candidates.append(target_name)
@@ -2471,6 +2921,50 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 heartbeat.start()
                 try:
                     parsed = parser.parse(source_obj)
+                except KeyError as exc:
+                    ch_locator = getattr(getattr(parse_cfg, "fields", None), "ch_names", None)
+                    ch_locator_str = str(ch_locator or "").strip()
+                    err_msg = str(exc)
+                    can_retry = (
+                        isinstance(ch_locator, str)
+                        and ch_locator_str not in {"", "__self__"}
+                        and f"Cannot resolve step '{ch_locator_str}'" in err_msg
+                    )
+                    if not can_retry:
+                        raise
+
+                    combined_paths = []
+                    seen_paths = set()
+                    for entry in list(params.get("additional_metadata_paths") or []) + _discover_neighbor_tabular_metadata_paths(source_path):
+                        p = str((entry or {}).get("path") or "").strip()
+                        if not p:
+                            continue
+                        rp = os.path.realpath(p)
+                        if rp in seen_paths:
+                            continue
+                        seen_paths.add(rp)
+                        combined_paths.append({
+                            "path": rp,
+                            "name": (entry or {}).get("name") or os.path.basename(rp),
+                        })
+
+                    recovered = _try_resolve_additional_metadata_ch_names(ch_locator_str, combined_paths)
+                    if not recovered:
+                        raise
+
+                    import dataclasses
+                    parse_cfg = dataclasses.replace(
+                        parse_cfg,
+                        fields=dataclasses.replace(parse_cfg.fields, ch_names=recovered),
+                    )
+                    parser = EphysDatasetParser(parse_cfg)
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Auto-detected {len(recovered)} channel name(s) from nearby metadata files "
+                        f"for locator '{ch_locator_str}'. Retrying parse.",
+                    )
+                    parsed = parser.parse(source_obj)
                 finally:
                     parse_running["flag"] = False
                     heartbeat.join(timeout=0.2)
@@ -2618,6 +3112,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
         _append_job_output(job_status, job_id, "Attaching computed features to dataframe.")
         output_df["FeatureMethod"] = method
+        output_df = _postprocess_features_output(method, output_df, params, job_status, job_id)
 
         # By default, persist features into the same parsed dataframe pickle.
         input_df_path = params['file_paths'].get('data_file')
@@ -4068,20 +4563,33 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                     proxy_area_raw = dict(proxy)
             dt_ms = _safe_float(proxy_sim_step)
             row = {
-                "data": proxy_area_payload if proxy_area_payload else proxy,
+                "data": proxy,
                 "proxy_method": method,
                 "dt_ms": dt_ms,
+                "t_start_ms": 0.0,
                 "decimation_factor": proxy_decimation_factor,
                 "fs_hz": None,
-                "metadata": {"dt_ms": dt_ms, "decimation_factor": proxy_decimation_factor, "fs_hz": None, "dt_source": dt_source},
+                "metadata": {
+                    "dt_ms": dt_ms,
+                    "t_start_ms": 0.0,
+                    "decimation_factor": proxy_decimation_factor,
+                    "fs_hz": None,
+                    "dt_source": dt_source,
+                },
             }
             if proxy_area_raw:
                 row["raw_signals"] = proxy_area_raw
-                row["sum"] = proxy_area_payload
+                row["area_sums"] = proxy_area_payload
+                try:
+                    row["sum"] = _sum_signal_dict(proxy_area_payload)
+                except Exception:
+                    row["sum"] = proxy
             if proxy_decimation_factor > 1:
                 row["data"] = _decimate_signal_time(row["data"], proxy_decimation_factor)
                 if "raw_signals" in row:
                     row["raw_signals"] = _decimate_signal_time(row["raw_signals"], proxy_decimation_factor)
+                if "area_sums" in row:
+                    row["area_sums"] = _decimate_signal_time(row["area_sums"], proxy_decimation_factor)
                 if "sum" in row:
                     row["sum"] = _decimate_signal_time(row["sum"], proxy_decimation_factor)
             dt_val = row.get("dt_ms")
@@ -4090,6 +4598,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 row["fs_hz"] = fs_hz
                 row["metadata"] = {
                     "dt_ms": float(dt_val),
+                    "t_start_ms": 0.0,
                     "decimation_factor": proxy_decimation_factor,
                     "fs_hz": fs_hz,
                     "dt_source": dt_source,
@@ -4101,17 +4610,6 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             _set_sample_progress(trial_idx + 1)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
-
-        trial_proxy_payloads, clipped_length = _clip_trial_dataframe_payloads(
-            trial_proxy_payloads,
-            signal_columns=("data", "raw_signals", "sum"),
-        )
-        if clipped_length is not None:
-            _append_job_output(
-                job_status,
-                job_id,
-                f"Clipped proxy time-series to common minimum length {clipped_length} samples across trials.",
-            )
 
         output_root = _field_potential_output_dir("proxy")
         os.makedirs(output_root, exist_ok=True)
@@ -4461,19 +4959,62 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             transient = 0.0
         probe_names = selected_probe_names or ["KernelApproxCurrentDipoleMoment"]
         component_val = params.get("cdm_component")
-        if component_val in (None, "", "None"):
+        component_axis = _normalize_cdm_component_axis(component_val)
+        if component_axis is None:
+            component_axis = "xyz"
+        if component_axis not in {"z", "xyz"}:
+            raise ValueError("CDM component must be 'z' or 'xyz (all)'.")
+        component_index = _cdm_component_axis_index(component_axis)
+        if component_axis == "xyz":
             component = None
         else:
-            component_token = str(component_val).strip().lower()
-            axis_to_index = {"x": 0, "y": 1, "z": 2}
-            if component_token in axis_to_index:
-                component = axis_to_index[component_token]
-            elif component_token in {"xyz", "all", "3", "3d"}:
-                component = None
-            else:
-                component = int(float(component_val))
-        component_label = "xyz (all)" if component is None else str(component)
+            component = int(component_index)
+        component_label = "xyz (all)" if component is None else component_axis
         _append_job_output(job_status, job_id, f"CDM/LFP component selection: {component_label}.")
+
+        if component is not None:
+            dipole_probes = {"KernelApproxCurrentDipoleMoment", "CurrentDipoleMoment"}
+            axis_names = {0: "x", 1: "y", 2: "z"}
+
+            def _probe_axis_absmax(kernel_map, probe_name):
+                axis_absmax = [0.0, 0.0, 0.0]
+                matched = 0
+                if not isinstance(kernel_map, MappingABC):
+                    return axis_absmax, matched
+                for entry in kernel_map.values():
+                    if not isinstance(entry, MappingABC) or probe_name not in entry:
+                        continue
+                    arr = np.asarray(entry.get(probe_name))
+                    if arr.ndim != 2 or arr.shape[0] != 3:
+                        continue
+                    matched += 1
+                    for axis_idx in range(3):
+                        try:
+                            axis_abs = float(np.nanmax(np.abs(arr[axis_idx])))
+                        except Exception:
+                            axis_abs = 0.0
+                        if axis_abs > axis_absmax[axis_idx]:
+                            axis_absmax[axis_idx] = axis_abs
+                return axis_absmax, matched
+
+            for probe_name in probe_names:
+                if probe_name not in dipole_probes:
+                    continue
+                axis_absmax, matched_count = _probe_axis_absmax(kernels, probe_name)
+                if matched_count <= 0:
+                    continue
+                chosen_abs = axis_absmax[int(component)]
+                if chosen_abs == 0.0 and max(axis_absmax) > 0.0:
+                    dominant_axis = int(np.argmax(np.asarray(axis_absmax, dtype=float)))
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: selected CDM component "
+                        f"'{axis_names.get(int(component), str(component))}' is zero across all {probe_name} kernels "
+                        f"(max|x|={axis_absmax[0]:.3g}, max|y|={axis_absmax[1]:.3g}, max|z|={axis_absmax[2]:.3g}). "
+                        f"Choose component '{axis_names.get(dominant_axis, 'z')}' or 'xyz (all)' to obtain a non-zero CDM signal.",
+                    )
+                    break
         mode = params.get("cdm_mode") or "same"
         scale = _parse_float_param(params, "cdm_scale", default=(float(dt) * 1e-3))
         if scale is None or not np.isfinite(scale):
@@ -4653,18 +5194,28 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                         )
                         logged_target_area_sum = True
                 row = {
-                    "sum": area_sum_payload if area_sum_payload else _sum_signal_dict(cdm_signals),
+                    "sum": _sum_signal_dict(cdm_signals),
                     "raw_signals": cdm_signals,
                     "probe": probe_name,
+                    "component_axis": component_axis,
+                    "component_index": component_index,
                     "dt_ms": float(cdm_dt),
+                    "t_start_ms": float(transient),
+                    "t_stop_ms": float(cdm_tstop),
                     "decimation_factor": cdm_decimation_factor,
                     "fs_hz": fs_hz_after_decimation,
                     "metadata": {
                         "dt_ms": float(cdm_dt),
+                        "t_start_ms": float(transient),
+                        "t_stop_ms": float(cdm_tstop),
                         "decimation_factor": cdm_decimation_factor,
                         "fs_hz": fs_hz_after_decimation,
+                        "component_axis": component_axis,
+                        "component_index": component_index,
                     },
                 }
+                if area_sum_payload:
+                    row["area_sums"] = area_sum_payload
                 if trial_count > 1:
                     row["trial_index"] = int(trial_idx)
                 payload_df = pd.DataFrame([row])
@@ -4672,21 +5223,6 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             _set_sample_progress(trial_idx + 1)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed kernel convolution trial {trial_idx + 1}/{trial_count}.")
-
-        clipped_reported = False
-        for probe_name in probe_names:
-            clipped_payloads, clipped_length = _clip_trial_dataframe_payloads(
-                probe_trial_payloads[probe_name],
-                signal_columns=("sum", "raw_signals"),
-            )
-            probe_trial_payloads[probe_name] = clipped_payloads
-            if clipped_length is not None and not clipped_reported:
-                _append_job_output(
-                    job_status,
-                    job_id,
-                    f"Clipped kernel field-potential time-series to common minimum length {clipped_length} samples across trials.",
-                )
-                clipped_reported = True
 
         kernels_path = os.path.join(output_root, "kernels.pkl")
         kernel_payload = kernels_for_save if kernels_for_save is not None else kernels
@@ -4821,6 +5357,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
 
         model = params.get("meeg_model") or "NYHeadModel"
         model_kwargs = _parse_literal_value(params.get("meeg_model_kwargs"), None)
+        model_kwargs = model_kwargs or {}
         requested_forward_mode = str(params.get("meeg_forward_mode") or "simultaneous_all_dipoles").strip().lower()
         if requested_forward_mode not in {"simultaneous_all_dipoles", "per_sensor_independent"}:
             requested_forward_mode = "simultaneous_all_dipoles"
@@ -4830,8 +5367,79 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
         required_four_area_order = ("frontal", "parietal", "temporal", "occipital")
         if is_four_area_simulation and model == "NYHeadModel":
             raise ValueError("NYHeadModel is not supported for the four-area simulation model.")
+        if is_four_area_simulation and requested_forward_mode == "per_sensor_independent":
+            raise ValueError("Per-sensor independent simulation is not available for the four-area model.")
         force_per_sensor_mode = model == "NYHeadModel"
         use_per_sensor_independent = force_per_sensor_mode or (requested_forward_mode == "per_sensor_independent")
+
+        four_area_dipole_defaults = {
+            "FourSphereVolumeConductor": np.array(
+                [
+                    # [frontal, parietal, temporal, occipital]
+                    # Hemisphere-constrained layout (z >= 0):
+                    # - frontal and occipital on opposite sides
+                    # - parietal near the top center
+                    # - temporal low, close to z=0, at approximately parietal radius
+                    [0.0, 65000.0, 43000.0],    # frontal
+                    [0.0, 0.0, 78000.0],        # parietal
+                    [77000.0, 0.0, 12000.0],    # temporal
+                    [0.0, -65000.0, 43000.0],   # occipital
+                ],
+                dtype=float,
+            ),
+            "InfiniteVolumeConductor": np.array(
+                [
+                    [0.0, 16000.0, 12000.0],    # frontal
+                    [0.0, 0.0, 20000.0],        # parietal
+                    [19300.0, 0.0, 5000.0],     # temporal
+                    [0.0, -16000.0, 12000.0],   # occipital
+                ],
+                dtype=float,
+            ),
+            "InfiniteHomogeneousVolCondMEG": np.array(
+                [
+                    [0.0, 16000.0, 12000.0],    # frontal
+                    [0.0, 0.0, 20000.0],        # parietal
+                    [19300.0, 0.0, 5000.0],     # temporal
+                    [0.0, -16000.0, 12000.0],   # occipital
+                ],
+                dtype=float,
+            ),
+            "SphericallySymmetricVolCondMEG": np.array(
+                [
+                    [0.0, 75000.0, 49500.0],    # frontal
+                    [0.0, 0.0, 90000.0],        # parietal
+                    [88900.0, 0.0, 14000.0],    # temporal
+                    [0.0, -75000.0, 49500.0],   # occipital
+                ],
+                dtype=float,
+            ),
+        }
+
+        four_sphere_radii = np.array([79000.0, 80000.0, 85000.0, 90000.0], dtype=float)
+        if model == "FourSphereVolumeConductor":
+            raw_radii = model_kwargs.get("radii")
+            if raw_radii is not None:
+                try:
+                    parsed_radii = np.asarray(raw_radii, dtype=float).reshape(-1)
+                    if (
+                        parsed_radii.size == 4
+                        and np.all(np.isfinite(parsed_radii))
+                        and np.all(parsed_radii > 0.0)
+                    ):
+                        four_sphere_radii = parsed_radii
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "Warning: invalid FourSphere radii in meeg_model_kwargs; using default radii [79000, 80000, 85000, 90000].",
+                        )
+                except Exception:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: could not parse FourSphere radii from meeg_model_kwargs; using default radii [79000, 80000, 85000, 90000].",
+                    )
 
         _append_job_output(job_status, job_id, f"Model: {model}")
         if force_per_sensor_mode:
@@ -4848,12 +5456,36 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 + ("per-sensor independent" if use_per_sensor_independent else "simultaneous all dipoles"),
             )
         potential = ncpi.FieldPotential()
-        model_kwargs = model_kwargs or {}
         is_meg = model in {"InfiniteHomogeneousVolCondMEG", "SphericallySymmetricVolCondMEG"}
         trial_payloads = []
         warned_cdm_1d = False
         warned_cdm_2d = False
         warned_cdm_replicated = False
+        warned_component_mode_z = False
+        warned_component_mode_xyz = False
+        warned_component_mode_xyz_mismatch = False
+        warned_fixed_four_area_dipoles = False
+        warned_four_sphere_sensor_clipped = False
+        warned_four_sphere_dipole_clipped = False
+        axis_names = {0: "x", 1: "y", 2: "z"}
+
+        def _clip_locations_to_radius(locations, radius):
+            if locations is None:
+                return None, 0
+            arr = np.asarray(locations, dtype=float)
+            if arr.ndim == 1:
+                arr = arr.reshape(1, 3)
+            if arr.ndim != 2 or arr.shape[1] != 3:
+                raise ValueError("Locations must have shape (n, 3).")
+            max_radius = float(radius)
+            if max_radius <= 0.0 or (not np.isfinite(max_radius)):
+                return arr, 0
+            norms = np.linalg.norm(arr, axis=1)
+            mask = norms > max_radius
+            if np.any(mask):
+                scale = (max_radius / norms[mask]).reshape(-1, 1)
+                arr[mask] = arr[mask] * scale
+            return arr, int(np.count_nonzero(mask))
 
         def _coerce_area_cdm_entry(value, area_name):
             arr = np.asarray(value)
@@ -4903,29 +5535,34 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 return np.repeat(seed, n_dipoles, axis=0)
             return arr
 
-        def _dipole_below_sensor(sensor_xyz, model_key, brain_radius=None):
-            sensor = np.asarray(sensor_xyz, dtype=float)
-            norm = float(np.linalg.norm(sensor))
-            if model_key == "FourSphereVolumeConductor":
-                r1 = _safe_float(brain_radius)
-                if r1 is None or r1 <= 0:
-                    r1 = 79000.0
-                if norm <= 0.0:
-                    return np.array([0.0, 0.0, 0.98 * r1], dtype=float)
-                # Strictly inside the brain sphere: |r_dipole| < r1
-                target_norm = min(norm * 0.98, r1 * 0.98)
-                return sensor * (target_norm / norm)
-            if model_key == "SphericallySymmetricVolCondMEG":
-                # Keep dipole strictly inside the sensor radius.
-                if norm > 0.0:
-                    return sensor * 0.98
-                return np.array([0.0, 0.0, 1000.0], dtype=float)
-            if norm > 0.0:
-                return sensor + np.array([0.0, 0.0, -2000.0], dtype=float)
-            return np.array([0.0, 0.0, -2000.0], dtype=float)
-
         for trial_idx, cdm_trial_raw in enumerate(cdm_trials_raw):
             CDM, cdm_meta = _extract_signal_and_meta_from_source(cdm_trial_raw)
+            component_mode = _normalize_cdm_component_axis(cdm_meta.get("component_axis"))
+            if component_mode not in {"z", "xyz"}:
+                component_mode = None
+            axis_from_meta = _cdm_component_axis_index(cdm_meta.get("component_axis"))
+            if axis_from_meta is None:
+                component_index_value = _safe_float(cdm_meta.get("component_index"))
+                if (
+                    component_index_value is not None
+                    and float(component_index_value).is_integer()
+                    and int(component_index_value) in axis_names
+                ):
+                    axis_from_meta = int(component_index_value)
+            if component_mode == "z" and not warned_component_mode_z:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "CDM metadata indicates z-component-only input; using z with x=y=0 in forward modeling.",
+                )
+                warned_component_mode_z = True
+            elif component_mode == "xyz" and not warned_component_mode_xyz:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "CDM metadata indicates all xyz components; using full dipole vectors in forward modeling.",
+                )
+                warned_component_mode_xyz = True
             trial_four_area_map = _extract_four_area_cdm_map(CDM)
             if trial_four_area_map is not None:
                 _append_job_output(
@@ -4957,15 +5594,19 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             trial_sensor_locations = np.array(sensor_locations, dtype=float, copy=True) if sensor_locations is not None else None
 
             if is_four_area_simulation:
-                if trial_dipole_locations is None:
+                default_four_area_locs = four_area_dipole_defaults.get(model)
+                if default_four_area_locs is None:
                     raise ValueError(
-                        "Four-area model requires dipole locations for frontal, parietal, temporal, occipital."
+                        f"Fixed four-area dipole defaults are not available for model '{model}'."
                     )
-                if trial_dipole_locations.shape != (4, 3):
-                    raise ValueError(
-                        "Four-area model requires exactly 4 dipole locations with shape (4, 3), "
-                        "ordered as frontal, parietal, temporal, occipital."
+                trial_dipole_locations = np.array(default_four_area_locs, dtype=float, copy=True)
+                if not warned_fixed_four_area_dipoles:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Four-area simulation uses fixed dipole locations mapped to frontal/parietal/temporal/occipital areas.",
                     )
+                    warned_fixed_four_area_dipoles = True
                 cdm_arr = np.asarray(CDM)
                 if trial_four_area_map is None and not (cdm_arr.ndim == 3 and cdm_arr.shape[0] == 4):
                     raise ValueError(
@@ -4978,16 +5619,58 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             if CDM.ndim == 3 and CDM.shape[1] != 3 and CDM.shape[2] == 3:
                 CDM = np.transpose(CDM, (0, 2, 1))
             if CDM.ndim == 1:
+                resolved_axis = axis_from_meta if axis_from_meta in axis_names else 2
+                if component_mode == "xyz" and not warned_component_mode_xyz_mismatch:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: CDM metadata says xyz, but payload is single-component; using z-axis fallback for forward modeling.",
+                    )
+                    warned_component_mode_xyz_mismatch = True
                 if not warned_cdm_1d:
-                    _append_job_output(job_status, job_id, "CDM is 1D; assuming z-axis dipole (x=y=0).")
+                    if axis_from_meta in axis_names:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"CDM is 1D; using saved component axis '{axis_names[resolved_axis]}' (other axes set to 0).",
+                        )
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "CDM is 1D with no saved component axis; assuming z-axis dipole (x=y=0).",
+                        )
                     warned_cdm_1d = True
-                CDM = np.vstack([np.zeros_like(CDM), np.zeros_like(CDM), CDM])
+                components = [np.zeros_like(CDM), np.zeros_like(CDM), np.zeros_like(CDM)]
+                components[resolved_axis] = CDM
+                CDM = np.vstack(components)
             elif CDM.ndim == 2 and CDM.shape[0] != 3:
+                resolved_axis = axis_from_meta if axis_from_meta in axis_names else 2
+                if component_mode == "xyz" and not warned_component_mode_xyz_mismatch:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: CDM metadata says xyz, but payload has one component per dipole; using z-axis fallback for forward modeling.",
+                    )
+                    warned_component_mode_xyz_mismatch = True
                 if not warned_cdm_2d:
-                    _append_job_output(job_status, job_id, "CDM has 1 component per dipole; assuming z-axis dipoles (x=y=0).")
+                    if axis_from_meta in axis_names:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"CDM has 1 component per dipole; using saved axis '{axis_names[resolved_axis]}' (other axes set to 0).",
+                        )
+                    else:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            "CDM has 1 component per dipole with no saved axis; assuming z-axis dipoles (x=y=0).",
+                        )
                     warned_cdm_2d = True
                 zeros = np.zeros_like(CDM)
-                CDM = np.stack([zeros, zeros, CDM], axis=1)
+                components = [zeros, zeros, zeros]
+                components[resolved_axis] = CDM
+                CDM = np.stack(components, axis=1)
             if not ((CDM.ndim == 2 and CDM.shape[0] == 3) or (CDM.ndim == 3 and CDM.shape[1] == 3)):
                 raise ValueError(
                     "CDM must have 3 components. Ensure you computed a dipole-moment probe (e.g., "
@@ -5024,8 +5707,15 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         ny_dipoles = np.vstack([ny_dipoles, tail])
                     trial_dipole_locations = np.array(ny_dipoles[:n_dip], dtype=float, copy=True)
             else:
-                if trial_sensor_locations is None:
-                    if model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
+                if (not use_per_sensor_independent) and trial_sensor_locations is None:
+                    if is_four_area_simulation:
+                        # For four-area runs, use a consistent default sensor placement
+                        # across forward models unless explicit sensor locations are provided.
+                        if model == "FourSphereVolumeConductor":
+                            trial_sensor_locations = np.array([[0.0, 0.0, float(four_sphere_radii[3])]])
+                        else:
+                            trial_sensor_locations = np.array([[0.0, 0.0, 92000.0]])
+                    elif model in {"FourSphereVolumeConductor", "InfiniteVolumeConductor"}:
                         trial_sensor_locations = np.array([[0.0, 0.0, 90000.0]])
                     elif model == "InfiniteHomogeneousVolCondMEG":
                         trial_sensor_locations = np.array([[10000.0, 0.0, 0.0]])
@@ -5033,6 +5723,10 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         trial_sensor_locations = np.array([[0.0, 0.0, 92000.0]])
 
             if trial_dipole_locations is None:
+                if model != "NYHeadModel" and use_per_sensor_independent:
+                    raise ValueError(
+                        "Per-sensor independent mode requires explicit dipole locations for non-NYHeadModel forward models."
+                    )
                 if model == "FourSphereVolumeConductor":
                     default_loc = np.array([0.0, 0.0, 78000.0], dtype=float)
                 elif model == "SphericallySymmetricVolCondMEG":
@@ -5043,6 +5737,33 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     trial_dipole_locations = np.repeat(default_loc.reshape(1, 3), int(CDM.shape[0]), axis=0)
                 else:
                     trial_dipole_locations = default_loc
+
+            if model == "FourSphereVolumeConductor":
+                # Keep four-sphere dipole/sensor coordinates inside the model boundaries.
+                trial_dipole_locations, dipole_clipped = _clip_locations_to_radius(
+                    trial_dipole_locations,
+                    float(four_sphere_radii[0]),
+                )
+                if dipole_clipped > 0 and not warned_four_sphere_dipole_clipped:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        f"Adjusted {dipole_clipped} dipole location(s) to the FourSphere inner radius ({float(four_sphere_radii[0]):g}).",
+                    )
+                    warned_four_sphere_dipole_clipped = True
+
+                if trial_sensor_locations is not None:
+                    trial_sensor_locations, sensor_clipped = _clip_locations_to_radius(
+                        trial_sensor_locations,
+                        float(four_sphere_radii[3]),
+                    )
+                    if sensor_clipped > 0 and not warned_four_sphere_sensor_clipped:
+                        _append_job_output(
+                            job_status,
+                            job_id,
+                            f"Adjusted {sensor_clipped} sensor location(s) to the FourSphere outer radius ({float(four_sphere_radii[3]):g}).",
+                        )
+                        warned_four_sphere_sensor_clipped = True
 
             p_list, loc_list = potential._normalize_cdm_and_locations(CDM, trial_dipole_locations)
 
@@ -5062,6 +5783,10 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 if matrices:
                     n_sensors = matrices[0].shape[0]
             else:
+                if use_per_sensor_independent and trial_sensor_locations is None:
+                    raise ValueError(
+                        "Per-sensor independent mode requires explicit sensor locations for non-NYHeadModel forward models."
+                    )
                 trial_sensor_locations = np.asarray(trial_sensor_locations, dtype=float)
                 if trial_sensor_locations.ndim == 1:
                     if trial_sensor_locations.shape[0] != 3:
@@ -5073,12 +5798,30 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 if model == "FourSphereVolumeConductor":
                     FourSphere = potential._load_eegmegcalc_model("FourSphereVolumeConductor")
                     model_obj = FourSphere(trial_sensor_locations, **model_kwargs)
-                    four_sphere_r1 = _safe_float(getattr(model_obj, "r1", None))
                     def get_M(loc):
                         return model_obj.get_transformation_matrix(loc)
                 elif model == "InfiniteVolumeConductor":
                     InfiniteVol = potential._load_eegmegcalc_model("InfiniteVolumeConductor")
-                    model_obj = InfiniteVol(**model_kwargs)
+                    infinite_ctor_accepts_sensor_locations = False
+                    try:
+                        ctor_signature = inspect.signature(InfiniteVol)
+                        ctor_params = list(ctor_signature.parameters.values())
+                        if ctor_params:
+                            first_param = ctor_params[0]
+                            infinite_ctor_accepts_sensor_locations = (
+                                first_param.kind in (
+                                    inspect.Parameter.POSITIONAL_ONLY,
+                                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                                )
+                                and first_param.name in {"sensor_locations", "r"}
+                            )
+                    except (TypeError, ValueError):
+                        infinite_ctor_accepts_sensor_locations = False
+
+                    if infinite_ctor_accepts_sensor_locations:
+                        model_obj = InfiniteVol(trial_sensor_locations, **model_kwargs)
+                    else:
+                        model_obj = InfiniteVol(**model_kwargs)
                     def get_M(loc):
                         r = trial_sensor_locations - loc
                         return model_obj.get_transformation_matrix(r)
@@ -5096,22 +5839,43 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     raise ValueError(f"Unknown model '{model}'.")
                 n_sensors = int(trial_sensor_locations.shape[0])
                 if use_per_sensor_independent:
-                    if len(p_list) == 0:
-                        raise ValueError("No CDM signal available for M/EEG computation.")
-                    if len(p_list) == 1:
-                        p_reference = p_list[0]
-                    else:
-                        _append_job_output(
-                            job_status,
-                            job_id,
-                            f"Collapsing {len(p_list)} dipole CDM entries into one equivalent CDM by summing components for per-sensor simulation.",
+                    if trial_dipole_locations is None or trial_sensor_locations is None:
+                        raise ValueError(
+                            "Per-sensor independent mode requires explicit dipole and sensor locations."
                         )
-                        p_reference = np.sum(np.stack(p_list, axis=0), axis=0)
-                    p_use_list = [p_reference]
+                    if trial_dipole_locations.ndim == 1:
+                        trial_dipole_locations = trial_dipole_locations.reshape(1, 3)
+                    if trial_sensor_locations.ndim == 1:
+                        trial_sensor_locations = trial_sensor_locations.reshape(1, 3)
+                    if trial_dipole_locations.shape[0] != trial_sensor_locations.shape[0]:
+                        raise ValueError(
+                            "Per-sensor independent mode requires the same number of dipole and sensor locations."
+                        )
+                    n_pairs = int(trial_dipole_locations.shape[0])
+                    if n_pairs <= 0:
+                        raise ValueError("Define at least one dipole/sensor pair for per-sensor independent mode.")
+                    if CDM.ndim == 2 and CDM.shape[0] == 3:
+                        shared_cdm = np.array(CDM, copy=True)
+                    elif CDM.ndim == 3 and CDM.shape[1] == 3:
+                        if CDM.shape[0] == 1:
+                            shared_cdm = np.array(CDM[0], copy=True)
+                        else:
+                            _append_job_output(
+                                job_status,
+                                job_id,
+                                f"Collapsing {CDM.shape[0]} dipole CDM entries into one shared CDM for per-sensor independent pairing.",
+                            )
+                            shared_cdm = np.sum(np.asarray(CDM, dtype=float), axis=0)
+                    else:
+                        raise ValueError("CDM must resolve to a 3-component dipole signal for per-sensor independent mode.")
+                    CDM = np.repeat(shared_cdm[np.newaxis, :, :], n_pairs, axis=0)
+                    p_list, loc_list = potential._normalize_cdm_and_locations(CDM, trial_dipole_locations)
+                    p_use_list = list(p_list)
+                    n_sensors = n_pairs
                     _append_job_output(
                         job_status,
                         job_id,
-                        "Using per-sensor independent forward simulation: for each sensor, the same CDM is evaluated at a dipole location below that sensor.",
+                        "Using per-sensor independent forward simulation: sensor i is computed only from dipole i; the same shared CDM is assigned to all configured dipoles.",
                     )
                 else:
                     for p_i, loc_i in zip(p_list, loc_list):
@@ -5120,7 +5884,13 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                     _append_job_output(
                         job_status,
                         job_id,
-                        "Using simultaneous multi-dipole forward simulation: all dipoles are simulated together across all sensors.",
+                        (
+                            "Using simultaneous multi-dipole forward simulation (four-area mode): "
+                            "fixed frontal/parietal/temporal/occipital dipoles are simulated together and each receives its area-specific CDM."
+                            if is_four_area_simulation
+                            else "Using simultaneous multi-dipole forward simulation: all configured dipoles are simulated together across all sensors "
+                                 "and receive the same CDM (replicated across dipoles when needed)."
+                        ),
                     )
 
             if n_sensors <= 0:
@@ -5161,17 +5931,16 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                         meeg[idx] = acc
                 else:
                     if use_per_sensor_independent:
-                        loc_sensor = trial_sensor_locations[idx]
-                        loc_dip = _dipole_below_sensor(
-                            loc_sensor,
-                            model,
-                            brain_radius=four_sphere_r1 if model == "FourSphereVolumeConductor" else None,
-                        )
-                        M_local = get_M(loc_dip)
+                        M_local = get_M(loc_list[idx])
+                        p_local = p_use_list[idx]
+                        if idx >= int(M_local.shape[0]):
+                            raise ValueError(
+                                "Per-sensor independent mode requires sensor index alignment with transformation rows."
+                            )
                         if is_meg:
-                            meeg[idx] = M_local[idx] @ p_use_list[0]
+                            meeg[idx] = M_local[idx] @ p_local
                         else:
-                            meeg[idx] = M_local[idx] @ p_use_list[0]
+                            meeg[idx] = M_local[idx] @ p_local
                     else:
                         if is_meg:
                             acc = np.zeros((3, n_times))
@@ -5201,12 +5970,22 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             meeg_dt_ms = _safe_float(cdm_meta.get("dt_ms"))
             meeg_decimation = int(cdm_meta.get("decimation_factor", 1))
             meeg_fs = _safe_float(cdm_meta.get("fs_hz"))
+            meeg_t_start = _safe_float(cdm_meta.get("t_start_ms"))
+            meeg_t_stop = _safe_float(cdm_meta.get("t_stop_ms"))
             row = {
                 "data": meeg,
                 "dt_ms": meeg_dt_ms,
+                "t_start_ms": meeg_t_start,
+                "t_stop_ms": meeg_t_stop,
                 "decimation_factor": meeg_decimation,
                 "fs_hz": meeg_fs,
-                "metadata": {"dt_ms": meeg_dt_ms, "decimation_factor": meeg_decimation, "fs_hz": meeg_fs},
+                "metadata": {
+                    "dt_ms": meeg_dt_ms,
+                    "t_start_ms": meeg_t_start,
+                    "t_stop_ms": meeg_t_stop,
+                    "decimation_factor": meeg_decimation,
+                    "fs_hz": meeg_fs,
+                },
                 "source_cdm_file": os.path.basename(cdm_path),
             }
             if trial_count > 1:

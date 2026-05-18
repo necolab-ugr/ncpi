@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Docs | API</title>
+  <link rel="stylesheet" href="./docs_style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
+        <div class="title">Documentation</div>
+      </div>
+      <ul class="left-nav">
+        <li><a href="./index.html">Home</a></li>
+        <li><a href="./installation.html">Installation</a></li>
+        <li><a href="./tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/webui/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li><a class="active" href="./api.html">API</a></li>
+        <li><a href="./faq.html">FAQ</a></li>
+        <li><a href="./contributing.html">Contributing</a></li>
+        <li><a href="./citation.html">Citation</a></li>
+        <li><a href="./credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="overview">
+          <h1>API</h1>
+          <p><span class="pill">Version 1.0</span></p>
+          <p>
+            This page maps the core public API to its source location in the repository.
+            All links below point directly to the implementation in GitHub.
+          </p>
+        </section>
+
+        <section id="simulation">
+          <h2>Simulation</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py">ncpi/Simulation.py</a>
+          </p>
+          <ul>
+            <li><code>Simulation.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L70">source</a>
+            </li>
+            <li><code>Simulation.network()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L87">source</a>
+            </li>
+            <li><code>Simulation.simulate()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L92">source</a>
+            </li>
+            <li><code>Simulation.analysis()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L98">source</a>
+            </li>
+            <li><code>Simulation.bundle_output_folder()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L104">source</a>
+            </li>
+            <li><code>Simulation.bundle_outputs()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L166">source</a>
+            </li>
+          </ul>
+        </section>
+
+        <section id="fieldpotential">
+          <h2>FieldPotential</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py">ncpi/FieldPotential.py</a>
+          </p>
+          <ul>
+            <li><code>FieldPotential.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L19">source</a>
+            </li>
+            <li><code>FieldPotential.create_kernel()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L317">source</a>
+            </li>
+            <li><code>FieldPotential.compute_cdm_lfp_from_kernels()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L634">source</a>
+            </li>
+            <li><code>FieldPotential.compute_MEEG()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L800">source</a>
+            </li>
+            <li><code>FieldPotential.compute_proxy()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L1094">source</a>
+            </li>
+          </ul>
+        </section>
+
+        <section id="features">
+          <h2>Features</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py">ncpi/Features.py</a>
+          </p>
+          <ul>
+            <li><code>Features.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L221">source</a>
+            </li>
+            <li><code>Features.catch22()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1085">source</a>
+            </li>
+            <li><code>Features.specparam()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1108">source</a>
+            </li>
+            <li><code>Features.dfa()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1450">source</a>
+            </li>
+            <li><code>Features.fEI()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1611">source</a>
+            </li>
+            <li><code>Features.hctsa()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1854">source</a>
+            </li>
+            <li><code>Features.compute_features()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L2013">source</a>
+            </li>
+          </ul>
+        </section>
+
+        <section id="inference">
+          <h2>Inference</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py">ncpi/Inference.py</a>
+          </p>
+          <ul>
+            <li><code>Inference.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L59">source</a>
+            </li>
+            <li><code>Inference.add_simulation_data()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L201">source</a>
+            </li>
+            <li><code>Inference.initialize_sbi()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L270">source</a>
+            </li>
+            <li><code>Inference.train()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L372">source</a>
+            </li>
+            <li><code>Inference.predict()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L665">source</a>
+            </li>
+          </ul>
+        </section>
+
+        <section id="analysis">
+          <h2>Analysis</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py">ncpi/Analysis.py</a>
+          </p>
+          <ul>
+            <li><code>Analysis.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L142">source</a>
+            </li>
+            <li><code>Analysis.lmer_tests()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L201">source</a>
+            </li>
+            <li><code>Analysis.lmer_selection()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L573">source</a>
+            </li>
+            <li><code>Analysis.cohend()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L739">source</a>
+            </li>
+            <li><code>Analysis.eeg_topomap()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L829">source</a>
+            </li>
+            <li><code>Analysis.meg_surface()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L976">source</a>
+            </li>
+          </ul>
+        </section>
+
+        <section id="parser">
+          <h2>EphysDatasetParser</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py">ncpi/EphysDatasetParser.py</a>
+          </p>
+          <ul>
+            <li><code>CanonicalFields</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L368">source</a>
+            </li>
+            <li><code>ParseConfig</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L434">source</a>
+            </li>
+            <li><code>EphysDatasetParser.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L505">source</a>
+            </li>
+            <li><code>EphysDatasetParser.parse()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L512">source</a>
+            </li>
+          </ul>
+        </section>
+      </article>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#simulation">Simulation</a></li>
+        <li><a href="#fieldpotential">FieldPotential</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#inference">Inference</a></li>
+        <li><a href="#analysis">Analysis</a></li>
+        <li><a href="#parser">EphysDatasetParser</a></li>
+      </ul>
+    </aside>
+  </div>
+</body>
+</html>

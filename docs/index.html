@@ -3,72 +3,99 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ncpi Documentation</title>
-  <style>
-    body {
-      margin: 0;
-      font-family: Arial, sans-serif;
-      background: #f1f5f9;
-      color: #0f172a;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-    }
-    .wrap {
-      width: min(860px, 92vw);
-    }
-    h1 {
-      margin: 0 0 20px 0;
-      text-align: center;
-      font-size: 2rem;
-    }
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 16px;
-    }
-    .card {
-      background: #ffffff;
-      border: 1px solid #dbeafe;
-      border-radius: 12px;
-      padding: 20px;
-      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
-    }
-    .card h2 {
-      margin: 0 0 8px 0;
-      font-size: 1.2rem;
-    }
-    .card p {
-      margin: 0 0 14px 0;
-      color: #334155;
-      line-height: 1.5;
-    }
-    .btn {
-      display: inline-block;
-      text-decoration: none;
-      font-weight: 700;
-      border-radius: 8px;
-      padding: 10px 14px;
-      border: 1px solid #0f766e;
-      color: #0f766e;
-    }
-  </style>
+  <title>ncpi Docs | Home</title>
+  <link rel="stylesheet" href="./docs_style.css">
 </head>
 <body>
-  <main class="wrap">
-    <h1>ncpi Documentation</h1>
-    <section class="grid">
-      <article class="card">
-        <h2>New Version</h2>
-        <p>Documentation for the new ncpi version, including the graphical interface.</p>
-        <a class="btn" href="./new/index.html">Open new docs</a>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
+        <div class="title">Documentation</div>
+      </div>
+      <ul class="left-nav">
+        <li><a class="active" href="./index.html">Home</a></li>
+        <li><a href="./installation.html">Installation</a></li>
+        <li><a href="./tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/webui/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li><a href="./api.html">API</a></li>
+        <li><a href="./faq.html">FAQ</a></li>
+        <li><a href="./contributing.html">Contributing</a></li>
+        <li><a href="./citation.html">Citation</a></li>
+        <li><a href="./credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="overview">
+          <h1>ncpi: Neural Circuit Parameter Inference</h1>
+          <p>
+            <span class="pill">Version 1.0</span>
+            <span class="pill">Python >= 3.10</span>
+            <span class="pill">WebUI Included</span>
+          </p>
+          <p>
+            <code>ncpi</code> is a Python library for model-based inference of neural circuit parameters
+            from population-level electrophysiological signals such as LFP, ECoG, EEG, and MEG.
+          </p>
+        </section>
+
+        <section id="highlights">
+          <h2>Highlights</h2>
+          <ul>
+            <li>Integrated simulation, forward modelling of field potentials, feature extraction, inference, and analysis pipeline.</li>
+            <li>Modular architecture so you can use only the modules you need.</li>
+            <li>A super nice graphical interface (WebUI) designed for practical end-to-end workflows.</li>
+          </ul>
+          <p>
+            Source repository:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi">https://github.com/necolab-ugr/ncpi</a>
+          </p>
+        </section>
       </article>
-      <article class="card">
-        <h2>Older Version</h2>
-        <p>Legacy documentation for the previous ncpi version.</p>
-        <a class="btn" href="./old/index.html">Open older docs</a>
-      </article>
-    </section>
-  </main>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#highlights">Highlights</a></li>
+      </ul>
+    </aside>
+  </div>
 </body>
 </html>

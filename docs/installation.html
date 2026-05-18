@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Docs | Installation</title>
+  <link rel="stylesheet" href="./docs_style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
+        <div class="title">Documentation</div>
+      </div>
+      <ul class="left-nav">
+        <li><a href="./index.html">Home</a></li>
+        <li><a class="active" href="./installation.html">Installation</a></li>
+        <li><a href="./tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/webui/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li><a href="./api.html">API</a></li>
+        <li><a href="./faq.html">FAQ</a></li>
+        <li><a href="./contributing.html">Contributing</a></li>
+        <li><a href="./citation.html">Citation</a></li>
+        <li><a href="./credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="requirements">
+          <h1>Installation</h1>
+          <p>
+            <span class="pill">Version 1.0</span>
+            <span class="pill">Python &gt;= 3.10</span>
+          </p>
+          <p><code>ncpi</code> requires <strong>Python 3.10+</strong>. We strongly recommend using a dedicated <strong>Conda</strong> environment.</p>
+          <p>
+            If you need to install Anaconda first, download it from the official page:
+            <a class="link" href="https://www.anaconda.com/download">https://www.anaconda.com/download</a>
+          </p>
+        </section>
+
+        <section id="unix">
+          <h2>1) Unix (Linux/macOS)</h2>
+
+          <h3>Base installation</h3>
+          <pre><code># Create environment
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+
+# Install ncpi
+pip install ncpi</code></pre>
+
+          <h3>NEST (for LIF simulation examples)</h3>
+          <p>If you run examples that depend on NEST (for example in <code>examples/simulation</code>), install it in the same environment:</p>
+          <pre><code>conda install -c conda-forge nest-simulator=3.8</code></pre>
+          <p>
+            If <code>nest-simulator</code> is not available for your platform/channel combination, follow the official NEST build/install
+            instructions:
+            <a class="link" href="https://nest-simulator.readthedocs.io/">https://nest-simulator.readthedocs.io/</a>
+          </p>
+        </section>
+
+        <section id="windows">
+          <h2>2) Windows</h2>
+
+          <h3>Base installation (native Windows Python)</h3>
+          <pre><code>conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi</code></pre>
+
+          <h3>NEST on Windows</h3>
+          <p>NEST-based examples are recommended via <strong>WSL2 (Ubuntu)</strong>, not native Windows.</p>
+          <pre><code># One-time WSL2 setup
+wsl --install -d Ubuntu</code></pre>
+
+          <p>Then, inside the Ubuntu/WSL shell:</p>
+          <pre><code>conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
+conda install -c conda-forge nest-simulator=3.8</code></pre>
+        </section>
+
+        <section id="optional">
+          <h2>3) Optional Dependencies</h2>
+          <p><code>ncpi</code> supports optional extras. Install only what your workflow needs.</p>
+
+          <h3>Extras shortcuts</h3>
+          <pre><code>pip install "ncpi[parser]"          # extended parser backends
+pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
+pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
+pip install "ncpi[webui]"           # WebUI runtime backends
+pip install "ncpi[examples]"        # dependencies for example scripts
+pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
+
+        </section>
+
+        <section id="webui">
+          <h2>4) WebUI: installation and usage</h2>
+          <p>The WebUI is available from the repository source (<code>webui/app.py</code>).</p>
+
+          <h3>Install WebUI dependencies</h3>
+          <p>After activating your Conda environment:</p>
+          <pre><code>pip install "ncpi[webui]"</code></pre>
+
+          <h3>Start WebUI</h3>
+          <p>From the repository root:</p>
+          <pre><code>python webui/app.py</code></pre>
+
+          <p>Then open:</p>
+          <pre><code>http://127.0.0.1:5000</code></pre>
+
+          <h3>Windows note</h3>
+          <p>
+            You can run the same command from Anaconda Prompt or PowerShell.
+            If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
+          </p>
+        </section>
+
+        <section id="backends">
+          <h2>5) Optional backends notes</h2>
+          <p>Optional backends are listed in <strong>Section 3 (Optional Dependencies)</strong>. Install only the extras required by your workflow.</p>
+
+          <h3>hctsa note</h3>
+          <p>
+            For hctsa-based features, install hctsa first:
+            <a class="link" href="https://github.com/benfulcher/hctsa">https://github.com/benfulcher/hctsa</a>
+          </p>
+          <p>
+            The <code>hctsa</code> extra depends on the hctsa MATLAB toolbox and the MATLAB Engine for Python. Attempting to install a
+            <code>matlabengine</code> pip package without MATLAB installed (or without a matching MATLAB Engine distribution) can fail or
+            raise errors. The recommended approach is to install MATLAB first, then install the MATLAB Engine for Python from the
+            MATLAB installation directory (see MathWorks docs: <a class="link" href="https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html">https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html</a>),
+            or otherwise ensure the engine distribution you install matches your MATLAB version. After that, install hctsa and
+            pass the hctsa repository path as <code>hctsa_folder</code> when invoking hctsa-backed features in ncpi.
+          </p>
+
+          <h3>analysis (R) note</h3>
+          <p>
+            The <code>analysis</code> extra enables R-backed analysis utilities via <code>rpy2</code>. Before installing
+            <code>ncpi[analysis]</code> you must have R installed on your system (e.g. from <a class="link" href="https://cran.r-project.org/">CRAN</a> or your package manager).
+            Installing <code>rpy2</code> via pip or conda will fail if a suitable R installation and headers are not present. On many Linux systems
+            you may need to install the system R development package (e.g. <code>r-base-dev</code> or similar) prior to installing the Python bindings.
+          </p>
+        </section>
+
+      </article>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#requirements">Requirements</a></li>
+        <li><a href="#unix">Unix</a></li>
+        <li><a href="#windows">Windows</a></li>
+        <li><a href="#optional">Optional Dependencies</a></li>
+        <li><a href="#webui">WebUI</a></li>
+        <li><a href="#backends">Optional backends notes</a></li>
+      </ul>
+    </aside>
+  </div>
+</body>
+</html>

@@ -32,7 +32,7 @@
             }
         }
         const supportedParserFileExtensions = new Set([
-            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather', '.set', '.fif', '.edf', '.tsv'
+            '.mat', '.json', '.npy', '.csv', '.parquet', '.pkl', '.pickle', '.xlsx', '.xls', '.feather', '.set', '.fif', '.edf', '.ds', '.tsv'
         ]);
         return {
             activeTab: initialActiveTab,
@@ -143,10 +143,13 @@
             parserSegmentT0S: '',
             parserSegmentT1S: '',
             parserZscore: false,
+            parserZscoreAfterEpoch: false,
+            parserExcludeLastEpoch: false,
             parserEnableAggregate: false,
             parserAggregateOverSelected: ['sensor'],
             parserAggregateMethod: 'sum',
             parserAggregateLabels: '',
+            parserAggregateLabelValue: '',
             selectedMethod: '',
             submitInProgress: false,
             uploadProgress: 0,
@@ -287,10 +290,13 @@
                     'parserSegmentT0S',
                     'parserSegmentT1S',
                     'parserZscore',
+                    'parserZscoreAfterEpoch',
+                    'parserExcludeLastEpoch',
                     'parserEnableAggregate',
                     'parserAggregateOverSelected',
                     'parserAggregateMethod',
                     'parserAggregateLabels',
+                    'parserAggregateLabelValue',
                     'submitError',
                 ];
             },
@@ -330,6 +336,7 @@
                     }
                 }
                 this.persistSimulationLocalFiles(this.simulationLocalFiles || []);
+                this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
             },
             saveComputeFlowSnapshot(choice) {
                 const normalized = this.normalizeComputeFlowChoice(choice);
@@ -428,7 +435,12 @@
             },
             setSimulationSourceMode(mode) {
                 const nextMode = mode === 'upload' ? 'upload' : 'server-path';
-                if (this.simulationSourceMode === nextMode) return;
+                if (this.simulationSourceMode === nextMode) {
+                    if (nextMode === 'server-path') {
+                        this.syncAdditionalFileSourceModeWithDataSource();
+                    }
+                    return;
+                }
                 this.simulationSourceMode = nextMode;
                 this.parserFilenameFormat = '';
                 this.parserError = '';
@@ -449,6 +461,7 @@
                 this.appendSimulationSelection = false;
                 if (nextMode === 'server-path') {
                     this.clearSimulationUploadInput();
+                    this.syncAdditionalFileSourceModeWithDataSource();
                 }
             },
             openSimulationFolderPicker(append = false) {
@@ -664,6 +677,8 @@
                 if (!current.includes(selectedPath)) current.push(selectedPath);
                 this.simulationFolderPaths = current;
                 this.simulationFolderPath = current.length > 0 ? current[0] : '';
+                this.simulationSourceMode = 'server-path';
+                this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                 await this.inspectSimulationFolderPath();
             },
             async removeSimulationFolderPath(path) {
@@ -835,6 +850,55 @@
                 };
                 await this.inspectSimulationFolderPath();
             },
+            isServerDataFolderMode() {
+                return this.computeFlowChoice === 'new-data' && this.simulationSourceMode === 'server-path';
+            },
+            selectedServerDataFolderPath() {
+                if (!this.isServerDataFolderMode()) return '';
+                const analysisPath = Array.isArray(this.parserAnalysisFolderPaths)
+                    ? String(this.parserAnalysisFolderPaths[0] || '').trim()
+                    : '';
+                if (analysisPath) return analysisPath;
+                const primaryPath = String(this.simulationFolderPath || '').trim();
+                if (primaryPath) return primaryPath;
+                const folderPaths = Array.isArray(this.simulationFolderPaths)
+                    ? this.simulationFolderPaths.map((item) => String(item || '').trim()).filter((item) => item.length > 0)
+                    : [];
+                return folderPaths.length > 0 ? folderPaths[0] : '';
+            },
+            clearAdditionalLocalFiles() {
+                const input = document.getElementById('additional-file-input');
+                if (input) input.value = '';
+                this.additionalLocalFiles = [];
+                this.additionalFileDropActive = false;
+            },
+            syncAdditionalFileSourceModeWithDataSource(options = {}) {
+                if (!this.isServerDataFolderMode()) return;
+                const hadLocalFiles = (this.additionalLocalFiles || []).length > 0;
+                this.additionalFileSourceMode = 'server-path';
+                this.additionalFileDropActive = false;
+                if (options.clearLocalFiles) {
+                    this.clearAdditionalLocalFiles();
+                    if (hadLocalFiles && !(this.additionalServerFilePaths || []).length) {
+                        this.metadataInfo = null;
+                        this.metadataError = '';
+                    }
+                }
+            },
+            detectedSamplingFrequencyHz() {
+                const hint = Number(this.parserInfo?.fs_hint_hz);
+                if (Number.isFinite(hint) && hint > 0) return hint;
+                if (String(this.parserFsSource || '').trim() === '__numeric__') {
+                    const manual = Number(this.parserFsManual);
+                    if (Number.isFinite(manual) && manual > 0) return manual;
+                }
+                return '';
+            },
+            detectedSamplingFrequencyNperseg() {
+                const fsHz = this.detectedSamplingFrequencyHz();
+                if (!fsHz) return '';
+                return String(Math.max(1, Math.round(Number(fsHz))));
+            },
             async chooseServerDirectory() {
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
                 if (!selectedPath) {
@@ -878,8 +942,13 @@
                 }
             },
             setAdditionalFileSourceMode(mode) {
-                if (this.additionalFileSourceMode === mode) return;
-                this.additionalFileSourceMode = mode;
+                const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+                if (nextMode === 'upload' && this.isServerDataFolderMode()) {
+                    this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
+                    return;
+                }
+                if (this.additionalFileSourceMode === nextMode) return;
+                this.additionalFileSourceMode = nextMode;
                 this.additionalFileDropActive = false;
             },
             openAdditionalLocalFilePicker() {
@@ -916,11 +985,13 @@
                 await this.inspectAllAdditionalFiles();
             },
             async openServerFileBrowser() {
+                this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                 this.serverFileBrowserError = '';
                 this.serverFileBrowserOpen = true;
-                const startPath = this.additionalServerFilePaths.length > 0
+                const selectedDataFolder = this.selectedServerDataFolderPath();
+                const startPath = selectedDataFolder || (this.additionalServerFilePaths.length > 0
                     ? this.additionalServerFilePaths[this.additionalServerFilePaths.length - 1].replace(/[^/\\]*$/, '').replace(/[/\\]$/, '')
-                    : '';
+                    : '');
                 await this.loadServerFileBrowser(startPath);
             },
             async loadServerFileBrowser(path) {
@@ -1007,6 +1078,7 @@
                 if (
                     key === '__file_extracted_label__'
                     || key.startsWith('__file_extracted_chain_')
+                    || key.startsWith('__file_extracted_sep__')
                     || key.startsWith('__file_token_')
                 ) {
                     const sourceHint = 'from source file names';
@@ -1041,6 +1113,7 @@
                 return key === '__file_id__'
                     || key === '__file_extracted_label__'
                     || key.startsWith('__file_extracted_chain_')
+                    || key.startsWith('__file_extracted_sep__')
                     || key.startsWith('__file_token_');
             },
             parserIsTokenField(field) {
@@ -1053,6 +1126,7 @@
                 if (!key) return false;
                 return key === '__file_extracted_label__'
                     || key.startsWith('__file_extracted_chain_')
+                    || key.startsWith('__file_extracted_sep__')
                     || key.startsWith('__file_token_');
             },
             parserCandidateFieldsWithoutFileExtracted() {
@@ -1607,11 +1681,13 @@
                     this.parserAnalysisFolderPaths = [token.value];
                     this.parserAnalysisFolderNames = [];
                     this.ensureDataLocatorMatchesSelectedFolder();
+                    this.syncAdditionalFileSourceModeWithDataSource();
                     return;
                 }
                 this.parserAnalysisFolderNames = [token.value];
                 this.parserAnalysisFolderPaths = [];
                 this.ensureDataLocatorMatchesSelectedFolder();
+                this.syncAdditionalFileSourceModeWithDataSource();
             },
             parserSelectedFolderCount() {
                 let selectedCount = 0;
@@ -1642,6 +1718,7 @@
                     ? [currentName]
                     : (availableNames.length > 0 ? [availableNames[0]] : []);
                 this.ensureDataLocatorMatchesSelectedFolder();
+                this.syncAdditionalFileSourceModeWithDataSource();
             },
             ensureDataLocatorMatchesSelectedFolder() {
                 const allowed = this.parserDataLocatorCandidates();
@@ -1843,6 +1920,7 @@
                 this.empiricalUploadSummary = '';
                 this.clearEmpiricalUploadInput();
                 this.resetParserConfig();
+                this.syncAdditionalFileSourceModeWithDataSource();
             },
             resetParserConfig() {
                 this.parserInfo = null;
@@ -1892,10 +1970,13 @@
                 this.parserSegmentT0S = '';
                 this.parserSegmentT1S = '';
                 this.parserZscore = false;
+                this.parserZscoreAfterEpoch = false;
+                this.parserExcludeLastEpoch = false;
                 this.parserEnableAggregate = false;
                 this.parserAggregateOverSelected = ['sensor'];
                 this.parserAggregateMethod = 'sum';
                 this.parserAggregateLabels = '';
+                this.parserAggregateLabelValue = '';
                 this.parserAnalysisFolderPaths = [];
                 this.parserAnalysisFolderNames = [];
                 this.simulationFolderExtensionError = '';
@@ -2034,6 +2115,7 @@
                 const previousFolderPath = String(this.simulationFolderPath || '').trim();
                 try {
                     this.simulationSourceMode = 'server-path';
+                    this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                     this.clearSimulationUploadInput();
                     this.simulationLocalFiles = [];
                     const buildInspectFormData = (inspectMode) => {
@@ -2341,6 +2423,73 @@
                     const num = Number.parseInt(String(value ?? ''), 10);
                     return Number.isFinite(num) ? num : fallback;
                 };
+                const findFieldDetail = (fieldName) => {
+                    const key = String(fieldName || '').trim();
+                    if (!key) return null;
+                    return fieldDetails.find((row) => String(row?.field || '').trim() === key) || null;
+                };
+                const inferCountFromShape = (shapeValue) => {
+                    if (!Array.isArray(shapeValue) || shapeValue.length === 0) return null;
+                    const dims = shapeValue
+                        .map((v) => Number.parseInt(String(v), 10))
+                        .filter((v) => Number.isFinite(v) && v > 0);
+                    if (!dims.length) return null;
+                    if (dims.length === 1) return dims[0];
+                    const nonSingleton = dims.filter((v) => v > 1);
+                    if (nonSingleton.length === 1) return nonSingleton[0];
+                    return Math.max(...dims);
+                };
+                const inferAxesFromShapes = (dataLocator, chLocator, idLocator) => {
+                    const dataDetail = findFieldDetail(dataLocator);
+                    const dataShape = Array.isArray(dataDetail?.shape) ? dataDetail.shape : null;
+                    if (!dataShape || dataShape.length < 2) return null;
+
+                    const dims = dataShape
+                        .map((v, idx) => ({ idx, size: Number.parseInt(String(v), 10) }))
+                        .filter((item) => Number.isFinite(item.size) && item.size > 0);
+                    if (dims.length < 2) return null;
+
+                    let axisSamples = dims[0].idx;
+                    let maxSize = dims[0].size;
+                    for (const item of dims) {
+                        if (item.size > maxSize) {
+                            maxSize = item.size;
+                            axisSamples = item.idx;
+                        }
+                    }
+
+                    const chCount = inferCountFromShape(findFieldDetail(chLocator)?.shape);
+                    const idCount = inferCountFromShape(findFieldDetail(idLocator)?.shape);
+
+                    const bySize = (count, excluded = new Set()) => {
+                        if (!Number.isFinite(count) || count <= 0) return -1;
+                        const matches = dims
+                            .filter((item) => item.size === count && !excluded.has(item.idx))
+                            .map((item) => item.idx);
+                        return matches.length ? Math.min(...matches) : -1;
+                    };
+
+                    let axisChannels = bySize(chCount, new Set([axisSamples]));
+                    let axisIds = bySize(idCount, new Set([axisSamples, axisChannels]));
+                    let axisEpochs = -1;
+
+                    const remaining = dims
+                        .map((item) => item.idx)
+                        .filter((idx) => !new Set([axisSamples, axisChannels, axisIds]).has(idx))
+                        .sort((a, b) => a - b);
+                    if (remaining.length > 0) axisEpochs = remaining[0];
+                    if (axisIds < 0 && remaining.length > 1) {
+                        axisIds = remaining[0];
+                        axisEpochs = remaining[1];
+                    }
+
+                    return {
+                        axis_samples: axisSamples,
+                        axis_channels: axisChannels,
+                        axis_ids: axisIds,
+                        axis_epochs: axisEpochs,
+                    };
+                };
                 const defaultData = String(sampleTableGuesses.data || '').trim() || String(defaults.data || '').trim();
                 const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
                 const detailDataAllowed = detailData && dataCandidates.includes(detailData);
@@ -2457,10 +2606,27 @@
                 if (kind === 'new-simulation' || kind === 'new-empirical') {
                     this.parserArrayAxesEnabled = true;
                     if (!this.parserAxisUserEdited) {
-                        const axisSamples = parseAxis(defaults.axis_samples, 0);
-                        const axisChannels = parseAxis(defaults.axis_channels, -1);
-                        const axisIds = parseAxis(defaults.axis_ids, -1);
-                        const axisEpochs = parseAxis(defaults.axis_epochs, -1);
+                        const inferredAxes = inferAxesFromShapes(
+                            this.parserDataLocator,
+                            this.parserChNamesLocator,
+                            this.parserSubjectIdLocator,
+                        );
+                        const axisSamples = parseAxis(
+                            inferredAxes?.axis_samples ?? defaults.axis_samples,
+                            0
+                        );
+                        const axisChannels = parseAxis(
+                            inferredAxes?.axis_channels ?? defaults.axis_channels,
+                            -1
+                        );
+                        const axisIds = parseAxis(
+                            inferredAxes?.axis_ids ?? defaults.axis_ids,
+                            -1
+                        );
+                        const axisEpochs = parseAxis(
+                            inferredAxes?.axis_epochs ?? defaults.axis_epochs,
+                            -1
+                        );
                         this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
                         this.parserAxisChannels = String(axisChannels);
                         this.parserAxisIds = String(axisIds);
@@ -2965,6 +3131,8 @@
                         lines.push(`    epoch_step_s=${epochStep},`);
                     }
                     lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
+                    lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                    lines.push(`    exclude_last_epoch=${this.parserExcludeLastEpoch ? 'True' : 'False'},`);
                     if (this.parserEnableAggregate) {
                         const aggDims = (this.parserAggregateOverSelected || [])
                             .map((item) => String(item || '').trim())
@@ -2972,7 +3140,11 @@
                         if (aggDims.length > 0) {
                             lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
                             lines.push(`    aggregate_method='${this.parserAggregateMethod || 'sum'}',`);
-                            if ((this.parserAggregateLabels || '').trim()) {
+                            const aggregateLabelValue = String(this.parserAggregateLabelValue || '').trim();
+                            if (aggregateLabelValue) {
+                                const labelEntries = aggDims.map((d) => `${toPyString(d)}: ${toPyString(aggregateLabelValue)}`);
+                                lines.push(`    aggregate_labels={${labelEntries.join(', ')}},`);
+                            } else if ((this.parserAggregateLabels || '').trim()) {
                                 lines.push(`    aggregate_labels=${this.parserAggregateLabels},`);
                             }
                         }
@@ -3062,6 +3234,8 @@
                     lines.push(`    epoch_step_s=${epochStep},`);
                 }
                 lines.push(`    zscore=${zscoreFlag},`);
+                lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                lines.push(`    exclude_last_epoch=${this.parserExcludeLastEpoch ? 'True' : 'False'},`);
                 if (this.parserEnableAggregate) {
                     const aggDims = (this.parserAggregateOverSelected || [])
                         .map((item) => String(item || '').trim())
@@ -3069,7 +3243,11 @@
                     if (aggDims.length > 0) {
                         lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
                         lines.push(`    aggregate_method='${this.parserAggregateMethod || 'sum'}',`);
-                        if ((this.parserAggregateLabels || '').trim()) {
+                        const aggregateLabelValue = String(this.parserAggregateLabelValue || '').trim();
+                        if (aggregateLabelValue) {
+                            const labelEntries = aggDims.map((d) => `${toPyString(d)}: ${toPyString(aggregateLabelValue)}`);
+                            lines.push(`    aggregate_labels={${labelEntries.join(', ')}},`);
+                        } else if ((this.parserAggregateLabels || '').trim()) {
                             lines.push(`    aggregate_labels=${this.parserAggregateLabels},`);
                         }
                     }
@@ -3642,8 +3820,14 @@
                             @drop.prevent="onAdditionalFileDrop($event)">
                             <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
                                 <button type="button" @click.stop="setAdditionalFileSourceMode('upload')"
+                                    :disabled="isServerDataFolderMode()"
+                                    :title="isServerDataFolderMode() ? 'Server data folders use server metadata files.' : ''"
                                     class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
-                                    :class="additionalFileSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
+                                    :class="additionalFileSourceMode === 'upload'
+                                        ? 'border-primary bg-primary/10 text-primary font-semibold'
+                                        : (isServerDataFolderMode()
+                                            ? 'border-gray-200 dark:border-[#323b67] text-gray-400 dark:text-gray-500 opacity-50 cursor-not-allowed'
+                                            : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300')">
                                     Local files
                                 </button>
                                 <button type="button" @click.stop="setAdditionalFileSourceMode('server-path')"
@@ -4428,6 +4612,11 @@
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                         Apply z-score normalization
                                     </label>
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" x-model="parserZscoreAfterEpoch"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Apply z-score after epoching
+                                    </label>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
@@ -4692,6 +4881,11 @@
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Apply z-score normalization
                                 </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserZscoreAfterEpoch"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Apply z-score after epoching
+                                </label>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
@@ -4783,10 +4977,10 @@
                                         </select>
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate labels (dict)</span>
-                                        <input type="text" name="parser_aggregate_labels" x-model="parserAggregateLabels"
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate output label</span>
+                                        <input type="text" name="parser_aggregate_label_value" x-model="parserAggregateLabelValue"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="e.g. {'sensor': 'all'}">
+                                            placeholder="Optional, e.g. all">
                                     </label>
                                 </div>
 
@@ -4802,7 +4996,14 @@
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                     </label>
                                 </div>
+                                <label x-show="parserEnableEpoching" x-cloak class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserExcludeLastEpoch"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Exclude last epoch
+                                </label>
                                 <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
+                                <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscoreAfterEpoch ? '1' : '0'">
+                                <input type="hidden" name="parser_exclude_last_epoch" :value="parserExcludeLastEpoch ? '1' : '0'">
                             </div>
                         </template>
                     </div>
@@ -4935,6 +5136,12 @@
 
                         <section x-show="selectedMethod === 'specparam'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">specparam options</h2>
+                            <div class="space-y-4">
+                                <div class="flex items-center gap-2 border-b border-slate-200 dark:border-[#323b67] pb-2">
+                                    <span class="material-symbols-outlined text-base text-primary">tune</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Core setup</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Set the signal sampling rate, peak selection strategy, and frequency band used for fitting.</p>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
@@ -4956,7 +5163,7 @@
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Frequency range min (Hz)</span>
-                                    <input type="number" step="any" name="specparam_freq_min" value="1.0"
+                                    <input type="number" step="any" name="specparam_freq_min" value="5.0"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                                 <label class="text-sm">
@@ -4965,13 +5172,21 @@
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
+                            </div>
 
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5 pl-4 border-l-2 border-l-cyan-500/70">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-cyan-600 dark:text-cyan-300">graphic_eq</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Welch setup</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Configure how the power spectrum is estimated from each time-series sample before specparam fitting.</p>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch nperseg</span>
                                     <input type="number" step="1" min="1" name="specparam_welch_nperseg"
+                                        :value="detectedSamplingFrequencyNperseg()"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
+                                        :placeholder="detectedSamplingFrequencyNperseg() || 'Optional'">
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch noverlap</span>
@@ -4981,21 +5196,143 @@
                                 </label>
                             </div>
 
-                            <div class="grid grid-cols-1 gap-4">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch kwargs (JSON/dict)</span>
-                                    <textarea name="specparam_welch_kwargs" rows="2"
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch nfft</span>
+                                    <input type="number" step="1" min="1" name="specparam_welch_nfft"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. {'detrend': 'constant'}"></textarea>
+                                        placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">SpectralModel kwargs (JSON/dict)</span>
-                                    <textarea name="specparam_model_kwargs" rows="2"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. {'peak_width_limits': [1, 8], 'max_n_peaks': 6}"></textarea>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch window</span>
+                                    <select name="specparam_welch_window"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="hann">hann</option>
+                                        <option value="hamming">hamming</option>
+                                        <option value="blackman">blackman</option>
+                                        <option value="bartlett">bartlett</option>
+                                        <option value="boxcar">boxcar</option>
+                                        <option value="flattop">flattop</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch detrend</span>
+                                    <select name="specparam_welch_detrend"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="constant">constant</option>
+                                        <option value="linear">linear</option>
+                                        <option value="none">none</option>
+                                    </select>
                                 </label>
                             </div>
 
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch scaling</span>
+                                    <select name="specparam_welch_scaling"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="density">density</option>
+                                        <option value="spectrum">spectrum</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch average</span>
+                                    <select name="specparam_welch_average"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="mean">mean</option>
+                                        <option value="median">median</option>
+                                    </select>
+                                </label>
+                            </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-indigo-600 dark:text-indigo-300">stacked_line_chart</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">SpectralModel</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Control peak detection, aperiodic mode, and optional fit metrics reported by the model.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak threshold</span>
+                                    <input type="number" step="any" name="specparam_model_peak_threshold" value="1.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Min peak height</span>
+                                    <input type="number" step="any" name="specparam_model_min_peak_height" value="0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Max number of peaks</span>
+                                    <input type="number" step="1" min="0" name="specparam_model_max_n_peaks" value="5"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak width min</span>
+                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_min" value="10.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak width max</span>
+                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_max" value="50.0"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aperiodic mode</span>
+                                    <select name="specparam_model_aperiodic_mode"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="fixed" selected>fixed</option>
+                                        <option value="knee">knee</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Model verbose</span>
+                                    <select name="specparam_model_verbose"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="false">false</option>
+                                        <option value="true">true</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div class="flex flex-wrap gap-5">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_model_metric_gof_adjrsquared" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Include gof_adjrsquared
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_model_metric_error_mse" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Include error_mse
+                                </label>
+                            </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-emerald-600 dark:text-emerald-300">rule</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Quality filters</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Choose which fit-quality thresholds mark results as invalid or remove them from the final dataframe.</p>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Metric policy</span>
@@ -5007,18 +5344,63 @@
                                 </label>
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Threshold gof_rsquared</span>
-                                    <input type="number" min="0" max="1" step="any" name="specparam_threshold_gof_rsquared"
+                                    <input type="number" min="0" max="1" step="any" name="specparam_threshold_gof_rsquared" value="0.8"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder="Optional">
                                 </label>
                             </div>
 
-                            <label class="text-sm block">
-                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional metric thresholds (JSON/dict)</span>
-                                <textarea name="specparam_metric_thresholds" rows="2"
-                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                    placeholder="e.g. {'gof_rsquared': 0.95}"></textarea>
-                            </label>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional threshold metric</span>
+                                    <select name="specparam_threshold_metric_1_name"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">None</option>
+                                        <option value="gof_adjrsquared">gof_adjrsquared</option>
+                                        <option value="error_mse">error_mse</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional threshold value</span>
+                                    <input type="number" step="any" name="specparam_threshold_metric_1_value"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-violet-600 dark:text-violet-300">save</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Saved output</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Select whether to store the full specparam dictionary or one extracted value in the Features column.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Saved output value</span>
+                                    <select name="specparam_output_key"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="full_dict">Full specparam dictionary</option>
+                                        <option value="aperiodic_exponent" selected>Aperiodic exponent</option>
+                                        <option value="aperiodic_offset">Aperiodic offset</option>
+                                        <option value="peak_cf">Selected peak CF</option>
+                                        <option value="peak_pw">Selected peak PW</option>
+                                        <option value="peak_bw">Selected peak BW</option>
+                                        <option value="n_peaks">Number of peaks</option>
+                                        <option value="gof_rsquared">Metric: gof_rsquared</option>
+                                        <option value="gof_adjrsquared">Metric: gof_adjrsquared</option>
+                                        <option value="error_mse">Metric: error_mse</option>
+                                        <option value="valid">Valid flag</option>
+                                        <option value="custom">Custom path</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
+                                    <input type="text" name="specparam_output_path"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. metrics.gof_rsquared or aperiodic_params.1">
+                                </label>
+                            </div>
 
                             <div class="flex flex-wrap gap-5">
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
@@ -5027,10 +5409,21 @@
                                     Debug mode
                                 </label>
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="specparam_normalize" value="1"
+                                    <input type="checkbox" name="specparam_normalize" value="1" checked
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Normalize each sample
                                 </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_drop_invalid_rows" value="1" checked
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Drop invalid/NaN feature rows
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_reject_nonpositive_exponent" value="1" checked
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Reject non-positive exponent
+                                </label>
+                            </div>
                             </div>
                         </section>
 

@@ -196,8 +196,8 @@
                 <div class="px-4 pt-2">
                     <h3 class="text-slate-800 dark:text-white text-lg font-semibold leading-tight">
                         Inter-area connectivity</h3>
-                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        Complete these fields to define connectivity between source and target populations across areas.
+                    <p id="inter-area-mode-status" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        Inter-area connectivity is common for all areas and is configured here as full area-population matrices (8x8). Same-area entries are ignored by the simulator. Rows are color-coded by source area (frontal: red, parietal: blue, temporal: green, occipital: purple).
                     </p>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
@@ -230,6 +230,27 @@
 
 
 <form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='four_area') }}">
+    <section class="flex flex-col gap-3 px-4 pb-2">
+        <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Local area editor</h2>
+        <div class="grid grid-cols-1 md:grid-cols-[minmax(14rem,20rem)_1fr] gap-3 items-end">
+            <label class="flex flex-col gap-2">
+                <span class="text-slate-800 dark:text-white text-sm font-medium">Area selector</span>
+                <select
+                    id="four-area-selector"
+                    class="form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                >
+                    <option value="0">frontal</option>
+                    <option value="1">parietal</option>
+                    <option value="2">temporal</option>
+                    <option value="3">occipital</option>
+                </select>
+            </label>
+            <p id="four-area-editor-status" class="text-xs text-slate-500 dark:text-slate-400">
+                Area selector affects Network local parameters and recurrent connectivity for the selected area only. Simulation parameters and inter-area connectivity are common for all areas.
+            </p>
+        </div>
+    </section>
+
     <section class="flex flex-col gap-4 px-4 pb-2">
         <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Simulation mode</h2>
         <div class="flex flex-col md:flex-row gap-4">

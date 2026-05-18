@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Docs | FAQ</title>
+  <link rel="stylesheet" href="./docs_style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
+        <div class="title">Documentation</div>
+      </div>
+      <ul class="left-nav">
+        <li><a href="./index.html">Home</a></li>
+        <li><a href="./installation.html">Installation</a></li>
+        <li><a href="./tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/webui/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-predictions.html">5. Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li><a href="./api.html">API</a></li>
+        <li><a class="active" href="./faq.html">FAQ</a></li>
+        <li><a href="./contributing.html">Contributing</a></li>
+        <li><a href="./citation.html">Citation</a></li>
+        <li><a href="./credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="questions">
+          <h1>FAQ</h1>
+          <p><span class="pill">Version 1.0</span></p>
+          <h3>Which Python versions are supported?</h3>
+          <p>Python 3.10 or higher.</p>
+          <h3>Do I need NEST for all workflows?</h3>
+          <p>No. NEST is only required for simulation examples that depend on it.</p>
+          <h3>Can I run FieldPotential without optional dependencies?</h3>
+          <p>No. FieldPotential workflows require optional NEURON/LFPy-related libraries.</p>
+          <h3>How should I run NEST workflows on Windows?</h3>
+          <p>Use WSL2 (Ubuntu) and install NEST in the WSL environment.</p>
+          <h3>Where do I report issues?</h3>
+          <p>Open an issue on the project repository.</p>
+        </section>
+      </article>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#questions">Questions</a></li>
+      </ul>
+    </aside>
+  </div>
+</body>
+</html>

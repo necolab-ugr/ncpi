@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API</title>
+    <link rel="icon" href="../img/ncpi_logo.png" type="image/x-icon">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            background-color: #ffffff;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        .container {
+            display: flex;
+            min-height: 100vh;
+            align-items: flex-start;
+        }
+
+        nav {
+            width: 200px;
+            background-color: #f6f8fa;
+            padding: 1.5em;
+            border-right: 1px solid #ddd;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        nav ul {
+            list-style-type: none;
+            padding: 0;
+        }
+
+        nav ul li {
+            margin-bottom: 0.8em;
+        }
+
+        nav ul li a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+
+        nav ul li a:hover {
+            text-decoration: underline;
+        }
+
+        nav ul li a.active {
+            font-weight: bold;
+            color: #24292e;
+        }
+
+        main {
+            flex: 1;
+            padding: 2em;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        aside {
+            width: 200px;
+            background-color: #f9f9f9;
+            padding: 1.5em;
+            border-left: 1px solid #ddd;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        /* Section styling */
+        section.class-description {
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5em;
+            margin-bottom: 2em;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        section.methods {
+            margin-top: 2em;
+        }
+
+        /* Headings */
+        h1 {
+            color: #2c3e50;
+            font-size: 2em;
+            margin-top: 0;
+            padding-bottom: 0.5em;
+            border-bottom: 2px solid #e1e4e8;
+        }
+
+        h2 {
+            color: #34495e;
+            font-size: 1.5em;
+            margin-top: 1.5em;
+        }
+
+        h3 {
+            color: #3a5169;
+            font-size: 1.3em;
+            margin-top: 1.2em;
+            border-bottom: 1px dashed #e1e4e8;
+            padding-bottom: 0.3em;
+        }
+
+        h4 {
+            color: #4a6b8a;
+            font-size: 1.1em;
+            margin-top: 1em;
+        }
+
+        /* Method blocks */
+        .method {
+            background-color: white;
+            border-radius: 6px;
+            padding: 1.5em;
+            margin-bottom: 1.5em;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 4px solid #5d9cec;
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1em 0;
+            font-size: 0.95em;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        th {
+            background-color: #5d9cec;
+            color: white;
+            text-align: left;
+            padding: 0.75em;
+            font-weight: 500;
+        }
+
+        td {
+            padding: 0.75em;
+            border-bottom: 1px solid #e1e4e8;
+            vertical-align: top;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        tr:hover {
+            background-color: #f1f5f9;
+        }
+
+        /* Code blocks */
+        code {
+            background-color: #f6f8fa;
+            padding: 0.2em 0.4em;
+            border-radius: 3px;
+            font-family: SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace;
+            font-size: 90%;
+            color: #e83e8c;
+        }
+
+        pre {
+            background-color: #f6f8fa;
+            padding: 1em;
+            border-radius: 6px;
+            overflow-x: auto;
+            border-left: 3px solid #5d9cec;
+        }
+
+        /* Parameter descriptions */
+        .method p {
+            color: #4a5568;
+        }
+
+        /* Returns section */
+        .method h4 + p {
+            background-color: #f0f7ff;
+            padding: 0.8em;
+            border-radius: 4px;
+            border-left: 3px solid #a0c4ff;
+        }
+
+        a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+
+        a:hover {
+            text-decoration: underline;
+        }
+
+        aside ul {
+            list-style-type: none;
+            padding-left: 0;
+        }
+
+        aside ul li {
+            margin-bottom: 0.5em;
+        }
+
+        aside h2 {
+            font-size: 1.1em;
+            margin-bottom: 0.6em;
+        }
+
+        /* Under construction banner */
+        .construction-banner {
+            background-color: #fff8e6;
+            border-left: 4px solid #ffcc00;
+            padding: 1em;
+            margin-bottom: 2em;
+            border-radius: 0 4px 4px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .construction-banner:before {
+            content: "🚧";
+            margin-right: 0.5em;
+            font-size: 1.2em;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 1100px) {
+            nav,
+            aside {
+                display: none;
+            }
+
+            main {
+                padding: 1em;
+                margin: 0;
+                max-width: 100%;
+            }
+
+            .method {
+                padding: 1em;
+            }
+
+            table {
+                font-size: 0.85em;
+            }
+
+            th, td {
+                padding: 0.5em;
+            }
+        }
+
+        /* Add some spacing between sections */
+        .class-description + .methods {
+            margin-top: -1em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Menu (Left) -->
+        <nav>
+            <ul>
+                <li><a href="index.html">Home</a></li>
+                <li><a href="tutorials.html">Tutorials</a></li>
+                <li><a href="API.html" class="active">API</a></li>
+                <li><a href="FAQ.html">FAQ</a></li>
+                <li><a href="Contributing.html">Contributing</a></li>
+                <li><a href="Citation.html">Citation</a></li>
+                <li><a href="Credits.html">Credits</a></li>
+            </ul>
+        </nav>
+
+        <!-- Main Markdown-Style Content (Center) -->
+        <main>
+            <section class="class-description">
+                <h1 id="analysis">Analysis</h1>
+                <p>The Analysis class is designed to facilitate statistical analysis and data visualization.</p>
+
+                <h3>Parameters</h3>
+                <table>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                    <tr>
+                        <td>data</td>
+                        <td>list, np.ndarray, pd.DataFrame</td>
+                        <td>Data to be analyzed</td>
+                    </tr>
+                </table>
+            </section>
+
+            <section class="methods">
+                <h3>Methods</h3>
+
+                <div class="method">
+                    <h3>lmer</h3>
+                    <p>Perform linear mixed-effects model (lmer) or linear model (lm) comparisons using R's `lme4`, `emmeans` and `nlme` packages.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>control_group</td>
+                            <td>str</td>
+                            <td>'HC'</td>
+                            <td>The control group to be used for comparisons</td>
+                        </tr>
+                        <tr>
+                            <td>data_col</td>
+                            <td>str</td>
+                            <td>'Y'</td>
+                            <td>The name of the data column to be analyzed</td>
+                        </tr>
+                        <tr>
+                            <td>other_col</td>
+                            <td>list</td>
+                            <td>['ID', 'Group', 'Epoch', 'Sensor']</td>
+                            <td>The names of other columns to include in the analysis</td>
+                        </tr>
+                        <tr>
+                            <td>data_index</td>
+                            <td>int</td>
+                            <td>-1</td>
+                            <td>The index of the data column to be analyzed (-1 for entire column)</td>
+                        </tr>
+                        <tr>
+                            <td>models</td>
+                            <td>dict</td>
+                            <td>None</td>
+                            <td>Dictionary of model formulas (keys are model names)</td>
+                        </tr>
+                        <tr>
+                            <td>bic_models</td>
+                            <td>list</td>
+                            <td>None</td>
+                            <td>List of models to evaluate using BIC</td>
+                        </tr>
+                        <tr>
+                            <td>anova_tests</td>
+                            <td>dict</td>
+                            <td>None</td>
+                            <td>Dictionary specifying models for ANOVA tests</td>
+                        </tr>
+                        <tr>
+                            <td>specs</td>
+                            <td>string</td>
+                            <td>None</td>
+                            <td>Specifications for emmeans function in R</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>dict: A dictionary containing analysis results (keys are group comparison names, values are DataFrames)</p>
+                </div>
+
+                <div class="method">
+                    <h3>cohend</h3>
+                    <p>Compute Cohen's d for all pairwise group comparisons across sensors.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>control_group</td>
+                            <td>str</td>
+                            <td>'HC'</td>
+                            <td>The control group to be used for comparisons</td>
+                        </tr>
+                        <tr>
+                            <td>data_col</td>
+                            <td>str</td>
+                            <td>'Y'</td>
+                            <td>The name of the data column to be analyzed</td>
+                        </tr>
+                        <tr>
+                            <td>data_index</td>
+                            <td>int</td>
+                            <td>-1</td>
+                            <td>The index of the data column to be analyzed (-1 for entire column)</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>dict: A dictionary containing Cohen's d values (keys are group comparison names, values are DataFrames)</p>
+                </div>
+
+                <div class="method">
+                    <h3>EEG_topographic_plot</h3>
+                    <p>Generate a topographical plot of EEG data using the 10-20 electrode placement system.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>radius</td>
+                            <td>float</td>
+                            <td>0.6</td>
+                            <td>Radius of the head circumference</td>
+                        </tr>
+                        <tr>
+                            <td>pos</td>
+                            <td>float</td>
+                            <td>0.0</td>
+                            <td>Position of the head on the x-axis</td>
+                        </tr>
+                        <tr>
+                            <td>electrode_size</td>
+                            <td>float</td>
+                            <td>0.9</td>
+                            <td>Size of the electrodes</td>
+                        </tr>
+                        <tr>
+                            <td>label</td>
+                            <td>bool</td>
+                            <td>True</td>
+                            <td>Show the colorbar label</td>
+                        </tr>
+                        <tr>
+                            <td>ax</td>
+                            <td>matplotlib Axes</td>
+                            <td>None</td>
+                            <td>Axes object to plot the data</td>
+                        </tr>
+                        <tr>
+                            <td>fig</td>
+                            <td>matplotlib Figure</td>
+                            <td>None</td>
+                            <td>Figure object to plot the data</td>
+                        </tr>
+                        <tr>
+                            <td>vmin</td>
+                            <td>float</td>
+                            <td>None</td>
+                            <td>Min value used for plotting</td>
+                        </tr>
+                        <tr>
+                            <td>vmax</td>
+                            <td>float</td>
+                            <td>None</td>
+                            <td>Max value used for plotting</td>
+                        </tr>
+                    </table>
+                </div>
+            </section>
+
+
+            <section class="class-description">
+                <h1 id="features">Features</h1>
+                <p>Class for computing features from electrophysiological data recordings.</p>
+
+                <h3>Constructor</h3>
+                <div class="method">
+                    <h4>__init__</h4>
+                    <p>Initialize the Features class with specified computation method.</p>
+
+                    <h5>Parameters</h5>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>method</td>
+                            <td>str</td>
+                            <td>'catch22'</td>
+                            <td>Feature computation method ('catch22', 'power_spectrum_parameterization', 'fEI', 'DFA', or 'hctsa')</td>
+                        </tr>
+                        <tr>
+                            <td>params</td>
+                            <td>dict</td>
+                            <td>None</td>
+                            <td>Parameters for feature computation</td>
+                        </tr>
+                    </table>
+                </div>
+            </section>
+
+            <section class="methods">
+                <h3>Methods</h3>
+
+                <div class="method">
+                    <h3>catch22</h3>
+                    <p>Compute the catch22 features from a time-series sample.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>sample</td>
+                            <td>np.array</td>
+                            <td>Sample data</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>np.array: Array with the catch22 feature values</p>
+                </div>
+
+                <div class="method">
+                    <h3>power_spectrum_parameterization</h3>
+                    <p>Power spectrum parameterization of a time-series sample using the FOOOF algorithm.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>sample</td>
+                            <td>np.array</td>
+                            <td></td>
+                            <td>Time-series sample</td>
+                        </tr>
+                        <tr>
+                            <td>fs</td>
+                            <td>float</td>
+                            <td></td>
+                            <td>Sampling frequency</td>
+                        </tr>
+                        <tr>
+                            <td>fmin</td>
+                            <td>float</td>
+                            <td></td>
+                            <td>Minimum frequency for power spectrum fit</td>
+                        </tr>
+                        <tr>
+                            <td>fmax</td>
+                            <td>float</td>
+                            <td></td>
+                            <td>Maximum frequency for power spectrum fit</td>
+                        </tr>
+                        <tr>
+                            <td>fooof_setup</td>
+                            <td>dict</td>
+                            <td></td>
+                            <td>Parameters for FOOOF algorithm</td>
+                        </tr>
+                        <tr>
+                            <td>r_squared_th</td>
+                            <td>float</td>
+                            <td>0.9</td>
+                            <td>Threshold for r_squared value</td>
+                        </tr>
+                        <tr>
+                            <td>freq_range</td>
+                            <td>list</td>
+                            <td>[30., 200.]</td>
+                            <td>Frequency range for peak search</td>
+                        </tr>
+                        <tr>
+                            <td>nperseg</td>
+                            <td>int</td>
+                            <td>-1</td>
+                            <td>Length of each segment for power spectrum</td>
+                        </tr>
+                        <tr>
+                            <td>compute_knee</td>
+                            <td>bool</td>
+                            <td>False</td>
+                            <td>Whether to compute knee parameter</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>np.array: Array with aperiodic components, peak parameters, and mean power</p>
+                </div>
+
+                <div class="method">
+                    <h3>fEI</h3>
+                    <p>Calculates fEI (on a set window size) for a signal.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>signal</td>
+                            <td>array</td>
+                            <td>Amplitude envelope for all channels</td>
+                        </tr>
+                        <tr>
+                            <td>sampling_frequency</td>
+                            <td>int</td>
+                            <td>Sampling frequency</td>
+                        </tr>
+                        <tr>
+                            <td>window_size_sec</td>
+                            <td>float</td>
+                            <td>Window size in seconds</td>
+                        </tr>
+                        <tr>
+                            <td>window_overlap</td>
+                            <td>float</td>
+                            <td>Fraction of overlap between windows (0-1)</td>
+                        </tr>
+                        <tr>
+                            <td>DFA_array</td>
+                            <td>array</td>
+                            <td>Array of DFA values for thresholding</td>
+                        </tr>
+                        <tr>
+                            <td>bad_idxes</td>
+                            <td>array</td>
+                            <td>Channels to ignore from computation</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>tuple: (fEI_outliers_removed, fEI_val, num_outliers, wAmp, wDNF)</p>
+                </div>
+
+                <div class="method">
+                    <h3>DFA</h3>
+                    <p>Calculates DFA (Detrended Fluctuation Analysis) of a signal.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>signal</td>
+                            <td>array</td>
+                            <td>Amplitude envelope for all channels</td>
+                        </tr>
+                        <tr>
+                            <td>sampling_frequency</td>
+                            <td>int</td>
+                            <td>Sampling frequency</td>
+                        </tr>
+                        <tr>
+                            <td>fit_interval</td>
+                            <td>list</td>
+                            <td>Interval (seconds) for DFA exponent fit</td>
+                        </tr>
+                        <tr>
+                            <td>compute_interval</td>
+                            <td>list</td>
+                            <td>Interval (seconds) for DFA computation</td>
+                        </tr>
+                        <tr>
+                            <td>overlap</td>
+                            <td>bool</td>
+                            <td>Whether to use 50% window overlap</td>
+                        </tr>
+                        <tr>
+                            <td>bad_idxes</td>
+                            <td>array</td>
+                            <td>Channels to ignore from computation</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>tuple: (dfa_array, window_sizes, fluctuations, dfa_intercept)</p>
+                </div>
+
+                <div class="method">
+                    <h3>hctsa</h3>
+                    <p>Compute hctsa (Highly Comparative Time-Series Analysis) features.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>samples</td>
+                            <td>ndarray/list</td>
+                            <td>Time-series samples</td>
+                        </tr>
+                        <tr>
+                            <td>hctsa_folder</td>
+                            <td>str</td>
+                            <td>Folder where hctsa is installed</td>
+                        </tr>
+                        <tr>
+                            <td>workers</td>
+                            <td>int</td>
+                            <td>Number of MATLAB workers</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>list: hctsa features (n_samples × n_features)</p>
+                </div>
+
+                <div class="method">
+                    <h3>compute_features</h3>
+                    <p>Compute features from the data using the specified method.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>data</td>
+                            <td>pd.DataFrame</td>
+                            <td>Data containing time-series samples in 'Data' column</td>
+                        </tr>
+                        <tr>
+                            <td>hctsa_folder</td>
+                            <td>str</td>
+                            <td>Folder where hctsa is installed (if method is 'hctsa')</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>pd.DataFrame: Original data with features appended</p>
+                </div>
+            </section>
+
+            <section class="class-description">
+                <h1 id="field-potential">FieldPotential</h1>
+                <p>Class for simulating and analyzing field potentials (e.g., LFP, EEG).</p>
+
+                <h3>Constructor</h3>
+                <div class="method">
+                    <h4>__init__</h4>
+                    <p>Initialize the FieldPotential object.</p>
+
+                    <h5>Parameters</h5>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>kernel</td>
+                            <td>bool</td>
+                            <td>True</td>
+                            <td>Choose to compute kernels.</td>
+                        </tr>
+                        <tr>
+                            <td>nyhead</td>
+                            <td>bool</td>
+                            <td>False</td>
+                            <td>Use the NYHeadModel for computing EEG.</td>
+                        </tr>
+                        <tr>
+                            <td>MEEG</td>
+                            <td>str</td>
+                            <td>None</td>
+                            <td>Prepare data structures for computing EEG or MEG signals. Options are 'EEG' or 'MEG'.</td>
+                        </tr>
+                        <tr>
+                            <td>CDM_shape</td>
+                            <td>int</td>
+                            <td>15500</td>
+                            <td>Number of time points in the CDM.</td>
+                        </tr>
+                    </table>
+                </div>
+            </section>
+
+            <section class="methods">
+                <h3>Methods</h3>
+
+                <div class="method">
+                    <h3>create_kernel</h3>
+                    <p>Create kernels from multicompartment neuron network descriptions.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>MC_folder</td>
+                            <td>str</td>
+                            <td>Path to the folder containing the multicompartment neuron network descriptions.</td>
+                        </tr>
+                        <tr>
+                            <td>output_path</td>
+                            <td>str</td>
+                            <td>Path to the output folder.</td>
+                        </tr>
+                        <tr>
+                            <td>params</td>
+                            <td>module</td>
+                            <td>Network parameters module.</td>
+                        </tr>
+                        <tr>
+                            <td>biophys</td>
+                            <td>list</td>
+                            <td>List of biophysical membrane properties.</td>
+                        </tr>
+                        <tr>
+                            <td>dt</td>
+                            <td>float</td>
+                            <td>Time step.</td>
+                        </tr>
+                        <tr>
+                            <td>tstop</td>
+                            <td>float</td>
+                            <td>Simulation time.</td>
+                        </tr>
+                        <tr>
+                            <td>electrodeParameters</td>
+                            <td>dict</td>
+                            <td>Electrode parameters. If None, no LFP is computed.</td>
+                        </tr>
+                        <tr>
+                            <td>CDM</td>
+                            <td>bool</td>
+                            <td>Compute the current dipole moment.</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>dict: Dictionary containing the kernels.</p>
+                </div>
+
+                <div class="method">
+                    <h3>compute_MEEG</h3>
+                    <p>Compute EEG/MEG from a current dipole moment using the NYHeadModel or a homogeneous volume conductor model.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>CDM</td>
+                            <td>np.array</td>
+                            <td>Current dipole moment.</td>
+                        </tr>
+                        <tr>
+                            <td>location</td>
+                            <td>np.array</td>
+                            <td>Location of the dipole moment.</td>
+                        </tr>
+                        <tr>
+                            <td>cMEG</td>
+                            <td>bool</td>
+                            <td>Compute MEG instead of EEG.</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>list: MEEG at the electrode/sensor locations.</p>
+                </div>
+
+                <div class="method">
+                    <h3>compute_proxy</h3>
+                    <p>Compute a proxy for the extracellular signal by combining variables directly measured from network simulations.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>method</td>
+                            <td>str</td>
+                            <td>Method to compute the proxy (e.g., 'FR', 'AMPA', 'GABA').</td>
+                        </tr>
+                        <tr>
+                            <td>sim_data</td>
+                            <td>dict</td>
+                            <td>Dictionary containing the simulation data.</td>
+                        </tr>
+                        <tr>
+                            <td>sim_step</td>
+                            <td>float</td>
+                            <td>Simulation time step in ms.</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>np.array: Proxy for the extracellular signal.</p>
+                </div>
+            </section>
+
+            <section class="class-description">
+                <h1 id="inference">Inference</h1>
+                <p>General-purpose class for inferring parameters from simulated or observed features using either Bayesian inference (with SBI) or regression (with sklearn).</p>
+
+                <h3>Constructor</h3>
+                <div class="method">
+                    <h4>__init__</h4>
+                    <p>Initialize the Inference class with the specified model and hyperparameters.</p>
+
+                    <h5>Parameters</h5>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>model</td>
+                            <td>str</td>
+                            <td></td>
+                            <td>Name of the machine-learning model to use (e.g., regression models from sklearn or NPE, NLE, NRE from SBI).</td>
+                        </tr>
+                        <tr>
+                            <td>hyperparams</td>
+                            <td>dict</td>
+                            <td>None</td>
+                            <td>Dictionary of hyperparameters for the model.</td>
+                        </tr>
+                    </table>
+                </div>
+            </section>
+
+            <section class="methods">
+                <h3>Methods</h3>
+
+                <div class="method">
+                    <h3>add_simulation_data</h3>
+                    <p>Add features and parameters to the training data.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>features</td>
+                            <td>np.ndarray</td>
+                            <td>Features.</td>
+                        </tr>
+                        <tr>
+                            <td>parameters</td>
+                            <td>np.ndarray</td>
+                            <td>Parameters to infer.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="method">
+                    <h3>initialize_sbi</h3>
+                    <p>Initialize the SBI inference method (NPE, NLE, or NRE) using the appropriate neural estimator.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>hyperparams</td>
+                            <td>dict</td>
+                            <td>Dictionary of hyperparameters required to set up the inference method.</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>object: Configured SBI inference object ready for appending simulations and training.</p>
+                </div>
+
+                <div class="method">
+                    <h3>train</h3>
+                    <p>Train the model using either SBI or sklearn depending on configuration.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>param_grid</td>
+                            <td>list</td>
+                            <td>None</td>
+                            <td>List of dictionaries of hyperparameters to search over.</td>
+                        </tr>
+                        <tr>
+                            <td>n_splits</td>
+                            <td>int</td>
+                            <td>10</td>
+                            <td>Number of splits for RepeatedKFold cross-validation.</td>
+                        </tr>
+                        <tr>
+                            <td>n_repeats</td>
+                            <td>int</td>
+                            <td>10</td>
+                            <td>Number of repeats for RepeatedKFold cross-validation.</td>
+                        </tr>
+                        <tr>
+                            <td>train_params</td>
+                            <td>dict</td>
+                            <td>{'learning_rate': 0.0005, 'training_batch_size': 256}</td>
+                            <td>Dictionary of training parameters for SBI.</td>
+                        </tr>
+                    </table>
+                </div>
+
+                <div class="method">
+                    <h3>predict</h3>
+                    <p>Predict parameters for new input features.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>features</td>
+                            <td>np.ndarray</td>
+                            <td>Features to predict parameters for.</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>list: List of predictions.</p>
+                </div>
+
+                <div class="method">
+                    <h3>sample_posterior</h3>
+                    <p>Sample from the posterior distribution for a given observation.</p>
+
+                    <h4>Parameters</h4>
+                    <table>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>Default</th>
+                            <th>Description</th>
+                        </tr>
+                        <tr>
+                            <td>x</td>
+                            <td>np.ndarray</td>
+                            <td></td>
+                            <td>Observed feature vector (1D array).</td>
+                        </tr>
+                        <tr>
+                            <td>num_samples</td>
+                            <td>int</td>
+                            <td>10000</td>
+                            <td>Number of posterior samples to draw.</td>
+                        </tr>
+                    </table>
+
+                    <h4>Returns</h4>
+                    <p>np.ndarray: Array of posterior samples.</p>
+                </div>
+            </section>
+
+        <section class="class-description">
+            <h1 id="simulation">Simulation</h1>
+            <p>Class for managing and running simulation scripts with specified parameters and output folders.</p>
+
+            <h3>Constructor</h3>
+            <div class="method">
+                <h4>__init__</h4>
+                <p>Initialize the Simulation class with folder paths for parameters, Python scripts, and output.</p>
+                <h5>Parameters</h5>
+                <table>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                    <tr>
+                        <td>param_folder</td>
+                        <td>str</td>
+                        <td>Path to the folder containing parameter files.</td>
+                    </tr>
+                    <tr>
+                        <td>python_folder</td>
+                        <td>str</td>
+                        <td>Path to the folder containing Python scripts.</td>
+                    </tr>
+                    <tr>
+                        <td>output_folder</td>
+                        <td>str</td>
+                        <td>Path to the folder where the output files will be saved.</td>
+                    </tr>
+                </table>
+            </div>
+        </section>
+
+        <section class="methods">
+            <h3>Methods</h3>
+
+            <div class="method">
+                <h3>network</h3>
+                <p>Run a network simulation script with the specified parameters.</p>
+                <h4>Parameters</h4>
+                <table>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                    <tr>
+                        <td>script_path</td>
+                        <td>str</td>
+                        <td>Name of the Python script to run (relative to <code>python_folder</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>param_path</td>
+                        <td>str</td>
+                        <td>Name of the parameter file to use (relative to <code>param_folder</code>).</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="method">
+                <h3>simulate</h3>
+                <p>Run a simulation script with the specified parameters.</p>
+                <h4>Parameters</h4>
+                <table>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                    <tr>
+                        <td>script_path</td>
+                        <td>str</td>
+                        <td>Name of the Python script to run (relative to <code>python_folder</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>param_path</td>
+                        <td>str</td>
+                        <td>Name of the parameter file to use (relative to <code>param_folder</code>).</td>
+                    </tr>
+                </table>
+            </div>
+
+            <div class="method">
+                <h3>analysis</h3>
+                <p>Run an analysis script with the specified parameters.</p>
+                <h4>Parameters</h4>
+                <table>
+                    <tr>
+                        <th>Name</th>
+                        <th>Type</th>
+                        <th>Description</th>
+                    </tr>
+                    <tr>
+                        <td>script_path</td>
+                        <td>str</td>
+                        <td>Name of the Python script to run (relative to <code>python_folder</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>param_path</td>
+                        <td>str</td>
+                        <td>Name of the parameter file to use (relative to <code>param_folder</code>).</td>
+                    </tr>
+                </table>
+            </div>
+        </section>
+
+        </main>
+
+
+
+        <!-- Table of Contents (Right) -->
+        <aside>
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#analysis">Analysis</a></li>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#field-potential">FieldPotential</a></li>
+                <li><a href="#inference">Inference</a></li>
+                <li><a href="#simulation">Simulation</a></li>
+            </ul>
+        </aside>
+
+    </div>
+</body>
+</html>

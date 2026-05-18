@@ -347,11 +347,12 @@ document.addEventListener('DOMContentLoaded', function() {
         elements.jointGroupsInput.value = JSON.stringify(groups);
     }
 
-    function refreshJointGroupsUi() {
+    function refreshJointGroupsUi(changedSelect = null) {
         const cards = jointGroupCards();
         const selections = cards.map(card => readJointGroupSelection(card));
         const globallySelected = new Set(selections.flat());
         const options = sweepableParamOptions();
+        const optionLabelByValue = new Map(options.map(option => [option.value, option.label]));
 
         cards.forEach((card, index) => {
             const title = card.querySelector('[data-joint-group-title="1"]');
@@ -360,25 +361,57 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const summary = card.querySelector('[data-joint-group-summary="1"]');
             if (summary) {
-                const count = selections[index].length;
-                summary.textContent = count > 0 ? `${count} parameter(s) selected` : 'Select at least two parameters';
+                const selected = selections[index] || [];
+                if (selected.length === 0) {
+                    summary.textContent = 'Select at least two parameters';
+                } else {
+                    const labels = selected.map(value => optionLabelByValue.get(value) || value);
+                    const preview = labels.slice(0, 6);
+                    const suffix = labels.length > preview.length ? `, +${labels.length - preview.length} more` : '';
+                    summary.textContent = `Selected: ${preview.join(', ')}${suffix}`;
+                }
             }
 
             const select = card.querySelector('[data-joint-group-select="1"]');
             if (!select) {
                 return;
             }
+            const previousScrollTop = select.scrollTop;
+            const shouldPreserveInPlace = select === changedSelect || select === document.activeElement;
             const ownSelection = new Set(selections[index]);
-            const fragment = document.createDocumentFragment();
-            options.forEach(option => {
-                const node = document.createElement('option');
-                node.value = option.value;
-                node.textContent = option.label;
-                node.selected = ownSelection.has(option.value);
-                node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
-                fragment.appendChild(node);
+            if (shouldPreserveInPlace) {
+                const existingOptionValues = new Set(Array.from(select.options).map(node => node.value));
+                Array.from(select.options).forEach(node => {
+                    node.disabled = globallySelected.has(node.value) && !ownSelection.has(node.value);
+                    node.selected = ownSelection.has(node.value);
+                });
+                options.forEach(option => {
+                    if (existingOptionValues.has(option.value)) {
+                        return;
+                    }
+                    const node = document.createElement('option');
+                    node.value = option.value;
+                    node.textContent = option.label;
+                    node.selected = ownSelection.has(option.value);
+                    node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
+                    select.appendChild(node);
+                });
+            } else {
+                const fragment = document.createDocumentFragment();
+                options.forEach(option => {
+                    const node = document.createElement('option');
+                    node.value = option.value;
+                    node.textContent = option.label;
+                    node.selected = ownSelection.has(option.value);
+                    node.disabled = globallySelected.has(option.value) && !ownSelection.has(option.value);
+                    fragment.appendChild(node);
+                });
+                select.replaceChildren(fragment);
+            }
+            select.scrollTop = previousScrollTop;
+            window.requestAnimationFrame(() => {
+                select.scrollTop = previousScrollTop;
             });
-            select.replaceChildren(fragment);
         });
 
         syncJointGroupsInput(
@@ -430,7 +463,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 node.selected = selectedSet.has(option.value);
                 select.appendChild(node);
             });
-            select.addEventListener('change', refreshJointGroupsUi);
+            select.addEventListener('change', () => {
+                refreshJointGroupsUi(select);
+            });
         }
         const removeButton = card.querySelector('[data-remove-joint-group="1"]');
         if (removeButton) {
@@ -450,7 +485,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const seenGroupTokens = new Set();
         const seenBackendParams = new Set();
-        const seenLeafTokens = new Set();
         const backendGroups = [];
         const leafGroupsByParam = new Map();
 
@@ -461,53 +495,58 @@ document.addEventListener('DOMContentLoaded', function() {
             }
 
             const parsedGroup = group.map(parseJointToken);
-            const groupHasLeafTokens = parsedGroup.some(item => item.pathKey !== '');
-            if (groupHasLeafTokens) {
-                const paramNames = new Set(parsedGroup.map(item => item.paramName));
-                if (paramNames.size !== 1) {
-                    return { ok: false, message: `Joint sweep group ${index + 1} with leaf targets must belong to a single parameter.` };
+            const backendGroup = [];
+            const backendSeenInGroup = new Set();
+            const localLeafPathsByParam = new Map();
+
+            for (let tokenIndex = 0; tokenIndex < group.length; tokenIndex += 1) {
+                const token = group[tokenIndex];
+                const parsed = parsedGroup[tokenIndex];
+                const paramName = String(parsed.paramName || '').trim();
+                const pathKey = String(parsed.pathKey || '').trim();
+
+                if (!paramName) {
+                    return { ok: false, message: `Joint sweep group ${index + 1} contains an invalid parameter target.` };
                 }
-                if (parsedGroup.some(item => !item.pathKey)) {
-                    return { ok: false, message: `Joint sweep group ${index + 1} cannot mix a whole parameter with leaf targets.` };
+                if (seenGroupTokens.has(token)) {
+                    return { ok: false, message: `Parameter "${token}" cannot belong to more than one joint sweep group.` };
                 }
-                const paramName = parsedGroup[0].paramName;
-                const leafPathKeys = parsedGroup.map(item => item.pathKey);
-                const localLeafSet = new Set();
-                for (const token of group) {
-                    if (seenGroupTokens.has(token)) {
-                        return { ok: false, message: `Parameter "${token}" cannot belong to more than one joint sweep group.` };
-                    }
-                    seenGroupTokens.add(token);
-                    if (seenLeafTokens.has(token)) {
-                        return { ok: false, message: `Leaf target "${token}" cannot belong to more than one joint sweep group.` };
-                    }
-                    seenLeafTokens.add(token);
+                seenGroupTokens.add(token);
+
+                if (!backendSeenInGroup.has(paramName)) {
+                    backendSeenInGroup.add(paramName);
+                    backendGroup.push(paramName);
                 }
-                for (const key of leafPathKeys) {
-                    if (localLeafSet.has(key)) {
-                        return { ok: false, message: `Joint sweep group ${index + 1} contains duplicate leaf targets.` };
-                    }
-                    localLeafSet.add(key);
+
+                if (!pathKey) {
+                    continue;
                 }
+                if (!localLeafPathsByParam.has(paramName)) {
+                    localLeafPathsByParam.set(paramName, new Set());
+                }
+                const leafPathSet = localLeafPathsByParam.get(paramName);
+                if (leafPathSet.has(pathKey)) {
+                    return { ok: false, message: `Joint sweep group ${index + 1} contains duplicate leaf targets.` };
+                }
+                leafPathSet.add(pathKey);
+            }
+
+            for (const [paramName, pathSet] of localLeafPathsByParam.entries()) {
                 if (!leafGroupsByParam.has(paramName)) {
                     leafGroupsByParam.set(paramName, []);
                 }
-                leafGroupsByParam.get(paramName).push(leafPathKeys);
-                continue;
+                leafGroupsByParam.get(paramName).push(Array.from(pathSet));
             }
 
-            const backendGroup = parsedGroup.map(item => item.paramName);
-            for (const paramName of backendGroup) {
-                if (seenGroupTokens.has(paramName)) {
-                    return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
+            if (backendGroup.length >= 2) {
+                for (const paramName of backendGroup) {
+                    if (seenBackendParams.has(paramName)) {
+                        return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
+                    }
                 }
-                if (seenBackendParams.has(paramName)) {
-                    return { ok: false, message: `Parameter "${paramName}" cannot belong to more than one joint sweep group.` };
-                }
-                seenGroupTokens.add(paramName);
-                seenBackendParams.add(paramName);
+                backendGroup.forEach(paramName => seenBackendParams.add(paramName));
+                backendGroups.push(backendGroup);
             }
-            backendGroups.push(backendGroup);
         }
 
         syncJointGroupsInput(backendGroups);

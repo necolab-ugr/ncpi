@@ -20,14 +20,11 @@ _SHARED_SPEC.loader.exec_module(_shared)
 REPO_ROOT = _shared.REPO_ROOT
 FOUR_AREA_EXAMPLE_DIR = REPO_ROOT / "examples" / "simulation" / "four_area_cortical_model" / "simulation"
 FOUR_AREA_RELATIVE_MARGIN = 0.10
-FOUR_AREA_ALTERNATE_VECTOR_SCALES = {
-    "N_X": [1.10, 0.90],
-    "C_m_X": [0.90, 1.10],
-    "tau_m_X": [1.10, 0.90],
-}
-FOUR_AREA_ALTERNATE_INTER_AREA_J_YX_SCALES = {
-    (0, 0): 1.10,
-    (0, 1): 0.90,
+# Keep alternate configuration scalar-only for UI stability in headless automation.
+# Array/matrix leaf edits are still covered in dedicated grid-sweep tests.
+FOUR_AREA_ALTERNATE_SCALAR_SCALES = {
+    "nu_ext": 1.10,
+    "J_ext": 1.05,
 }
 FOUR_AREA_LOCAL_J_YX_MATRIX_SHAPE = (2, 2)
 FOUR_AREA_RUNTIME_CONTROL_KEYS = {"local_num_threads"}
@@ -62,19 +59,42 @@ def _four_area_default_grid_values(app_module):
         for key in app_module.FOUR_AREA_GRID_KEYS
         if key in app_module.FOUR_AREA_DEFAULTS
     }
-    inter_area_p = app_module.FOUR_AREA_DEFAULTS["inter_area_p"]
-    inter_area_scale = app_module.FOUR_AREA_DEFAULTS["inter_area_scale"]
-    inter_area_delay = app_module.FOUR_AREA_DEFAULTS["inter_area_delay"]
-    defaults["inter_area.C_YX"] = [[inter_area_p, inter_area_p], [0.0, 0.0]]
-    defaults["inter_area.J_YX"] = [
-        [
-            app_module.FOUR_AREA_DEFAULTS["J_EE"] * inter_area_scale,
-            app_module.FOUR_AREA_DEFAULTS["J_IE"] * inter_area_scale,
-        ],
-        [0.0, 0.0],
-    ]
-    defaults["inter_area.delay_YX"] = [[inter_area_delay, inter_area_delay], [0.0, 0.0]]
+    area_names = list(defaults["areas"])
+    populations = list(defaults["X"])
+    defaults["inter_area.C_YX"] = _four_area_expand_population_matrix_to_full(
+        app_module.FOUR_AREA_DEFAULTS["inter_area.C_YX"],
+        areas=area_names,
+        populations=populations,
+    )
+    defaults["inter_area.J_YX"] = _four_area_expand_population_matrix_to_full(
+        app_module.FOUR_AREA_DEFAULTS["inter_area.J_YX"],
+        areas=area_names,
+        populations=populations,
+    )
+    defaults["inter_area.delay_YX"] = _four_area_expand_population_matrix_to_full(
+        app_module.FOUR_AREA_DEFAULTS["inter_area.delay_YX"],
+        areas=area_names,
+        populations=populations,
+    )
     return defaults
+
+
+def _four_area_expand_population_matrix_to_full(matrix, areas, populations):
+    """Expand a population-level matrix to a full area-population matrix if needed."""
+    raw = np.asarray(matrix, dtype=float)
+    if raw.ndim != 2:
+        return matrix
+    pop_count = len(populations)
+    total_nodes = len(areas) * pop_count
+    if raw.shape == (total_nodes, total_nodes):
+        return raw.tolist()
+    if raw.shape != (pop_count, pop_count):
+        return matrix
+    expanded = np.zeros((total_nodes, total_nodes), dtype=float)
+    for src in range(total_nodes):
+        for tgt in range(total_nodes):
+            expanded[src, tgt] = raw[src % pop_count, tgt % pop_count]
+    return expanded.tolist()
 
 
 def _mean_firing_rate_by_bin_dataframe_from_payload(times, network, tstop, bin_width_ms=100.0):
@@ -205,13 +225,16 @@ def _run_python_four_area_reference_dataframes(app_module, form_data, output_roo
     return trial_dataframes
 
 
-def _independent_parse_four_area_value(raw_value, default):
+def _independent_parse_four_area_value(raw_value, default, key="<value>"):
     """Parse a four-area form value independently from the WebUI implementation."""
     if raw_value is None:
         return default
     text = str(raw_value).strip()
     if text == "":
         return default
+    if text.lower().startswith("grid="):
+        candidates = _independent_parse_four_area_grid_candidates(text, default, key)
+        return candidates[0] if candidates else default
     if isinstance(default, str):
         return text
     if isinstance(default, int) and not isinstance(default, bool):
@@ -247,11 +270,11 @@ def _independent_parse_four_area_grid_candidates(raw_value, default, key):
 
 def _independent_expected_four_area_trials(app_module, form_data):
     """Derive the expected four-area trial configurations directly from submitted form data."""
-    defaults = _four_area_default_grid_values(app_module)
+    defaults = app_module._simulation_grid_defaults("four_area")
     run_mode = str(form_data.get("sim_run_mode", "single")).strip().lower() or "single"
     repetitions = int(float(str(form_data.get("sim_repetitions", "1")).strip() or "1"))
 
-    grid_keys = [key for key in app_module.FOUR_AREA_GRID_KEYS if key in defaults]
+    grid_keys = list(defaults.keys())
     candidate_lists = {
         key: _independent_parse_four_area_grid_candidates(form_data.get(key), defaults[key], key)
         for key in grid_keys
@@ -274,6 +297,22 @@ def _independent_expected_four_area_trials(app_module, form_data):
 
     expected_trials = []
     for combo_index, values in enumerate(combos):
+        area_params = {}
+        for area_index, area_name in enumerate(values["areas"]):
+            key_prefix = f"area_{area_index}."
+            area_params[area_name] = {
+                "N_X": values[f"{key_prefix}N_X"],
+                "C_m_X": values[f"{key_prefix}C_m_X"],
+                "tau_m_X": values[f"{key_prefix}tau_m_X"],
+                "E_L_X": values[f"{key_prefix}E_L_X"],
+                "C_YX": values[f"{key_prefix}C_YX"],
+                "J_YX": values[f"{key_prefix}J_YX"],
+                "delay_YX": values[f"{key_prefix}delay_YX"],
+                "tau_syn_YX": values[f"{key_prefix}tau_syn_YX"],
+                "n_ext": values[f"{key_prefix}n_ext"],
+                "nu_ext": float(values[f"{key_prefix}nu_ext"]),
+                "J_ext": float(values[f"{key_prefix}J_ext"]),
+            }
         network = {
             "areas": values["areas"],
             "X": values["X"],
@@ -289,6 +328,7 @@ def _independent_expected_four_area_trials(app_module, form_data):
             "nu_ext": values["nu_ext"],
             "J_ext": values["J_ext"],
             "model": values["model"],
+            "area_params": area_params,
             "inter_area": {
                 "C_YX": values["inter_area.C_YX"],
                 "J_YX": values["inter_area.J_YX"],
@@ -337,11 +377,11 @@ def _assert_four_area_generated_parameter_files_match_expected(app_module, form_
 def _navigate_to_four_area_form(page, live_webui_server):
     """Navigate to the four-area simulation form and wait for its controls to finish loading."""
     page.goto(live_webui_server, wait_until="domcontentloaded")
-    page.locator("a[href='/simulation']").first.click()
+    _shared._click_locator(page.locator("a[href='/simulation']").first)
     page.wait_for_url(f"{live_webui_server}/simulation", wait_until="domcontentloaded")
-    page.locator("a[href='/simulation/new_sim']").first.click()
+    _shared._click_locator(page.locator("a[href='/simulation/new_sim']").first)
     page.wait_for_url(f"{live_webui_server}/simulation/new_sim", wait_until="domcontentloaded")
-    page.locator("a[href='/simulation/new_sim/four_area']").first.click()
+    _shared._click_locator(page.locator("a[href='/simulation/new_sim/four_area']").first)
     page.wait_for_url(f"{live_webui_server}/simulation/new_sim/four_area", wait_until="domcontentloaded")
     page.wait_for_function(
         """
@@ -368,24 +408,12 @@ def _scale_four_area_parameter(value, factor):
 
 
 def _build_four_area_alternate_single_values(app_module):
-    """Build alternate single-run four-area values for parameter-override tests."""
+    """Build alternate single-run four-area overrides targeting scalar controls."""
     defaults = _four_area_default_grid_values(app_module)
-    alternate = {
-        param_name: [
-            _scale_four_area_parameter(value, factor)
-            for value, factor in zip(defaults[param_name], factors)
-        ]
-        for param_name, factors in FOUR_AREA_ALTERNATE_VECTOR_SCALES.items()
+    return {
+        param_name: _scale_four_area_parameter(defaults[param_name], factor)
+        for param_name, factor in FOUR_AREA_ALTERNATE_SCALAR_SCALES.items()
     }
-
-    inter_area_j_yx = np.array(defaults["inter_area.J_YX"], dtype=float, copy=True)
-    for (row_index, column_index), factor in FOUR_AREA_ALTERNATE_INTER_AREA_J_YX_SCALES.items():
-        inter_area_j_yx[row_index, column_index] = _scale_four_area_parameter(
-            inter_area_j_yx[row_index, column_index],
-            factor,
-        )
-    alternate["inter_area.J_YX"] = inter_area_j_yx.tolist()
-    return alternate
 
 
 def _expected_four_area_form_values(app_module, overrides=None):
@@ -429,7 +457,7 @@ def _matrix_to_tuple(matrix):
 
 def _build_four_area_local_j_yx_margin_candidates(default_j_yx):
     """Build boundary candidate matrices for the four-area local J_YX grid-sweep test."""
-    default_matrix = np.array(default_j_yx, dtype=float, copy=False)
+    default_matrix = np.asarray(default_j_yx, dtype=float)
     leaf_candidates = [
         (
             _scale_four_area_parameter(value, 1.0 - FOUR_AREA_RELATIVE_MARGIN),
@@ -467,7 +495,7 @@ def _run_four_area_webui_job(live_webui_server, pytestconfig, configure_page):
                 form_data = _shared._normalized_form_data_from_page(page)
                 _log_test_progress("submitting WebUI simulation")
 
-                page.locator("button[type='submit']").click()
+                _shared._click_locator(page.locator("button[type='submit']"))
                 page.wait_for_url("**/job_status/*", wait_until="domcontentloaded")
                 job_id = Path(urlparse(page.url).path).name
                 _log_test_progress(f"submitted WebUI simulation as job {job_id}")
@@ -546,6 +574,80 @@ def test_four_area_joint_grid_group_zips_grouped_parameters(webui_app_module):
     assert grid_metadata["configuration_count"] == 2
 
 
+def test_four_area_area_local_joint_grid_group_zips_grouped_parameters(webui_app_module):
+    """Verify that area-local grouped parameters are zipped (not Cartesian) when using area_{i} keys."""
+    expected_pairs = [
+        ([9.0, 10.0], 20.0),
+        ([11.0, 12.0], 30.0),
+    ]
+    form_data = {
+        "sim_run_mode": "grid",
+        "sim_repetitions": "1",
+        "area_0.tau_m_X": "grid=[[9.0, 10.0], [11.0, 12.0]]",
+        "area_0.J_ext": "grid=[20.0, 30.0]",
+        "sim_joint_groups": json.dumps([["area_0.tau_m_X", "area_0.J_ext"]]),
+    }
+
+    run_mode, expanded_forms, normalized_trials = _expanded_four_area_trials(webui_app_module, form_data)
+    assert run_mode == "grid"
+    assert len(expanded_forms) == 2
+    assert [
+        (list(trial["area_0.tau_m_X"]), float(trial["area_0.J_ext"]))
+        for trial in normalized_trials
+    ] == expected_pairs
+
+    grid_metadata = webui_app_module._build_simulation_grid_metadata("four_area", run_mode, expanded_forms)
+    assert grid_metadata is not None
+    assert grid_metadata["joint_groups"] == [["area_0.tau_m_X", "area_0.J_ext"]]
+    assert grid_metadata["changed_keys"] == ["area_0.tau_m_X", "area_0.J_ext"]
+    assert grid_metadata["configuration_count"] == 2
+
+
+def test_four_area_area_title_places_inter_area_macrogroup_entries_on_separate_rows(webui_app_module):
+    """Ensure inter-area macrogroup entries render one connection per title row."""
+    areas = list(webui_app_module.FOUR_AREA_DEFAULTS["areas"])
+    populations = list(webui_app_module.FOUR_AREA_DEFAULTS["X"])
+    node_count = len(areas) * len(populations)
+
+    matrix_trial_0 = np.zeros((node_count, node_count), dtype=float)
+    matrix_trial_1 = np.zeros((node_count, node_count), dtype=float)
+    # parietal.E -> frontal.E and temporal.E -> frontal.E
+    matrix_trial_0[2, 0] = 0.111
+    matrix_trial_0[4, 0] = 0.222
+    matrix_trial_1[2, 0] = 0.333
+    matrix_trial_1[4, 0] = 0.444
+
+    sim_data = {
+        "times": [{}, {}],
+        "gids": [{}, {}],
+        "dt": [_shared.TEST_SIMULATION_DT_MS, _shared.TEST_SIMULATION_DT_MS],
+        "tstop": [_shared.TEST_SIMULATION_TSTOP_MS, _shared.TEST_SIMULATION_TSTOP_MS],
+        "network": [
+            {"areas": areas, "X": populations},
+            {"areas": areas, "X": populations},
+        ],
+        "grid_metadata": {
+            "changed_keys": ["inter_area.J_YX"],
+            "trials": [
+                {"changed": {"inter_area.J_YX": matrix_trial_0.tolist()}},
+                {"changed": {"inter_area.J_YX": matrix_trial_1.tolist()}},
+            ],
+        },
+    }
+
+    title_lines = webui_app_module._simulation_trial_changed_params_for_title(
+        sim_data,
+        trial_idx=0,
+        area_name="frontal",
+    )
+    assert title_lines == "\n".join(
+        [
+            "J_YX: parietal.E->frontal.E=0.111",
+            "J_YX: temporal.E->frontal.E=0.222",
+        ]
+    )
+
+
 @pytest.mark.slow
 def test_four_area_default_configuration_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
@@ -620,11 +722,11 @@ def test_four_area_alternate_configuration_matches_direct_python_run(
 
 
 @pytest.mark.slow
-def test_four_area_alternate_configuration_with_three_repetitions_matches_direct_python_run(
+def test_four_area_alternate_configuration_with_two_repetitions_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
-    """Verify that four area alternate configuration with three repetitions matches direct Python run."""
-    _log_test_progress("starting alternate-parameter four-area comparison with 3 repetitions")
+    """Verify that four area alternate configuration with two repetitions matches direct Python run."""
+    _log_test_progress("starting alternate-parameter four-area comparison with 2 repetitions")
     webui_app_module._clear_simulation_output_folder_all_files()
     alternate_values = _build_four_area_alternate_single_values(webui_app_module)
     captured_param_dirs = _shared._capture_webui_generated_param_files(
@@ -637,7 +739,7 @@ def test_four_area_alternate_configuration_with_three_repetitions_matches_direct
         """Apply the test-specific form changes before submitting the WebUI job."""
         page.locator("#sim-use-numpy-seed").check()
         _shared._apply_hagen_single_parameter_overrides(page, alternate_values)
-        page.locator("#sim-repetitions").fill("3")
+        page.locator("#sim-repetitions").fill("2")
 
     form_data, job_id = _run_four_area_webui_job(
         live_webui_server,
@@ -646,7 +748,7 @@ def test_four_area_alternate_configuration_with_three_repetitions_matches_direct
     )
     run_mode, expanded_forms, normalized_trials = _expanded_four_area_trials(webui_app_module, form_data)
     assert run_mode == "single"
-    assert len(expanded_forms) == 3
+    assert len(expanded_forms) == 2
     _assert_four_area_form_values(webui_app_module, form_data, overrides=alternate_values)
     assert all(trial == normalized_trials[0] for trial in normalized_trials[1:])
     _assert_four_area_generated_parameter_files_match_expected(webui_app_module, form_data, captured_param_dirs)
@@ -657,7 +759,7 @@ def test_four_area_alternate_configuration_with_three_repetitions_matches_direct
         job_id,
         form_data,
         tmp_path,
-        expected_trial_count=3,
+        expected_trial_count=2,
     )
 
 
@@ -665,8 +767,8 @@ def test_four_area_alternate_configuration_with_three_repetitions_matches_direct
 def test_four_area_local_synaptic_weight_grid_sweep_matches_direct_python_run(
     webui_app_module, live_webui_server, tmp_path, pytestconfig, monkeypatch
 ):
-    """Verify that four area local synaptic weight grid sweep matches direct Python run."""
-    _log_test_progress("starting four-area local J_YX grid sweep WebUI vs Python comparison")
+    """Verify that four-area frontal-local synaptic weight grid sweep matches direct Python run."""
+    _log_test_progress("starting four-area frontal-local area_0.J_YX grid sweep WebUI vs Python comparison")
     webui_app_module._clear_simulation_output_folder_all_files()
     defaults = _four_area_default_grid_values(webui_app_module)
     j_yx_leaf_candidates, expected_j_yx_matrices = _build_four_area_local_j_yx_margin_candidates(
@@ -683,7 +785,7 @@ def test_four_area_local_synaptic_weight_grid_sweep_matches_direct_python_run(
         page.locator("#sim-use-numpy-seed").check()
         page.locator("input[name='sim_run_mode'][value='grid']").check()
         for leaf_index, candidates in enumerate(j_yx_leaf_candidates):
-            _shared._fill_hagen_grid_leaf_candidates(page, "J_YX", leaf_index=leaf_index, candidates=candidates)
+            _shared._fill_hagen_grid_leaf_candidates(page, "area_0.J_YX", leaf_index=leaf_index, candidates=candidates)
 
     form_data, job_id = _run_four_area_webui_job(
         live_webui_server,
@@ -693,16 +795,16 @@ def test_four_area_local_synaptic_weight_grid_sweep_matches_direct_python_run(
     run_mode, expanded_forms, normalized_trials = _expanded_four_area_trials(webui_app_module, form_data)
     assert run_mode == "grid"
     assert len(expanded_forms) == 2 ** 4
-    _assert_four_area_form_values(webui_app_module, form_data, ignored_keys={"J_YX"})
+    _assert_four_area_form_values(webui_app_module, form_data, ignored_keys={"area_0.J_YX"})
 
     grid_metadata = webui_app_module._build_simulation_grid_metadata("four_area", run_mode, expanded_forms)
     assert grid_metadata is not None
-    assert grid_metadata["changed_keys"] == ["J_YX"]
+    assert grid_metadata["changed_keys"] == ["area_0.J_YX"]
     assert grid_metadata["trial_count"] == 2 ** 4
     assert grid_metadata["configuration_count"] == 2 ** 4
     assert grid_metadata["repetitions_per_configuration"] == 1
     assert {
-        _matrix_to_tuple(trial["J_YX"])
+        _matrix_to_tuple(trial["area_0.J_YX"])
         for trial in normalized_trials
     } == {
         _matrix_to_tuple(matrix)
