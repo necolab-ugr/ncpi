@@ -4563,7 +4563,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                     proxy_area_raw = dict(proxy)
             dt_ms = _safe_float(proxy_sim_step)
             row = {
-                "data": proxy_area_payload if proxy_area_payload else proxy,
+                "data": proxy,
                 "proxy_method": method,
                 "dt_ms": dt_ms,
                 "t_start_ms": 0.0,
@@ -4579,11 +4579,17 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             }
             if proxy_area_raw:
                 row["raw_signals"] = proxy_area_raw
-                row["sum"] = proxy_area_payload
+                row["area_sums"] = proxy_area_payload
+                try:
+                    row["sum"] = _sum_signal_dict(proxy_area_payload)
+                except Exception:
+                    row["sum"] = proxy
             if proxy_decimation_factor > 1:
                 row["data"] = _decimate_signal_time(row["data"], proxy_decimation_factor)
                 if "raw_signals" in row:
                     row["raw_signals"] = _decimate_signal_time(row["raw_signals"], proxy_decimation_factor)
+                if "area_sums" in row:
+                    row["area_sums"] = _decimate_signal_time(row["area_sums"], proxy_decimation_factor)
                 if "sum" in row:
                     row["sum"] = _decimate_signal_time(row["sum"], proxy_decimation_factor)
             dt_val = row.get("dt_ms")
@@ -4604,17 +4610,6 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             _set_sample_progress(trial_idx + 1)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed proxy trial {trial_idx + 1}/{trial_count}.")
-
-        trial_proxy_payloads, clipped_length = _clip_trial_dataframe_payloads(
-            trial_proxy_payloads,
-            signal_columns=("data", "raw_signals", "sum"),
-        )
-        if clipped_length is not None:
-            _append_job_output(
-                job_status,
-                job_id,
-                f"Clipped proxy time-series to common minimum length {clipped_length} samples across trials.",
-            )
 
         output_root = _field_potential_output_dir("proxy")
         os.makedirs(output_root, exist_ok=True)
@@ -5199,7 +5194,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                         )
                         logged_target_area_sum = True
                 row = {
-                    "sum": area_sum_payload if area_sum_payload else _sum_signal_dict(cdm_signals),
+                    "sum": _sum_signal_dict(cdm_signals),
                     "raw_signals": cdm_signals,
                     "probe": probe_name,
                     "component_axis": component_axis,
@@ -5219,6 +5214,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                         "component_index": component_index,
                     },
                 }
+                if area_sum_payload:
+                    row["area_sums"] = area_sum_payload
                 if trial_count > 1:
                     row["trial_index"] = int(trial_idx)
                 payload_df = pd.DataFrame([row])
@@ -5226,21 +5223,6 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             _set_sample_progress(trial_idx + 1)
             if trial_count > 1:
                 _append_job_output(job_status, job_id, f"Computed kernel convolution trial {trial_idx + 1}/{trial_count}.")
-
-        clipped_reported = False
-        for probe_name in probe_names:
-            clipped_payloads, clipped_length = _clip_trial_dataframe_payloads(
-                probe_trial_payloads[probe_name],
-                signal_columns=("sum", "raw_signals"),
-            )
-            probe_trial_payloads[probe_name] = clipped_payloads
-            if clipped_length is not None and not clipped_reported:
-                _append_job_output(
-                    job_status,
-                    job_id,
-                    f"Clipped kernel field-potential time-series to common minimum length {clipped_length} samples across trials.",
-                )
-                clipped_reported = True
 
         kernels_path = os.path.join(output_root, "kernels.pkl")
         kernel_payload = kernels_for_save if kernels_for_save is not None else kernels

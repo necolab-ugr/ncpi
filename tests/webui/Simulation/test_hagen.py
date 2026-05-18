@@ -846,6 +846,18 @@ def _run_hagen_webui_job(live_webui_server, pytestconfig, configure_page):
                 _log_test_progress(f"opening Hagen form at {live_webui_server}")
                 _navigate_to_hagen_form(page, live_webui_server)
                 _apply_fast_simulation_runtime_to_page(page)
+                # Pre-check the seed toggle to avoid intermittent clickability race conditions
+                # on this control in headless browser runs.
+                page.evaluate(
+                    """
+                    () => {
+                        const seedToggle = document.getElementById('sim-use-numpy-seed');
+                        if (!seedToggle) return;
+                        seedToggle.checked = true;
+                        seedToggle.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                    """
+                )
                 _log_test_progress("configuring Hagen form")
                 configure_page(page)
                 form_data = _normalized_form_data_from_page(page)

@@ -8756,13 +8756,16 @@ def features_load_data():
 def features_browse_dirs():
     requested = (request.args.get("path") or "").strip()
     requested_history_key = (request.args.get("history_key") or "").strip()
-    if requested:
-        current = os.path.realpath(os.path.expanduser(requested))
-    else:
-        current = _path_history_start_directory(
-            default_value=os.path.realpath(os.path.expanduser("~")),
-            history_key=requested_history_key,
-        )
+    try:
+        if requested:
+            current = os.path.realpath(os.path.expanduser(requested))
+        else:
+            current = _path_history_start_directory(
+                default_value=os.path.realpath(os.path.expanduser("~")),
+                history_key=requested_history_key,
+            )
+    except (TypeError, ValueError, OSError) as exc:
+        return jsonify({"error": f"Invalid directory path: {exc}"}), 400
 
     if not os.path.isdir(current):
         return jsonify({"error": f"Not a directory: {current}"}), 400
@@ -8802,6 +8805,8 @@ def features_browse_dirs():
         return jsonify({"error": f"Permission denied: {current}"}), 403
     except OSError as exc:
         return jsonify({"error": f"Failed to list directory: {exc}"}), 400
+    except Exception as exc:
+        return jsonify({"error": f"Failed to browse directory: {exc}"}), 400
 
     dirs.sort(key=lambda item: item["name"].lower())
     if include_files:
