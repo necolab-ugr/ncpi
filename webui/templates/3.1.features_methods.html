@@ -143,10 +143,13 @@
             parserSegmentT0S: '',
             parserSegmentT1S: '',
             parserZscore: false,
+            parserZscoreAfterEpoch: false,
+            parserExcludeLastEpoch: false,
             parserEnableAggregate: false,
             parserAggregateOverSelected: ['sensor'],
             parserAggregateMethod: 'sum',
             parserAggregateLabels: '',
+            parserAggregateLabelValue: '',
             selectedMethod: '',
             submitInProgress: false,
             uploadProgress: 0,
@@ -287,10 +290,13 @@
                     'parserSegmentT0S',
                     'parserSegmentT1S',
                     'parserZscore',
+                    'parserZscoreAfterEpoch',
+                    'parserExcludeLastEpoch',
                     'parserEnableAggregate',
                     'parserAggregateOverSelected',
                     'parserAggregateMethod',
                     'parserAggregateLabels',
+                    'parserAggregateLabelValue',
                     'submitError',
                 ];
             },
@@ -1895,10 +1901,13 @@
                 this.parserSegmentT0S = '';
                 this.parserSegmentT1S = '';
                 this.parserZscore = false;
+                this.parserZscoreAfterEpoch = false;
+                this.parserExcludeLastEpoch = false;
                 this.parserEnableAggregate = false;
                 this.parserAggregateOverSelected = ['sensor'];
                 this.parserAggregateMethod = 'sum';
                 this.parserAggregateLabels = '';
+                this.parserAggregateLabelValue = '';
                 this.parserAnalysisFolderPaths = [];
                 this.parserAnalysisFolderNames = [];
                 this.simulationFolderExtensionError = '';
@@ -3052,6 +3061,8 @@
                         lines.push(`    epoch_step_s=${epochStep},`);
                     }
                     lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
+                    lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                    lines.push(`    exclude_last_epoch=${this.parserExcludeLastEpoch ? 'True' : 'False'},`);
                     if (this.parserEnableAggregate) {
                         const aggDims = (this.parserAggregateOverSelected || [])
                             .map((item) => String(item || '').trim())
@@ -3059,7 +3070,11 @@
                         if (aggDims.length > 0) {
                             lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
                             lines.push(`    aggregate_method='${this.parserAggregateMethod || 'sum'}',`);
-                            if ((this.parserAggregateLabels || '').trim()) {
+                            const aggregateLabelValue = String(this.parserAggregateLabelValue || '').trim();
+                            if (aggregateLabelValue) {
+                                const labelEntries = aggDims.map((d) => `${toPyString(d)}: ${toPyString(aggregateLabelValue)}`);
+                                lines.push(`    aggregate_labels={${labelEntries.join(', ')}},`);
+                            } else if ((this.parserAggregateLabels || '').trim()) {
                                 lines.push(`    aggregate_labels=${this.parserAggregateLabels},`);
                             }
                         }
@@ -3149,6 +3164,8 @@
                     lines.push(`    epoch_step_s=${epochStep},`);
                 }
                 lines.push(`    zscore=${zscoreFlag},`);
+                lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                lines.push(`    exclude_last_epoch=${this.parserExcludeLastEpoch ? 'True' : 'False'},`);
                 if (this.parserEnableAggregate) {
                     const aggDims = (this.parserAggregateOverSelected || [])
                         .map((item) => String(item || '').trim())
@@ -3156,7 +3173,11 @@
                     if (aggDims.length > 0) {
                         lines.push(`    aggregate_over=(${aggDims.map((d) => `'${d}'`).join(', ')}${aggDims.length === 1 ? ',' : ''}),`);
                         lines.push(`    aggregate_method='${this.parserAggregateMethod || 'sum'}',`);
-                        if ((this.parserAggregateLabels || '').trim()) {
+                        const aggregateLabelValue = String(this.parserAggregateLabelValue || '').trim();
+                        if (aggregateLabelValue) {
+                            const labelEntries = aggDims.map((d) => `${toPyString(d)}: ${toPyString(aggregateLabelValue)}`);
+                            lines.push(`    aggregate_labels={${labelEntries.join(', ')}},`);
+                        } else if ((this.parserAggregateLabels || '').trim()) {
                             lines.push(`    aggregate_labels=${this.parserAggregateLabels},`);
                         }
                     }
@@ -4515,6 +4536,11 @@
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                         Apply z-score normalization
                                     </label>
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" x-model="parserZscoreAfterEpoch"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Apply z-score after epoching
+                                    </label>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
@@ -4779,6 +4805,11 @@
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Apply z-score normalization
                                 </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserZscoreAfterEpoch"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Apply z-score after epoching
+                                </label>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
@@ -4870,10 +4901,10 @@
                                         </select>
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate labels (dict)</span>
-                                        <input type="text" name="parser_aggregate_labels" x-model="parserAggregateLabels"
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate output label</span>
+                                        <input type="text" name="parser_aggregate_label_value" x-model="parserAggregateLabelValue"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="e.g. {'sensor': 'all'}">
+                                            placeholder="Optional, e.g. all">
                                     </label>
                                 </div>
 
@@ -4889,7 +4920,14 @@
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                     </label>
                                 </div>
+                                <label x-show="parserEnableEpoching" x-cloak class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
+                                    <input type="checkbox" x-model="parserExcludeLastEpoch"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Exclude last epoch
+                                </label>
                                 <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
+                                <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscoreAfterEpoch ? '1' : '0'">
+                                <input type="hidden" name="parser_exclude_last_epoch" :value="parserExcludeLastEpoch ? '1' : '0'">
                             </div>
                         </template>
                     </div>
@@ -5022,6 +5060,12 @@
 
                         <section x-show="selectedMethod === 'specparam'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">specparam options</h2>
+                            <div class="space-y-4">
+                                <div class="flex items-center gap-2 border-b border-slate-200 dark:border-[#323b67] pb-2">
+                                    <span class="material-symbols-outlined text-base text-primary">tune</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Core setup</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Set the signal sampling rate, peak selection strategy, and frequency band used for fitting.</p>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
@@ -5052,7 +5096,14 @@
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                 </label>
                             </div>
+                            </div>
 
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5 pl-4 border-l-2 border-l-cyan-500/70">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-cyan-600 dark:text-cyan-300">graphic_eq</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Welch setup</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Configure how the power spectrum is estimated from each time-series sample before specparam fitting.</p>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch nperseg</span>
@@ -5068,21 +5119,143 @@
                                 </label>
                             </div>
 
-                            <div class="grid grid-cols-1 gap-4">
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch kwargs (JSON/dict)</span>
-                                    <textarea name="specparam_welch_kwargs" rows="2"
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch nfft</span>
+                                    <input type="number" step="1" min="1" name="specparam_welch_nfft"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. {'detrend': 'constant'}"></textarea>
+                                        placeholder="Optional">
                                 </label>
                                 <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">SpectralModel kwargs (JSON/dict)</span>
-                                    <textarea name="specparam_model_kwargs" rows="2"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. {'peak_width_limits': [1, 8], 'max_n_peaks': 6}"></textarea>
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch window</span>
+                                    <select name="specparam_welch_window"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="hann">hann</option>
+                                        <option value="hamming">hamming</option>
+                                        <option value="blackman">blackman</option>
+                                        <option value="bartlett">bartlett</option>
+                                        <option value="boxcar">boxcar</option>
+                                        <option value="flattop">flattop</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch detrend</span>
+                                    <select name="specparam_welch_detrend"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="constant">constant</option>
+                                        <option value="linear">linear</option>
+                                        <option value="none">none</option>
+                                    </select>
                                 </label>
                             </div>
 
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch scaling</span>
+                                    <select name="specparam_welch_scaling"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="density">density</option>
+                                        <option value="spectrum">spectrum</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Welch average</span>
+                                    <select name="specparam_welch_average"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="mean">mean</option>
+                                        <option value="median">median</option>
+                                    </select>
+                                </label>
+                            </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-indigo-600 dark:text-indigo-300">stacked_line_chart</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">SpectralModel</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Control peak detection, aperiodic mode, and optional fit metrics reported by the model.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak threshold</span>
+                                    <input type="number" step="any" name="specparam_model_peak_threshold"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Min peak height</span>
+                                    <input type="number" step="any" name="specparam_model_min_peak_height"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Max number of peaks</span>
+                                    <input type="number" step="1" min="0" name="specparam_model_max_n_peaks"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak width min</span>
+                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_min"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Peak width max</span>
+                                    <input type="number" step="any" min="0" name="specparam_model_peak_width_max"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aperiodic mode</span>
+                                    <select name="specparam_model_aperiodic_mode"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="fixed">fixed</option>
+                                        <option value="knee">knee</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Model verbose</span>
+                                    <select name="specparam_model_verbose"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">Default</option>
+                                        <option value="false">false</option>
+                                        <option value="true">true</option>
+                                    </select>
+                                </label>
+                            </div>
+
+                            <div class="flex flex-wrap gap-5">
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_model_metric_gof_adjrsquared" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Include gof_adjrsquared
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_model_metric_error_mse" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Include error_mse
+                                </label>
+                            </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-emerald-600 dark:text-emerald-300">rule</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Quality filters</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Choose which fit-quality thresholds mark results as invalid or remove them from the final dataframe.</p>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <label class="text-sm">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Metric policy</span>
@@ -5100,12 +5273,57 @@
                                 </label>
                             </div>
 
-                            <label class="text-sm block">
-                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional metric thresholds (JSON/dict)</span>
-                                <textarea name="specparam_metric_thresholds" rows="2"
-                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                    placeholder="e.g. {'gof_rsquared': 0.95}"></textarea>
-                            </label>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional threshold metric</span>
+                                    <select name="specparam_threshold_metric_1_name"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="">None</option>
+                                        <option value="gof_adjrsquared">gof_adjrsquared</option>
+                                        <option value="error_mse">error_mse</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Additional threshold value</span>
+                                    <input type="number" step="any" name="specparam_threshold_metric_1_value"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="Optional">
+                                </label>
+                            </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-violet-600 dark:text-violet-300">save</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Saved output</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Select whether to store the full specparam dictionary or one extracted value in the Features column.</p>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Saved output value</span>
+                                    <select name="specparam_output_key"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="full_dict">Full specparam dictionary</option>
+                                        <option value="aperiodic_exponent">Aperiodic exponent</option>
+                                        <option value="aperiodic_offset">Aperiodic offset</option>
+                                        <option value="peak_cf">Selected peak CF</option>
+                                        <option value="peak_pw">Selected peak PW</option>
+                                        <option value="peak_bw">Selected peak BW</option>
+                                        <option value="n_peaks">Number of peaks</option>
+                                        <option value="gof_rsquared">Metric: gof_rsquared</option>
+                                        <option value="gof_adjrsquared">Metric: gof_adjrsquared</option>
+                                        <option value="error_mse">Metric: error_mse</option>
+                                        <option value="valid">Valid flag</option>
+                                        <option value="custom">Custom path</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
+                                    <input type="text" name="specparam_output_path"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. metrics.gof_rsquared or aperiodic_params.1">
+                                </label>
+                            </div>
 
                             <div class="flex flex-wrap gap-5">
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
@@ -5118,6 +5336,17 @@
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                     Normalize each sample
                                 </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_drop_invalid_rows" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Drop invalid/NaN feature rows
+                                </label>
+                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                    <input type="checkbox" name="specparam_reject_nonpositive_exponent" value="1"
+                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                    Reject non-positive exponent
+                                </label>
+                            </div>
                             </div>
                         </section>
 
