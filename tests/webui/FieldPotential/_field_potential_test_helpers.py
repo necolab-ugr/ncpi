@@ -273,6 +273,16 @@ def _load_pickle_file(path):
         return pickle.load(handle)
 
 
+def _extract_simulation_component(payload, field_name):
+    if isinstance(payload, list):
+        if payload and isinstance(payload[0], dict) and field_name in payload[0]:
+            return [item.get(field_name) for item in payload]
+        return payload
+    if isinstance(payload, dict) and field_name in payload:
+        return payload.get(field_name)
+    return payload
+
+
 def _as_trial_list(payload):
     return list(payload) if isinstance(payload, list) else [payload]
 
@@ -358,8 +368,8 @@ def _assert_nested_allclose(actual, expected, atol=1e-10, rtol=1e-10):
 
 def _python_reference_proxy_trial_rows(sim_output, bin_size_ms=1.0):
     sim_files = _simulation_file_paths(sim_output["output_dir"])
-    times_payload = _load_pickle_file(sim_files["times"])
-    gids_payload = _load_pickle_file(sim_files["gids"])
+    times_payload = _extract_simulation_component(_load_pickle_file(sim_files["times"]), "times")
+    gids_payload = _extract_simulation_component(_load_pickle_file(sim_files["gids"]), "gids")
     times_trials = _as_trial_list(times_payload)
     gids_trials = _as_trial_list(gids_payload)
     trial_count = max(len(times_trials), len(gids_trials))
@@ -401,8 +411,8 @@ def _python_reference_proxy_trial_rows(sim_output, bin_size_ms=1.0):
 
 def _python_reference_kernel_trial_rows(sim_output, cdm_dt=0.2, cdm_tstop=100.0, component_axis="z"):
     sim_files = _simulation_file_paths(sim_output["output_dir"])
-    spike_times_payload = _load_pickle_file(sim_files["times"])
-    pop_sizes_payload = _load_pickle_file(sim_files["population_sizes"])
+    spike_times_payload = _extract_simulation_component(_load_pickle_file(sim_files["times"]), "times")
+    pop_sizes_payload = _extract_simulation_component(_load_pickle_file(sim_files["population_sizes"]), "population_sizes")
     spike_trials = _as_trial_list(spike_times_payload)
     pop_trials = _as_trial_list(pop_sizes_payload)
     trial_count = max(len(spike_trials), len(pop_trials))
@@ -437,8 +447,8 @@ def _python_reference_kernel_trial_rows(sim_output, cdm_dt=0.2, cdm_tstop=100.0,
 
 def _python_reference_kernel_raw_signals_by_probe(sim_output, probe_name, cdm_dt=0.2, cdm_tstop=100.0, component_axis="z"):
     sim_files = _simulation_file_paths(sim_output["output_dir"])
-    spike_times_payload = _load_pickle_file(sim_files["times"])
-    pop_sizes_payload = _load_pickle_file(sim_files["population_sizes"])
+    spike_times_payload = _extract_simulation_component(_load_pickle_file(sim_files["times"]), "times")
+    pop_sizes_payload = _extract_simulation_component(_load_pickle_file(sim_files["population_sizes"]), "population_sizes")
     spike_trials = _as_trial_list(spike_times_payload)
     pop_trials = _as_trial_list(pop_sizes_payload)
     trial_count = max(len(spike_trials), len(pop_trials))
@@ -490,6 +500,15 @@ def _python_reference_meeg_rows_from_cdm_payload(cdm_payload, model_name, dipole
     if sensor_arr.ndim == 1:
         sensor_arr = sensor_arr.reshape(1, 3)
     dipole_arr = np.asarray(dipole_location, dtype=float).reshape(3,)
+    if str(model_name) == "FourSphereVolumeConductor":
+        dipole_norm = np.linalg.norm(dipole_arr)
+        if dipole_norm > 79000.0:
+            dipole_arr = dipole_arr * (79000.0 / dipole_norm)
+        sensor_norms = np.linalg.norm(sensor_arr, axis=1)
+        mask = sensor_norms > 90000.0
+        if np.any(mask):
+            sensor_arr = np.array(sensor_arr, copy=True)
+            sensor_arr[mask] = sensor_arr[mask] * (90000.0 / sensor_norms[mask]).reshape(-1, 1)
 
     reference_rows = []
     for trial_obj in trials:
