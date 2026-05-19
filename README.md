@@ -20,27 +20,31 @@ streamlining traditionally complex workflows into a minimal amount of code.
 - **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural
   circuit simulations.
 - **Biophysically grounded analysis**: practical workflows to bridge electrophysiology and neural circuit parameters.
+- **Graphical interface for simulation and empirical workflows**: includes a GUI that can run both simulation and
+  empirical pipelines, and can load many different file formats and dataset structures.
 - **Flexible and extensible**: use individual modules independently or run complete end-to-end pipelines.
 
 # Installation
 
-`ncpi` requires **Python 3.10+**. We strongly recommend using a dedicated **Conda** environment.
+`ncpi` requires **Python 3.10+**.
+
+## 1) Create and activate a Conda environment (Windows + Unix)
+
+We strongly recommend installing `ncpi` in a dedicated **Conda** environment.
 If you need to install Anaconda first, download it from the official page:
 https://www.anaconda.com/download
 
-## 1) Unix (Linux/macOS)
+On Windows, start from **Anaconda Prompt** (recommended).
 
-### Base installation
+## 2) Install ncpi on Unix (Linux/macOS)
+
 ```bash
-# Create environment
 conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
-
-# Install ncpi
 pip install ncpi
 ```
 
-### NEST (for LIF simulation examples)
+### NEST on Unix/macOS (for LIF simulation examples)
 If you run examples that depend on NEST (for example in `examples/simulation`), install it in the same environment:
 
 ```bash
@@ -50,9 +54,10 @@ conda install -c conda-forge nest-simulator=3.8
 If `nest-simulator` is not available for your platform/channel combination, follow the official NEST build/install
 instructions: https://nest-simulator.readthedocs.io/
 
-## 2) Windows
+## 3) Install ncpi on Windows
 
-### Base installation (native Windows Python)
+In **Anaconda Prompt**, run:
+
 ```powershell
 conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
@@ -64,7 +69,7 @@ NEST-based examples are recommended via **WSL2 (Ubuntu)**, not native Windows.
 
 ```powershell
 # One-time WSL2 setup
-wsl --install -d Ubuntu
+wsl --install
 ```
 
 Then, inside the Ubuntu/WSL shell:
@@ -75,7 +80,7 @@ pip install ncpi
 conda install -c conda-forge nest-simulator=3.8
 ```
 
-## 3) Optional Dependencies
+## 4) Optional Dependencies
 
 `ncpi` supports optional extras. Install only what your workflow needs.
 
@@ -83,14 +88,15 @@ conda install -c conda-forge nest-simulator=3.8
 ```bash
 pip install "ncpi[parser]"          # extended parser backends
 pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
-pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[webui]"           # WebUI runtime backends
 pip install "ncpi[examples]"        # dependencies for example scripts
+# Note: see Section 6 (Optional backends notes) for prerequisites/conflicts.
 pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[hctsa]"           # hctsa backend support
 ```
 
-## 4) WebUI: installation and usage
+## 5) WebUI: installation and usage
 
 The WebUI is available from the repository source (`webui/app.py`).
 
@@ -118,8 +124,15 @@ http://127.0.0.1:5000
 You can run the same command from Anaconda Prompt or PowerShell.
 If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
 
-## 5) Optional backends notes
-Optional backends are listed in **Section 3 (Optional Dependencies)**. Install only the extras required by your workflow.
+## 6) Optional backends notes
+Optional backends are listed in **Section 4 (Optional Dependencies)**. Install only the extras required by your workflow.
+
+### analysis (R) note
+The `analysis` and `tests` extras can require `rpy2` (R-backed dependencies). Before installing `ncpi[analysis]` or
+`ncpi[tests]`, make sure R is installed on your system (e.g. from https://cran.r-project.org/ or your package
+manager). Installing `rpy2` via pip or conda will fail if a suitable R installation and headers are not present. If
+you use Conda, you can install R with:
+`conda install -c conda-forge r-base`.
 
 ### hctsa note
 For hctsa-based features, install hctsa first: https://github.com/benfulcher/hctsa
@@ -131,12 +144,6 @@ MATLAB installation directory (see MathWorks docs: https://www.mathworks.com/hel
 or otherwise ensure the engine distribution you install matches your MATLAB version. After that, install hctsa and
 pass the hctsa repository path as `hctsa_folder` when invoking hctsa-backed features in ncpi.
 
-### analysis (R) note
-The `analysis` extra enables R-backed analysis utilities via `rpy2`. Before installing `ncpi[analysis]` you must have R
-installed on your system (e.g. from https://cran.r-project.org/ or your package manager). Installing `rpy2` via pip
-or conda will fail if a suitable R installation and headers are not present. On many Linux systems you may need to
-install the system R development package (e.g. `r-base-dev` or similar) prior to installing the Python bindings.
-
 
 # Folder Structure
 
@@ -147,14 +154,19 @@ install the system R development package (e.g. `r-base-dev` or similar) prior to
 - `webui/`: ncpi web interface.
 - `tests/`: unit/integration/webui test suites.
 
+# Tutorials
+The documentation includes installation guides, API references, and end-to-end tutorials for simulation and empirical
+pipelines. Browse it at: https://necolab-ugr.github.io/ncpi/
+
 # Example Usage
 
-The example below follows a Gao-style synthetic setup: two Poisson generators are convolved with synaptic kernels to
-obtain AMPA and GABA currents, and their sum is used as a synthetic LFP
+The example below follows Gao et al. (2017, Sec. 2.1/Table 1): Poisson spike trains are generated by integrating ISIs
+drawn from exponential distributions, convolved with AMPA/GABAA difference-of-exponential conductance kernels, then
+converted to currents using reversal potentials and summed to form the LFP. E:I is set by scaling inhibition so
+mean gI is 2-6x mean gE, and each LFP is power-normalized to unity
 (Gao et al., 2017: https://doi.org/10.1016/j.neuroimage.2017.06.078).
 
 ```python
-import inspect
 import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import mean_squared_error
@@ -163,40 +175,90 @@ import ncpi
 
 RNG = np.random.default_rng(42)
 FS = 1000.0  # Hz
-DT = 1.0 / FS # s
-DURATION_S = 12.0 # s
-N_SAMPLES_SIGNAL = int(FS * DURATION_S) # number of time samples in the signal
+DT = 1.0 / FS  # s
+DURATION_S = 12.0  # s
+N_SAMPLES_SIGNAL = int(FS * DURATION_S)
 N_SAMPLES_DATASET = 1000  # number of synthetic LFP samples for training/testing
 
+# Gao et al. (2017) Table 1 parameters
+RATE_E_HZ = 2.0
+RATE_I_HZ = 5.0
+N_E = 8000
+N_I = 2000
+V_REST_MV = -65.0
+E_AMPA_MV = 0.0
+E_GABAA_MV = -80.0
+TAU_RISE_AMPA_MS = 0.1
+TAU_DECAY_AMPA_MS = 2.0
+TAU_RISE_GABAA_MS = 0.5
+TAU_DECAY_GABAA_MS = 10.0
+EPS = 1e-12
 
-def synaptic_kernel(tau_rise_ms, tau_decay_ms, fs_hz, support_ms=200.0):
-    # Exponential decay kernel with rise and decay times.
+
+def conductance_kernel(tau_rise_ms, tau_decay_ms, fs_hz, support_ms=200.0):
+    # Difference-of-exponentials with area normalization constant C.
     t = np.arange(0.0, support_ms / 1000.0, 1.0 / fs_hz)
-    k = np.exp(-t / (tau_decay_ms / 1000.0)) - np.exp(-t / (tau_rise_ms / 1000.0))
+    tau_r = tau_rise_ms / 1000.0
+    tau_d = tau_decay_ms / 1000.0
+    k = np.exp(-t / tau_d) - np.exp(-t / tau_r)
     k[k < 0.0] = 0.0
-    k = k / (np.sum(k) + 1e-12)
+    k = k / (np.sum(k) + EPS)
     return k
 
 
-K_AMPA = synaptic_kernel(tau_rise_ms=0.5, tau_decay_ms=2.0, fs_hz=FS)
-K_GABA = synaptic_kernel(tau_rise_ms=0.5, tau_decay_ms=7.0, fs_hz=FS)
+K_AMPA = conductance_kernel(TAU_RISE_AMPA_MS, TAU_DECAY_AMPA_MS, FS)
+K_GABAA = conductance_kernel(TAU_RISE_GABAA_MS, TAU_DECAY_GABAA_MS, FS)
 
 
-def poisson_spike_train(rate_hz, n_samples, rng):
-    # Discrete-time Poisson counts per sample bin (dt).
-    return rng.poisson(rate_hz * DT, size=n_samples).astype(float)
+def poisson_counts_from_isi(rate_hz, duration_s, dt_s, n_samples, rng):
+    # Poisson process by ISI integration (ISI ~ Exponential(rate_hz)).
+    expected_spikes = max(1, int(rate_hz * duration_s))
+    n_draws = max(32, int(expected_spikes + 8.0 * np.sqrt(expected_spikes) + 64))
+    isi = rng.exponential(scale=1.0 / rate_hz, size=n_draws)
+    spike_times = np.cumsum(isi)
+
+    # Extend if this draw did not cover full duration.
+    while spike_times[-1] < duration_s:
+        extra = rng.exponential(scale=1.0 / rate_hz, size=n_draws)
+        spike_times = np.concatenate([spike_times, spike_times[-1] + np.cumsum(extra)])
+
+    spike_times = spike_times[spike_times < duration_s]
+    spike_bins = (spike_times / dt_s).astype(int)
+    return np.bincount(spike_bins, minlength=n_samples).astype(float)
 
 
-def simulate_lfp(rate_exc_hz, rate_inh_hz, w_exc=1.0, w_inh=1.4):
-    # Simulate LFP with excitatory and inhibitory Poisson spike trains.
-    spikes_e = poisson_spike_train(rate_exc_hz, N_SAMPLES_SIGNAL, RNG)
-    spikes_i = poisson_spike_train(rate_inh_hz, N_SAMPLES_SIGNAL, RNG)
+def simulate_lfp(target_inh_over_exc):
+    # Superposition of Poisson neurons in each population is Poisson with summed rate.
+    spikes_e = poisson_counts_from_isi(
+        rate_hz=RATE_E_HZ * N_E,
+        duration_s=DURATION_S,
+        dt_s=DT,
+        n_samples=N_SAMPLES_SIGNAL,
+        rng=RNG,
+    )
+    spikes_i = poisson_counts_from_isi(
+        rate_hz=RATE_I_HZ * N_I,
+        duration_s=DURATION_S,
+        dt_s=DT,
+        n_samples=N_SAMPLES_SIGNAL,
+        rng=RNG,
+    )
 
-    i_ampa = w_exc * np.convolve(spikes_e, K_AMPA, mode="same")
-    i_gaba = -w_inh * np.convolve(spikes_i, K_GABA, mode="same")
-    lfp = i_ampa + i_gaba
+    g_e = np.convolve(spikes_e, K_AMPA, mode="same")
+    g_i = np.convolve(spikes_i, K_GABAA, mode="same")
 
-    return lfp, i_ampa, i_gaba
+    # Set mean gI to 2x-6x mean gE (Gao et al. Table 1 E:I range 1:2 to 1:6).
+    g_i *= (target_inh_over_exc * np.mean(g_e)) / (np.mean(g_i) + EPS)
+    ei_ratio = np.mean(g_e) / (np.mean(g_i) + EPS)
+
+    i_e = g_e * (V_REST_MV - E_AMPA_MV)
+    i_i = g_i * (V_REST_MV - E_GABAA_MV)
+    lfp = i_e + i_i
+
+    # Normalize total LFP power to unity for each E:I ratio.
+    total_power = np.sum(np.abs(np.fft.rfft(lfp)) ** 2)
+    norm = np.sqrt(total_power + EPS)
+    return lfp / norm, i_e / norm, i_i / norm, ei_ratio
 
 
 if __name__ == "__main__":
@@ -208,24 +270,18 @@ if __name__ == "__main__":
     print("[2/7] Generating synthetic dataset...")
     traces = None
     for i in range(N_SAMPLES_DATASET):
-        # Sample a target E/I ratio and a total drive, then derive rates.
-        # This reduces ambiguity compared with drawing excitatory/inhibitory rates independently.
-        target_ei = RNG.uniform(0.20, 1.60)
-        total_rate = RNG.uniform(10.0, 24.0)
-        rate_inh = total_rate / (1.0 + target_ei)
-        rate_exc = total_rate - rate_inh
-
-        lfp, i_ampa, i_gaba = simulate_lfp(rate_exc, rate_inh)
+        target_inh_over_exc = RNG.uniform(2.0, 6.0)  # gI/gE
+        lfp, i_e, i_i, ei_ratio = simulate_lfp(target_inh_over_exc)
         lfp_samples.append(lfp)
-        ei_ratios[i] = target_ei
+        ei_ratios[i] = ei_ratio
 
         if i == 0:
-            traces = (lfp, i_ampa, i_gaba)
+            traces = (lfp, i_e, i_i)
         if (i + 1) % 50 == 0 or (i + 1) == N_SAMPLES_DATASET:
             pct = 100.0 * (i + 1) / N_SAMPLES_DATASET
             print(f"  -> Dataset progress: {i + 1}/{N_SAMPLES_DATASET} ({pct:.1f}%)")
 
-    print("  -> Computing catch22 features in parallel...")
+    print("  -> Computing catch22 features...")
     def feature_progress(completed, total, percent):
         if completed > 0 and (percent % 10 == 0 or completed == total):
             print(f"  -> Feature progress: {completed}/{total} ({percent}%)")
@@ -290,10 +346,6 @@ if __name__ == "__main__":
     plt.tight_layout()
     plt.show()
 ```
-
-# Tutorials
-Explore step-by-step tutorials and complete workflows at:
-https://necolab-ugr.github.io/ncpi/tutorials.html
 
 # Citation
 If you use `ncpi` in your research, please consider citing our work:

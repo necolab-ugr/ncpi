@@ -106,7 +106,7 @@ tests = [
     "lfpykernels",
     "lfpykit",
     "nest-simulator",
-    "matlabengine",
+    #"matlabengine",
     "mne",
     "nibabel",
     "neuron",

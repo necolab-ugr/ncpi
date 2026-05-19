@@ -61,31 +61,32 @@
 
     <main class="content">
       <article class="doc">
-        <section id="requirements">
+        <section id="installation">
           <h1>Installation</h1>
           <p>
             <span class="pill">Version 1.0</span>
             <span class="pill">Python &gt;= 3.10</span>
           </p>
-          <p><code>ncpi</code> requires <strong>Python 3.10+</strong>. We strongly recommend using a dedicated <strong>Conda</strong> environment.</p>
+          <p><code>ncpi</code> requires <strong>Python 3.10+</strong>.</p>
+        </section>
+
+        <section id="conda">
+          <h2>1) Create and activate a Conda environment (Windows + Unix)</h2>
+          <p>We strongly recommend installing <code>ncpi</code> in a dedicated <strong>Conda</strong> environment.</p>
           <p>
             If you need to install Anaconda first, download it from the official page:
             <a class="link" href="https://www.anaconda.com/download">https://www.anaconda.com/download</a>
           </p>
+          <p>On Windows, start from <strong>Anaconda Prompt</strong> (recommended).</p>
         </section>
 
         <section id="unix">
-          <h2>1) Unix (Linux/macOS)</h2>
-
-          <h3>Base installation</h3>
-          <pre><code># Create environment
-conda create -n ncpi-env python=3.10 -y
+          <h2>2) Install ncpi on Unix (Linux/macOS)</h2>
+          <pre><code>conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
-
-# Install ncpi
 pip install ncpi</code></pre>
 
-          <h3>NEST (for LIF simulation examples)</h3>
+          <h3>NEST on Unix/macOS (for LIF simulation examples)</h3>
           <p>If you run examples that depend on NEST (for example in <code>examples/simulation</code>), install it in the same environment:</p>
           <pre><code>conda install -c conda-forge nest-simulator=3.8</code></pre>
           <p>
@@ -96,9 +97,8 @@ pip install ncpi</code></pre>
         </section>
 
         <section id="windows">
-          <h2>2) Windows</h2>
-
-          <h3>Base installation (native Windows Python)</h3>
+          <h2>3) Install ncpi on Windows</h2>
+          <p>In <strong>Anaconda Prompt</strong>, run:</p>
           <pre><code>conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
 pip install ncpi</code></pre>
@@ -106,7 +106,7 @@ pip install ncpi</code></pre>
           <h3>NEST on Windows</h3>
           <p>NEST-based examples are recommended via <strong>WSL2 (Ubuntu)</strong>, not native Windows.</p>
           <pre><code># One-time WSL2 setup
-wsl --install -d Ubuntu</code></pre>
+wsl --install</code></pre>
 
           <p>Then, inside the Ubuntu/WSL shell:</p>
           <pre><code>conda create -n ncpi-env python=3.10 -y
@@ -116,22 +116,22 @@ conda install -c conda-forge nest-simulator=3.8</code></pre>
         </section>
 
         <section id="optional">
-          <h2>3) Optional Dependencies</h2>
+          <h2>4) Optional Dependencies</h2>
           <p><code>ncpi</code> supports optional extras. Install only what your workflow needs.</p>
 
           <h3>Extras shortcuts</h3>
           <pre><code>pip install "ncpi[parser]"          # extended parser backends
 pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
-pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[webui]"           # WebUI runtime backends
 pip install "ncpi[examples]"        # dependencies for example scripts
+# Note: see Section 6 (Optional backends notes) for prerequisites/conflicts.
 pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
-
         </section>
 
         <section id="webui">
-          <h2>4) WebUI: installation and usage</h2>
+          <h2>5) WebUI: installation and usage</h2>
           <p>The WebUI is available from the repository source (<code>webui/app.py</code>).</p>
 
           <h3>Install WebUI dependencies</h3>
@@ -153,8 +153,17 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
         </section>
 
         <section id="backends">
-          <h2>5) Optional backends notes</h2>
-          <p>Optional backends are listed in <strong>Section 3 (Optional Dependencies)</strong>. Install only the extras required by your workflow.</p>
+          <h2>6) Optional backends notes</h2>
+          <p>Optional backends are listed in <strong>Section 4 (Optional Dependencies)</strong>. Install only the extras required by your workflow.</p>
+
+          <h3>analysis (R) note</h3>
+          <p>
+            The <code>analysis</code> and <code>tests</code> extras can require <code>rpy2</code> (R-backed dependencies). Before installing
+            <code>ncpi[analysis]</code> or <code>ncpi[tests]</code>, make sure R is installed on your system (e.g. from
+            <a class="link" href="https://cran.r-project.org/">https://cran.r-project.org/</a> or your package manager). Installing <code>rpy2</code>
+            via pip or conda will fail if a suitable R installation and headers are not present. If you use Conda, you can install R with:
+            <code>conda install -c conda-forge r-base</code>.
+          </p>
 
           <h3>hctsa note</h3>
           <p>
@@ -165,17 +174,10 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
             The <code>hctsa</code> extra depends on the hctsa MATLAB toolbox and the MATLAB Engine for Python. Attempting to install a
             <code>matlabengine</code> pip package without MATLAB installed (or without a matching MATLAB Engine distribution) can fail or
             raise errors. The recommended approach is to install MATLAB first, then install the MATLAB Engine for Python from the
-            MATLAB installation directory (see MathWorks docs: <a class="link" href="https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html">https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html</a>),
+            MATLAB installation directory (see MathWorks docs:
+            <a class="link" href="https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html">https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html</a>),
             or otherwise ensure the engine distribution you install matches your MATLAB version. After that, install hctsa and
             pass the hctsa repository path as <code>hctsa_folder</code> when invoking hctsa-backed features in ncpi.
-          </p>
-
-          <h3>analysis (R) note</h3>
-          <p>
-            The <code>analysis</code> extra enables R-backed analysis utilities via <code>rpy2</code>. Before installing
-            <code>ncpi[analysis]</code> you must have R installed on your system (e.g. from <a class="link" href="https://cran.r-project.org/">CRAN</a> or your package manager).
-            Installing <code>rpy2</code> via pip or conda will fail if a suitable R installation and headers are not present. On many Linux systems
-            you may need to install the system R development package (e.g. <code>r-base-dev</code> or similar) prior to installing the Python bindings.
           </p>
         </section>
 
@@ -185,12 +187,12 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#requirements">Requirements</a></li>
-        <li><a href="#unix">Unix</a></li>
-        <li><a href="#windows">Windows</a></li>
-        <li><a href="#optional">Optional Dependencies</a></li>
-        <li><a href="#webui">WebUI</a></li>
-        <li><a href="#backends">Optional backends notes</a></li>
+        <li><a class="active" href="#conda">1) Conda Environment</a></li>
+        <li><a href="#unix">2) Unix Installation</a></li>
+        <li><a href="#windows">3) Windows Installation</a></li>
+        <li><a href="#optional">4) Optional Dependencies</a></li>
+        <li><a href="#webui">5) WebUI</a></li>
+        <li><a href="#backends">6) Optional backends notes</a></li>
       </ul>
     </aside>
   </div>
