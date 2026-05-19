@@ -61,19 +61,42 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
+        <section id="overview">
           <h1>Feature Extraction</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
-          <p><a class="link" href="../webui-index.html">Back to WebUI Tutorials Index</a></p>
+          <p>
+            <span class="pill">WebUI</span>
+            <span class="pill">Simulation Pipeline</span>
+            <span class="pill">catch22</span>
+          </p>
+          <p>
+            As in previous tutorial, we begin with loading simulation and field potential data from previous session.
+            Then we open Features from the dashboard, choose <code>Continue simulation pipeline</code>, select
+            <code>cdm.pkl</code>, configure EphysDatasetParser with recording type <code>CDM</code> and data origin
+            <code>Simulated</code>, enable epoching, choose <code>catch22</code>, and compute features.
+          </p>
         </section>
+
+        <section id="video">
+          <h2>Recorded Walkthrough</h2>
+          <p>
+            The video below is expected at:
+            <code>docs/tutorials/automation/videos/extract-features.webm</code>
+          </p>
+          <video controls preload="metadata" poster="../automation/videos/extract-features-poster.png">
+            <source src="../automation/videos/extract-features.webm" type="video/webm">
+            Your browser does not support the video tag.
+          </video>
+        </section>
+
+        <p><a class="link" href="../webui-index.html">Back to WebUI Tutorials Index</a></p>
       </article>
     </main>
 
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#video">Recorded Walkthrough</a></li>
       </ul>
     </aside>
   </div>
