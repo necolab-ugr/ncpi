@@ -549,9 +549,14 @@ class EphysDatasetParser:
             rows = self._apply_epoching_rows(rows)
             df = self._rows_to_df(rows)
 
-            # 4b) Exclude last epoch if requested
-            if self.config.exclude_last_epoch:
-                df = self._exclude_last_epoch(df)
+        # 4b) Keep all parsed series aligned when epoching produces different counts.
+        df = self._limit_epoch_count_to_minimum(df)
+
+        # 4c) Exclude final epochs explicitly or when an incomplete final epoch is detected.
+        if self.config.exclude_last_epoch:
+            df = self._exclude_last_epoch(df)
+        else:
+            df = self._exclude_incomplete_final_epoch(df)
 
         # 5) Optional z-scoring AFTER epoching (per-epoch normalization)
         if self.config.zscore and self.config.zscore_after_epoch:
@@ -966,9 +971,9 @@ class EphysDatasetParser:
 
         data = self._resolve(d, f.data)
 
-        fs = self._resolve(d, f.fs)
+        fs_raw = self._resolve(d, f.fs)
         # Handle a possible list that comes from a struct array
-        fs = self._extract_first_if_list(fs)
+        fs = self._extract_first_if_list(fs_raw)
         fs = float(np.asarray(fs).item()) if fs is not None and np.asarray(fs).size == 1 else (float(fs) if fs is not None else None)
 
         data_domain = self._resolve(d, f.data_domain) or "time"
@@ -992,10 +997,40 @@ class EphysDatasetParser:
         def _subject_ids_for_axis(base_meta: Mapping[str, Any], n_ids: int) -> list[Any]:
             return self._normalize_subject_id_list(base_meta.get("subject_id", None), n_ids)
 
+        condition_rows = self._parse_condition_sequence_data(
+            data,
+            meta,
+            ch_names,
+            epoch_val,
+            fs_raw,
+            data_domain,
+            freqs,
+            spectral_kind,
+            source_file,
+        )
+        if condition_rows is not None:
+            return condition_rows
+
         # data can be:
         # - 2D: (time, channels) or (channels, time)
         # - 3D: (epochs, channels, time) or (epochs, time, channels)
-        arr = np.asarray(data)
+        try:
+            arr = self._as_array_excluding_incomplete_final_epoch(data)
+        except ValueError:
+            rows = self._parse_ragged_dict_data(
+                data,
+                meta,
+                ch_names,
+                epoch_val,
+                fs,
+                data_domain,
+                freqs,
+                spectral_kind,
+                source_file,
+            )
+            if rows is not None:
+                return rows
+            raise
         if arr.dtype == object and arr.ndim == 1 and arr.size > 0:
             try:
                 stacked = np.stack([np.asarray(a).squeeze() for a in arr.tolist()], axis=0)
@@ -1003,6 +1038,8 @@ class EphysDatasetParser:
                     arr = stacked
             except Exception:
                 pass
+        arr, array_axes = self._squeeze_unmapped_singleton_axes(arr, f.array_axes)
+        array_axes = self._normalize_array_axes_for_data(arr, array_axes, ch_names)
 
         if arr.ndim == 1:
             # single channel
@@ -1010,7 +1047,7 @@ class EphysDatasetParser:
             return [self._row_from_series(meta, labels[0], None, arr, fs, data_domain, freqs, spectral_kind, source_file)]
 
         if arr.ndim == 2:
-            ax = f.array_axes
+            ax = array_axes
             if ax and "samples" in ax:
                 sa_ax = int(ax["samples"])
                 if "channels" in ax:
@@ -1086,7 +1123,7 @@ class EphysDatasetParser:
                 return rows
 
         if arr.ndim == 3:
-            ax = f.array_axes
+            ax = array_axes
             if ax and "channels" in ax and "samples" in ax and "epochs" in ax:
                 # Explicit axis mapping: transpose to (epochs, channels, samples)
                 ep_ax = int(ax["epochs"])
@@ -1165,7 +1202,7 @@ class EphysDatasetParser:
             return rows
 
         if arr.ndim == 4:
-            ax = f.array_axes
+            ax = array_axes
             if not (ax and "channels" in ax and "samples" in ax):
                 raise ValueError(
                     "4D dict-like arrays require explicit array_axes mapping with at least "
@@ -1184,11 +1221,21 @@ class EphysDatasetParser:
                 raise ValueError(f"array_axes indices must be in [0, {arr.ndim - 1}] for shape {arr.shape}.")
 
             remaining = [i for i in range(arr.ndim) if i not in used]
-            if len(remaining) > 0:
+            available_roles = []
+            if ep_ax < 0:
+                available_roles.append("epochs")
+            if id_ax < 0:
+                available_roles.append("ids")
+            if len(remaining) > len(available_roles):
                 raise ValueError(
-                    "4D dict-like arrays must map all dimensions via array_axes "
+                    "4D dict-like arrays must map all non-sample dimensions via array_axes "
                     "(use ids/epochs/channels/samples)."
                 )
+            for role, axis_idx in zip(available_roles, remaining):
+                if role == "epochs":
+                    ep_ax = axis_idx
+                elif role == "ids":
+                    id_ax = axis_idx
 
             if id_ax >= 0 and ep_ax >= 0:
                 arr4 = arr.transpose(id_ax, ep_ax, ch_ax, sa_ax)
@@ -2130,6 +2177,823 @@ class EphysDatasetParser:
         # For each group, find the max epoch and exclude it
         max_epochs = df.groupby(group_cols)["epoch"].transform("max")
         return df[df["epoch"] < max_epochs].reset_index(drop=True)
+
+    def _exclude_incomplete_final_epoch(self, df: "Any") -> "Any":
+        """Exclude final epochs retrospectively when any final epoch is shorter."""
+        if "epoch" not in df.columns or "data" not in df.columns or df.empty:
+            return df
+
+        def data_length(value):
+            if value is None:
+                return None
+            try:
+                if isinstance(value, float) and np.isnan(value):
+                    return None
+            except Exception:
+                pass
+            try:
+                arr = np.asarray(value)
+            except Exception:
+                return None
+            if arr.ndim == 0:
+                return 1
+            return int(arr.size)
+
+        def ordered_group(frame):
+            if "t0" in frame.columns:
+                try:
+                    t0_values = frame["t0"].astype(float)
+                    if np.isfinite(t0_values).any():
+                        return frame.assign(_epoch_sort_t0=t0_values).sort_values("_epoch_sort_t0").drop(columns=["_epoch_sort_t0"])
+                except Exception:
+                    pass
+            return frame.sort_index()
+
+        def is_incomplete(frame):
+            ordered = ordered_group(frame)
+            lengths = [data_length(value) for value in ordered["data"].tolist()]
+            if len(lengths) < 2:
+                return False
+            last_len = lengths[-1]
+            previous = [length for length in lengths[:-1] if length is not None]
+            if last_len is None or not previous:
+                return False
+            counts = {}
+            for length in previous:
+                counts[int(length)] = counts.get(int(length), 0) + 1
+            typical_len = max(counts.items(), key=lambda item: (item[1], item[0]))[0]
+            return int(last_len) < int(typical_len)
+
+        group_cols = [
+            col for col in [
+                "source_file",
+                "subject_id",
+                "species",
+                "group",
+                "condition",
+                "sensor",
+                "recording_type",
+                "fs",
+                "data_domain",
+                "spectral_kind",
+            ]
+            if col in df.columns and not df[col].isna().all()
+        ]
+        grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
+        groups = list(grouped)
+        if not any(is_incomplete(frame) for _, frame in groups):
+            return df
+
+        drop_indices = []
+        for _, frame in groups:
+            ordered = ordered_group(frame)
+            if ordered.empty:
+                continue
+            last_epoch = ordered.iloc[-1]["epoch"]
+            last_epoch_missing = last_epoch is None
+            try:
+                if isinstance(last_epoch, float) and np.isnan(last_epoch):
+                    last_epoch_missing = True
+            except Exception:
+                pass
+            if last_epoch_missing:
+                drop_indices.append(ordered.index[-1])
+                continue
+            drop_indices.extend(list(frame.index[frame["epoch"].map(lambda value: value == last_epoch)]))
+
+        if not drop_indices:
+            return df
+        return df.drop(index=list(set(drop_indices))).reset_index(drop=True)
+
+    def _limit_epoch_count_to_minimum(self, df: "Any") -> "Any":
+        """Limit all epoch series to the smallest epoch count produced."""
+        if "epoch" not in df.columns or df.empty:
+            return df
+
+        valid_epoch = df["epoch"].map(lambda value: not self._is_missing_value(value))
+        if not bool(valid_epoch.any()):
+            return df
+
+        group_cols = [
+            col for col in [
+                "source_file",
+                "subject_id",
+                "species",
+                "group",
+                "condition",
+                "sensor",
+                "recording_type",
+                "fs",
+                "data_domain",
+                "spectral_kind",
+            ]
+            if col in df.columns and not df[col].isna().all()
+        ]
+
+        def epoch_sort_key(value):
+            if self._is_missing_value(value):
+                return (1, 0, "")
+            try:
+                return (0, float(value), str(value))
+            except Exception:
+                text = str(value)
+                tail = text.rsplit(":", 1)[-1]
+                try:
+                    return (0, float(tail), text)
+                except Exception:
+                    return (0, 0, text)
+
+        def ordered_epoch_values(frame):
+            seen = set()
+            values = []
+            for value in frame["epoch"].tolist():
+                if self._is_missing_value(value):
+                    continue
+                marker = str(value)
+                if marker in seen:
+                    continue
+                seen.add(marker)
+                values.append(value)
+            return sorted(values, key=epoch_sort_key)
+
+        groups = list(df.groupby(group_cols, sort=False, dropna=False)) if group_cols else [(None, df)]
+        epoch_values_by_group = []
+        for group_key, frame in groups:
+            values = ordered_epoch_values(frame)
+            if values:
+                epoch_values_by_group.append((group_key, frame, values))
+
+        if len(epoch_values_by_group) < 2:
+            return df
+
+        counts = [len(values) for _, _, values in epoch_values_by_group]
+        min_count = min(counts)
+        max_count = max(counts)
+        if min_count <= 0 or min_count == max_count:
+            return df
+
+        drop_indices = []
+        for _, frame, values in epoch_values_by_group:
+            keep_markers = {str(value) for value in values[:min_count]}
+            drop_indices.extend(
+                list(frame.index[frame["epoch"].map(lambda value: str(value) not in keep_markers)])
+            )
+
+        if not drop_indices:
+            return df
+
+        import warnings
+        warnings.warn(
+            "Epoch count was limited to the smallest available count "
+            f"({min_count}; max was {max_count}) because series produced different "
+            "numbers of epochs after epoching.",
+            RuntimeWarning,
+        )
+        return df.drop(index=list(set(drop_indices))).reset_index(drop=True)
+
+    def _is_missing_value(self, value: Any) -> bool:
+        if value is None:
+            return True
+        try:
+            return bool(isinstance(value, float) and np.isnan(value))
+        except Exception:
+            return False
+
+    def _as_array_excluding_incomplete_final_epoch(self, data: Any) -> np.ndarray:
+        """Convert data to an array, dropping a ragged final epoch when needed."""
+        try:
+            return np.asarray(data)
+        except ValueError as exc:
+            trimmed, changed = self._drop_ragged_incomplete_final_epoch(data)
+            if not changed:
+                raise exc
+            try:
+                return np.asarray(trimmed)
+            except ValueError:
+                raise exc
+
+    def _squeeze_unmapped_singleton_axes(
+        self,
+        arr: np.ndarray,
+        axes: Optional[Mapping[str, int]],
+    ) -> tuple[np.ndarray, Optional[Mapping[str, int]]]:
+        """Drop MATLAB-style singleton dimensions that are not part of array_axes."""
+        if arr.ndim <= 1:
+            return arr, axes
+
+        mapped_axes: set[int] = set()
+        if axes:
+            for axis in axes.values():
+                try:
+                    axis_idx = int(axis)
+                except Exception:
+                    continue
+                if axis_idx >= 0:
+                    mapped_axes.add(axis_idx)
+
+        squeeze_axes = [
+            idx for idx, size in enumerate(arr.shape)
+            if int(size) == 1 and idx not in mapped_axes
+        ]
+        if not squeeze_axes:
+            return arr, axes
+
+        squeezed = np.squeeze(arr, axis=tuple(squeeze_axes))
+        if not axes:
+            return squeezed, axes
+
+        adjusted: dict[str, int] = {}
+        for role, axis in axes.items():
+            try:
+                axis_idx = int(axis)
+            except Exception:
+                continue
+            if axis_idx < 0:
+                adjusted[str(role)] = axis_idx
+                continue
+            adjusted[str(role)] = axis_idx - sum(1 for removed in squeeze_axes if removed < axis_idx)
+        return squeezed, adjusted
+
+    def _normalize_array_axes_for_data(
+        self,
+        arr: np.ndarray,
+        axes: Optional[Mapping[str, int]],
+        ch_names: Any,
+    ) -> Optional[Mapping[str, int]]:
+        """Correct obvious channel/sample axis swaps using resolved channel names."""
+        if not axes:
+            return axes
+
+        adjusted: dict[str, int] = {}
+        for role, axis in axes.items():
+            try:
+                adjusted[str(role)] = int(axis)
+            except Exception:
+                continue
+
+        labels = ch_names if isinstance(ch_names, list) else None
+        if labels:
+            ch_count = len(labels)
+            channel_matches = [
+                idx for idx, size in enumerate(arr.shape)
+                if int(size) == int(ch_count)
+            ]
+            current_ch = adjusted.get("channels", -1)
+            current_ch_ok = (
+                isinstance(current_ch, int)
+                and 0 <= current_ch < arr.ndim
+                and int(arr.shape[current_ch]) == int(ch_count)
+            )
+            if channel_matches and not current_ch_ok:
+                adjusted["channels"] = channel_matches[0]
+
+        used_non_sample = {
+            axis for role, axis in adjusted.items()
+            if role != "samples" and axis >= 0
+        }
+        sample_axis = adjusted.get("samples", -1)
+        sample_axis_ok = (
+            isinstance(sample_axis, int)
+            and 0 <= sample_axis < arr.ndim
+            and sample_axis not in used_non_sample
+        )
+        if not sample_axis_ok:
+            candidates = [idx for idx in range(arr.ndim) if idx not in used_non_sample]
+            non_singleton = [idx for idx in candidates if int(arr.shape[idx]) > 1]
+            candidates = non_singleton or candidates
+            if candidates:
+                adjusted["samples"] = max(candidates, key=lambda idx: int(arr.shape[idx]))
+
+        return adjusted
+
+    def _drop_ragged_incomplete_final_epoch(self, data: Any) -> tuple[Any, bool]:
+        def sequence_items(value):
+            if isinstance(value, np.ndarray):
+                if value.ndim == 0:
+                    return None
+                return list(value)
+            if isinstance(value, (list, tuple)):
+                return list(value)
+            return None
+
+        def max_sequence_depth(value, depth=0):
+            items = sequence_items(value)
+            if items is None or not items:
+                return depth
+            return max(max_sequence_depth(item, depth + 1) for item in items)
+
+        def try_drop_at_epoch_axis(epoch_axis, sample_axis=None):
+            try:
+                epoch_axis = int(epoch_axis)
+            except Exception:
+                return data, False
+            if epoch_axis < 0:
+                return data, False
+
+            def sample_length(epoch_value):
+                try:
+                    arr = np.asarray(epoch_value)
+                    if sample_axis is not None:
+                        local_axis = int(sample_axis) - epoch_axis - 1
+                        if 0 <= local_axis < arr.ndim:
+                            return int(arr.shape[local_axis])
+                    if arr.ndim == 0:
+                        return 1
+                    return int(arr.size)
+                except Exception:
+                    items = sequence_items(epoch_value)
+                    return len(items) if items is not None else None
+
+            epoch_sequences = []
+
+            def collect(node, depth):
+                items = sequence_items(node)
+                if items is None:
+                    return
+                if depth == epoch_axis:
+                    epoch_sequences.append(items)
+                    return
+                for item in items:
+                    collect(item, depth + 1)
+
+            collect(data, 0)
+            if not epoch_sequences:
+                return data, False
+
+            should_drop = False
+            for seq in epoch_sequences:
+                if len(seq) < 2:
+                    continue
+                lengths = [sample_length(item) for item in seq]
+                last_len = lengths[-1]
+                previous = [length for length in lengths[:-1] if length is not None]
+                if last_len is None or not previous:
+                    continue
+                counts = {}
+                for length in previous:
+                    counts[int(length)] = counts.get(int(length), 0) + 1
+                typical_len = max(counts.items(), key=lambda item: (item[1], item[0]))[0]
+                if int(last_len) < int(typical_len):
+                    should_drop = True
+                    break
+
+            if not should_drop:
+                return data, False
+
+            def trim(node, depth):
+                items = sequence_items(node)
+                if items is None:
+                    return node
+                if depth == epoch_axis:
+                    return items[:-1]
+                return [trim(item, depth + 1) for item in items]
+
+            return trim(data, 0), True
+
+        axes = self.config.fields.array_axes or {}
+        if "epochs" in axes:
+            sample_axis = None
+            try:
+                sample_axis = int(axes["samples"]) if "samples" in axes else None
+            except Exception:
+                sample_axis = None
+            return try_drop_at_epoch_axis(axes["epochs"], sample_axis=sample_axis)
+
+        try:
+            depth = max_sequence_depth(data)
+        except Exception:
+            depth = 0
+
+        for candidate_axis in range(max(0, depth)):
+            trimmed, changed = try_drop_at_epoch_axis(candidate_axis)
+            if not changed:
+                continue
+            try:
+                np.asarray(trimmed)
+            except ValueError:
+                continue
+            return trimmed, True
+
+        return data, False
+
+    def _parse_ragged_dict_data(
+        self,
+        data: Any,
+        meta: Mapping[str, Any],
+        ch_names: Any,
+        epoch_val: Any,
+        fs: Optional[float],
+        data_domain: Any,
+        freqs: Any,
+        spectral_kind: Any,
+        source_file: Optional[str],
+    ) -> Optional[list[dict]]:
+        """Parse nested list/cell-array data whose sample vectors have variable length."""
+
+        def sequence_items(value):
+            if isinstance(value, np.ndarray):
+                if value.ndim == 0:
+                    return None
+                return list(value)
+            if isinstance(value, (list, tuple)):
+                return list(value)
+            return None
+
+        def axis_value(name):
+            axes = self.config.fields.array_axes or {}
+            if name not in axes:
+                return None
+            try:
+                axis = int(axes[name])
+            except Exception:
+                return None
+            return axis if axis >= 0 else None
+
+        labels = ch_names if isinstance(ch_names, list) else None
+
+        def channel_label(index: Optional[int]) -> str:
+            if index is None:
+                return str(labels[0]) if labels else "ch0"
+            if labels and 0 <= int(index) < len(labels):
+                return str(labels[int(index)])
+            return f"ch{int(index)}"
+
+        def series_from_node(node):
+            try:
+                series = np.asarray(node)
+            except ValueError:
+                try:
+                    series = np.asarray(node, dtype=object)
+                except Exception:
+                    return None
+            series = np.squeeze(series)
+            if series.ndim == 0:
+                return None
+            if series.dtype == object:
+                flat = np.ravel(series)
+                if any(sequence_items(item) is not None for item in flat):
+                    return None
+            if series.ndim != 1:
+                return None
+            return np.asarray(series)
+
+        def parse_with_axes(axis_map: Mapping[str, Any]) -> Optional[list[dict]]:
+            sample_axis = axis_map.get("samples")
+            if sample_axis is None:
+                return None
+            sample_axis = int(sample_axis)
+
+            roles_by_axis: dict[int, str] = {}
+            for role in ("ids", "channels", "epochs"):
+                axis = axis_map.get(role)
+                if axis is None:
+                    continue
+                axis = int(axis)
+                if axis == sample_axis:
+                    return None
+                roles_by_axis[axis] = role
+
+            for axis in range(sample_axis):
+                if axis in roles_by_axis:
+                    continue
+                if "epochs" not in roles_by_axis.values():
+                    roles_by_axis[axis] = "epochs"
+                elif "ids" not in roles_by_axis.values():
+                    roles_by_axis[axis] = "ids"
+
+            rows: list[dict] = []
+
+            def visit(node, depth: int, context: dict[str, Any], current_meta: Mapping[str, Any]):
+                if depth == sample_axis:
+                    series = series_from_node(node)
+                    if series is None:
+                        return
+                    rows.append(
+                        self._row_from_series(
+                            current_meta,
+                            channel_label(context.get("channels")),
+                            context.get("epochs", epoch_val),
+                            series,
+                            fs,
+                            data_domain,
+                            freqs,
+                            spectral_kind,
+                            source_file,
+                        )
+                    )
+                    return
+
+                items = sequence_items(node)
+                if items is None:
+                    return
+
+                role = roles_by_axis.get(depth)
+                subject_ids = None
+                if role == "ids":
+                    subject_ids = self._normalize_subject_id_list(current_meta.get("subject_id", None), len(items))
+
+                for index, item in enumerate(items):
+                    next_context = dict(context)
+                    next_meta = current_meta
+                    if role == "ids":
+                        next_meta = {
+                            key: self._metadata_row_value(str(key), value, index, len(items))
+                            for key, value in current_meta.items()
+                        }
+                        if subject_ids is not None:
+                            next_meta["subject_id"] = subject_ids[index]
+                        next_context["ids"] = index
+                    elif role == "channels":
+                        next_context["channels"] = index
+                    elif role == "epochs":
+                        next_context["epochs"] = index
+                    visit(item, depth + 1, next_context, next_meta)
+
+            visit(data, 0, {}, meta)
+            return rows if rows else None
+
+        candidates: list[dict[str, int]] = []
+        explicit_axes = {
+            name: axis
+            for name, axis in {
+                "samples": axis_value("samples"),
+                "ids": axis_value("ids"),
+                "channels": axis_value("channels"),
+                "epochs": axis_value("epochs"),
+            }.items()
+            if axis is not None
+        }
+        if "samples" in explicit_axes:
+            candidates.append(explicit_axes)
+
+        inferred_axes = self._infer_ragged_axes(data, ch_names, meta)
+        if inferred_axes and inferred_axes not in candidates:
+            candidates.append(inferred_axes)
+
+        for axis_map in candidates:
+            rows = parse_with_axes(axis_map)
+            if rows:
+                return rows
+
+        return None
+
+    def _parse_condition_sequence_data(
+        self,
+        data: Any,
+        meta: Mapping[str, Any],
+        ch_names: Any,
+        epoch_val: Any,
+        fs_value: Any,
+        data_domain: Any,
+        freqs: Any,
+        spectral_kind: Any,
+        source_file: Optional[str],
+    ) -> Optional[list[dict]]:
+        """Parse MATLAB struct-array fields resolved as one LFP array per condition."""
+
+        def sequence_items(value):
+            if isinstance(value, np.ndarray):
+                if value.ndim == 0 or value.dtype != object:
+                    return None
+                return list(value.flat)
+            if isinstance(value, (list, tuple)):
+                return list(value)
+            return None
+
+        items = sequence_items(data)
+        if not items:
+            return None
+
+        condition_arrays = []
+        for item in items:
+            try:
+                arr = np.asarray(item)
+            except Exception:
+                return None
+            arr = np.squeeze(arr)
+            if arr.ndim < 2:
+                return None
+            condition_arrays.append(arr)
+
+        # A plain list of 1D channels is not a struct-array condition list.
+        if not any(arr.ndim >= 3 for arr in condition_arrays):
+            return None
+
+        rows: list[dict] = []
+        total = len(condition_arrays)
+        for condition_idx, arr in enumerate(condition_arrays):
+            meta_i = {
+                key: self._metadata_row_value(str(key), value, condition_idx, total)
+                for key, value in meta.items()
+            }
+            fs_i = self._value_at_index(fs_value, condition_idx, total)
+            fs_i = self._coerce_optional_float(fs_i)
+            epoch_i = self._value_at_index(epoch_val, condition_idx, total)
+            rows.extend(
+                self._rows_from_condition_array(
+                    arr,
+                    meta_i,
+                    ch_names,
+                    epoch_i,
+                    fs_i,
+                    data_domain,
+                    freqs,
+                    spectral_kind,
+                    source_file,
+                )
+            )
+
+        return rows if rows else None
+
+    def _rows_from_condition_array(
+        self,
+        arr: np.ndarray,
+        meta: Mapping[str, Any],
+        ch_names: Any,
+        epoch_val: Any,
+        fs: Optional[float],
+        data_domain: Any,
+        freqs: Any,
+        spectral_kind: Any,
+        source_file: Optional[str],
+    ) -> list[dict]:
+        arr = np.asarray(arr).squeeze()
+        labels = ch_names if isinstance(ch_names, list) else None
+
+        def choose_axes(shape: tuple[int, ...]) -> tuple[Optional[int], Optional[int], Optional[int]]:
+            axes = self.config.fields.array_axes or {}
+            ch_ax = self._valid_axis(axes.get("channels"), len(shape))
+            ep_ax = self._valid_axis(axes.get("epochs"), len(shape))
+            sa_ax = self._valid_axis(axes.get("samples"), len(shape))
+
+            if labels:
+                matches = [idx for idx, size in enumerate(shape) if int(size) == len(labels)]
+                if matches and (ch_ax is None or int(shape[ch_ax]) != len(labels)):
+                    ch_ax = matches[0]
+
+            if sa_ax is None or sa_ax == ch_ax:
+                candidates = [idx for idx in range(len(shape)) if idx != ch_ax]
+                if candidates:
+                    sa_ax = max(candidates, key=lambda idx: int(shape[idx]))
+
+            if ch_ax is None:
+                candidates = [idx for idx, size in enumerate(shape) if int(size) > 1 and idx != sa_ax]
+                if candidates:
+                    ch_ax = min(candidates, key=lambda idx: int(shape[idx]))
+            elif not labels:
+                candidates = [idx for idx, size in enumerate(shape) if int(size) > 1 and idx != sa_ax]
+                if candidates:
+                    inferred_ch_ax = min(candidates, key=lambda idx: int(shape[idx]))
+                    if int(shape[inferred_ch_ax]) < int(shape[ch_ax]):
+                        ch_ax = inferred_ch_ax
+
+            used = {idx for idx in (ch_ax, sa_ax) if idx is not None}
+            if ep_ax is None or ep_ax in used:
+                candidates = [idx for idx in range(len(shape)) if idx not in used]
+                ep_ax = candidates[0] if candidates else None
+
+            return ch_ax, ep_ax, sa_ax
+
+        if arr.ndim == 2:
+            ch_ax, _, sa_ax = choose_axes(arr.shape)
+            if ch_ax is None or sa_ax is None or ch_ax == sa_ax:
+                return []
+            arr2 = arr.transpose(ch_ax, sa_ax)
+            n_ch, _ = arr2.shape
+            labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+            return [
+                self._row_from_series(meta, labels2[i], epoch_val, arr2[i, :], fs, data_domain, freqs, spectral_kind, source_file)
+                for i in range(n_ch)
+            ]
+
+        if arr.ndim == 3:
+            ch_ax, ep_ax, sa_ax = choose_axes(arr.shape)
+            if ch_ax is None or ep_ax is None or sa_ax is None:
+                return []
+            if len({ch_ax, ep_ax, sa_ax}) != 3:
+                return []
+            arr3 = arr.transpose(ep_ax, ch_ax, sa_ax)
+            n_ep, n_ch, _ = arr3.shape
+            labels2 = labels if labels and len(labels) == n_ch else [f"ch{i}" for i in range(n_ch)]
+            rows = []
+            for e in range(n_ep):
+                row_epoch = e if self._is_missing_value(epoch_val) else f"{epoch_val}:{e}"
+                for i, ch in enumerate(labels2):
+                    rows.append(
+                        self._row_from_series(
+                            meta,
+                            ch,
+                            row_epoch,
+                            arr3[e, i, :],
+                            fs,
+                            data_domain,
+                            freqs,
+                            spectral_kind,
+                            source_file,
+                        )
+                    )
+            return rows
+
+        return []
+
+    def _valid_axis(self, axis: Any, ndim: int) -> Optional[int]:
+        try:
+            axis = int(axis)
+        except Exception:
+            return None
+        if axis < 0 or axis >= ndim:
+            return None
+        return axis
+
+    def _value_at_index(self, value: Any, index: int, total: int) -> Any:
+        if value is None:
+            return None
+        if isinstance(value, (list, tuple, np.ndarray)):
+            try:
+                arr = np.asarray(value, dtype=object)
+            except Exception:
+                return value
+            if arr.ndim == 0:
+                return arr.item() if hasattr(arr, "item") else value
+            flat = arr.reshape(-1).tolist()
+            if len(flat) == total and index < len(flat):
+                return flat[index]
+            if flat:
+                return flat[0]
+        return value
+
+    def _coerce_optional_float(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            arr = np.asarray(value)
+            if arr.size == 1:
+                return float(arr.item())
+        except Exception:
+            pass
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _infer_ragged_axes(
+        self,
+        data: Any,
+        ch_names: Any,
+        meta: Mapping[str, Any],
+    ) -> Optional[dict[str, int]]:
+        """Infer common MATLAB-cell shapes such as epochs/channels/samples."""
+
+        def sequence_items(value):
+            if isinstance(value, np.ndarray):
+                if value.ndim == 0:
+                    return None
+                return list(value)
+            if isinstance(value, (list, tuple)):
+                return list(value)
+            return None
+
+        outer = sequence_items(data)
+        if not outer:
+            return None
+        inner = sequence_items(outer[0])
+        if not inner:
+            return {"samples": 1}
+
+        cell_items = sequence_items(inner[0]) if inner else None
+        first_cell_item = sequence_items(cell_items[0]) if cell_items else None
+        inferred = {"samples": 3, "epochs": 2} if first_cell_item is not None else {"samples": 2}
+        labels = ch_names if isinstance(ch_names, list) else None
+        subject_id = meta.get("subject_id") if isinstance(meta, MappingABC) else None
+        subject_items = sequence_items(subject_id)
+
+        def outer_axis_role() -> str:
+            if subject_items and len(subject_items) == len(outer):
+                return "ids"
+            return "epochs"
+
+        def inner_axis_role() -> str:
+            if subject_items and len(subject_items) == len(inner):
+                return "ids"
+            return "epochs"
+
+        if labels and len(labels) == len(inner):
+            inferred["channels"] = 1
+            inferred[outer_axis_role()] = 0
+            return inferred
+        if labels and len(labels) == len(outer):
+            inferred["channels"] = 0
+            inferred[inner_axis_role()] = 1
+            return inferred
+
+        if subject_items and len(subject_items) == len(outer):
+            inferred["ids"] = 0
+            inferred["channels"] = 1
+            return inferred
+
+        inferred["epochs"] = 0
+        inferred["channels"] = 1
+        return inferred
 
     def _apply_aggregation(self, df):
         over = list(self.config.aggregate_over or [])
