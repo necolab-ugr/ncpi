@@ -4739,8 +4739,11 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                     proxy_area_payload = area_sum_payload
                     proxy_area_raw = dict(proxy)
             dt_ms = _safe_float(proxy_sim_step)
+            row_data = proxy
+            if proxy_area_payload is not None and proxy_decimation_factor <= 1:
+                row_data = proxy_area_payload
             row = {
-                "data": proxy,
+                "data": row_data,
                 "proxy_method": method,
                 "dt_ms": dt_ms,
                 "t_start_ms": 0.0,
@@ -6201,4 +6204,4 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             })
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
-    cleanup_temp_files(params.get('file_paths', {}))
+    cleanup_temp_files(params.get('file_paths', {}), keep_paths=[cdm_path])
