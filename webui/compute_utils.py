@@ -25,6 +25,7 @@ import itertools
 import threading
 import time
 import traceback
+import warnings
 from collections.abc import Mapping as MappingABC
 import tmp_paths
 from tmp_paths import configure_temp_environment, tmp_subdir
@@ -1232,6 +1233,125 @@ def _structure_signature_for_value(value, depth=0, max_depth=2):
 
 def _build_source_structure_signature(source_obj):
     return _structure_signature_for_value(source_obj, depth=0, max_depth=2)
+
+
+def _selected_non_sample_axis_lengths(value, axes, ch_names=None):
+    axes = dict(axes or {})
+    out = {}
+
+    def sequence_items(obj):
+        if isinstance(obj, np.ndarray):
+            if obj.ndim == 0:
+                return None
+            return list(obj)
+        if isinstance(obj, (list, tuple)):
+            return list(obj)
+        return None
+
+    items = sequence_items(value)
+    if items:
+        first = next((item for item in items if item is not None), None)
+        try:
+            first_arr = np.asarray(first)
+        except Exception:
+            first_arr = None
+        if first_arr is not None and first_arr.ndim >= 2:
+            value = first
+
+    def channel_name_count(names):
+        if names is None or isinstance(names, str):
+            return None
+        if isinstance(names, np.ndarray):
+            try:
+                names = names.tolist()
+            except Exception:
+                return None
+        if isinstance(names, (list, tuple)):
+            return len(names)
+        return None
+
+    def axis_length(obj, axis, role):
+        try:
+            axis = int(axis)
+        except Exception:
+            return None
+        if axis < 0:
+            return None
+        if isinstance(obj, np.ndarray) and obj.dtype != object:
+            if obj.ndim > axis:
+                return int(obj.shape[axis])
+            return None
+        items = sequence_items(obj)
+        if items is None:
+            return None
+        if axis == 0:
+            return len(items)
+        lengths = {
+            length for item in items
+            for length in [axis_length(item, axis - 1, role)]
+            if length is not None
+        }
+        if len(lengths) > 1:
+            raise ValueError(
+                f"Selected {role} axis has inconsistent lengths within one input file: "
+                f"{sorted(lengths)}."
+            )
+        return next(iter(lengths), None)
+
+    ch_count = channel_name_count(ch_names)
+    if ch_count:
+        channel_matches = []
+        for axis in range(8):
+            length = axis_length(value, axis, "channels")
+            if length is None:
+                break
+            if int(length) == int(ch_count):
+                channel_matches.append(axis)
+        current_channel_axis = axes.get("channels")
+        current_channel_length = axis_length(value, current_channel_axis, "channels")
+        if channel_matches and int(current_channel_length or -1) != int(ch_count):
+            axes["channels"] = channel_matches[0]
+        for role in ("epochs", "ids"):
+            if role in axes and axes.get(role) == axes.get("channels"):
+                axes.pop(role, None)
+
+    used_non_sample_axes = set()
+    for role, axis in axes.items():
+        if str(role) == "samples":
+            continue
+        try:
+            axis = int(axis)
+        except Exception:
+            continue
+        if axis >= 0:
+            used_non_sample_axes.add(axis)
+
+    sample_axis = axes.get("samples")
+    sample_length = axis_length(value, sample_axis, "samples")
+    try:
+        sample_axis_int = int(sample_axis)
+    except Exception:
+        sample_axis_int = -1
+    if sample_length is None or sample_axis_int in used_non_sample_axes:
+        candidate_lengths = []
+        for axis in range(8):
+            if axis in used_non_sample_axes:
+                continue
+            length = axis_length(value, axis, "samples")
+            if length is None:
+                break
+            candidate_lengths.append((axis, int(length)))
+        if candidate_lengths:
+            axes["samples"] = max(candidate_lengths, key=lambda item: item[1])[0]
+
+    for role, axis in axes.items():
+        role = str(role)
+        if role in {"samples", "epochs"}:
+            continue
+        length = axis_length(value, axis, role)
+        if length is not None:
+            out[role] = int(length)
+    return out
 
 
 def _load_module_from_path(path, name="kernel_params"):
@@ -2850,6 +2970,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             _append_job_output(job_status, job_id, f"Parsing {total_uploads} input file(s)...")
             parsed_frames = []
             structure_reference_by_folder = {}
+            axis_reference_by_folder = {}
             log_every = max(1, total_uploads // 20)
             for idx, payload in enumerate(empirical_uploads, start=1):
                 name = payload.get("name") or f"file_{idx}"
@@ -2899,6 +3020,40 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                             "Ensure files within each folder share the same structure."
                         )
 
+                axes = dict(getattr(getattr(parse_cfg, "fields", None), "array_axes", None) or {})
+                if axes:
+                    try:
+                        data_value = parser._resolve(source_obj, parse_cfg.fields.data)
+                    except Exception:
+                        data_value = None
+                    try:
+                        ch_names_value = parser._resolve(source_obj, parse_cfg.fields.ch_names)
+                    except Exception:
+                        ch_names_value = getattr(parse_cfg.fields, "ch_names", None)
+                    selected_axis_lengths = (
+                        _selected_non_sample_axis_lengths(data_value, axes, ch_names=ch_names_value)
+                        if data_value is not None
+                        else {}
+                    )
+                    if selected_axis_lengths:
+                        if structure_key not in axis_reference_by_folder:
+                            axis_reference_by_folder[structure_key] = (str(name), selected_axis_lengths)
+                        else:
+                            baseline_name, baseline_axes = axis_reference_by_folder[structure_key]
+                            mismatches = [
+                                f"{role}: {selected_axis_lengths.get(role)} != {baseline_axes.get(role)}"
+                                for role in sorted(set(selected_axis_lengths) | set(baseline_axes))
+                                if selected_axis_lengths.get(role) != baseline_axes.get(role)
+                            ]
+                            if mismatches:
+                                raise ValueError(
+                                    f"Selected non-sample axis mismatch detected in folder '{folder_label}' "
+                                    f"(extension '{ext}'): '{name}' does not match reference file "
+                                    f"'{baseline_name}' ({', '.join(mismatches)}). "
+                                    "Different sample counts are allowed and will be epoch-limited, but "
+                                    "selected channels/trials/IDs axes must match."
+                                )
+
                 parse_running = {"flag": True, "last_log": time.time()}
                 parse_started = time.time()
 
@@ -2919,8 +3074,18 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
                 heartbeat = threading.Thread(target=_parse_heartbeat, daemon=True)
                 heartbeat.start()
+                def _parse_with_warning_log(parser_obj):
+                    with warnings.catch_warnings(record=True) as caught:
+                        warnings.simplefilter("always")
+                        parsed_obj = parser_obj.parse(source_obj)
+                    for warning_item in caught:
+                        warning_message = str(warning_item.message).strip()
+                        if warning_message:
+                            _append_job_output(job_status, job_id, f"Warning: {warning_message}")
+                    return parsed_obj
+
                 try:
-                    parsed = parser.parse(source_obj)
+                    parsed = _parse_with_warning_log(parser)
                 except KeyError as exc:
                     ch_locator = getattr(getattr(parse_cfg, "fields", None), "ch_names", None)
                     ch_locator_str = str(ch_locator or "").strip()
@@ -2964,7 +3129,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                         f"Auto-detected {len(recovered)} channel name(s) from nearby metadata files "
                         f"for locator '{ch_locator_str}'. Retrying parse.",
                     )
-                    parsed = parser.parse(source_obj)
+                    parsed = _parse_with_warning_log(parser)
                 finally:
                     parse_running["flag"] = False
                     heartbeat.join(timeout=0.2)
@@ -2975,6 +3140,10 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 )
                 if not isinstance(parsed, pd.DataFrame):
                     raise ValueError(f"Parser output for '{name}' is not a dataframe.")
+                if "source_file" in parsed.columns:
+                    parsed["source_file"] = parsed["source_file"].fillna(str(name))
+                else:
+                    parsed["source_file"] = str(name)
                 if file_id_metadata_fields:
                     file_id_value = str(name)
                     for col_name in file_id_metadata_fields:
@@ -3017,6 +3186,14 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     job_id,
                     metadata_locators=_meta_locators,
                 )
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                df = parser._limit_epoch_count_to_minimum(df)
+            for warning_item in caught:
+                warning_message = str(warning_item.message).strip()
+                if warning_message:
+                    _append_job_output(job_status, job_id, f"Warning: {warning_message}")
         else:
             input_path = params.get("file_paths", {}).get("data_file")
             if not input_path:

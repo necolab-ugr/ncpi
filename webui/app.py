@@ -5296,6 +5296,22 @@ def _infer_axis_defaults_from_values(data_value, ch_names_value=None, ids_value=
 
 
 def _auto_channel_names(value, axis=None):
+    if isinstance(value, (list, tuple)) and value:
+        first = next((item for item in value if item is not None), None)
+        try:
+            first_arr = np.asarray(first)
+        except Exception:
+            first_arr = None
+        if first_arr is not None and first_arr.ndim >= 2:
+            value = first
+    elif isinstance(value, np.ndarray) and value.dtype == object and value.size > 0:
+        first = next((item for item in value.flat if item is not None), None)
+        try:
+            first_arr = np.asarray(first)
+        except Exception:
+            first_arr = None
+        if first_arr is not None and first_arr.ndim >= 2:
+            value = first
     count = _estimate_sensor_count(value, axis=axis)
     if count is None or count < 1:
         count = 1
@@ -5957,7 +5973,9 @@ def _build_parse_config_from_form(form):
     data_source_kind = (form.get("data_source_kind") or "").strip()
     zscore = str(form.get("parser_zscore", "")).lower() in {"1", "true", "on", "yes"}
     zscore_after_epoch = str(form.get("parser_zscore_after_epoch", "")).lower() in {"1", "true", "on", "yes"}
-    exclude_last_epoch = str(form.get("parser_exclude_last_epoch", "")).lower() in {"1", "true", "on", "yes"}
+    # The web UI no longer exposes manual last-epoch exclusion; the parser
+    # automatically drops an incomplete final epoch when the source data has one.
+    exclude_last_epoch = False
     epoching_enabled = str(form.get("parser_enable_epoching", "")).lower() in {"1", "true", "on", "yes"}
     aggregate_enabled = str(form.get("parser_enable_aggregate", "")).lower() in {"1", "true", "on", "yes"}
     epoch_length_s = _optional_float(form.get("parser_epoch_length_s")) if epoching_enabled else None
@@ -6075,22 +6093,17 @@ def _build_parse_config_from_form(form):
         if axis_ids < -1:
             raise ValueError("IDs axis must be greater than or equal to -1 (None).")
 
-        all_axes = [axis_samples]
-        if axis_channels >= 0:
-            all_axes.append(axis_channels)
-        if axis_epochs >= 0:
-            all_axes.append(axis_epochs)
-        if axis_ids >= 0:
-            all_axes.append(axis_ids)
-        if len(set(all_axes)) != len(all_axes):
-            raise ValueError("Array axis mapping: each dimension can only be assigned to one role.")
         array_axes = {"samples": axis_samples}
-        if axis_channels >= 0:
-            array_axes["channels"] = axis_channels
-        if axis_epochs >= 0:
-            array_axes["epochs"] = axis_epochs
-        if axis_ids >= 0:
-            array_axes["ids"] = axis_ids
+        used_axes = {axis_samples}
+        for role, axis_value in (
+            ("channels", axis_channels),
+            ("epochs", axis_epochs),
+            ("ids", axis_ids),
+        ):
+            if axis_value < 0 or axis_value in used_axes:
+                continue
+            array_axes[role] = axis_value
+            used_axes.add(axis_value)
 
     sensor_names = _parse_sensor_names(form.get("parser_sensor_names"))
     ch_names_source = (form.get("parser_ch_names_source") or "").strip()
