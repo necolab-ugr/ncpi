@@ -30,7 +30,7 @@
         </div>
         <div x-cloak x-show="status === 'finished' && !pending" class="text-primary dark:text-primary text-4xl">✅</div>
         <div x-cloak x-show="status === 'cancelled' && !pending" class="text-amber-500 dark:text-amber-400 text-4xl">■</div>
-        <div x-cloak x-show="status === 'failed' || error" class="flex flex-col items-center gap-6 text-center">
+        <div x-cloak x-show="status === 'failed' || error" style="display: none" class="flex flex-col items-center gap-6 text-center">
             <div class="text-red-500 dark:text-red-400 text-4xl">❌</div>
         </div>
         <div class="flex flex-col gap-2">
@@ -61,7 +61,7 @@
         </p>
 
         <!-- Error message section - only shows when error exists -->
-        <div x-show="status === 'failed' || error" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+        <div x-show="status === 'failed' || error" style="display: none" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
             <p class="text-sm font-medium text-red-700 dark:text-red-300">
                 Error: <span x-text="error"></span>
             </p>
