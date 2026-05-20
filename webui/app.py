@@ -6200,6 +6200,7 @@ def _build_parse_config_from_form(form):
             zscore=zscore,
             zscore_after_epoch=zscore_after_epoch,
             exclude_last_epoch=exclude_last_epoch,
+            align_epoch_count_to_minimum=False,
             aggregate_over=aggregate_over,
             aggregate_method=aggregate_method,
             aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -6240,6 +6241,7 @@ def _build_parse_config_from_form(form):
         zscore=zscore,
         zscore_after_epoch=zscore_after_epoch,
         exclude_last_epoch=exclude_last_epoch,
+        align_epoch_count_to_minimum=False,
         aggregate_over=aggregate_over,
         aggregate_method=aggregate_method,
         aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -15936,9 +15938,12 @@ def start_computation_redirect(computation_type):
 
         selected_method = (request.form.get("select-method") or "").strip()
         app.logger.warning("[compute %s] features selected_method=%s", job_id, selected_method)
-        valid_feature_methods = {"catch22", "specparam"}
+        valid_feature_methods = {"catch22", "specparam", "dfa", "fEI", "custom"}
         if selected_method not in valid_feature_methods:
             flash('Select a valid features method before computing.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
+        if selected_method == "custom" and not (request.form.get("custom_feature_script") or "").strip():
+            flash('Provide a custom feature extraction script before computing.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
