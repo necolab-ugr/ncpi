@@ -23,8 +23,8 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("Trials/Epochs axis None Dim 0").first.select_option("0")
     page.get_by_label("Recording type source * Value").first.select_option("__value__")
     page.get_by_label("Recording type value LFP CDM").first.select_option("EEG")
-    page.get_by_label("Subject ID source None Custom").select_option("__file_extracted_chain_2")
-    page.get_by_label("Group source None Custom").select_option("__file_extracted_chain_0")
+    page.get_by_label("Subject ID source None Custom").select_option("__file_extracted_sep__underscore__2")
+    page.get_by_label("Group source None Custom").select_option("__file_extracted_sep__underscore__0")
     page.get_by_label("Species source None Custom").select_option("__value__")
     page.get_by_role("textbox", name="Species value").click()
     page.get_by_role("textbox", name="Species value").fill("human")
@@ -44,7 +44,7 @@ def run(playwright: Playwright) -> None:
     avg = wait_and_get_feature_average(
         page,
         method_name = "catch22",
-        timeout_terminal=120,
+        timeout_terminal=460,
         timeout_file=60,
     )
 

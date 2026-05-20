@@ -26,7 +26,7 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("IDs axis None Dim 0 Dim 1 Dim").first.select_option("-1")
     page.get_by_label("Trials/Epochs axis None Dim 0").first.select_option("-1")
     page.get_by_label("Recording type value LFP CDM").first.select_option("EEG")
-    page.get_by_label("Subject ID source None Custom").select_option("__file_extracted_chain_0")
+    page.get_by_label("Subject ID source None Custom").select_option("__file_extracted_sep__underscore__0")
     page.get_by_label("Species source None Custom").select_option("__value__")
     page.get_by_role("textbox", name="Species value").click()
     page.get_by_role("textbox", name="Species value").fill("human")
