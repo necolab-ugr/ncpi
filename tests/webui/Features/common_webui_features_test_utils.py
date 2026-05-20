@@ -4,9 +4,8 @@ import time
 import pickle
 from pathlib import Path
 import numpy as np
-from playwright.sync_api import Page, expect
 import pytest
-from playwright.sync_api import Playwright, sync_playwright, expect
+from playwright.sync_api import Playwright, sync_playwright, expect, Page, Locator
 
 
 # Sampling percentage
@@ -142,3 +141,152 @@ def wait_and_get_feature_average(
     features = emp_data["Features"].tolist()
     avg = np.nanmean([np.nanmean(np.asarray(x)) for x in features])
     return float(avg)
+
+
+# Variable global a nivel de módulo para recordar la última posición del cursor
+# Ayuda a que el movimiento sea más suave
+_last_cursor_pos = {"x": 24.0, "y": 24.0}
+
+
+def ensure_demo_cursor(page: Page) -> None:
+    """Asegura que el cursor rojo y su event listener existen en la página actual."""
+    # Inyectamos el CSS y el div si no están presentes
+    page.evaluate(
+        """
+        () => {
+            // Crear estilos si no existen
+            if (!document.getElementById('pw-demo-cursor-style')) {
+                const style = document.createElement('style');
+                style.id = 'pw-demo-cursor-style';
+                style.textContent = `
+                    #pw-demo-cursor {
+                        position: fixed;
+                        left: 24px;
+                        top: 24px;
+                        width: 24px;
+                        height: 24px;
+                        border-radius: 50%;
+                        background: rgba(220, 38, 38, 0.95);
+                        border: 3px solid white;
+                        box-shadow: 0 0 0 3px rgba(0,0,0,0.5), 0 0 0 8px rgba(220,38,38,0.2);
+                        transform: translate(-50%, -50%);
+                        transition: transform 0.09s ease;
+                        pointer-events: none;
+                        z-index: 2147483647;
+                    }
+                    #pw-demo-cursor.clicking {
+                        transform: translate(-50%, -50%) scale(0.78);
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+
+            // Crear el div del cursor si no existe
+            if (!document.getElementById('pw-demo-cursor')) {
+                const cursor = document.createElement('div');
+                cursor.id = 'pw-demo-cursor';
+                cursor.style.left = '24px';
+                cursor.style.top = '24px';
+                document.body.appendChild(cursor);
+            }
+
+            // Asegurar el event listener de mousemove (solo una vez por página)
+            if (!window.__pwDemoCursorMouseBound) {
+                window.__pwDemoCursorMouseBound = true;
+                document.addEventListener('mousemove', (e) => {
+                    const c = document.getElementById('pw-demo-cursor');
+                    if (c) {
+                        c.style.left = e.clientX + 'px';
+                        c.style.top = e.clientY + 'px';
+                    }
+                });
+            }
+        }
+        """
+    )
+
+
+def move_demo_cursor(page: Page, target_x: float, target_y: float, move_duration_ms: int = 400) -> None:
+    """
+    Mueve el ratón real de Playwright en línea recta hacia (target_x, target_y)
+    con un número fijo de steps, y espera el tiempo indicado para que la animación sea visible.
+    Además, actualiza la posición global almacenada.
+    """
+    global _last_cursor_pos
+    # Asegurar que el cursor existe antes de mover
+    ensure_demo_cursor(page)
+
+    # Usamos steps=40 por simplicidad (funciona bien en ventanas de hasta 1600x900)
+    page.mouse.move(target_x, target_y, steps=40)
+    # Pausa para que el vídeo capture el movimiento
+    page.wait_for_timeout(move_duration_ms)
+    # Actualizar posición recordada
+    _last_cursor_pos = {"x": target_x, "y": target_y}
+
+
+def click_with_demo_cursor(page: Page, locator: Locator, move_duration_ms: int = 400, click_delay: int = 80) -> None:
+    """Mueve el cursor al elemento, muestra efecto de click, y hace clic real."""
+    # Obtener coordenadas del centro del elemento
+    box = locator.bounding_box()
+    if not box:
+        raise ValueError("No se pudo obtener bounding box del elemento")
+    target_x = box["x"] + box["width"] / 2
+    target_y = box["y"] + box["height"] / 2
+
+    move_demo_cursor(page, target_x, target_y, move_duration_ms)
+
+    # Efecto visual de click (encogimiento)
+    page.evaluate("""
+        () => {
+            const c = document.getElementById('pw-demo-cursor');
+            if (c) {
+                c.classList.add('clicking');
+                setTimeout(() => c.classList.remove('clicking'), 120);
+            }
+        }
+    """)
+
+    # Clic real de Playwright
+    locator.click(delay=click_delay)
+    page.wait_for_timeout(200)  # Pequeña pausa para apreciar el click
+
+
+def select_option_with_cursor(page: Page, locator: Locator, value: str, move_duration_ms: int = 400) -> None:
+    """Mueve el cursor al select, luego selecciona la opción."""
+    box = locator.bounding_box()
+    if not box:
+        raise ValueError("No se pudo obtener bounding box del select")
+    target_x = box["x"] + box["width"] / 2
+    target_y = box["y"] + box["height"] / 2
+
+    move_demo_cursor(page, target_x, target_y, move_duration_ms)
+    locator.select_option(value)
+    page.wait_for_timeout(150)
+
+
+def fill_with_cursor(page: Page, locator: Locator, text: str, move_duration_ms: int = 400) -> None:
+    """Mueve el cursor al campo de texto y luego escribe el texto."""
+    box = locator.bounding_box()
+    if not box:
+        raise ValueError("No se pudo obtener bounding box del campo")
+    target_x = box["x"] + box["width"] / 2
+    target_y = box["y"] + box["height"] / 2
+
+    move_demo_cursor(page, target_x, target_y, move_duration_ms)
+    locator.fill(text)
+    page.wait_for_timeout(150)
+
+
+def check_with_cursor(page: Page, locator: Locator, move_duration_ms: int = 400) -> None:
+    """Mueve el cursor a un radio/checkbox y luego lo marca."""
+    box = locator.bounding_box()
+    if not box:
+        raise ValueError("No se pudo obtener bounding box del elemento")
+    target_x = box["x"] + box["width"] / 2
+    target_y = box["y"] + box["height"] / 2
+
+    move_demo_cursor(page, target_x, target_y, move_duration_ms)
+    # Opcional: añadir efecto de click si quieres
+    # page.evaluate("() => { const c = document.getElementById('pw-demo-cursor'); if(c) c.classList.add('clicking'); setTimeout(() => c.classList.remove('clicking'), 120); }")
+    locator.check()
+    page.wait_for_timeout(150)
