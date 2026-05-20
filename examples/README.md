@@ -1,194 +1,146 @@
 # Example Scripts
 
-This folder contains example scripts to generate results published in:
+This folder contains example scripts used to generate results for the publication below, plus additional simulation scripts
+(e.g., Cavallari and four-area cortical models) that were added later and are not part of the original publication:
 
-**[1] Alejandro Orozco Valero, Víctor Rodríguez-González, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie, 
-Francisco Pelayo, Christian Morillas, Jesús Poza, Carlos Gómez & Pablo Martínez-Cañada**  
-*A Python toolbox for neural circuit parameter inference.*  
-npj Syst Biol Appl 11, 45 (2025).  
-https://doi.org/10.1038/s41540-025-00527-9  
+**[1] Alejandro Orozco Valero, Victor Rodriguez-Gonzalez, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie,**
+**Francisco Pelayo, Christian Morillas, Jesus Poza, Carlos Gomez & Pablo Martinez-Canada**
+*A Python toolbox for neural circuit parameter inference.*
+npj Syst Biol Appl 11, 45 (2025).
+https://doi.org/10.1038/s41540-025-00527-9
 
----
+## Requirements for these examples
 
-**Note**: `LFP_developing_brain/figures/LFP_predictions.py` and `EEG_AD/figures/EEG_predictions.py`  perform a Linear 
-Mixed-Effects (LME) analysis, which requires both R and the Python `rpy2` packages to be installed beforehand 
-(e.g., ```conda install -c conda-forge r-base rpy2```). In the R environment, the following packages must also be 
-installed:
+Use the same base setup as the repository README:
 
+```bash
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
+pip install "ncpi[examples]"
+```
 
-  - `lme4`  
-  - `emmeans`
+### NEST-dependent examples
 
-  To install these packages in R, use:
+Some simulation examples require NEST (for example `examples/simulation/Hagen_model/` and
+`examples/simulation/four_area_cortical_model/`):
 
-  ```r
-  install.packages(c("lme4", "emmeans"))
-  ```
+```bash
+conda install -c conda-forge nest-simulator=3.8
+```
 
-  Or alternatively (if R packages fail to install), with conda:
-  ```bash
-  conda install -c conda-forge r-lme4 r-emmeans
-  ```
+If `nest-simulator` is not available for your platform/channel combination, follow:
+https://nest-simulator.readthedocs.io/
 
+On Windows, NEST-based examples are recommended via WSL2 (Ubuntu), not native Windows. One-time setup:
 
-  If you prefer not to use the LME analysis, you can opt to compute Cohen's d statistic instead, which does not 
-  require R.
+```powershell
+wsl --install
+```
 
-## 📂 Folder Structure
+Then inside Ubuntu/WSL:
 
-- **`tools.py`**:  
-  Contains shared utility functions used across the different example scripts.
+```bash
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
+pip install "ncpi[examples]"
+conda install -c conda-forge nest-simulator=3.8
+```
 
-### 🔵 `EEG_AD/`  
-Scripts to generate results from applying our inverse models to the EEG dataset used in the study. This dataset 
-includes both healthy controls (HCs) and patients clinically diagnosed with Alzheimer’s Disease (AD) at varying stages: 
-mild (ADMIL), moderate (ADMOD), and severe (ADSEV).
+### R-dependent analysis in figure scripts
 
-**Note**: This EEG dataset is not publicly available but can be provided by the authors upon reasonable 
-  request.
+`examples/LFP_developing_brain/figures/LFP_predictions.py` and
+`examples/EEG_AD/figures/EEG_predictions.py` can run LME analysis through `Analysis.lmer_tests`, which requires R,
+`rpy2`, and specific R packages.
 
-- **`EEG_AD.py`**:  
-  Extracts empirical features from EEG data and computes predictions of changes in cortical circuit parameters in 
-patients with dementia due to AD
-- **`figures/EEG_predictions.py`**:  
-    Generates **Figure 7**: *"Predicted circuit parameter imbalances in AD based on EEG data"*
+Install R first (for Conda environments):
 
-### 🔵 `LFP_developing_brain/`  
-Scripts to generate results of applying our inverse models to resting-state LFP recordings from the prefrontal 
-cortex (PFC) of unanesthetized mice during early postnatal development.  
+```bash
+conda install -c conda-forge r-base
+```
 
-- **`LFP_developing_brain.py`**:  
-  Extracts empirical features from developmental LFP data and computes predictions of changes in cortical circuit 
-parameters during the early postnatal period.
+Install Python-side analysis dependencies (includes `rpy2`):
 
-- **`figures/LFP_predictions.py`**:  
-  Generates **Figure 6**: *"Predictions of changes in cortical circuit parameters derived from developmental 
-LFP data."*
+```bash
+pip install "ncpi[analysis]"
+```
 
-- **`figures/emp_features.py`**: 
-    Plots features extracted from LFP data as a function of postnatal days.
+Then install the required R packages:
 
-### 🔵 `simulation/`
+```r
+install.packages(c("lme4", "emmeans"), repos="https://cloud.r-project.org")
+```
 
-This folder contains example network simulation workflows for both LIF and multicompartment models:
-- **`Hagen_model/`**: single-area LIF network model.
-- **`four_area_cortical_model/`**: multi-area (four-area) LIF network model.
-- **`Cavallari_model/`**: single-area conductance-based LIF network model using a custom NEST neuron extension module, plus a multicompartment NEURON/LFPy network simulation.
+Alternative (conda-forge):
 
-> **Note:** To run examples that include simulations of the LIF network models (e.g., in `Hagen_model/figures/example_full_pipeline.py`), 
-> the [NEST simulator](https://nest-simulator.readthedocs.io/) must be installed. You can install a pre-built NEST 
-> package with:
->
-> ```bash
-> conda install -c conda-forge nest-simulator=3.8
-> ```
->
-> Similarly, to compute field potentials, the [`LFPykernels`](https://github.com/LFPy/LFPykernels) package must be 
-> installed via pip:
->
-> ```bash
-> pip install LFPykernels
-> ```
->  If you encounter a binary incompatibility between your installed NumPy and scikit-learn packages after installing NEST—
-> for example, an error like *numpy.dtype size changed, may indicate binary incompatibility. Expected 96 from C header, 
-> got 88 from PyObject*—you can resolve it by force-reinstalling both packages:
->
-> ```bash
-> pip uninstall scikit-learn numpy -y
-> pip install scikit-learn==1.3.2 numpy
-> ```
+```bash
+conda install -c conda-forge r-lme4 r-emmeans
+```
 
-#### Figures Generation (`Hagen_model/figures/`)
+If you do not want to use R for these figure scripts, set their statistical mode to Cohen's d.
 
-- **`example_full_pipeline.py`**  
-  Generates plots for **Figure 3**: *"Representative simulations illustrating the dynamics of the LIF network model in 
-response to varying external input values."*
+## Folder structure
 
-- **`save_code_as_image.py`**  
-  Generates **Figure 2**: *"A Python code snippet demonstrating the usage of the `ncpi` library and its core classes."*
+- `tools.py`: shared utilities used by multiple example scripts.
+- `EEG_AD/`: EEG-based empirical pipeline and figure scripts.
+  - `EEG_AD.py`
+  - `figures/EEG_predictions.py`
+- `LFP_developing_brain/`: developmental LFP empirical pipeline and figure scripts.
+  - `LFP_developing_brain.py`
+  - `figures/LFP_predictions.py`
+  - `figures/emp_features.py`
+- `simulation/`: simulation workflows and model-specific scripts.
+  - `Hagen_model/`
+    - `figures/SBI_results.py`
+    - `figures/example_full_pipeline.py`
+    - `figures/save_code_as_image.py`
+    - `figures/sim_features_v1.py`
+    - `figures/sim_features_v2.py`
+    - `figures/sim_predictions.py`
+    - `simulation/example_model_simulation.py`
+    - `simulation/massive_model_simulation.py`
+    - `simulation/merge_massive_model_simulation_batches.py`
+    - `simulation/run_massive_model_simulation_slurm_array.sh`
+    - `simulation/params/analysis_params.py`
+    - `simulation/params/network_params.py`
+    - `simulation/params/simulation_params.py`
+    - `simulation/python/analysis.py`
+    - `simulation/python/network.py`
+    - `simulation/python/simulation.py`
+    - `train/RepeatedKFold.py`
+  - `four_area_cortical_model/`
+    - `simulation/example_model_simulation.py`
+    - `simulation/params/analysis_params.py`
+    - `simulation/params/network_params.py`
+    - `simulation/params/simulation_params.py`
+    - `simulation/python/analysis.py`
+    - `simulation/python/network.py`
+    - `simulation/python/simulation.py`
+  - `Cavallari_model/`
+    - `LIF_simulation/example_model_simulation.py`
+    - `LIF_simulation/massive_model_simulation.py`
+    - `LIF_simulation/merge_massive_model_simulation_batches.py`
+    - `LIF_simulation/run_massive_model_simulation_slurm_array.sh`
+    - `LIF_simulation/params/network_params.py`
+    - `LIF_simulation/params/simulation_params.py`
+    - `LIF_simulation/python/simulation.py`
+    - `MC_simulation/analysis_params.py`
+    - `MC_simulation/example_model_simulation.py`
+    - `neuron_model/README.md`
+    - `neuron_model/install.sh`
+    - `neuron_model/CMakeLists.txt`
+    - `neuron_model/src/CMakeLists.txt`
+    - `neuron_model/src/cavallari_module.cpp`
+    - `neuron_model/src/iaf_bw_2003.cpp`
+    - `neuron_model/src/iaf_bw_2003.h`
 
-- **`SBI_results.py`**  
-  Generates plots using SBI-based models (**Supplementary Material**).
+## Custom NEST extension (Cavallari model)
 
-- **`sim_features.py`**  
-  Generates **Figure 4**: *"Comparison of features extracted from simulated neural signals."*
-
-- **`sim_predictions.py`**  
-  Generates **Figure 5**: *"Predicted model parameters based on simulation data under various feature configurations."*
-
----
-
-#### Simulation Code (`Hagen_model/simulation/`)
-
-- **`params/`**  
-  Contains parameter sets used to run simulations of Hagen's model.
-
-- **`python/`**  
-  Contains the main Python script to execute Hagen’s model simulations.
-
-- **`compute_features.py`**  
-  Extracts features from simulated data.
-
-- **`example_model_simulation.py`**  
-  Example script demonstrating how to simulate Hagen’s model.
-
-- **`preprocessing.py`**  
-  Preprocesses simulated data and structures it appropriately before feature extraction.
-
-- **`sim_statistics.py`**  
-  Plots statistical relationships between model parameters and extracted features.
-
----
-
-#### Model Training (`Hagen_model/train/`)
-
-- **`RepeatedKFold.py`**  
-  Trains inverse models on simulation data using repeated K-fold cross-validation.
-
----
-
-#### Simulation Code (`four_area_cortical_model/simulation/`)
-
-- **`params/`**  
-  Contains parameter sets used to run simulations of the four-area cortical model.
-
-- **`python/`**  
-  Contains the main Python scripts to configure the network, run simulations, and perform analysis.
-
-- **`example_model_simulation.py`**  
-  Example script demonstrating how to simulate the four-area cortical model.
-
----
-
-#### Simulation Code (`Cavallari_model/LIF_simulation/`)
-
-- **`params/`**  
-  Contains parameter sets used to run simulations of the Cavallari conductance-based model.
-
-- **`python/`**  
-  Contains the main Python scripts to configure the network, run simulations, and perform analysis.
-
-- **`example_model_simulation.py`**  
-  Example script demonstrating how to simulate the Cavallari model.
-
-#### Simulation Code (`Cavallari_model/MC_simulation/`)
-
-- **`analysis_params.py`**  
-  Defines the multicompartment Hagen-style network parameters used by the direct MC simulation.
-
-- **`example_model_simulation.py`**  
-  Runs a single multicompartment network simulation using the Zenodo-hosted morphologies and NEURON mechanisms.
-
-#### Custom NEST extension (`Cavallari_model/neuron_model/`)
-
-This example depends on the custom `iaf_bw_2003` neuron model, which is not part of standard NEST.
-Build it locally before running the simulation:
+`examples/simulation/Cavallari_model/neuron_model/` provides a custom NEST extension (`iaf_bw_2003`) used by the
+Cavallari LIF simulation scripts. Build it before running those scripts:
 
 ```bash
 cd examples/simulation/Cavallari_model/neuron_model
 ./install.sh
 ```
-
-
----
- 
