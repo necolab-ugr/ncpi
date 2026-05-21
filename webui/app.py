@@ -16,6 +16,7 @@ import re
 import traceback
 import functools
 import textwrap
+import tempfile
 from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -130,7 +131,7 @@ job_futures = {}
 # Set NCPI_MAX_OUTPUT_LINES <= 0 for unlimited output retention (default).
 MAX_OUTPUT_LINES = max(0, int(os.environ.get("NCPI_MAX_OUTPUT_LINES", "0")))
 FEATURES_PARSER_FILE_EXTENSIONS = {
-    ".mat", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".ds", ".tsv", ".vhdr", ".dat"
+    ".mat", ".nwb", ".json", ".npy", ".csv", ".parquet", ".pkl", ".pickle", ".xlsx", ".xls", ".feather", ".set", ".fif", ".edf", ".ds", ".tsv", ".vhdr", ".dat"
 }
 FEATURES_MAX_SUBFOLDER_DEPTH = 6
 
@@ -5102,6 +5103,188 @@ def _collect_dataframe_candidate_fields_from_description(description):
     return [field for field in candidates if field in dataframe_fields]
 
 
+def _describe_nwb_parser_source(path):
+    from ncpi.EphysDatasetParser import _load_nwb_with_pynwb
+
+    source_obj = _load_nwb_with_pynwb(Path(path), load_data=False)
+    metadata = source_obj.get("metadata") if isinstance(source_obj.get("metadata"), dict) else {}
+    series_map = source_obj.get("series") if isinstance(source_obj.get("series"), dict) else {}
+
+    selected_series = str(source_obj.get("selected_series") or "").strip()
+    data_shape = source_obj.get("data_shape") or []
+    data_dtype = str(source_obj.get("data_dtype") or "")
+    ch_names = source_obj.get("ch_names") or []
+    n_channels = source_obj.get("n_channels")
+    try:
+        n_channels = int(n_channels) if n_channels is not None else None
+    except Exception:
+        n_channels = None
+    if n_channels is None and isinstance(ch_names, (list, tuple)):
+        n_channels = len(ch_names)
+
+    fs_val = source_obj.get("fs")
+    try:
+        fs_float = float(fs_val) if fs_val is not None else None
+    except Exception:
+        fs_float = None
+    duration_val = source_obj.get("duration_s")
+    try:
+        duration_float = float(duration_val) if duration_val is not None else None
+    except Exception:
+        duration_float = None
+    try:
+        series_count = int(source_obj.get("series_count") or len(series_map))
+    except Exception:
+        series_count = len(series_map)
+
+    def _axis_defaults_from_shape(shape):
+        try:
+            shape_tuple = tuple(int(dim) for dim in (shape or []))
+        except Exception:
+            shape_tuple = ()
+        if len(shape_tuple) <= 1:
+            return {
+                "axis_samples": 0,
+                "axis_channels": -1,
+                "axis_ids": -1,
+                "axis_epochs": -1,
+                "axis_confidence": "medium",
+            }
+        return {
+            "axis_samples": 0,
+            "axis_channels": 1,
+            "axis_ids": -1,
+            "axis_epochs": -1,
+            "axis_confidence": "high",
+        }
+
+    defaults = {
+        "data": "data",
+        "fs": "fs" if fs_float is not None else "",
+        "ch_names": "ch_names" if ch_names else "",
+        "recording_type": "recording_type" if source_obj.get("recording_type") else "",
+        "subject_id": "subject_id" if source_obj.get("subject_id") else "",
+        "group": "group" if source_obj.get("group") else "",
+        "species": "species" if source_obj.get("species") else "",
+        "condition": "condition" if source_obj.get("condition") else "",
+    }
+    defaults.update(_axis_defaults_from_shape(data_shape))
+
+    base_candidates = [
+        "data",
+        "fs",
+        "ch_names",
+        "recording_type",
+        "subject_id",
+        "species",
+        "series_name",
+        "series_path",
+        "series_type",
+        "n_channels",
+        "n_samples",
+        "duration_s",
+        "data_shape",
+        "data_dtype",
+        "metadata",
+    ]
+    metadata_candidates = [str(key) for key in metadata.keys() if str(key) not in base_candidates]
+    series_candidates = []
+    for series_key, payload in series_map.items():
+        safe_key = str(series_key)
+        for field in (
+            "data",
+            "fs",
+            "ch_names",
+            "recording_type",
+            "series_name",
+            "series_path",
+            "n_channels",
+            "n_samples",
+            "duration_s",
+            "data_shape",
+            "data_dtype",
+        ):
+            if field == "data" or field in payload:
+                series_candidates.append(f"series.{safe_key}.{field}")
+
+    candidate_fields = list(dict.fromkeys(base_candidates + metadata_candidates + series_candidates))
+    top_keys = [str(key) for key in source_obj.keys() if not str(key).startswith("__")]
+    if "data" not in top_keys:
+        top_keys.insert(0, "data")
+
+    def _detail(field, value=None, *, python_type=None, dtype="", shape=None, detail=""):
+        if python_type is None:
+            summarized = _summarize_value_for_ui(value)
+            python_type = summarized.get("python_type") or type(value).__name__
+            dtype = summarized.get("dtype") or dtype
+            shape = summarized.get("shape") if summarized.get("shape") is not None else shape
+            detail = summarized.get("detail") or detail
+        return {
+            "field": field,
+            "origin": "field",
+            "python_type": python_type or "",
+            "dtype": dtype or "",
+            "shape": shape,
+            "detail": detail or "",
+        }
+
+    field_details = [
+        _detail(
+            "data",
+            python_type="NWB TimeSeries data",
+            dtype=data_dtype,
+            shape=[int(dim) for dim in data_shape] if data_shape else None,
+            detail="NWB TimeSeries data (metadata only during inspection; loaded when computing).",
+        )
+    ]
+    for key in base_candidates[1:] + metadata_candidates:
+        if key in source_obj:
+            field_details.append(_detail(key, source_obj.get(key)))
+    for series_key, payload in series_map.items():
+        safe_key = str(series_key)
+        series_shape = payload.get("data_shape") or []
+        series_dtype = str(payload.get("data_dtype") or "")
+        field_details.append(
+            _detail(
+                f"series.{safe_key}.data",
+                python_type="NWB TimeSeries data",
+                dtype=series_dtype,
+                shape=[int(dim) for dim in series_shape] if series_shape else None,
+                detail=f"NWB series '{safe_key}' data (metadata only during inspection).",
+            )
+        )
+        for key in ("fs", "ch_names", "recording_type", "series_name", "series_path", "n_channels", "n_samples", "duration_s", "data_shape", "data_dtype"):
+            if key in payload:
+                field_details.append(_detail(f"series.{safe_key}.{key}", payload.get(key)))
+
+    summary_parts = ["NWB recording"]
+    if selected_series:
+        summary_parts.append(f"selected series: {selected_series}")
+    if isinstance(n_channels, int) and n_channels > 0:
+        summary_parts.append(f"{n_channels} channels")
+    if fs_float is not None and np.isfinite(fs_float) and fs_float > 0:
+        summary_parts.append(f"{fs_float:g} Hz")
+    if duration_float is not None and np.isfinite(duration_float) and duration_float > 0:
+        summary_parts.append(f"{duration_float:.3f}s")
+    if series_count:
+        summary_parts.append(f"{series_count} series")
+
+    payload = {
+        "source_type": "nwb",
+        "candidate_fields": candidate_fields,
+        "top_keys": top_keys,
+        "defaults": defaults,
+        "summary": " · ".join(summary_parts) + ".",
+        "sensor_count_estimate": n_channels,
+        "multi_sensor_detected": bool(n_channels and n_channels > 1),
+        "fs_hint_hz": fs_float,
+        "fs_hint_note": f"Sampling rate from selected NWB TimeSeries: {fs_float:g} Hz." if fs_float else None,
+        "field_details": field_details,
+        "manual_field_details": _manual_field_details_for_ui(),
+    }
+    return payload
+
+
 def _validate_data_locator_against_dataframe_source(data_locator, source_obj, source_label="selected source"):
     locator = str(data_locator or "").strip()
     if not locator:
@@ -5149,6 +5332,19 @@ def _validate_data_locator_against_dataframe_source(data_locator, source_obj, so
 
 
 def _validate_data_locator_against_source_path(data_locator, source_path, source_label="selected source"):
+    if Path(str(source_path or "")).suffix.lower() == ".nwb":
+        description = _describe_nwb_parser_source(source_path)
+        locator = str(data_locator or "").strip()
+        candidates = set(str(item or "").strip() for item in (description.get("candidate_fields") or []))
+        if locator in candidates:
+            return
+        preview = ", ".join(list(candidates)[:12])
+        if len(candidates) > 12:
+            preview += ", ..."
+        raise ValueError(
+            f"Data locator '{locator}' could not be resolved in {source_label}. "
+            f"Available NWB fields: {preview or '(none)'}."
+        )
     source_obj = _load_features_source(source_path)
     sample_name = os.path.basename(str(source_path or "").strip()) or "sample"
     label = f"{source_label} '{sample_name}'"
@@ -5480,6 +5676,22 @@ def _load_uploaded_source_in_memory(upload):
     if ext == ".mat":
         return compute_utils._load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
+    if ext == ".nwb":
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
+                handle.write(raw)
+                temp_path = handle.name
+            parser = EphysDatasetParser(ParseConfig())
+            loaded, _ = parser._load_source(temp_path)
+            return loaded
+        finally:
+            if temp_path and os.path.isfile(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
     raise ValueError(f"Unsupported file type for in-memory parsing: {ext}")
 
 
@@ -5674,6 +5886,9 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
 
 
 def _describe_parser_source(path):
+    if Path(str(path or "")).suffix.lower() == ".nwb":
+        return _describe_nwb_parser_source(path)
+
     source_obj = _load_features_source(path)
     fs_hint_hz = None
     fs_hint_note = None
@@ -5883,6 +6098,59 @@ def _describe_parser_source(path):
         defaults.update(_infer_axis_defaults_from_values(resolved_data, resolved_ch_names, resolved_ids))
         sensor_count = _estimate_sensor_count(resolved_data) if resolved_data is not None else None
         source_format = str(source_obj.get("__source_format__") or "").strip().lower()
+        if source_format == "nwb":
+            for key in ("data", "fs", "ch_names", "recording_type", "subject_id", "species"):
+                if key in source_obj:
+                    defaults[key] = key
+            fs_val = source_obj.get("fs")
+            try:
+                fs_float = float(fs_val) if fs_val is not None else None
+            except Exception:
+                fs_float = None
+            duration_val = source_obj.get("duration_s")
+            try:
+                duration_float = float(duration_val) if duration_val is not None else None
+            except Exception:
+                duration_float = None
+            n_channels = source_obj.get("n_channels")
+            if isinstance(n_channels, (int, float)):
+                try:
+                    n_channels = int(n_channels)
+                except Exception:
+                    n_channels = sensor_count
+            else:
+                n_channels = sensor_count
+            series_count = source_obj.get("series_count")
+            try:
+                series_count = int(series_count) if series_count is not None else None
+            except Exception:
+                series_count = None
+            selected_series = str(source_obj.get("selected_series") or "").strip()
+            summary_parts = ["NWB recording"]
+            if selected_series:
+                summary_parts.append(f"selected series: {selected_series}")
+            if isinstance(n_channels, int) and n_channels > 0:
+                summary_parts.append(f"{n_channels} channels")
+            if fs_float is not None and np.isfinite(fs_float) and fs_float > 0:
+                summary_parts.append(f"{fs_float:g} Hz")
+            if duration_float is not None and np.isfinite(duration_float) and duration_float > 0:
+                summary_parts.append(f"{duration_float:.3f}s")
+            if series_count is not None:
+                summary_parts.append(f"{series_count} series")
+            payload = {
+                "source_type": "nwb",
+                "candidate_fields": candidate_fields,
+                "top_keys": top_keys,
+                "defaults": defaults,
+                "summary": " · ".join(summary_parts) + ".",
+                "sensor_count_estimate": n_channels if isinstance(n_channels, int) else sensor_count,
+                "multi_sensor_detected": bool((n_channels if isinstance(n_channels, int) else sensor_count) and (n_channels if isinstance(n_channels, int) else sensor_count) > 1),
+                "fs_hint_hz": fs_float,
+                "fs_hint_note": f"Sampling rate from selected NWB TimeSeries: {fs_float:g} Hz." if fs_float else None,
+            }
+            payload["field_details"] = _describe_source_fields_for_ui(source_obj, candidate_fields, "field")
+            payload["manual_field_details"] = _manual_field_details_for_ui()
+            return payload
         if source_format == "edf":
             fs_val = source_obj.get("fs")
             try:
@@ -9582,30 +9850,32 @@ def features_parser_inspect():
                 dataframe_candidate_fields = metadata_summary.get("dataframe_candidate_fields") or []
                 inspected_file_count = int(metadata_summary.get("inspected_file_count") or 0)
 
-            selected_source_obj = None
-            try:
-                selected_source_obj = _load_features_source(inspect_path)
-            except Exception:
+            combined_defaults = selected_description.get("defaults")
+            if not combined_defaults:
                 selected_source_obj = None
-            combined_defaults = selected_description.get("defaults") or {
-                "data": _pick_data_field_guess(selected_data_candidates, ["sum", "data", "signal", "samples", "lfp", "eeg", "meg", "ecog", "cdm"], selected_source_obj),
-                "fs": _pick_field_guess_fuzzy(
-                    selected_data_candidates,
-                    ["fs", "fsample", "sfreq", "freq", "frequency", "sample_frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
-                ),
-                "ch_names": _pick_field_guess_fuzzy(
-                    selected_data_candidates,
-                    ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
-                ),
-                "recording_type": _pick_field_guess(selected_data_candidates, ["recording_type", "modality", "recording", "type"]),
-                "subject_id": _pick_field_guess(
-                    selected_data_candidates,
-                    ["subject_id", "sub_ids", "subid", "subject", "subj", "participant", "id", "ids"],
-                ),
-                "group": _pick_field_guess(selected_data_candidates, ["group", "cohort", "class"]),
-                "species": _pick_field_guess(selected_data_candidates, ["species", "animal", "organism"]),
-                "condition": _pick_field_guess(selected_data_candidates, ["condition", "state", "task"]),
-            }
+                try:
+                    selected_source_obj = _load_features_source(inspect_path)
+                except Exception:
+                    selected_source_obj = None
+                combined_defaults = {
+                    "data": _pick_data_field_guess(selected_data_candidates, ["sum", "data", "signal", "samples", "lfp", "eeg", "meg", "ecog", "cdm"], selected_source_obj),
+                    "fs": _pick_field_guess_fuzzy(
+                        selected_data_candidates,
+                        ["fs", "fsample", "sfreq", "freq", "frequency", "sample_frequency", "sampling_rate", "sampling_frequency", "sampling_frequency_hz"],
+                    ),
+                    "ch_names": _pick_field_guess_fuzzy(
+                        selected_data_candidates,
+                        ["ch_names", "channels", "channel_names", "channel", "labels", "sensors", "sensor", "ch"],
+                    ),
+                    "recording_type": _pick_field_guess(selected_data_candidates, ["recording_type", "modality", "recording", "type"]),
+                    "subject_id": _pick_field_guess(
+                        selected_data_candidates,
+                        ["subject_id", "sub_ids", "subid", "subject", "subj", "participant", "id", "ids"],
+                    ),
+                    "group": _pick_field_guess(selected_data_candidates, ["group", "cohort", "class"]),
+                    "species": _pick_field_guess(selected_data_candidates, ["species", "animal", "organism"]),
+                    "condition": _pick_field_guess(selected_data_candidates, ["condition", "state", "task"]),
+                }
 
             context_by_path = {
                 str(item.get("folder_path") or "").strip(): item

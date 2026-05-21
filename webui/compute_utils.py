@@ -869,6 +869,20 @@ def _load_uploaded_source_bytes(name, ext, content):
     if ext == ".mat":
         return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
+    if ext == ".nwb":
+        temp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
+                handle.write(raw)
+                temp_path = handle.name
+            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".nwb")
+        finally:
+            if temp_path and os.path.isfile(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
     if ext == ".edf":
         temp_path = ""
         try:
@@ -912,6 +926,14 @@ def _load_uploaded_source_bytes(name, ext, content):
 
 
 def _load_edf_with_parser(path):
+    from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
+
+    parser = EphysDatasetParser(ParseConfig())
+    source_obj, _ = parser._load_source(path)
+    return source_obj
+
+
+def _load_nwb_with_parser(path):
     from ncpi.EphysDatasetParser import EphysDatasetParser, ParseConfig
 
     parser = EphysDatasetParser(ParseConfig())
@@ -974,6 +996,12 @@ def _load_uploaded_source_path(path, name=None, ext=None):
 
     if ext == ".mat":
         return _load_mat_with_fallback(safe_path, in_memory=False, source_name=safe_name)
+
+    if ext == ".nwb":
+        try:
+            return _load_nwb_with_parser(safe_path)
+        except ImportError as exc:
+            raise ValueError(f"pynwb is required to parse .nwb files: {exc}")
 
     if ext == ".set":
         try:
@@ -2971,6 +2999,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             parsed_frames = []
             structure_reference_by_folder = {}
             axis_reference_by_folder = {}
+            variable_channel_warning_keys = set()
             log_every = max(1, total_uploads // 20)
             for idx, payload in enumerate(empirical_uploads, start=1):
                 name = payload.get("name") or f"file_{idx}"
@@ -3040,11 +3069,22 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                             axis_reference_by_folder[structure_key] = (str(name), selected_axis_lengths)
                         else:
                             baseline_name, baseline_axes = axis_reference_by_folder[structure_key]
+                            ignored_channel_mismatch = False
                             mismatches = [
                                 f"{role}: {selected_axis_lengths.get(role)} != {baseline_axes.get(role)}"
                                 for role in sorted(set(selected_axis_lengths) | set(baseline_axes))
+                                if not (
+                                    ext == ".nwb"
+                                    and role == "channels"
+                                    and selected_axis_lengths.get(role) != baseline_axes.get(role)
+                                )
                                 if selected_axis_lengths.get(role) != baseline_axes.get(role)
                             ]
+                            if (
+                                ext == ".nwb"
+                                and selected_axis_lengths.get("channels") != baseline_axes.get("channels")
+                            ):
+                                ignored_channel_mismatch = True
                             if mismatches:
                                 raise ValueError(
                                     f"Selected non-sample axis mismatch detected in folder '{folder_label}' "
@@ -3052,6 +3092,17 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                                     f"'{baseline_name}' ({', '.join(mismatches)}). "
                                     "Different sample counts are allowed and will be epoch-limited, but "
                                     "selected channels/trials/IDs axes must match."
+                                )
+                            if ignored_channel_mismatch and structure_key not in variable_channel_warning_keys:
+                                variable_channel_warning_keys.add(structure_key)
+                                _append_job_output(
+                                    job_status,
+                                    job_id,
+                                    "Warning: NWB files in folder "
+                                    f"'{folder_label}' have different channel counts "
+                                    f"({baseline_name}: {baseline_axes.get('channels')}, "
+                                    f"{name}: {selected_axis_lengths.get('channels')}). "
+                                    "All channels will be kept; no channel truncation is applied."
                                 )
 
                 parse_running = {"flag": True, "last_log": time.time()}
