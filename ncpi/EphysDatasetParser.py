@@ -552,8 +552,12 @@ class EphysDatasetParser:
             rows = self._apply_epoching_rows(rows)
             df = self._rows_to_df(rows)
 
-        # 4b) Keep all parsed series aligned when epoching produces different counts.
-        if bool(getattr(self.config, "align_epoch_count_to_minimum", True)):
+        # 4b) Keep all parsed series aligned when parser-driven epoching produces
+        # different counts. Do not alter pre-labeled epochs parsed from source data.
+        if (
+            self.config.epoch_length_s is not None
+            and bool(getattr(self.config, "align_epoch_count_to_minimum", True))
+        ):
             df = self._limit_epoch_count_to_minimum(df)
 
         # 4c) Exclude final epochs explicitly or when an incomplete final epoch is detected.
