@@ -28,7 +28,7 @@ DEFAULT_VIEWPORT_WIDTH = 1600
 DEFAULT_VIEWPORT_HEIGHT = 900
 DEFAULT_SLOW_MO_MS = 300
 DEFAULT_SESSION_LABEL = "webui docs"
-DEFAULT_SESSION_ROOT = "/tmp/ncpi_webui_session_2c3af880cfe741ceb12bc3a66e9750bf"
+DEFAULT_SESSION_ROOT = "/tmp/ncpi_webui_session_e6152202b3294223b22bb4fc0bc1682b"
 _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
 
 
@@ -263,7 +263,41 @@ def smooth_check(page: Page, locator: Locator, after_ms: int = 450) -> None:
 def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int = 450) -> None:
     move_to_locator(page, locator, click=False, pause_ms=180)
     move_to_locator(page, locator, click=True, pause_ms=80)
-    locator.select_option(value)
+    locator.click(delay=80)
+    page.wait_for_timeout(220)
+    state = locator.evaluate(
+        """
+        (el, targetValue) => {
+          const options = Array.from(el.options || []);
+          const values = options.map((opt) => String(opt.value || ""));
+          const labels = options.map((opt) => String((opt.textContent || "").trim()));
+          let targetIndex = values.findIndex((item) => item === targetValue);
+          if (targetIndex < 0) {
+            targetIndex = labels.findIndex((item) => item === targetValue);
+          }
+          const currentIndex = Number.isInteger(el.selectedIndex) ? el.selectedIndex : -1;
+          return { targetIndex, currentIndex, values, labels };
+        }
+        """,
+        value,
+    )
+    target_index = int(state.get("targetIndex", -1))
+    current_index = int(state.get("currentIndex", -1))
+    if target_index < 0:
+        raise RuntimeError(
+            f"Dropdown option {value!r} not found. "
+            f"Available values: {state.get('values', [])}, labels: {state.get('labels', [])}"
+        )
+    if current_index < 0:
+        locator.press("Home")
+        page.wait_for_timeout(120)
+        current_index = 0
+    if target_index != current_index:
+        key = "ArrowDown" if target_index > current_index else "ArrowUp"
+        for _ in range(abs(target_index - current_index)):
+            locator.press(key)
+            page.wait_for_timeout(120)
+    locator.press("Enter")
     page.wait_for_timeout(after_ms)
 
 
@@ -298,13 +332,144 @@ def wait_for_job_finished(page: Page, base_url: str, job_id: str, timeout_sec: i
     )
 
 
+def _has_any_file(dir_path: Path, suffixes: Optional[set[str]] = None) -> bool:
+    if not dir_path.is_dir():
+        return False
+    for entry in dir_path.rglob("*"):
+        if not entry.is_file():
+            continue
+        if suffixes and entry.suffix.lower() not in suffixes:
+            continue
+        return True
+    return False
+
+
+def _session_has_simulation_artifacts(session_root: str) -> bool:
+    base = Path(session_root)
+    return _has_any_file(base / "simulation" / "data", suffixes={".pkl"})
+
+
+def _session_has_field_potential_artifacts(session_root: str) -> bool:
+    base = Path(session_root)
+    return _has_any_file(base / "field_potential", suffixes={".pkl"})
+
+
 def load_requested_session(page: Page, session_root: str, session_label: str) -> None:
     smooth_click(page, page.get_by_role("link", name="Previous Sessions"))
     page.wait_for_url("**/sessions**")
-    print(f"[automation] loading saved session '{session_label}' -> {session_root}", flush=True)
-    target_form = page.locator(f"form:has(input[name='session_root'][value='{session_root}'])").first
+    page.wait_for_timeout(500)
+    entries = page.evaluate(
+        """
+        () => {
+          const parseStamp = (text) => {
+            const raw = String(text || '').trim();
+            if (!raw) return null;
+            let ts = Date.parse(raw);
+            if (!Number.isNaN(ts)) return ts;
+            const m = raw.match(/(\\d{4})-(\\d{2})-(\\d{2})[ T](\\d{2}):(\\d{2})(?::(\\d{2}))?/);
+            if (m) {
+              const y = Number(m[1]);
+              const mo = Number(m[2]) - 1;
+              const d = Number(m[3]);
+              const h = Number(m[4]);
+              const mi = Number(m[5]);
+              const s = Number(m[6] || '0');
+              return new Date(y, mo, d, h, mi, s).getTime();
+            }
+            return null;
+          };
+
+          const cards = Array.from(document.querySelectorAll('article'));
+          const entries = cards.map((card, idx) => {
+            const input = card.querySelector("input[name='session_root']");
+            const dtNodes = Array.from(card.querySelectorAll('dt'));
+            const ddNodes = Array.from(card.querySelectorAll('dd'));
+            let updated = '';
+            for (const dt of dtNodes) {
+              if ((dt.textContent || '').trim().toLowerCase() === 'last modified') {
+                const dd = dt.parentElement ? dt.parentElement.querySelector('dd') : null;
+                updated = (dd ? dd.textContent : '').trim();
+                break;
+              }
+            }
+            if (!updated && ddNodes.length >= 3) {
+              updated = (ddNodes[2].textContent || '').trim();
+            }
+            let modulesText = '';
+            for (const dt of dtNodes) {
+              if ((dt.textContent || '').trim().toLowerCase() === 'detected modules') {
+                const dd = dt.parentElement ? dt.parentElement.querySelector('dd') : null;
+                modulesText = (dd ? dd.textContent : '').trim();
+                break;
+              }
+            }
+            const modules = modulesText
+              .split(',')
+              .map((token) => token.trim().toLowerCase())
+              .filter((token) => token && token !== 'no module folders detected yet');
+            const isActive = Boolean(card.querySelector('span') && Array.from(card.querySelectorAll('span')).some((n) => (n.textContent || '').trim().toLowerCase() === 'active'));
+            return {
+              index: idx,
+              path: input ? String(input.value || '').trim() : '',
+              updated,
+              stamp: parseStamp(updated),
+              isActive,
+              modules,
+            };
+          }).filter((entry) => entry.path);
+
+          if (!entries.length) return [];
+          entries.sort((a, b) => {
+            if (a.stamp != null && b.stamp != null) return b.stamp - a.stamp;
+            if (a.stamp != null) return -1;
+            if (b.stamp != null) return 1;
+            if (a.updated && b.updated) return b.updated.localeCompare(a.updated);
+            return a.index - b.index;
+          });
+          return entries;
+        }
+        """
+    )
+    if not entries:
+        raise RuntimeError("No saved sessions found in /sessions page.")
+
+    required_modules = {"simulation", "field potential"}
+    eligible = []
+    for entry in entries:
+        if bool(entry.get("isActive")):
+            continue
+        modules = {str(item).strip().lower() for item in (entry.get("modules") or [])}
+        if not required_modules.issubset(modules):
+            continue
+        path_value = str(entry.get("path") or "")
+        if not _session_has_simulation_artifacts(path_value):
+            continue
+        if not _session_has_field_potential_artifacts(path_value):
+            continue
+        eligible.append(entry)
+    if not eligible:
+        raise RuntimeError(
+            "No previous session contains the artifacts required for feature extraction "
+            "(expected simulation/data/*.pkl and field_potential/**/*.pkl)."
+        )
+    target = eligible[0]
+    target_path = str(target["path"])
+    print(
+        f"[automation] loading most recent session with simulation+field potential artifacts "
+        f"(label={session_label!r}, requested={session_root!r}) -> "
+        f"{target_path} (updated={target.get('updated', '')}, modules={target.get('modules', [])})",
+        flush=True,
+    )
+    target_form = page.locator(f"form:has(input[name='session_root'][value='{target_path}'])").first
     if target_form.count() == 0:
-        raise RuntimeError(f"Saved session not found in UI: {session_root}")
+        raise RuntimeError(f"Target saved session form not found in UI: {target_path}")
+    target_card = page.locator(f"article:has(input[name='session_root'][value='{target_path}'])").first
+    if target_card.count() > 0:
+        target_card.evaluate(
+            "el => el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })"
+        )
+        page.wait_for_timeout(900)
+        move_to_locator(page, target_card, click=False, pause_ms=220)
     smooth_click(page, target_form.get_by_role("button"))
     page.wait_for_url("**/sessions**")
     page.wait_for_timeout(1200)
@@ -320,6 +485,13 @@ def wait_for_enabled(page: Page, locator: Locator, timeout_sec: int = 30) -> Non
             pass
         page.wait_for_timeout(200)
     raise RuntimeError("Timed out waiting for enabled UI control.")
+
+
+def select_catch22_method(page: Page) -> None:
+    catch22_radio = page.locator("input[type='radio'][name='select-method'][value='catch22']:visible").first
+    if catch22_radio.count() == 0:
+        raise RuntimeError("Could not find catch22 method selector.")
+    smooth_check(page, catch22_radio)
 
 
 def run_tutorial_recording(
@@ -393,11 +565,6 @@ def run_tutorial_recording(
                 raise RuntimeError("Could not find 'cdm.pkl' in detected simulation pipeline files.")
             smooth_click(page, cdm_entry)
 
-            parser_source = page.locator("select[name='parser_recording_type_source']:visible").first
-            parser_source.wait_for(state="visible", timeout=120_000)
-            smooth_select_option(page, parser_source, "__value__")
-            smooth_select_option(page, page.locator("select[name='parser_recording_type']:visible").first, "CDM")
-
             simulated_radio = page.locator("input[name='parser_metadata_mode'][value='simulated']:visible").first
             smooth_check(page, simulated_radio)
 
@@ -407,7 +574,7 @@ def run_tutorial_recording(
             smooth_click(page, page.get_by_role("button", name="Next: Select method"))
             page.locator("h2:has-text('Select Method')").first.wait_for(state="visible")
 
-            smooth_click(page, page.locator("label:has-text('Catch22')").first)
+            select_catch22_method(page)
             smooth_click(page, page.get_by_role("button", name="Next step"))
             page.locator("h1:has-text('Method Configuration')").first.wait_for(state="visible")
 

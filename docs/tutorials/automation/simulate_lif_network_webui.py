@@ -34,7 +34,7 @@ _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Automate and record: Hagen single-trial simulation (threads=32, NumPy seed=10), "
+            "Automate and record: Hagen single-trial simulation (threads=32), "
             "then Analysis -> Load all -> raster plot."
         )
     )
@@ -338,7 +338,41 @@ def smooth_check(page: Page, locator: Locator, after_ms: int = 450) -> None:
 def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int = 450) -> None:
     move_to_locator(page, locator, click=False, pause_ms=180)
     move_to_locator(page, locator, click=True, pause_ms=80)
-    locator.select_option(value)
+    locator.click(delay=80)
+    page.wait_for_timeout(220)
+    state = locator.evaluate(
+        """
+        (el, targetValue) => {
+          const options = Array.from(el.options || []);
+          const values = options.map((opt) => String(opt.value || ""));
+          const labels = options.map((opt) => String((opt.textContent || "").trim()));
+          let targetIndex = values.findIndex((item) => item === targetValue);
+          if (targetIndex < 0) {
+            targetIndex = labels.findIndex((item) => item === targetValue);
+          }
+          const currentIndex = Number.isInteger(el.selectedIndex) ? el.selectedIndex : -1;
+          return { targetIndex, currentIndex, values, labels };
+        }
+        """,
+        value,
+    )
+    target_index = int(state.get("targetIndex", -1))
+    current_index = int(state.get("currentIndex", -1))
+    if target_index < 0:
+        raise RuntimeError(
+            f"Dropdown option {value!r} not found. "
+            f"Available values: {state.get('values', [])}, labels: {state.get('labels', [])}"
+        )
+    if current_index < 0:
+        locator.press("Home")
+        page.wait_for_timeout(120)
+        current_index = 0
+    if target_index != current_index:
+        key = "ArrowDown" if target_index > current_index else "ArrowUp"
+        for _ in range(abs(target_index - current_index)):
+            locator.press(key)
+            page.wait_for_timeout(120)
+    locator.press("Enter")
     page.wait_for_timeout(after_ms)
 
 
@@ -409,6 +443,32 @@ def wait_for_raster_plot_rendered(page: Page, timeout_sec: int) -> None:
             raise
 
 
+def scroll_plot_into_view(page: Page) -> None:
+    page.evaluate(
+        """
+        () => {
+          const img = document.getElementById('plot-image');
+          if (!img) return;
+          img.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        """
+    )
+    page.wait_for_timeout(1200)
+
+
+def scroll_simulation_outputs_controls_into_view(page: Page) -> None:
+    page.evaluate(
+        """
+        () => {
+          const plotType = document.getElementById('sim-plot-type');
+          if (!plotType) return;
+          plotType.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        """
+    )
+    page.wait_for_timeout(900)
+
+
 def run_tutorial_recording(
     base_url: str,
     headless: bool,
@@ -455,10 +515,6 @@ def run_tutorial_recording(
             page.wait_for_url("**/simulation/new_sim/hagen**")
 
             smooth_fill(page, page.locator("input[data-param='local_num_threads']"), "32")
-            smooth_check(page, page.locator("#sim-use-numpy-seed"))
-            smooth_fill(page, page.locator("#sim-numpy-seed"), "10")
-            smooth_check(page, page.locator("input[name='sim_run_mode'][value='single']"))
-            smooth_fill(page, page.locator("#sim-repetitions"), "1")
             print("[automation] submitting simulation...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Run trial simulation"))
             page.wait_for_url("**/job_status/**", timeout=ui_timeout_sec * 1000)
@@ -479,11 +535,13 @@ def run_tutorial_recording(
             smooth_click(page, load_all)
 
             smooth_click(page, page.get_by_role("button", name="Simulation outputs"))
+            scroll_simulation_outputs_controls_into_view(page)
             smooth_select_option(page, page.locator("#sim-plot-type"), "raster")
             print("[automation] plotting raster...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
 
             wait_for_raster_plot_rendered(page, timeout_sec=ui_timeout_sec)
+            scroll_plot_into_view(page)
             page.wait_for_timeout(1500)
 
             print("[automation] capturing poster...", flush=True)

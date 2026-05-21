@@ -27,7 +27,6 @@
               <li><a class="subnav2 active" href="./extract-features.html">3. Feature Extraction</a></li>
               <li><a class="subnav2" href="./train-inverse-model.html">4. Inverse Model Training</a></li>
               <li><a class="subnav2" href="./compute-predictions.html">5. Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-simulation-results.html">6. Plot Simulation Results</a></li>
               <li class="subnav-group">Empirical Dataset Analysis</li>
               <li><a class="subnav2" href="./load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
               <li><a class="subnav2" href="./plot-empirical-results.html">2. Plot Empirical Results</a></li>
@@ -64,15 +63,9 @@
         <section id="overview">
           <h1>Feature Extraction</h1>
           <p>
-            <span class="pill">WebUI</span>
-            <span class="pill">Simulation Pipeline</span>
-            <span class="pill">catch22</span>
-          </p>
-          <p>
-            As in previous tutorial, we begin with loading simulation and field potential data from previous session.
-            Then we open Features from the dashboard, choose <code>Continue simulation pipeline</code>, select
-            <code>cdm.pkl</code>, configure EphysDatasetParser with recording type <code>CDM</code> and data origin
-            <code>Simulated</code>, enable epoching, choose <code>catch22</code>, and compute features.
+            This tutorial shows the feature-extraction stage of the simulation pipeline,
+            where simulated field-potential signals are transformed into feature vectors
+            for downstream modeling steps.
           </p>
         </section>
 

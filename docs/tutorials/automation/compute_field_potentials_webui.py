@@ -28,7 +28,7 @@ DEFAULT_VIEWPORT_WIDTH = 1600
 DEFAULT_VIEWPORT_HEIGHT = 900
 DEFAULT_SLOW_MO_MS = 300
 DEFAULT_SESSION_LABEL = "webui docs"
-DEFAULT_SESSION_ROOT = "/tmp/ncpi_webui_session_dd66d7487893495d855245c263e457c7"
+DEFAULT_SESSION_ROOT = "/tmp/ncpi_webui_session_e6152202b3294223b22bb4fc0bc1682b"
 DEFAULT_MC_FOLDER = "/home/pablomc/Downloads/multicompartment_neuron_network"
 DEFAULT_OUTPUT_SIM_FOLDER = (
     "/home/pablomc/Downloads/multicompartment_neuron_network/output/"
@@ -299,7 +299,41 @@ def smooth_check(page: Page, locator: Locator, after_ms: int = 450) -> None:
 def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int = 450) -> None:
     move_to_locator(page, locator, click=False, pause_ms=180)
     move_to_locator(page, locator, click=True, pause_ms=80)
-    locator.select_option(value)
+    locator.click(delay=80)
+    page.wait_for_timeout(220)
+    state = locator.evaluate(
+        """
+        (el, targetValue) => {
+          const options = Array.from(el.options || []);
+          const values = options.map((opt) => String(opt.value || ""));
+          const labels = options.map((opt) => String((opt.textContent || "").trim()));
+          let targetIndex = values.findIndex((item) => item === targetValue);
+          if (targetIndex < 0) {
+            targetIndex = labels.findIndex((item) => item === targetValue);
+          }
+          const currentIndex = Number.isInteger(el.selectedIndex) ? el.selectedIndex : -1;
+          return { targetIndex, currentIndex, values, labels };
+        }
+        """,
+        value,
+    )
+    target_index = int(state.get("targetIndex", -1))
+    current_index = int(state.get("currentIndex", -1))
+    if target_index < 0:
+        raise RuntimeError(
+            f"Dropdown option {value!r} not found. "
+            f"Available values: {state.get('values', [])}, labels: {state.get('labels', [])}"
+        )
+    if current_index < 0:
+        locator.press("Home")
+        page.wait_for_timeout(120)
+        current_index = 0
+    if target_index != current_index:
+        key = "ArrowDown" if target_index > current_index else "ArrowUp"
+        for _ in range(abs(target_index - current_index)):
+            locator.press(key)
+            page.wait_for_timeout(120)
+    locator.press("Enter")
     page.wait_for_timeout(after_ms)
 
 
@@ -367,6 +401,19 @@ def wait_for_plot_rendered(page: Page, timeout_sec: int) -> None:
         )
         if not loaded:
             raise
+
+
+def scroll_plot_into_view(page: Page) -> None:
+    page.evaluate(
+        """
+        () => {
+          const img = document.getElementById('plot-image');
+          if (!img) return;
+          img.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        """
+    )
+    page.wait_for_timeout(1200)
 
 
 def _split_abs_path(path_value: str) -> list[str]:
@@ -490,13 +537,137 @@ def set_kernel_params_fallback(
     )
 
 
+def _has_any_file(dir_path: Path, suffixes: Optional[set[str]] = None) -> bool:
+    if not dir_path.is_dir():
+        return False
+    for entry in dir_path.rglob("*"):
+        if not entry.is_file():
+            continue
+        if suffixes and entry.suffix.lower() not in suffixes:
+            continue
+        return True
+    return False
+
+
+def _session_has_simulation_artifacts(session_root: str) -> bool:
+    base = Path(session_root)
+    data_dir = base / "simulation" / "data"
+    return _has_any_file(data_dir, suffixes={".pkl"})
+
+
 def load_requested_session(page: Page, session_root: str, session_label: str) -> None:
     smooth_click(page, page.get_by_role("link", name="Previous Sessions"))
     page.wait_for_url("**/sessions**")
-    print(f"[automation] loading saved session '{session_label}' -> {session_root}", flush=True)
-    target_form = page.locator(f"form:has(input[name='session_root'][value='{session_root}'])").first
+    page.wait_for_timeout(500)
+    entries = page.evaluate(
+        """
+        () => {
+          const parseStamp = (text) => {
+            const raw = String(text || '').trim();
+            if (!raw) return null;
+            let ts = Date.parse(raw);
+            if (!Number.isNaN(ts)) return ts;
+            const m = raw.match(/(\\d{4})-(\\d{2})-(\\d{2})[ T](\\d{2}):(\\d{2})(?::(\\d{2}))?/);
+            if (m) {
+              const y = Number(m[1]);
+              const mo = Number(m[2]) - 1;
+              const d = Number(m[3]);
+              const h = Number(m[4]);
+              const mi = Number(m[5]);
+              const s = Number(m[6] || '0');
+              return new Date(y, mo, d, h, mi, s).getTime();
+            }
+            return null;
+          };
+
+          const cards = Array.from(document.querySelectorAll('article'));
+          const entries = cards.map((card, idx) => {
+            const input = card.querySelector("input[name='session_root']");
+            const dtNodes = Array.from(card.querySelectorAll('dt'));
+            const ddNodes = Array.from(card.querySelectorAll('dd'));
+            let updated = '';
+            for (const dt of dtNodes) {
+              if ((dt.textContent || '').trim().toLowerCase() === 'last modified') {
+                const dd = dt.parentElement ? dt.parentElement.querySelector('dd') : null;
+                updated = (dd ? dd.textContent : '').trim();
+                break;
+              }
+            }
+            if (!updated && ddNodes.length >= 3) {
+              updated = (ddNodes[2].textContent || '').trim();
+            }
+            let modulesText = '';
+            for (const dt of dtNodes) {
+              if ((dt.textContent || '').trim().toLowerCase() === 'detected modules') {
+                const dd = dt.parentElement ? dt.parentElement.querySelector('dd') : null;
+                modulesText = (dd ? dd.textContent : '').trim();
+                break;
+              }
+            }
+            const modules = modulesText
+              .split(',')
+              .map((token) => token.trim().toLowerCase())
+              .filter((token) => token && token !== 'no module folders detected yet');
+            const isActive = Boolean(card.querySelector('span') && Array.from(card.querySelectorAll('span')).some((n) => (n.textContent || '').trim().toLowerCase() === 'active'));
+            return {
+              index: idx,
+              path: input ? String(input.value || '').trim() : '',
+              updated,
+              stamp: parseStamp(updated),
+              isActive,
+              modules,
+            };
+          }).filter((entry) => entry.path);
+
+          if (!entries.length) return [];
+          entries.sort((a, b) => {
+            if (a.stamp != null && b.stamp != null) return b.stamp - a.stamp;
+            if (a.stamp != null) return -1;
+            if (b.stamp != null) return 1;
+            if (a.updated && b.updated) return b.updated.localeCompare(a.updated);
+            return a.index - b.index;
+          });
+          return entries;
+        }
+        """
+    )
+    if not entries:
+        raise RuntimeError("No saved sessions found in /sessions page.")
+
+    required_modules = {"simulation"}
+    eligible = []
+    for entry in entries:
+        if bool(entry.get("isActive")):
+            continue
+        modules = {str(item).strip().lower() for item in (entry.get("modules") or [])}
+        if not required_modules.issubset(modules):
+            continue
+        if not _session_has_simulation_artifacts(str(entry.get("path") or "")):
+            continue
+        eligible.append(entry)
+    if not eligible:
+        raise RuntimeError(
+            "No previous session contains simulation artifacts required for field potential "
+            "tutorial (expected .pkl files under simulation/data)."
+        )
+    target = eligible[0]
+    target_path = str(target["path"])
+    print(
+        f"[automation] loading most recent session with simulation artifacts "
+        f"(label={session_label!r}, requested={session_root!r}) -> "
+        f"{target_path} (updated={target.get('updated', '')}, modules={target.get('modules', [])})",
+        flush=True,
+    )
+    target_form = page.locator(f"form:has(input[name='session_root'][value='{target_path}'])").first
     if target_form.count() == 0:
-        raise RuntimeError(f"Saved session not found in UI: {session_root}")
+        raise RuntimeError(f"Target saved session form not found in UI: {target_path}")
+    target_card = page.locator(f"article:has(input[name='session_root'][value='{target_path}'])").first
+    if target_card.count() > 0:
+        target_card.evaluate(
+            "el => el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })"
+        )
+        page.wait_for_timeout(900)
+        move_to_locator(page, target_card, click=False, pause_ms=220)
     smooth_click(page, target_form.get_by_role("button"))
     page.wait_for_url("**/sessions**")
     page.wait_for_timeout(1200)
@@ -556,11 +727,6 @@ def run_tutorial_recording(
 
             print("[automation] selecting multicompartment model folder in kernel browser...", flush=True)
             mc_card = page.locator("#kernelMcFolderUploadCard")
-            mc_server_btn = mc_card.locator(".kernel-path-upload-server")
-            if mc_server_btn.count() == 0:
-                raise RuntimeError("MC server-folder button not found in Kernel paths card.")
-            print("[automation] switching MC folder card to server mode...", flush=True)
-            smooth_click(page, mc_server_btn)
             print("[automation] opening MC server-folder modal...", flush=True)
             smooth_click(page, mc_card)
             select_server_folder_in_kernel_modal(page, mc_folder)
@@ -568,11 +734,6 @@ def run_tutorial_recording(
 
             print("[automation] selecting multicompartment output folder in kernel browser...", flush=True)
             output_card = page.locator("#kernelOutputSimUploadCard")
-            output_server_btn = output_card.locator(".kernel-path-upload-server")
-            if output_server_btn.count() == 0:
-                raise RuntimeError("Output server-folder button not found in Kernel paths card.")
-            print("[automation] switching output folder card to server mode...", flush=True)
-            smooth_click(page, output_server_btn)
             print("[automation] opening output server-folder modal...", flush=True)
             smooth_click(page, output_card)
             select_server_folder_in_kernel_modal(page, output_sim_folder)
@@ -612,6 +773,7 @@ def run_tutorial_recording(
             print("[automation] plotting CDM...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
             wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
+            scroll_plot_into_view(page)
             page.wait_for_timeout(2200)
 
             smooth_click(page, page.get_by_role("link", name="Back to analysis"))
@@ -621,6 +783,7 @@ def run_tutorial_recording(
             print("[automation] plotting LFP...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
             wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
+            scroll_plot_into_view(page)
             page.wait_for_timeout(2600)
 
             print("[automation] capturing poster...", flush=True)

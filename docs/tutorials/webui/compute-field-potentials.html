@@ -27,7 +27,6 @@
               <li><a class="subnav2" href="./extract-features.html">3. Feature Extraction</a></li>
               <li><a class="subnav2" href="./train-inverse-model.html">4. Inverse Model Training</a></li>
               <li><a class="subnav2" href="./compute-predictions.html">5. Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-simulation-results.html">6. Plot Simulation Results</a></li>
               <li class="subnav-group">Empirical Dataset Analysis</li>
               <li><a class="subnav2" href="./load-empirical-data-extract-features-compute-predictions.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
               <li><a class="subnav2" href="./plot-empirical-results.html">2. Plot Empirical Results</a></li>
@@ -64,16 +63,9 @@
         <section id="overview">
           <h1>Compute Field Potentials</h1>
           <p>
-            <span class="pill">WebUI</span>
-            <span class="pill">Kernel</span>
-            <span class="pill">CDM + LFP</span>
-          </p>
-          <p>
-            This tutorial loads a previous WebUI session, configures the Field Potential Kernel module
-            with the multicompartment model/output folders, computes CDM using
-            <code>KernelApproxCurrentDipoleMoment</code> and LFP using <code>GaussCylinderPotential</code>
-            with <code>decimation factor=10</code>, then opens Analysis
-            to plot CDM and LFP outputs.
+            This tutorial illustrates a kernel-based workflow to compute field potentials
+            from simulated activity, and then visualize the resulting CDM and LFP signals
+            with the Analysis module.
           </p>
         </section>
 
