@@ -298,43 +298,46 @@ def smooth_check(page: Page, locator: Locator, after_ms: int = 450) -> None:
 
 def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int = 450) -> None:
     move_to_locator(page, locator, click=False, pause_ms=180)
-    move_to_locator(page, locator, click=True, pause_ms=80)
-    locator.click(delay=80)
-    page.wait_for_timeout(220)
+    locator.scroll_into_view_if_needed()
+    locator.wait_for(state="visible")
     state = locator.evaluate(
         """
-        (el, targetValue) => {
+        (el) => {
           const options = Array.from(el.options || []);
-          const values = options.map((opt) => String(opt.value || ""));
-          const labels = options.map((opt) => String((opt.textContent || "").trim()));
-          let targetIndex = values.findIndex((item) => item === targetValue);
-          if (targetIndex < 0) {
-            targetIndex = labels.findIndex((item) => item === targetValue);
-          }
-          const currentIndex = Number.isInteger(el.selectedIndex) ? el.selectedIndex : -1;
-          return { targetIndex, currentIndex, values, labels };
+          return {
+            values: options.map((opt) => String(opt.value || "")),
+            labels: options.map((opt) => String((opt.textContent || "").trim())),
+          };
         }
-        """,
-        value,
+        """
     )
-    target_index = int(state.get("targetIndex", -1))
-    current_index = int(state.get("currentIndex", -1))
-    if target_index < 0:
+    values = state.get("values", [])
+    labels = state.get("labels", [])
+    if value not in values and value not in labels:
         raise RuntimeError(
             f"Dropdown option {value!r} not found. "
-            f"Available values: {state.get('values', [])}, labels: {state.get('labels', [])}"
+            f"Available values: {values}, labels: {labels}"
         )
-    if current_index < 0:
-        locator.press("Home")
-        page.wait_for_timeout(120)
-        current_index = 0
-    if target_index != current_index:
-        key = "ArrowDown" if target_index > current_index else "ArrowUp"
-        for _ in range(abs(target_index - current_index)):
-            locator.press(key)
+
+    last_exc: Optional[Exception] = None
+    for _ in range(3):
+        try:
+            selected = locator.select_option(value=value)
+            if not selected:
+                locator.select_option(label=value)
             page.wait_for_timeout(120)
-    locator.press("Enter")
-    page.wait_for_timeout(after_ms)
+            current = locator.evaluate("el => String(el && el.value != null ? el.value : '')")
+            if current == value:
+                page.wait_for_timeout(after_ms)
+                return
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+        page.wait_for_timeout(140)
+
+    if last_exc is not None:
+        raise RuntimeError(f"Failed to select dropdown option {value!r}: {last_exc}") from last_exc
+    current = locator.evaluate("el => String(el && el.value != null ? el.value : '')")
+    raise RuntimeError(f"Failed to select dropdown option {value!r}. Current value: {current!r}")
 
 
 def _extract_job_id_from_url(url: str) -> str:
@@ -769,8 +772,8 @@ def run_tutorial_recording(
             smooth_click(page, load_all)
 
             smooth_click(page, page.get_by_role("button", name="Simulation outputs"))
-            smooth_select_option(page, page.locator("#sim-plot-type"), "cdm")
-            print("[automation] plotting CDM...", flush=True)
+            smooth_select_option(page, page.locator("#sim-plot-type"), "lfp")
+            print("[automation] plotting LFP...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
             wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
             scroll_plot_into_view(page)
@@ -779,8 +782,8 @@ def run_tutorial_recording(
             smooth_click(page, page.get_by_role("link", name="Back to analysis"))
             page.wait_for_url("**/analysis**")
             smooth_click(page, page.get_by_role("button", name="Simulation outputs"))
-            smooth_select_option(page, page.locator("#sim-plot-type"), "lfp")
-            print("[automation] plotting LFP...", flush=True)
+            smooth_select_option(page, page.locator("#sim-plot-type"), "cdm")
+            print("[automation] plotting CDM...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
             wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
             scroll_plot_into_view(page)
