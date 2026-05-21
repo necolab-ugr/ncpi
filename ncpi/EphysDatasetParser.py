@@ -958,6 +958,9 @@ class ParseConfig:
     zscore: bool = False
     zscore_after_epoch: bool = False  # If True, apply z-score AFTER epoching (per-epoch)
     exclude_last_epoch: bool = False  # If True, exclude the last epoch from each time series
+    # If True, trim each grouped epoch series to the minimum count observed across groups.
+    # Disable this for faster parsing when variable epoch counts are acceptable downstream.
+    align_epoch_count_to_minimum: bool = True
 
     # Aggregation: aggregate over one or more categorical columns.
     # Examples:
@@ -1042,8 +1045,13 @@ class EphysDatasetParser:
             rows = self._apply_epoching_rows(rows)
             df = self._rows_to_df(rows)
 
-        # 4b) Keep all parsed series aligned when epoching produces different counts.
-        df = self._limit_epoch_count_to_minimum(df)
+        # 4b) Keep all parsed series aligned when parser-driven epoching produces
+        # different counts. Do not alter pre-labeled epochs parsed from source data.
+        if (
+            self.config.epoch_length_s is not None
+            and bool(getattr(self.config, "align_epoch_count_to_minimum", True))
+        ):
+            df = self._limit_epoch_count_to_minimum(df)
 
         # 4c) Exclude final epochs explicitly or when an incomplete final epoch is detected.
         if self.config.exclude_last_epoch:
@@ -1390,8 +1398,8 @@ class EphysDatasetParser:
                 channel_cols = [c for c in df.columns if c not in exclude and np.issubdtype(df[c].dtype, np.number)]
 
             # channel labels
-            ch_names = self._resolve(df, f.ch_names)
-            if isinstance(ch_names, (list, tuple)) and not isinstance(ch_names, str):
+            ch_names = self._normalize_channel_names(self._resolve(df, f.ch_names))
+            if isinstance(ch_names, list):
                 labels = list(ch_names)
                 if len(labels) != len(channel_cols):
                     raise ValueError("Length of ch_names does not match number of channel_columns.")
@@ -1480,13 +1488,7 @@ class EphysDatasetParser:
         epoch_val = self._resolve(d, f.epoch)
 
         # channel names
-        ch_names = self._resolve(d, f.ch_names)
-        if ch_names is not None and not isinstance(ch_names, str):
-            # MATLAB sometimes returns numpy arrays of dtype object
-            if isinstance(ch_names, np.ndarray):
-                ch_names = [str(x) for x in ch_names.tolist()]
-            elif isinstance(ch_names, (list, tuple)):
-                ch_names = [str(x) for x in ch_names]
+        ch_names = self._normalize_channel_names(self._resolve(d, f.ch_names))
 
         meta = self._resolve_metadata(d)
 
@@ -1804,11 +1806,8 @@ class EphysDatasetParser:
         spectral_kind = self._resolve(arr, f.spectral_kind)
         freqs = self._resolve(arr, f.freqs)
 
-        ch_names = self._resolve(arr, f.ch_names)
-        if isinstance(ch_names, (list, tuple)) and not isinstance(ch_names, str):
-            labels = [str(x) for x in ch_names]
-        else:
-            labels = None
+        ch_names = self._normalize_channel_names(self._resolve(arr, f.ch_names))
+        labels = ch_names if isinstance(ch_names, list) else None
 
         meta = self._resolve_metadata(arr)
 
@@ -2043,9 +2042,9 @@ class EphysDatasetParser:
         fs = self._resolve(raw, f.fs)
         fs = float(fs) if fs is not None else float(getattr(raw.info, "sfreq", 0))
 
-        ch_names = self._resolve(raw, f.ch_names)
-        if isinstance(ch_names, (list, tuple)):
-            labels = [str(x) for x in ch_names]
+        ch_names = self._normalize_channel_names(self._resolve(raw, f.ch_names))
+        if isinstance(ch_names, list):
+            labels = ch_names
         else:
             labels = list(getattr(raw, "ch_names", []))
 
@@ -2096,8 +2095,8 @@ class EphysDatasetParser:
         fs = self._resolve(epochs, f.fs)
         fs = float(fs) if fs is not None else float(getattr(epochs.info, "sfreq", epochs.info.get("sfreq")))
 
-        ch_names = self._resolve(epochs, f.ch_names)
-        labels = [str(x) for x in ch_names] if isinstance(ch_names, (list, tuple)) else list(getattr(epochs, "ch_names", []))
+        ch_names = self._normalize_channel_names(self._resolve(epochs, f.ch_names))
+        labels = ch_names if isinstance(ch_names, list) else list(getattr(epochs, "ch_names", []))
 
         data_domain = self._resolve(epochs, f.data_domain) or "time"
         spectral_kind = self._resolve(epochs, f.spectral_kind)
@@ -2174,6 +2173,71 @@ class EphysDatasetParser:
         if not all(32 <= i <= 126 for i in printable):
             return None
         return "".join(chr(i) for i in printable).strip()
+
+    def _coerce_channel_label_token(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, np.generic):
+            try:
+                value = value.item()
+            except Exception:
+                return None
+        if isinstance(value, bytes):
+            try:
+                text = value.decode("utf-8", errors="ignore").strip()
+            except Exception:
+                text = str(value).strip()
+            return text if text else None
+        if isinstance(value, str):
+            text = value.strip()
+            return text if text else None
+        if isinstance(value, (np.integer, int)):
+            return str(int(value))
+        if isinstance(value, (np.floating, float)):
+            if not np.isfinite(float(value)):
+                return None
+            fv = float(value)
+            return str(int(fv)) if fv.is_integer() else str(fv)
+        if isinstance(value, (list, tuple, set, dict, np.ndarray)):
+            return None
+        try:
+            text = str(value).strip()
+        except Exception:
+            return None
+        return text if text else None
+
+    def _normalize_channel_names(self, raw: Any) -> Optional[list[str]]:
+        if raw is None:
+            return None
+        if isinstance(raw, str):
+            label = self._coerce_channel_label_token(raw)
+            return [label] if label is not None else None
+
+        if isinstance(raw, np.ndarray):
+            arr = raw
+            if arr.ndim == 0:
+                label = self._coerce_channel_label_token(arr.item() if hasattr(arr, "item") else raw)
+                return [label] if label is not None else None
+            if arr.dtype.kind in {"U", "S"} and arr.ndim == 2:
+                labels = []
+                for row in arr.tolist():
+                    token = "".join(str(ch) for ch in row).strip()
+                    if token:
+                        labels.append(token)
+                return labels or None
+            items = arr.reshape(-1).tolist()
+        elif isinstance(raw, (list, tuple)):
+            items = list(raw)
+        else:
+            label = self._coerce_channel_label_token(raw)
+            return [label] if label is not None else None
+
+        labels = []
+        for item in items:
+            label = self._coerce_channel_label_token(item)
+            if label is not None:
+                labels.append(label)
+        return labels or None
 
     def _coerce_subject_id_token(self, value: Any) -> Any:
         """Normalize subject_id payloads from MATLAB/HDF5 into readable values."""
@@ -2678,6 +2742,10 @@ class EphysDatasetParser:
         """Exclude final epochs retrospectively when any final epoch is shorter."""
         if "epoch" not in df.columns or "data" not in df.columns or df.empty:
             return df
+        # When epoching is performed by this parser, windows are emitted only when complete
+        # (`range(0, n - win + 1, step)`), so no incomplete final epoch can be produced.
+        if self.config.epoch_length_s is not None:
+            return df
 
         def data_length(value):
             if value is None:
@@ -2736,12 +2804,11 @@ class EphysDatasetParser:
             if col in df.columns and not df[col].isna().all()
         ]
         grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
-        groups = list(grouped)
-        if not any(is_incomplete(frame) for _, frame in groups):
-            return df
-
+        any_incomplete_group = False
         drop_indices = []
-        for _, frame in groups:
+        for _, frame in grouped:
+            if is_incomplete(frame):
+                any_incomplete_group = True
             ordered = ordered_group(frame)
             if ordered.empty:
                 continue
@@ -2757,7 +2824,7 @@ class EphysDatasetParser:
                 continue
             drop_indices.extend(list(frame.index[frame["epoch"].map(lambda value: value == last_epoch)]))
 
-        if not drop_indices:
+        if not any_incomplete_group or not drop_indices:
             return df
         return df.drop(index=list(set(drop_indices))).reset_index(drop=True)
 
@@ -2786,6 +2853,52 @@ class EphysDatasetParser:
             if col in df.columns and not df[col].isna().all()
         ]
 
+        # Fast numeric path for common epoch labels produced by parser epoching.
+        # This avoids per-group Python loops on large non-aggregated datasets.
+        if not tools.ensure_module("pandas"):
+            return df
+        import pandas as pd  # type: ignore
+        try:
+            epoch_num = pd.to_numeric(df["epoch"], errors="coerce")
+            has_numeric_epochs = bool(epoch_num.notna().all())
+        except Exception:
+            epoch_num = None
+            has_numeric_epochs = False
+
+        if has_numeric_epochs:
+            df_fast = df.assign(_epoch_num=epoch_num)
+            # Very common case for parser-created epoch indices: per-group epochs are
+            # contiguous and start at 0. In that case, aligning epoch counts is just
+            # clipping by the smallest per-group max epoch index.
+            if group_cols:
+                per_group_max = (
+                    df_fast.groupby(group_cols, sort=False, dropna=False)["_epoch_num"].max()
+                )
+            else:
+                per_group_max = pd.Series([float(df_fast["_epoch_num"].max())])
+
+            if per_group_max.empty or int(per_group_max.shape[0]) < 2:
+                return df
+
+            min_max = float(per_group_max.min())
+            max_max = float(per_group_max.max())
+            if not np.isfinite(min_max) or not np.isfinite(max_max):
+                return df
+            if min_max < 0 or min_max == max_max:
+                return df
+
+            # Keep epochs up to smallest available max index across groups.
+            keep_mask = df_fast["_epoch_num"] <= min_max
+
+            import warnings
+            warnings.warn(
+                "Epoch count was limited to the smallest available count "
+                f"({int(min_max + 1)}; max was {int(max_max + 1)}) because series produced different "
+                "numbers of epochs after epoching.",
+                RuntimeWarning,
+            )
+            return df_fast.loc[keep_mask].drop(columns=["_epoch_num"]).reset_index(drop=True)
+
         def epoch_sort_key(value):
             if self._is_missing_value(value):
                 return (1, 0, "")
@@ -2812,24 +2925,33 @@ class EphysDatasetParser:
                 values.append(value)
             return sorted(values, key=epoch_sort_key)
 
-        groups = list(df.groupby(group_cols, sort=False, dropna=False)) if group_cols else [(None, df)]
-        epoch_values_by_group = []
-        for group_key, frame in groups:
+        grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
+        num_groups_with_epochs = 0
+        min_count = None
+        max_count = 0
+        for _, frame in grouped:
             values = ordered_epoch_values(frame)
-            if values:
-                epoch_values_by_group.append((group_key, frame, values))
+            if not values:
+                continue
+            num_groups_with_epochs += 1
+            count = len(values)
+            if min_count is None or count < min_count:
+                min_count = count
+            if count > max_count:
+                max_count = count
 
-        if len(epoch_values_by_group) < 2:
+        if num_groups_with_epochs < 2 or min_count is None:
             return df
 
-        counts = [len(values) for _, _, values in epoch_values_by_group]
-        min_count = min(counts)
-        max_count = max(counts)
         if min_count <= 0 or min_count == max_count:
             return df
 
         drop_indices = []
-        for _, frame, values in epoch_values_by_group:
+        grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
+        for _, frame in grouped:
+            values = ordered_epoch_values(frame)
+            if not values:
+                continue
             keep_markers = {str(value) for value in values[:min_count]}
             drop_indices.extend(
                 list(frame.index[frame["epoch"].map(lambda value: str(value) not in keep_markers)])

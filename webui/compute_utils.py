@@ -2336,6 +2336,135 @@ def _parse_range_pair(params, min_key, max_key):
     return [float(lo), float(hi)]
 
 
+def _parse_optional_bool_param(params, key):
+    raw = _get_param(params, key, None)
+    if raw is None:
+        return None
+    parsed = _parse_bool(raw, default=None)
+    if parsed is None:
+        raise ValueError(f"Invalid boolean for '{key}': {raw}")
+    return bool(parsed)
+
+
+def _compile_custom_feature_callable(script_source):
+    source = str(script_source or "")
+    if not source.strip():
+        raise ValueError("Custom feature script is empty.")
+
+    namespace = {}
+    runtime_globals = {
+        "__builtins__": __builtins__,
+        "np": np,
+        "pd": pd,
+    }
+    try:
+        compiled = compile(source, "<webui_custom_feature_script>", "exec")
+        exec(compiled, runtime_globals, namespace)
+    except Exception as exc:
+        raise ValueError(f"Custom feature script failed to compile/execute: {exc}") from exc
+
+    for fn_name in ("custom_feature", "compute_feature", "extract_feature"):
+        fn = namespace.get(fn_name) or runtime_globals.get(fn_name)
+        if callable(fn):
+            return fn, fn_name
+
+    raise ValueError(
+        "Custom script must define one callable named 'custom_feature', "
+        "'compute_feature', or 'extract_feature'."
+    )
+
+
+def _compute_custom_features(method_params, samples, exec_opts, progress_callback=None, log_callback=None):
+    script_source = method_params.get("custom_feature_script", "")
+    feature_fn, fn_name = _compile_custom_feature_callable(script_source)
+    normalize = bool(method_params.get("normalize", False))
+    total = len(samples)
+    outputs = []
+
+    if log_callback:
+        log_callback(
+            f"Custom script function detected: {fn_name} (n_jobs={exec_opts.get('n_jobs')}, "
+            f"start_method={exec_opts.get('start_method')})."
+        )
+        if int(exec_opts.get("n_jobs") or 1) > 1:
+            log_callback("Custom method is executed sequentially in webui for this run.")
+
+    if progress_callback:
+        try:
+            progress_callback(0, total, 0)
+        except TypeError:
+            progress_callback(0)
+
+    def _normalize_custom_output(value, sample_idx):
+        if value is None:
+            raise ValueError(f"Custom feature returned None for sample index {sample_idx}.")
+
+        if isinstance(value, np.generic):
+            value = value.item()
+
+        # Scalars are accepted directly.
+        if np.isscalar(value):
+            try:
+                scalar = float(value)
+            except Exception as exc:
+                raise ValueError(
+                    f"Custom feature returned non-numeric scalar for sample index {sample_idx}: {type(value)!r}."
+                ) from exc
+            if not np.isfinite(scalar):
+                return np.nan
+            return scalar
+
+        # Lists/tuples/arrays are accepted as numeric vectors.
+        try:
+            arr = np.asarray(value, dtype=float).squeeze()
+        except Exception as exc:
+            raise ValueError(
+                f"Custom feature must return a numeric scalar or numeric array. "
+                f"Sample index {sample_idx} returned type {type(value)!r}."
+            ) from exc
+
+        if arr.ndim == 0:
+            scalar = float(arr.item())
+            return scalar if np.isfinite(scalar) else np.nan
+
+        return arr.reshape(-1)
+
+    user_params = {k: v for k, v in dict(method_params).items() if k != "custom_feature_script"}
+    expected_vector_len = None
+    for idx, sample in enumerate(samples, start=1):
+        x = np.asarray(sample).squeeze()
+        if x.ndim == 0:
+            x = np.asarray([x], dtype=float)
+        if x.ndim != 1:
+            raise ValueError(f"Custom feature expects 1D samples. Sample index {idx - 1} has shape {np.asarray(sample).shape}.")
+
+        if normalize:
+            mu = float(np.mean(x))
+            sigma = float(np.std(x))
+            if np.isfinite(sigma) and sigma > 0:
+                x = (x - mu) / sigma
+
+        out_value = _normalize_custom_output(feature_fn(x, user_params), idx - 1)
+        if isinstance(out_value, np.ndarray):
+            vec_len = int(out_value.size)
+            if expected_vector_len is None:
+                expected_vector_len = vec_len
+            elif vec_len != expected_vector_len:
+                raise ValueError(
+                    f"Custom feature returned arrays with inconsistent lengths: "
+                    f"expected {expected_vector_len}, got {vec_len} at sample index {idx - 1}."
+                )
+        outputs.append(out_value)
+        pct = int((idx * 100) / total)
+        if progress_callback:
+            try:
+                progress_callback(idx, total, pct)
+            except TypeError:
+                progress_callback(pct)
+
+    return outputs
+
+
 class _KernelParamsCreateKernelAdapter:
     """Adapt list/array kernel params (e.g., Cavallari) to create_kernel's per-post loop."""
 
@@ -2531,9 +2660,117 @@ def _build_feature_method_params(method, params, df):
         if thresholds:
             method_params["metric_thresholds"] = thresholds
 
+    elif method == "dfa":
+        method_params["normalize"] = _parse_bool_param(params, "dfa_normalize", default=False)
+        method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "dfa_fs", df, "dfa")
+
+        fit_interval = _parse_range_pair(params, "dfa_fit_interval_min", "dfa_fit_interval_max")
+        compute_interval = _parse_range_pair(params, "dfa_compute_interval_min", "dfa_compute_interval_max")
+        frequency_range = _parse_range_pair(params, "dfa_frequency_min", "dfa_frequency_max")
+        spectrum_range = _parse_range_pair(params, "dfa_spectrum_min", "dfa_spectrum_max")
+        if frequency_range is not None and spectrum_range is not None:
+            raise ValueError("DFA: provide only one of band frequency range or spectrum range.")
+        if frequency_range is None and spectrum_range is None:
+            frequency_range = (5.0, 45.0)
+
+        overlap = _parse_optional_bool_param(params, "dfa_overlap")
+        input_is_envelope = _parse_optional_bool_param(params, "dfa_input_is_envelope")
+        bad_idxes = _parse_idx_list_param(params, "dfa_bad_idxes")
+        filter_kwargs = _parse_dict_param(params, "dfa_filter_kwargs")
+        trim_seconds = _parse_float_param(params, "dfa_trim_seconds", default=None)
+        hilbert_n_fft = _parse_int_param(params, "dfa_hilbert_n_fft", default=None)
+
+        if fit_interval is not None:
+            method_params["fit_interval"] = tuple(fit_interval)
+        if compute_interval is not None:
+            method_params["compute_interval"] = tuple(compute_interval)
+        if frequency_range is not None:
+            method_params["frequency_range"] = tuple(frequency_range)
+        if spectrum_range is not None:
+            method_params["spectrum_range"] = tuple(spectrum_range)
+        if overlap is not None:
+            method_params["overlap"] = bool(overlap)
+        if input_is_envelope is not None:
+            method_params["input_is_envelope"] = bool(input_is_envelope)
+        if bad_idxes is not None:
+            method_params["bad_idxes"] = bad_idxes
+        if filter_kwargs:
+            method_params["filter_kwargs"] = filter_kwargs
+        if trim_seconds is not None:
+            if float(trim_seconds) < 0:
+                raise ValueError("DFA trim_seconds must be >= 0.")
+            method_params["trim_seconds"] = float(trim_seconds)
+        if hilbert_n_fft is not None:
+            method_params["hilbert_n_fft"] = int(hilbert_n_fft)
+
+    elif method == "fEI":
+        method_params["normalize"] = _parse_bool_param(params, "fei_normalize", default=False)
+        method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "fei_fs", df, "fEI")
+
+        frequency_range = _parse_range_pair(params, "fei_frequency_min", "fei_frequency_max")
+        spectrum_range = _parse_range_pair(params, "fei_spectrum_min", "fei_spectrum_max")
+        if frequency_range is not None and spectrum_range is not None:
+            raise ValueError("fEI: provide only one of band frequency range or spectrum range.")
+
+        dfa_fit_interval = _parse_range_pair(params, "fei_dfa_fit_interval_min", "fei_dfa_fit_interval_max")
+        dfa_compute_interval = _parse_range_pair(params, "fei_dfa_compute_interval_min", "fei_dfa_compute_interval_max")
+        window_size_sec = _parse_float_param(params, "fei_window_size_sec", default=None)
+        window_overlap = _parse_float_param(params, "fei_window_overlap", default=None)
+        dfa_value = _parse_float_param(params, "fei_dfa_value", default=None)
+        dfa_threshold = _parse_float_param(params, "fei_dfa_threshold", default=None)
+        dfa_overlap = _parse_optional_bool_param(params, "fei_dfa_overlap")
+        input_is_envelope = _parse_optional_bool_param(params, "fei_input_is_envelope")
+        bad_idxes = _parse_idx_list_param(params, "fei_bad_idxes")
+        filter_kwargs = _parse_dict_param(params, "fei_filter_kwargs")
+        trim_seconds = _parse_float_param(params, "fei_trim_seconds", default=None)
+        hilbert_n_fft = _parse_int_param(params, "fei_hilbert_n_fft", default=None)
+
+        if frequency_range is not None:
+            method_params["frequency_range"] = tuple(frequency_range)
+        if spectrum_range is not None:
+            method_params["spectrum_range"] = tuple(spectrum_range)
+        if dfa_fit_interval is not None:
+            method_params["dfa_fit_interval"] = tuple(dfa_fit_interval)
+        if dfa_compute_interval is not None:
+            method_params["dfa_compute_interval"] = tuple(dfa_compute_interval)
+        if window_size_sec is not None:
+            if float(window_size_sec) <= 0:
+                raise ValueError("fEI window_size_sec must be > 0.")
+            method_params["window_size_sec"] = float(window_size_sec)
+        if window_overlap is not None:
+            if float(window_overlap) < 0 or float(window_overlap) >= 1:
+                raise ValueError("fEI window_overlap must be in [0, 1).")
+            method_params["window_overlap"] = float(window_overlap)
+        if dfa_value is not None:
+            method_params["dfa_value"] = float(dfa_value)
+        if dfa_threshold is not None:
+            method_params["dfa_threshold"] = float(dfa_threshold)
+        if dfa_overlap is not None:
+            method_params["dfa_overlap"] = bool(dfa_overlap)
+        if input_is_envelope is not None:
+            method_params["input_is_envelope"] = bool(input_is_envelope)
+        if bad_idxes is not None:
+            method_params["bad_idxes"] = bad_idxes
+        if filter_kwargs:
+            method_params["filter_kwargs"] = filter_kwargs
+        if trim_seconds is not None:
+            if float(trim_seconds) < 0:
+                raise ValueError("fEI trim_seconds must be >= 0.")
+            method_params["trim_seconds"] = float(trim_seconds)
+        if hilbert_n_fft is not None:
+            method_params["hilbert_n_fft"] = int(hilbert_n_fft)
+
+    elif method == "custom":
+        method_params["normalize"] = _parse_bool_param(params, "custom_normalize", default=False)
+        script_text = str(_get_param(params, "custom_feature_script", "") or "")
+        if not script_text.strip():
+            raise ValueError("Custom method requires a non-empty custom_feature_script.")
+        method_params["custom_feature_script"] = script_text
+
     else:
         raise ValueError(
-            f"Unsupported features method '{method}'. Only 'catch22' and 'specparam' are available in webui."
+            f"Unsupported features method '{method}'. "
+            "Available methods in webui: catch22, specparam, dfa, fEI, custom."
         )
 
     return method_params, {
@@ -2554,6 +2791,11 @@ _SPECPARAM_OUTPUT_PATHS = {
     "gof_adjrsquared": "metrics.gof_adjrsquared",
     "error_mse": "metrics.error_mse",
     "valid": "valid",
+}
+
+_DFA_OUTPUT_PATHS = {
+    "dfa_value": "DFA",
+    "dfa_intercept": "dfa_intercept",
 }
 
 
@@ -2589,7 +2831,7 @@ def _coerce_feature_value(value):
     return value
 
 
-def _get_specparam_path_value(feature, path):
+def _get_mapping_path_value(feature, path):
     if not isinstance(feature, MappingABC):
         return np.nan
     current = feature
@@ -2610,6 +2852,31 @@ def _get_specparam_path_value(feature, path):
             continue
         return np.nan
     return _coerce_feature_value(current)
+
+
+def _as_numeric_scalar(value):
+    if _is_missing_feature_value(value):
+        return np.nan
+    if isinstance(value, MappingABC):
+        return np.nan
+    try:
+        arr = np.asarray(value, dtype=float).squeeze()
+    except Exception:
+        return np.nan
+    if arr.ndim == 0:
+        val = float(arr.item())
+        return val if np.isfinite(val) else np.nan
+    flat = arr.reshape(-1)
+    if flat.size == 0:
+        return np.nan
+    finite = flat[np.isfinite(flat)]
+    if finite.size == 0:
+        return np.nan
+    return float(finite[0]) if finite.size == 1 else float(np.nanmean(finite))
+
+
+def _get_specparam_path_value(feature, path):
+    return _get_mapping_path_value(feature, path)
 
 
 def _get_specparam_exponent(feature):
@@ -2702,9 +2969,47 @@ def _postprocess_specparam_output(output_df, params, job_status=None, job_id=Non
     return output_df
 
 
+def _dfa_output_path_from_params(params):
+    output_key = str(_get_param(params, "dfa_output_key", "dfa_value") or "dfa_value").strip()
+    if output_key in {"", "dfa", "dfa_value"}:
+        return "dfa_value", _DFA_OUTPUT_PATHS["dfa_value"]
+    if output_key in {"full", "dict", "full_dict"}:
+        return "full_dict", None
+    if output_key == "custom":
+        custom_path = str(_get_param(params, "dfa_output_path", "") or "").strip()
+        if not custom_path:
+            raise ValueError("Custom DFA output requires a non-empty output path.")
+        return output_key, custom_path
+    if output_key not in _DFA_OUTPUT_PATHS:
+        raise ValueError(f"Unsupported DFA output value: {output_key}")
+    return output_key, _DFA_OUTPUT_PATHS[output_key]
+
+
+def _postprocess_dfa_output(output_df, params, job_status=None, job_id=None):
+    if "Features" not in output_df.columns:
+        return output_df
+
+    def _log(message):
+        if job_status is not None and job_id is not None:
+            _append_job_output(job_status, job_id, message)
+
+    output_key, output_path = _dfa_output_path_from_params(params)
+    if output_path is None:
+        return output_df
+
+    values = [_get_mapping_path_value(feature, output_path) for feature in output_df["Features"].tolist()]
+    values = [_as_numeric_scalar(value) for value in values]
+    output_df = output_df.copy()
+    output_df["Features"] = values
+    _log(f"DFA output field selected: {output_path} (stored as numeric scalar).")
+    return output_df
+
+
 def _postprocess_features_output(method, output_df, params, job_status=None, job_id=None):
     if method == "specparam":
         return _postprocess_specparam_output(output_df, params, job_status, job_id)
+    if method == "dfa":
+        return _postprocess_dfa_output(output_df, params, job_status, job_id)
     return output_df
 
 
@@ -3238,13 +3543,14 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     metadata_locators=_meta_locators,
                 )
 
-            with warnings.catch_warnings(record=True) as caught:
-                warnings.simplefilter("always")
-                df = parser._limit_epoch_count_to_minimum(df)
-            for warning_item in caught:
-                warning_message = str(warning_item.message).strip()
-                if warning_message:
-                    _append_job_output(job_status, job_id, f"Warning: {warning_message}")
+            if bool(getattr(getattr(parser, "config", None), "align_epoch_count_to_minimum", True)):
+                with warnings.catch_warnings(record=True) as caught:
+                    warnings.simplefilter("always")
+                    df = parser._limit_epoch_count_to_minimum(df)
+                for warning_item in caught:
+                    warning_message = str(warning_item.message).strip()
+                    if warning_message:
+                        _append_job_output(job_status, job_id, f"Warning: {warning_message}")
         else:
             input_path = params.get("file_paths", {}).get("data_file")
             if not input_path:
@@ -3266,11 +3572,6 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             job_id,
             f"Method: {method} | n_jobs={exec_opts['n_jobs']} | chunksize={exec_opts['chunksize']} | start_method={exec_opts['start_method']}"
         )
-        features = ncpi.Features(method=method, params=method_params)
-        _append_job_output(job_status, job_id, "Starting feature extraction...")
-
-        sig = inspect.signature(features.compute_features)
-        supports_progress = "progress_callback" in sig.parameters
         progress_state = {
             "callback_seen": False,
             "running": True,
@@ -3288,13 +3589,6 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
 
         def _on_feature_log(message):
             _append_job_output(job_status, job_id, str(message))
-
-        if not supports_progress:
-            _append_job_output(
-                job_status,
-                job_id,
-                "Warning: compute_features progress callbacks are unavailable in this ncpi version."
-            )
 
         if job_id in job_status:
             job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 10)
@@ -3323,13 +3617,33 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         heartbeat_thread = threading.Thread(target=_feature_progress_heartbeat, daemon=True)
         heartbeat_thread.start()
         try:
-            computed = _compute_features_with_compat(
-                features_obj=features,
-                samples=samples,
-                exec_opts=exec_opts,
-                progress_callback=_on_feature_progress,
-                log_callback=_on_feature_log,
-            )
+            if method == "custom":
+                _append_job_output(job_status, job_id, "Starting custom feature extraction...")
+                computed = _compute_custom_features(
+                    method_params=method_params,
+                    samples=samples,
+                    exec_opts=exec_opts,
+                    progress_callback=_on_feature_progress,
+                    log_callback=_on_feature_log,
+                )
+            else:
+                features = ncpi.Features(method=method, params=method_params)
+                _append_job_output(job_status, job_id, "Starting feature extraction...")
+                sig = inspect.signature(features.compute_features)
+                supports_progress = "progress_callback" in sig.parameters
+                if not supports_progress:
+                    _append_job_output(
+                        job_status,
+                        job_id,
+                        "Warning: compute_features progress callbacks are unavailable in this ncpi version."
+                    )
+                computed = _compute_features_with_compat(
+                    features_obj=features,
+                    samples=samples,
+                    exec_opts=exec_opts,
+                    progress_callback=_on_feature_progress,
+                    log_callback=_on_feature_log,
+                )
         finally:
             progress_state["running"] = False
             heartbeat_thread.join(timeout=0.2)

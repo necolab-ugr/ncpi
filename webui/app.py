@@ -6468,6 +6468,7 @@ def _build_parse_config_from_form(form):
             zscore=zscore,
             zscore_after_epoch=zscore_after_epoch,
             exclude_last_epoch=exclude_last_epoch,
+            align_epoch_count_to_minimum=False,
             aggregate_over=aggregate_over,
             aggregate_method=aggregate_method,
             aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -6508,6 +6509,7 @@ def _build_parse_config_from_form(form):
         zscore=zscore,
         zscore_after_epoch=zscore_after_epoch,
         exclude_last_epoch=exclude_last_epoch,
+        align_epoch_count_to_minimum=False,
         aggregate_over=aggregate_over,
         aggregate_method=aggregate_method,
         aggregate_labels=aggregate_labels if aggregate_labels is not None else {"sensor": "aggregate"},
@@ -8161,7 +8163,7 @@ def run_trial_simulation(model_type):
         run_mode, run_forms = _expand_simulation_forms(model_type, form)
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(request.referrer or url_for(ref_page))
+        return redirect(url_for(ref_page))
 
     if model_type == "hagen":
         sim_defaults = HAGEN_DEFAULTS
@@ -8177,7 +8179,7 @@ def run_trial_simulation(model_type):
         )
     except Exception as exc:
         flash(f"Invalid simulation parameters: {exc}", "error")
-        return redirect(request.referrer or url_for(ref_page))
+        return redirect(url_for(ref_page))
     estimated_duration = max(60.0, min(24 * 3600.0, float(estimated_duration)))
 
     job_id = str(uuid.uuid4())
@@ -16206,9 +16208,12 @@ def start_computation_redirect(computation_type):
 
         selected_method = (request.form.get("select-method") or "").strip()
         app.logger.warning("[compute %s] features selected_method=%s", job_id, selected_method)
-        valid_feature_methods = {"catch22", "specparam"}
+        valid_feature_methods = {"catch22", "specparam", "dfa", "fEI", "custom"}
         if selected_method not in valid_feature_methods:
             flash('Select a valid features method before computing.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
+        if selected_method == "custom" and not (request.form.get("custom_feature_script") or "").strip():
+            flash('Provide a custom feature extraction script before computing.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
