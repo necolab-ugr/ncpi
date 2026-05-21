@@ -90,6 +90,7 @@
             boxplotGroupValuesLoading: false,
             boxplotGroupValuesError: '',
             boxplotLastGroupColumn: '',
+            userSelectedTab: false,
             topomapControlGroup: '',
             topomapGroupValues: [],
             topomapGroupValuesLoading: false,
@@ -620,12 +621,14 @@
                 await this.unselectSimulationFile(item.key);
             },
             nextTab() {
+                this.userSelectedTab = true;
                 const idx = this.tabOrder.indexOf(this.activeTab);
                 if (idx >= 0 && idx < this.tabOrder.length - 1) {
                     this.activeTab = this.tabOrder[idx + 1];
                 }
             },
             prevTab() {
+                this.userSelectedTab = true;
                 const idx = this.tabOrder.indexOf(this.activeTab);
                 if (idx > 0) {
                     this.activeTab = this.tabOrder[idx - 1];
@@ -651,7 +654,9 @@
 
                 const plotAction = String(config.plot_action || '').trim();
                 if (plotAction === 'boxplot' || plotAction === 'topomap') {
-                    this.activeTab = plotAction;
+                    if (!this.userSelectedTab) {          // <-- only if selection was not manual
+                        this.activeTab = plotAction;
+                    }
                 }
 
                 this.boxplotGroupBy = first('boxplot_group_by', this.boxplotGroupBy);
@@ -1551,19 +1556,19 @@
         <!-- Menu tabs -->
         <div class="mt-8 border-b border-slate-200 dark:border-slate-700">
             <nav aria-label="Tabs" class="-mb-px flex space-x-8">
-                <button @click="activeTab = 'upload-data'" type="button"
+                <button @click="activeTab = 'upload-data'; userSelectedTab = true" type="button"
                     :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'upload-data', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'upload-data' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Load data</button>
-                <button @click="activeTab = 'simulation-outputs'" type="button"
+                <button @click="activeTab = 'simulation-outputs'; userSelectedTab = true" type="button"
                     :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'simulation-outputs', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'simulation-outputs' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Simulation outputs</button>
-                <button @click="activeTab = 'boxplot'" type="button"
+                <button @click="activeTab = 'boxplot'; userSelectedTab = true" type="button"
                     :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'boxplot', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'boxplot' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Boxplot</button>
-                <button @click="activeTab = 'topomap'" type="button"
+                <button @click="activeTab = 'topomap'; userSelectedTab = true" type="button"
                     :class="{ 'border-primary text-primary dark:text-primary-dark dark:border-primary-dark': activeTab === 'topomap', 'border-transparent text-gray-500 dark:text-white/70 hover:text-gray-700 dark:hover:text-white': activeTab !== 'topomap' }"
                     class="shrink-0 border-b-2 px-1 pb-4 text-sm font-medium hover:border-gray-300 dark:hover:border-gray-500 transition-colors">
                     Topomap</button>
