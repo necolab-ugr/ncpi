@@ -21,7 +21,7 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("Channels axis None Dim 0 Dim").first.select_option("0")
     page.get_by_label("Samples axis Dim 0 Dim 1 Dim").first.select_option("1")
     page.get_by_role("radio", name="Empirical").check()
-    page.get_by_label("Subject ID source None Custom").select_option("__file_extracted_chain_0")
+    page.get_by_label("Subject ID source None Custom").select_option("__file_id__")
     page.get_by_label("Group source None Custom").select_option("LFP.age")
     page.get_by_label("Species source None Custom").select_option("__value__")
     page.get_by_role("textbox", name="Species value").click()
