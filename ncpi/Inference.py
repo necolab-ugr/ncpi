@@ -182,6 +182,57 @@ class Inference:
         return all_splits
 
 
+    def _sample_posterior_batch(self, posterior_obj, n_samples: int, xb, *, show_progress_bars: bool = False):
+        """
+        Draw posterior samples for a batch of observations.
+
+        Returns samples with shape [S, B, theta_dim].
+        """
+        torch = self.torch
+        b = int(xb.shape[0])
+
+        if b <= 0:
+            raise ValueError("Cannot sample posterior for an empty observation batch.")
+
+        if b == 1:
+            sb = posterior_obj.sample(
+                (int(n_samples),),
+                x=xb,
+                show_progress_bars=bool(show_progress_bars),
+            )
+            if sb.ndim == 2:
+                sb = sb.unsqueeze(1)
+            return sb
+
+        sample_batched = getattr(posterior_obj, "sample_batched", None)
+        if callable(sample_batched):
+            try:
+                sb = sample_batched(
+                    (int(n_samples),),
+                    x=xb,
+                    show_progress_bars=bool(show_progress_bars),
+                )
+                if sb.ndim == 2:
+                    sb = sb.unsqueeze(1)
+                return sb
+            except (TypeError, ValueError, NotImplementedError):
+                # Fallback for posterior classes / sbi versions where batched
+                # sampling is unavailable or not compatible.
+                pass
+
+        parts = []
+        for one_idx in range(b):
+            sb = posterior_obj.sample(
+                (int(n_samples),),
+                x=xb[one_idx:one_idx + 1],
+                show_progress_bars=bool(show_progress_bars),
+            )
+            if sb.ndim == 2:
+                sb = sb.unsqueeze(1)
+            parts.append(sb)
+        return torch.cat(parts, dim=1)
+
+
     # -----------------------------
     # Pickling
     # -----------------------------
@@ -640,11 +691,13 @@ class Inference:
                             xb = X_t[idx]
                             yb = Y_t[idx]
 
-                            samples = posterior.sample(
-                                (sbi_eval_num_posterior_samples,),
-                                x=xb,
+                            samples = self._sample_posterior_batch(
+                                posterior,
+                                n_samples=sbi_eval_num_posterior_samples,
+                                xb=xb,
                                 show_progress_bars=False,
-                            )  # [S, B, theta_dim]
+                            )
+
                             mean = samples.mean(dim=0)  # [B, theta_dim]
                             mse = torch.mean((mean - yb) ** 2).item()
                             total += mse * idx.shape[0]
@@ -921,38 +974,6 @@ class Inference:
         if sbi_batch_size is None or sbi_batch_size <= 0:
             sbi_batch_size = B
 
-        def _sample_from_posterior(posterior_obj, n_samples, xb):
-            b = xb.shape[0]
-
-            if b == 1:
-                sb = posterior_obj.sample(
-                    (n_samples,),
-                    x=xb,
-                    show_progress_bars=bool(sbi_show_progress_bars),
-                )
-                # Normalize to [S, 1, theta_dim]
-                if sb.ndim == 2:
-                    sb = sb.unsqueeze(1)
-                return sb
-
-            # Multiple observations: prefer sample_batched when available.
-            if hasattr(posterior_obj, "sample_batched"):
-                return posterior_obj.sample_batched(
-                    (n_samples,),
-                    x=xb,
-                    show_progress_bars=bool(sbi_show_progress_bars),
-                )
-
-            # Fallback for posterior implementations without sample_batched.
-            sb = posterior_obj.sample(
-                (n_samples,),
-                x=xb,
-                show_progress_bars=bool(sbi_show_progress_bars),
-            )
-            if sb.ndim == 2:
-                sb = sb.unsqueeze(1)
-            return sb
-
         # Batched posterior sampling 
         with torch.no_grad():
             chunks = []
@@ -962,7 +983,12 @@ class Inference:
                 n_post = len(posteriors)
 
                 if n_post == 1:
-                    sb = _sample_from_posterior(posteriors[0], num_posterior_samples, xb)
+                    sb = self._sample_posterior_batch(
+                        posteriors[0],
+                        n_samples=num_posterior_samples,
+                        xb=xb,
+                        show_progress_bars=bool(sbi_show_progress_bars),
+                    )
                 else:
                     base = num_posterior_samples // n_post
                     rem = num_posterior_samples % n_post
@@ -972,7 +998,14 @@ class Inference:
                     for posterior_obj, n_samples in zip(posteriors, per_model_counts):
                         if n_samples <= 0:
                             continue
-                        parts.append(_sample_from_posterior(posterior_obj, n_samples, xb))
+                        parts.append(
+                            self._sample_posterior_batch(
+                                posterior_obj,
+                                n_samples=n_samples,
+                                xb=xb,
+                                show_progress_bars=bool(sbi_show_progress_bars),
+                            )
+                        )
 
                     if not parts:
                         raise RuntimeError("No posterior samples drawn from ensemble.")
