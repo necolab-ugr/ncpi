@@ -47,6 +47,7 @@ parser = [
     "pandas",
     "pyEDFlib",
     "pyarrow",
+    "pynwb",
 ]
 
 # Analysis module dependencies
@@ -77,6 +78,7 @@ webui = [
     "nibabel",
     "pyEDFlib",
     "pyarrow",
+    "pynwb",
     "openpyxl",
     "xlrd",
 ]
@@ -113,6 +115,7 @@ tests = [
     "playwright",
     "Pillow",
     "pyEDFlib",
+    "pynwb",
     "pytest",
     "rpy2",
 ]

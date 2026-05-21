@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any, Mapping
@@ -30,6 +32,15 @@ if HAS_SCIPY:
 HAS_MNE = tools.ensure_module("mne")
 if HAS_MNE:
     import mne  # type: ignore[import-not-found]
+
+HAS_PYNWB = importlib.util.find_spec("pynwb") is not None
+if HAS_PYNWB:
+    try:
+        from pynwb import NWBHDF5IO, NWBFile  # type: ignore[import-not-found]
+        from pynwb.ecephys import ElectricalSeries  # type: ignore[import-not-found]
+        from pynwb.file import Subject  # type: ignore[import-not-found]
+    except Exception:
+        HAS_PYNWB = False
 
 
 # -------------------------
@@ -64,6 +75,83 @@ def _assert_row_meta(df: Any, expected: Mapping[str, Any]) -> None:
             col = df[k]
             arr = col.to_numpy() if hasattr(col, "to_numpy") else np.asarray(col)
             assert np.all(arr == v)
+
+
+# -------------------------
+# NWB parsing
+# -------------------------
+
+@pytest.mark.skipif(not (HAS_PANDAS and HAS_PYNWB), reason="pandas or pynwb not installed")
+def test_parse_nwb_electrical_series(tmp_path: Path) -> None:
+    nwb_path = tmp_path / "sample.nwb"
+    nwbfile = NWBFile(
+        session_description="parser test session",
+        identifier="NWB001",
+        session_start_time=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        session_id="rest",
+    )
+    nwbfile.subject = Subject(subject_id="S01", species="Mus musculus")
+    device = nwbfile.create_device(name="device")
+    group = nwbfile.create_electrode_group(
+        name="electrode_group",
+        description="test electrodes",
+        location="CA1",
+        device=device,
+    )
+    nwbfile.add_electrode_column(name="label", description="Channel label")
+    for idx, label in enumerate(("A", "B")):
+        nwbfile.add_electrode(
+            id=idx,
+            x=np.nan,
+            y=np.nan,
+            z=np.nan,
+            imp=np.nan,
+            location="CA1",
+            filtering="none",
+            group=group,
+            label=label,
+        )
+    region = nwbfile.create_electrode_table_region(region=[0, 1], description="all electrodes")
+    data = np.array(
+        [
+            [1.0, 10.0],
+            [2.0, 20.0],
+            [3.0, 30.0],
+        ]
+    )
+    nwbfile.add_acquisition(
+        ElectricalSeries(
+            name="LFP",
+            data=data,
+            electrodes=region,
+            starting_time=0.0,
+            rate=1000.0,
+        )
+    )
+    with NWBHDF5IO(str(nwb_path), "w") as io_file:
+        io_file.write(nwbfile)
+
+    cfg = ParseConfig(
+        fields=CanonicalFields(
+            data="data",
+            fs="fs",
+            ch_names="ch_names",
+            metadata={
+                "subject_id": "subject_id",
+                "species": "species",
+                "recording_type": "recording_type",
+            },
+        )
+    )
+    df = EphysDatasetParser(cfg).parse(nwb_path)
+
+    _assert_df_contract(df)
+    assert len(df) == 2
+    assert set(df["sensor"].tolist()) == {"A", "B"}
+    assert np.allclose(df["fs"].astype(float), 1000.0)
+    _assert_row_meta(df, {"subject_id": "S01", "species": "Mus musculus", "recording_type": "LFP"})
+    assert np.allclose(df.loc[df["sensor"] == "A", "data"].iloc[0], np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(df.loc[df["sensor"] == "B", "data"].iloc[0], np.array([10.0, 20.0, 30.0]))
 
 
 # -------------------------

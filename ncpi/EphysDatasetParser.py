@@ -2,6 +2,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import ast
 import json
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Union, Literal, Tuple
 from collections.abc import Mapping as MappingABC
@@ -93,6 +94,16 @@ def _require_h5py(context: str = "") -> None:
 def _require_pyedflib(context: str = "") -> None:
     if not tools.ensure_module("pyedflib"):
         msg = "pyEDFlib is required"
+        if context:
+            msg += f" for {context}"
+        msg += " but is not installed."
+        raise ImportError(msg)
+
+
+@lru_cache(maxsize=None)
+def _require_pynwb(context: str = "") -> None:
+    if not tools.ensure_module("pynwb"):
+        msg = "pynwb is required"
         if context:
             msg += f" for {context}"
         msg += " but is not installed."
@@ -347,6 +358,488 @@ def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
             pass
 
 
+def _nwb_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        text = value.decode("utf-8", errors="ignore").strip()
+        return text or None
+    if isinstance(value, (list, tuple, set)):
+        parts = [_nwb_text(item) for item in value]
+        text = ", ".join(part for part in parts if part)
+        return text or None
+    if isinstance(value, np.ndarray):
+        if value.size == 0:
+            return None
+        if value.size == 1:
+            return _nwb_text(value.reshape(-1)[0])
+        if value.size <= 8:
+            parts = [_nwb_text(item) for item in value.reshape(-1)]
+            text = ", ".join(part for part in parts if part)
+            return text or None
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _nwb_safe_key(value: Any, fallback: str = "series") -> str:
+    text = _nwb_text(value) or fallback
+    text = re.sub(r"[^0-9A-Za-z_]+", "_", text).strip("_")
+    if not text:
+        text = fallback
+    if text[0].isdigit():
+        text = f"s_{text}"
+    return text
+
+
+def _nwb_float(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        arr = np.asarray(value)
+        if arr.size != 1:
+            return None
+        out = float(arr.reshape(-1)[0])
+    except Exception:
+        try:
+            out = float(value)
+        except Exception:
+            return None
+    return out if np.isfinite(out) else None
+
+
+def _nwb_array(value: Any) -> np.ndarray:
+    last_exc: Optional[Exception] = None
+    loaders = (
+        lambda: np.asarray(value),
+        lambda: np.asarray(value[:]),
+        lambda: np.asarray(value[()]),
+    )
+    for load in loaders:
+        try:
+            arr = np.asarray(load())
+        except Exception as exc:
+            last_exc = exc
+            continue
+        if arr.size == 0:
+            last_exc = ValueError("empty data")
+            continue
+        if arr.dtype == np.object_:
+            try:
+                arr = arr.astype(float)
+            except Exception as exc:
+                last_exc = exc
+                continue
+        if np.issubdtype(arr.dtype, np.number):
+            return arr
+        last_exc = ValueError(f"non-numeric data dtype {arr.dtype}")
+    detail = f": {last_exc}" if last_exc is not None else ""
+    raise ValueError(f"NWB data could not be converted to a numeric NumPy array{detail}")
+
+
+def _nwb_timestamps(series: Any) -> Optional[np.ndarray]:
+    try:
+        timestamps = getattr(series, "timestamps", None)
+    except Exception:
+        timestamps = None
+    if timestamps is None:
+        return None
+    try:
+        arr = _nwb_array(timestamps).reshape(-1)
+    except Exception:
+        return None
+    return arr if arr.size > 0 else None
+
+
+def _nwb_sampling_rate(series: Any, *, allow_timestamps: bool = True) -> Optional[float]:
+    for attr in ("rate", "sampling_rate"):
+        try:
+            value = getattr(series, attr, None)
+        except Exception:
+            value = None
+        fs = _nwb_float(value)
+        if fs is not None and fs > 0:
+            return fs
+
+    if not allow_timestamps:
+        return None
+
+    timestamps = _nwb_timestamps(series)
+    if timestamps is None or timestamps.size < 2:
+        return None
+    diffs = np.diff(timestamps.astype(float))
+    diffs = diffs[np.isfinite(diffs) & (diffs > 0)]
+    if diffs.size == 0:
+        return None
+    median_dt = float(np.median(diffs))
+    return (1.0 / median_dt) if median_dt > 0 else None
+
+
+def _nwb_electrode_labels(series: Any, n_channels: int) -> Optional[list[str]]:
+    try:
+        electrodes = getattr(series, "electrodes", None)
+    except Exception:
+        electrodes = None
+    if electrodes is None:
+        return None
+
+    try:
+        frame = electrodes.to_dataframe()
+    except Exception:
+        return None
+
+    label_columns = ("label", "channel_name", "channel", "name", "electrode_label", "id")
+    for column in label_columns:
+        if column not in getattr(frame, "columns", []):
+            continue
+        labels = [_nwb_text(value) for value in frame[column].tolist()]
+        labels = [label for label in labels if label]
+        if len(labels) >= n_channels:
+            return labels[:n_channels]
+
+    try:
+        labels = [_nwb_text(value) for value in frame.index.tolist()]
+        labels = [label for label in labels if label]
+        if len(labels) >= n_channels:
+            return labels[:n_channels]
+    except Exception:
+        pass
+    return None
+
+
+def _nwb_data_shape(value: Any, *, allow_array: bool = True) -> tuple[int, ...]:
+    try:
+        shape = getattr(value, "shape", None)
+    except Exception:
+        shape = None
+    if shape is not None:
+        try:
+            return tuple(int(dim) for dim in shape)
+        except Exception:
+            pass
+    if allow_array:
+        try:
+            return tuple(int(dim) for dim in np.asarray(value).shape)
+        except Exception:
+            pass
+    return ()
+
+
+def _nwb_data_dtype(value: Any, *, allow_array: bool = True) -> Optional[str]:
+    try:
+        dtype = getattr(value, "dtype", None)
+    except Exception:
+        dtype = None
+    if dtype is not None:
+        return str(dtype)
+    if allow_array:
+        try:
+            return str(np.asarray(value).dtype)
+        except Exception:
+            pass
+    return None
+
+
+def _nwb_channel_names(series: Any, n_channels: int, ndim: int) -> list[str]:
+    if ndim <= 1:
+        return [_nwb_text(getattr(series, "name", None)) or "ch0"]
+
+    labels = _nwb_electrode_labels(series, n_channels)
+    if labels is not None:
+        return labels
+    return [f"ch{i}" for i in range(n_channels)]
+
+
+def _nwb_recording_type(series: Any, path: str = "") -> RecordingType:
+    name = " ".join(
+        item for item in (
+            _nwb_text(getattr(series, "name", None)),
+            type(series).__name__,
+            path,
+        )
+        if item
+    ).lower()
+    if "ecog" in name:
+        return "ECoG"
+    if "eeg" in name:
+        return "EEG"
+    if "meg" in name:
+        return "MEG"
+    if "lfp" in name or "electrical" in name or "voltage" in name:
+        return "LFP"
+    return "Unknown"
+
+
+def _nwb_iter_mapping(container: Any):
+    if container is None:
+        return
+    items_fn = getattr(container, "items", None)
+    if callable(items_fn):
+        try:
+            for key, value in items_fn():
+                yield str(key), value
+            return
+        except Exception:
+            pass
+    if isinstance(container, MappingABC):
+        for key, value in container.items():
+            yield str(key), value
+
+
+def _nwb_walk_timeseries(root_name: str, container: Any):
+    visited: set[int] = set()
+
+    def _is_terminal(value: Any) -> bool:
+        return value is None or isinstance(value, (str, bytes, int, float, bool, np.ndarray))
+
+    def _walk(path: str, obj: Any, depth: int):
+        if obj is None or depth > 8:
+            return
+        marker = id(obj)
+        if marker in visited:
+            return
+        visited.add(marker)
+
+        try:
+            data = getattr(obj, "data", None)
+        except Exception:
+            data = None
+        if data is not None and not isinstance(obj, np.ndarray):
+            yield path, obj
+
+        for key, child in _nwb_iter_mapping(obj) or ():
+            if _is_terminal(child):
+                continue
+            child_path = f"{path}.{_nwb_safe_key(key)}" if path else _nwb_safe_key(key)
+            yield from _walk(child_path, child, depth + 1)
+
+        for attr in ("data_interfaces", "electrical_series", "time_series", "roi_response_series"):
+            try:
+                nested = getattr(obj, attr, None)
+            except Exception:
+                nested = None
+            for key, child in _nwb_iter_mapping(nested) or ():
+                if _is_terminal(child):
+                    continue
+                child_path = f"{path}.{_nwb_safe_key(key)}" if path else _nwb_safe_key(key)
+                yield from _walk(child_path, child, depth + 1)
+
+        try:
+            fields = getattr(obj, "fields", None)
+        except Exception:
+            fields = None
+        for key, child in _nwb_iter_mapping(fields) or ():
+            if str(key) in {"data", "timestamps", "starting_time", "electrodes"} or _is_terminal(child):
+                continue
+            child_path = f"{path}.{_nwb_safe_key(key)}" if path else _nwb_safe_key(key)
+            yield from _walk(child_path, child, depth + 1)
+
+    yield from _walk(_nwb_safe_key(root_name), container, 0)
+
+
+def _nwb_session_metadata(nwbfile: Any) -> Dict[str, Any]:
+    metadata: Dict[str, Any] = {}
+    subject = getattr(nwbfile, "subject", None)
+    if subject is not None:
+        subject_fields = {
+            "subject_id": "subject_id",
+            "species": "species",
+            "subject_sex": "sex",
+            "subject_age": "age",
+            "subject_description": "description",
+            "subject_genotype": "genotype",
+            "subject_strain": "strain",
+        }
+        for out_key, attr in subject_fields.items():
+            value = _nwb_text(getattr(subject, attr, None))
+            if value:
+                metadata[out_key] = value
+
+    file_fields = (
+        "identifier",
+        "session_id",
+        "session_description",
+        "experiment_description",
+        "institution",
+        "lab",
+        "experimenter",
+    )
+    for attr in file_fields:
+        value = _nwb_text(getattr(nwbfile, attr, None))
+        if value:
+            metadata[attr] = value
+    return metadata
+
+
+def _nwb_series_payload(
+    series: Any,
+    path: str,
+    metadata: Mapping[str, Any],
+    *,
+    load_data: bool = True,
+) -> Dict[str, Any]:
+    data_obj = getattr(series, "data")
+    data_shape = _nwb_data_shape(data_obj, allow_array=load_data)
+    data_dtype = _nwb_data_dtype(data_obj, allow_array=load_data)
+    if not load_data and data_dtype:
+        try:
+            if not np.issubdtype(np.dtype(data_dtype), np.number):
+                raise ValueError(f"non-numeric data dtype {data_dtype}")
+        except TypeError:
+            pass
+    data = _nwb_array(data_obj) if load_data else None
+    if data is not None:
+        data_shape = tuple(int(dim) for dim in data.shape)
+        data_dtype = str(data.dtype)
+    fs = _nwb_sampling_rate(series, allow_timestamps=load_data)
+    timestamps = _nwb_timestamps(series) if load_data else None
+    ndim = len(data_shape)
+    n_samples = int(data_shape[0]) if ndim >= 1 else (int(data.size) if data is not None else 0)
+    n_channels = int(data_shape[1]) if ndim >= 2 else 1
+    ch_names = _nwb_channel_names(series, n_channels, ndim)
+
+    duration_s = None
+    if fs is not None and fs > 0 and n_samples > 0:
+        duration_s = float(n_samples) / float(fs)
+    elif timestamps is not None and timestamps.size >= 2:
+        duration_s = float(timestamps[-1] - timestamps[0])
+
+    payload: Dict[str, Any] = dict(metadata)
+    payload.update(
+        {
+            "fs": fs,
+            "ch_names": ch_names,
+            "recording_type": _nwb_recording_type(series, path),
+            "series_name": _nwb_text(getattr(series, "name", None)) or _nwb_safe_key(path),
+            "series_path": path,
+            "series_type": type(series).__name__,
+            "data_shape": list(data_shape),
+            "data_dtype": data_dtype,
+            "n_channels": n_channels,
+            "n_samples": n_samples,
+            "duration_s": duration_s,
+            "starting_time": _nwb_float(getattr(series, "starting_time", None)),
+            "unit": _nwb_text(getattr(series, "unit", None)),
+            "conversion": _nwb_float(getattr(series, "conversion", None)),
+            "resolution": _nwb_float(getattr(series, "resolution", None)),
+        }
+    )
+    if data is not None:
+        payload["data"] = data
+    if timestamps is not None:
+        payload["timestamps"] = timestamps
+    return payload
+
+
+def _nwb_series_priority(entry: Mapping[str, Any]) -> tuple:
+    payload = entry.get("payload") or {}
+    path = str(payload.get("series_path") or entry.get("path") or "").lower()
+    name = str(payload.get("series_name") or "").lower()
+    data = payload.get("data")
+    data_shape = payload.get("data_shape") or ()
+    score = 0
+    if path.startswith("acquisition"):
+        score -= 40
+    if any(token in f"{path} {name}" for token in ("lfp", "electrical", "eeg", "ecog", "meg", "voltage")):
+        score -= 25
+    try:
+        if data is not None and np.asarray(data).ndim >= 2:
+            score -= 10
+        elif len(data_shape) >= 2:
+            score -= 10
+    except Exception:
+        pass
+    n_channels = payload.get("n_channels")
+    try:
+        score -= min(int(n_channels), 64)
+    except Exception:
+        pass
+    return (score, str(payload.get("series_path") or ""))
+
+
+def _load_nwb_with_pynwb(path: Path, *, load_data: bool = True) -> Dict[str, Any]:
+    if not path.is_file():
+        raise ValueError(
+            f"NWB file does not exist or is not a regular file: '{path}'. "
+            "Verify the dataset path and that the file is available on disk."
+        )
+
+    _require_pynwb("NWB .nwb loading")
+    from pynwb import NWBHDF5IO  # type: ignore
+
+    failures: list[str] = []
+    try:
+        try:
+            io_obj = NWBHDF5IO(str(path), "r", load_namespaces=True)
+        except TypeError:
+            io_obj = NWBHDF5IO(str(path), "r")
+
+        with io_obj as io_file:
+            nwbfile = io_file.read()
+            metadata = _nwb_session_metadata(nwbfile)
+            roots: list[tuple[str, Any]] = [
+                ("acquisition", getattr(nwbfile, "acquisition", None)),
+                ("stimulus", getattr(nwbfile, "stimulus", None)),
+            ]
+            for module_name, module in _nwb_iter_mapping(getattr(nwbfile, "processing", None)) or ():
+                roots.append((f"processing.{_nwb_safe_key(module_name)}", module))
+
+            entries: list[Dict[str, Any]] = []
+            used_keys: set[str] = set()
+            seen_paths: set[str] = set()
+            for root_name, root in roots:
+                for series_path, series in _nwb_walk_timeseries(root_name, root):
+                    if series_path in seen_paths:
+                        continue
+                    seen_paths.add(series_path)
+                    try:
+                        payload = _nwb_series_payload(series, series_path, metadata, load_data=load_data)
+                    except Exception as exc:
+                        failures.append(f"{series_path}: {exc}")
+                        continue
+
+                    base_key = _nwb_safe_key(payload.get("series_name") or series_path, "series")
+                    key = base_key
+                    counter = 2
+                    while key in used_keys:
+                        key = f"{base_key}_{counter}"
+                        counter += 1
+                    used_keys.add(key)
+                    entries.append({"key": key, "root": root_name, "path": series_path, "payload": payload})
+
+            if not entries:
+                detail = f" Skipped series: {'; '.join(failures[:5])}" if failures else ""
+                raise ValueError(f"NWB file '{path}' does not contain readable numeric TimeSeries data.{detail}")
+
+            entries.sort(key=_nwb_series_priority)
+            selected = entries[0]
+            series_map = {str(entry["key"]): entry["payload"] for entry in entries}
+            grouped: Dict[str, Dict[str, Any]] = {}
+            for entry in entries:
+                group_key = str(entry["root"]).split(".", 1)[0]
+                grouped.setdefault(group_key, {})[str(entry["key"])] = entry["payload"]
+
+            result: Dict[str, Any] = dict(selected["payload"])
+            result.update(
+                {
+                    "__source_format__": "nwb",
+                    "metadata": metadata,
+                    "selected_series": selected["key"],
+                    "series_count": len(entries),
+                    "series": series_map,
+                    "timeseries": series_map,
+                    "acquisition": grouped.get("acquisition", {}),
+                    "processing": grouped.get("processing", {}),
+                    "stimulus": grouped.get("stimulus", {}),
+                }
+            )
+            return result
+    except Exception as exc:
+        if isinstance(exc, (ImportError, ValueError)):
+            raise
+        raise ValueError(f"Failed to load NWB file '{path}' with pynwb: {exc}") from exc
+
+
 # ---- Locators -------------------------------------------------------------
 # Locator grammar (recommended):
 # - "__self__" -> use the input object itself
@@ -497,7 +990,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat, .set, .fif, .edf, .ds, .tsv paths
+      - .npy, .json, .mat, .nwb, .set, .fif, .edf, .ds, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -592,6 +1085,9 @@ class EphysDatasetParser:
             if suffix == ".mat":
                 # Supports both classic MAT files and MATLAB v7.3 (HDF5-backed).
                 return _load_mat_with_fallback(path), source_file
+
+            if suffix == ".nwb":
+                return _load_nwb_with_pynwb(path), source_file
 
             if suffix == ".set":
                 _require_mne("EEGLAB .set loading")
