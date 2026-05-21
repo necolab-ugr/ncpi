@@ -255,7 +255,7 @@ if __name__ == "__main__":
             start_time = time.time()
 
             # Predict the parameters from the test data
-            predictions = inference.predict(X_test, scaler=scaler)
+            predictions = inference.predict(X_test, scaler=True)
 
             # Save predictions
             with open(os.path.join('data', method, 'predictions'), 'wb') as file:

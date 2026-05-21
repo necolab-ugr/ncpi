@@ -4039,7 +4039,7 @@ def _summarize_sbi_samples(samples, mode):
     return summary
 
 
-def _resolve_sbi_posteriors(model_obj, density_obj, build_kwargs):
+def _resolve_sbi_posteriors(model_obj):
     source = model_obj
     if source is None:
         raise ValueError(
@@ -4053,30 +4053,14 @@ def _resolve_sbi_posteriors(model_obj, density_obj, build_kwargs):
         if source and all(_is_posterior_like(item) for item in source):
             return list(source)
         if source and all(_is_inference_like(item) for item in source):
-            if density_obj is None:
-                raise ValueError(
-                    "SBI model list contains inference objects. Upload density_estimator.pkl "
-                    "to build posteriors for prediction."
-                )
-            if isinstance(density_obj, list):
-                if len(density_obj) != len(source):
-                    raise ValueError(
-                        "density_estimator list length does not match number of inference objects."
-                    )
-                densities = density_obj
-            else:
-                densities = [density_obj] * len(source)
-            return [
-                inf_obj.build_posterior(de_obj, **build_kwargs)
-                for inf_obj, de_obj in zip(source, densities)
-            ]
+            raise ValueError(
+                "SBI model list contains inference objects. Prediction now requires posterior object(s) in model.pkl."
+            )
 
     if _is_inference_like(source):
-        if density_obj is None:
-            raise ValueError(
-                "SBI inference object requires density_estimator.pkl to build posterior for prediction."
-            )
-        return [source.build_posterior(density_obj, **build_kwargs)]
+        raise ValueError(
+            "SBI inference object is not supported for prediction. Provide posterior object(s) in model.pkl."
+        )
 
     raise ValueError(
         f"Unsupported SBI artifact type: {type(source).__name__}. "
@@ -4214,27 +4198,20 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
 
         model_uploaded = _first_existing_file([file_paths.get("model_file"), file_paths.get("model-file")])
         scaler_uploaded = _first_existing_file([file_paths.get("scaler_file"), file_paths.get("scaler-file")])
-        density_uploaded = _first_existing_file([
-            file_paths.get("density_estimator_file"),
-            file_paths.get("density-estimator-file"),
-        ])
 
         model_source = model_uploaded
         scaler_source = scaler_uploaded
-        density_source = density_uploaded
 
         os.makedirs(artifacts_dir, exist_ok=True)
         model_dst = os.path.join(artifacts_dir, "model.pkl")
         scaler_dst = os.path.join(artifacts_dir, "scaler.pkl")
-        density_dst = os.path.join(artifacts_dir, "density_estimator.pkl")
 
         model_present = _copy_artifact_if_present(model_source, model_dst)
         scaler_present = _copy_artifact_if_present(scaler_source, scaler_dst)
-        density_present = _copy_artifact_if_present(density_source, density_dst)
         _append_job_output(
             job_status,
             job_id,
-            f"Prepared artifacts: model={'yes' if model_present else 'no'}, scaler={'yes' if scaler_present else 'no'}, density_estimator={'yes' if density_present else 'no'}."
+            f"Prepared artifacts: model={'yes' if model_present else 'no'}, scaler={'yes' if scaler_present else 'no'}."
         )
         if not model_present:
             raise ValueError("Model artifact is required for prediction.")
@@ -4304,18 +4281,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
 
         else:
             # model_obj already loaded above for automatic backend/type inference.
-            density_obj = _load_pickle_file(density_dst) if density_present else None
             _append_job_output(job_status, job_id, "Preparing SBI posterior sampling...")
-
-            build_kwargs_raw = (params.get("sbi_build_posterior_kwargs") or "").strip()
-            build_kwargs = {}
-            if build_kwargs_raw:
-                try:
-                    build_kwargs = json.loads(build_kwargs_raw)
-                except json.JSONDecodeError as exc:
-                    raise ValueError("SBI build posterior kwargs must be valid JSON.") from exc
-                if not isinstance(build_kwargs, dict):
-                    raise ValueError("SBI build posterior kwargs JSON must decode to an object/dict.")
 
             sbi_summary_mode = (params.get("sbi_summary_mode") or "mean").strip().lower()
             if sbi_summary_mode not in {"mean", "median"}:
@@ -4350,7 +4316,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                     raise ValueError("Scaler usage is enabled, but scaler.pkl was not provided.")
                 scaler_obj = _load_pickle_file(scaler_dst)
 
-            posteriors = _resolve_sbi_posteriors(model_obj, density_obj, build_kwargs)
+            posteriors = _resolve_sbi_posteriors(model_obj)
             _append_job_output(job_status, job_id, f"Resolved {len(posteriors)} SBI posterior object(s).")
 
             x_local = np.asarray(feature_matrix, dtype=float)

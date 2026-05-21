@@ -69,6 +69,7 @@ class Inference:
         if model in self.SBI_MODELS:
             self.backend = "sbi"
             self.model_name = model
+            self._set_sklearn_attrs_to_none()
             self._init_sbi_modules()
         else:
             self.backend = "sklearn"
@@ -149,6 +150,38 @@ class Inference:
         self.NRE = None
 
 
+    def _set_sklearn_attrs_to_none(self):
+        self.RepeatedKFold = None
+        self.all_estimators = None
+        self.RegressorMixin = None
+        self.multiprocessing = None
+        self.tqdm_inst = None
+        self.tqdm = None
+
+
+    @staticmethod
+    def _iter_repeated_kfold_indices(n_samples: int, n_splits: int, n_repeats: int, seed: int):
+        if n_splits < 2:
+            raise ValueError("n_splits must be >= 2.")
+        if n_repeats < 1:
+            raise ValueError("n_repeats must be >= 1.")
+        if n_samples < n_splits:
+            raise ValueError(
+                f"n_samples ({n_samples}) must be >= n_splits ({n_splits})."
+            )
+
+        all_splits = []
+        all_idx = np.arange(n_samples)
+        for rep in range(n_repeats):
+            rng = np.random.default_rng(seed + rep)
+            perm = rng.permutation(all_idx)
+            test_folds = np.array_split(perm, n_splits)
+            for test_idx in test_folds:
+                train_idx = np.setdiff1d(perm, test_idx, assume_unique=True)
+                all_splits.append((train_idx, test_idx))
+        return all_splits
+
+
     # -----------------------------
     # Pickling
     # -----------------------------
@@ -179,18 +212,17 @@ class Inference:
     def __setstate__(self, state):
         self.__dict__.update(state)
 
-        # Always re-init sklearn tooling + cache
-        self._init_sklearn_modules()
-        self._ensure_sklearn_regressor_cache()
-
-        # Re-init SBI only if needed
+        # Re-init only what the backend requires.
         model_name = getattr(self, "model_name", None)
         backend = getattr(self, "backend", None)
 
         is_sbi = (backend == "sbi") or (isinstance(model_name, str) and model_name in self.SBI_MODELS)
         if is_sbi:
+            self._set_sklearn_attrs_to_none()
             self._init_sbi_modules()
         else:
+            self._init_sklearn_modules()
+            self._ensure_sklearn_regressor_cache()
             self._set_sbi_attrs_to_none()
 
 
@@ -416,12 +448,16 @@ class Inference:
         model
             The trained model(s):
               - sklearn: single model or list of fold models if param_grid was used
-              - sbi: single inference object or list of fold inference objects if param_grid was used
+              - sbi: single posterior or list of fold posteriors if param_grid was used
         """
 
         train_params = train_params or {}
         if not isinstance(train_params, dict):
             raise TypeError("train_params must be a dict or None.")
+        if sbi_eval_num_posterior_samples <= 0:
+            raise ValueError("sbi_eval_num_posterior_samples must be > 0.")
+        if sbi_eval_batch_size <= 0:
+            raise ValueError("sbi_eval_batch_size must be > 0.")
 
         # --------- Validate data ----------
         if self.features is None or len(self.features) == 0:
@@ -462,7 +498,12 @@ class Inference:
 
             if param_grid is not None:
                 # CV splitter used only for param_grid
-                rkf = self.RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
+                all_splits = self._iter_repeated_kfold_indices(
+                    n_samples=X.shape[0],
+                    n_splits=n_splits,
+                    n_repeats=n_repeats,
+                    seed=seed,
+                )
                 total_folds = n_splits * n_repeats
                 print("Starting hyperparameter search with cross-validation...")
                 if not isinstance(param_grid, list) or not all(isinstance(d, dict) for d in param_grid):
@@ -477,7 +518,7 @@ class Inference:
                     fold_models = []
                     fold_scores = []
 
-                    for fold_i, (tr, te) in enumerate(rkf.split(X)):
+                    for fold_i, (tr, te) in enumerate(all_splits):
                         print(f"  Fold {fold_i+1}/{total_folds}")
                         repeat_id = fold_i // n_splits
                         repeat_seed = seed + repeat_id
@@ -550,7 +591,12 @@ class Inference:
 
             if param_grid is not None:
                 # CV splitter used only for param_grid
-                rkf = self.RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
+                all_splits = self._iter_repeated_kfold_indices(
+                    n_samples=X.shape[0],
+                    n_splits=n_splits,
+                    n_repeats=n_repeats,
+                    seed=seed,
+                )
                 total_folds = n_splits * n_repeats
                 print("Starting hyperparameter search with cross-validation...")
                 if not isinstance(param_grid, list) or not all(isinstance(d, dict) for d in param_grid):
@@ -558,7 +604,7 @@ class Inference:
 
                 best_score = np.inf
                 best_cfg_delta = None
-                best_fold_pairs = None  # list[(inference, density_estimator)]
+                best_fold_pairs = None  # list[(posterior, density_estimator)]
 
                 for params in param_grid:
                     print(f"Evaluating params: {params}")
@@ -568,7 +614,7 @@ class Inference:
                     fold_pairs = []
                     fold_scores = []
 
-                    for fold_i, (tr, te) in enumerate(rkf.split(X)):
+                    for fold_i, (tr, te) in enumerate(all_splits):
                         print(f"  Fold {fold_i+1}/{total_folds}")
                         repeat_id = fold_i // n_splits
                         repeat_seed = seed + repeat_id
@@ -605,7 +651,7 @@ class Inference:
 
                         fold_mse = total / n_te
                         fold_scores.append(fold_mse)
-                        fold_pairs.append((inf, de))
+                        fold_pairs.append((posterior, de))
 
                     mean_mse = float(np.mean(fold_scores))
                     if mean_mse < best_score:
@@ -618,7 +664,7 @@ class Inference:
                 else:
                     print(f"Best params: {best_cfg_delta} | mean CV MSE: {best_score:.6f}")
 
-                model = [inf for (inf, _) in best_fold_pairs]
+                model = [posterior for (posterior, _) in best_fold_pairs]
                 density_estimator = [de for (_, de) in best_fold_pairs]
 
             else:
@@ -667,7 +713,7 @@ class Inference:
             features,
             *,
             result_dir: str = "data",
-            scaler=None,
+            scaler: bool = False,
             # sklearn multiprocessing knobs
             n_jobs: int | None = None,
             chunksize: int | None = None,
@@ -675,13 +721,15 @@ class Inference:
             # SBI knobs
             num_posterior_samples: int | None = None,
             sbi_batch_size: int = 256,
+            sbi_show_progress_bars: bool = False,
     ):
         """
         Predict parameters.
 
-        Ensemble philosophy preserved:
-          - if loaded model.pkl is a list -> average predictions across all members
-          - if loaded model.pkl is a single model -> return its prediction
+        Ensemble behavior:
+          - sklearn: if loaded model.pkl is a list, average predictions across members.
+          - sbi: if loaded model.pkl is a list of posteriors, draw samples from each member and
+            concatenate a sample set with counts distributed as evenly as possible across members.
 
         Returns
         -------
@@ -689,13 +737,16 @@ class Inference:
             list where each element is float (scalar) or list[float] (multi-output), invalid rows -> nan_row
         sbi:
             np.ndarray of posterior samples:
-            - shape (S, B, theta_dim) for B valid rows (batch sampling),
+            - shape (S, B, theta_dim) for B valid rows (batch sampling), where S=num_posterior_samples
+              (for posterior ensembles, S total samples are split across members and concatenated),
             - invalid rows are NOT included (fast path). If you need alignment to original indices,
                 handle it outside this function.
         """
 
         model_path = os.path.join(result_dir, "model.pkl")
         scaler_path = os.path.join(result_dir, "scaler.pkl")
+        if not isinstance(scaler, (bool, np.bool_)):
+            raise TypeError("scaler must be a boolean: True=load scaler.pkl, False=do not scale.")
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Model not found at '{model_path}'. Train first.")
@@ -703,7 +754,7 @@ class Inference:
         with open(model_path, "rb") as f:
             model = pickle.load(f)
 
-        if scaler is True:
+        if scaler:
             if not os.path.exists(scaler_path):
                 raise FileNotFoundError(
                     "scaler=True but scaler.pkl not found in result_dir."
@@ -770,13 +821,6 @@ class Inference:
         else:
             raise ValueError(f"features must be scalar, 1D, or 2D; got shape {X.shape}.")
 
-        n = X.shape[0]
-        if n == 0:
-            return []
-
-        # Identify finite rows early (used for SBI; sklearn worker checks too)
-        finite_mask = np.isfinite(X).all(axis=1)
-
         # Prepare NaN row template (best-effort)
         theta_dim = None
         if self.theta is not None:
@@ -785,6 +829,19 @@ class Inference:
                 theta_dim = 1
             elif Y.ndim == 2:
                 theta_dim = Y.shape[1]
+
+        n = X.shape[0]
+        if n == 0:
+            if self.backend == "sbi":
+                s = 500 if num_posterior_samples is None else int(num_posterior_samples)
+                if s <= 0:
+                    raise ValueError("num_posterior_samples must be > 0.")
+                td = 0 if theta_dim is None else int(theta_dim)
+                return np.empty((s, 0, td), dtype=float)
+            return []
+
+        # Identify finite rows early (used for SBI; sklearn worker checks too)
+        finite_mask = np.isfinite(X).all(axis=1)
 
         nan_row = [np.nan] if (theta_dim in (None, 1)) else [np.nan] * theta_dim
 
@@ -825,8 +882,19 @@ class Inference:
         if self.backend != "sbi":
             raise RuntimeError(f"Unknown backend '{self.backend}'.")
 
-        # In the SBI path, model.pkl stores the posterior object directly
-        posterior = model
+        # In the SBI path, model.pkl stores either:
+        #   - a single posterior, or
+        #   - a list of posteriors (CV ensemble).
+        posteriors = model if isinstance(model, list) else [model]
+        if len(posteriors) == 0:
+            raise ValueError("Loaded SBI model ensemble is empty.")
+
+        for i, p in enumerate(posteriors):
+            if not hasattr(p, "sample"):
+                raise TypeError(
+                    f"SBI model at index {i} does not look like a posterior "
+                    f"(missing 'sample' method): {type(p)}"
+                )
 
         if scaler is not None and np.any(finite_mask):
             X2 = X.copy()
@@ -853,34 +921,62 @@ class Inference:
         if sbi_batch_size is None or sbi_batch_size <= 0:
             sbi_batch_size = B
 
+        def _sample_from_posterior(posterior_obj, n_samples, xb):
+            b = xb.shape[0]
+
+            if b == 1:
+                sb = posterior_obj.sample(
+                    (n_samples,),
+                    x=xb,
+                    show_progress_bars=bool(sbi_show_progress_bars),
+                )
+                # Normalize to [S, 1, theta_dim]
+                if sb.ndim == 2:
+                    sb = sb.unsqueeze(1)
+                return sb
+
+            # Multiple observations: prefer sample_batched when available.
+            if hasattr(posterior_obj, "sample_batched"):
+                return posterior_obj.sample_batched(
+                    (n_samples,),
+                    x=xb,
+                    show_progress_bars=bool(sbi_show_progress_bars),
+                )
+
+            # Fallback for posterior implementations without sample_batched.
+            sb = posterior_obj.sample(
+                (n_samples,),
+                x=xb,
+                show_progress_bars=bool(sbi_show_progress_bars),
+            )
+            if sb.ndim == 2:
+                sb = sb.unsqueeze(1)
+            return sb
+
         # Batched posterior sampling 
         with torch.no_grad():
             chunks = []
 
             for i in range(0, B, sbi_batch_size):
                 xb = Xf_t[i:i + sbi_batch_size]  
-                b = xb.shape[0]
+                n_post = len(posteriors)
 
-                if b == 1:
-                    # Match the exact behavior of:
-                    # posterior.sample((S,), x=x_tensor) for a single observation
-                    sb = posterior.sample(
-                        (num_posterior_samples,),
-                        x=xb,
-                        show_progress_bars=True,
-                    )
-                    # DirectPosterior typically returns (S, theta_dim) in this case.
-                    # Convert to (S, 1, theta_dim) to allow concatenation across batches.
-                    if sb.ndim == 2:
-                        sb = sb.unsqueeze(1) 
-
+                if n_post == 1:
+                    sb = _sample_from_posterior(posteriors[0], num_posterior_samples, xb)
                 else:
-                    # Multiple observations: use batched sampling
-                    sb = posterior.sample_batched(
-                        (num_posterior_samples,),
-                        x=xb,
-                        show_progress_bars=True,
-                    )  
+                    base = num_posterior_samples // n_post
+                    rem = num_posterior_samples % n_post
+                    per_model_counts = [base + (1 if j < rem else 0) for j in range(n_post)]
+
+                    parts = []
+                    for posterior_obj, n_samples in zip(posteriors, per_model_counts):
+                        if n_samples <= 0:
+                            continue
+                        parts.append(_sample_from_posterior(posterior_obj, n_samples, xb))
+
+                    if not parts:
+                        raise RuntimeError("No posterior samples drawn from ensemble.")
+                    sb = torch.cat(parts, dim=0)
 
                 chunks.append(sb)
 
@@ -890,5 +986,3 @@ class Inference:
             return samples[:, 0, :].detach().cpu().numpy()
 
         return samples.detach().cpu().numpy()
-
-

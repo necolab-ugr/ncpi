@@ -77,6 +77,16 @@ def test_predict_empty_returns_empty_list(tmp_result_dir):
     assert out == []
 
 
+def test_predict_rejects_non_boolean_scaler_flag(tmp_result_dir):
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=1, seed=14)
+    inf = Inference("Ridge", hyperparams={"alpha": 1.0})
+    inf.add_simulation_data(X, Y)
+    inf.train(param_grid=None, n_splits=2, n_repeats=1, result_dir=tmp_result_dir, seed=0)
+
+    with pytest.raises(TypeError):
+        inf.predict(X[:3], result_dir=tmp_result_dir, scaler="yes")
+
+
 def test_predict_rejects_ragged_object_array(tmp_result_dir):
     X, Y = _make_linear_data(n=20, d=2, theta_dim=1, seed=11)
     inf = Inference("Ridge", hyperparams={"alpha": 1.0})
@@ -173,3 +183,167 @@ def test_sbi_train_predict_and_sample(tmp_result_dir, sbi_model):
     samples1 = inf.predict(X[0], result_dir=tmp_result_dir, num_posterior_samples=40, sbi_batch_size=8)
     assert samples1.shape == (40, 2)
     assert np.all(np.isfinite(samples1))
+
+
+def test_sbi_predict_empty_input_returns_empty_sample_tensor(tmp_result_dir):
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=2, seed=5)
+
+    import torch
+    from sbi.utils import BoxUniform
+
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    hyper = {
+        "prior": prior,
+        "inference_kwargs": {"device": "cpu"},
+        "build_posterior_kwargs": {},
+    }
+
+    inf = Inference("NPE", hyperparams=hyper)
+    inf.add_simulation_data(X, Y)
+    inf.train(
+        param_grid=None,
+        n_splits=2,
+        n_repeats=1,
+        train_params={"max_num_epochs": 1, "show_train_summary": False},
+        result_dir=tmp_result_dir,
+        seed=0,
+        sbi_eval_num_posterior_samples=10,
+        sbi_eval_batch_size=4,
+    )
+
+    empty = inf.predict(np.empty((0, 2)), result_dir=tmp_result_dir, num_posterior_samples=15)
+    assert isinstance(empty, np.ndarray)
+    assert empty.shape == (15, 0, 2)
+
+
+def test_train_rejects_nonpositive_sbi_eval_knobs(tmp_result_dir):
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=1, seed=15)
+    inf = Inference("Ridge", hyperparams={"alpha": 1.0})
+    inf.add_simulation_data(X, Y)
+
+    with pytest.raises(ValueError):
+        inf.train(
+            param_grid=None,
+            n_splits=2,
+            n_repeats=1,
+            result_dir=tmp_result_dir,
+            seed=0,
+            sbi_eval_num_posterior_samples=0,
+            sbi_eval_batch_size=8,
+        )
+
+    with pytest.raises(ValueError):
+        inf.train(
+            param_grid=None,
+            n_splits=2,
+            n_repeats=1,
+            result_dir=tmp_result_dir,
+            seed=0,
+            sbi_eval_num_posterior_samples=10,
+            sbi_eval_batch_size=0,
+        )
+
+
+def test_sbi_param_grid_stores_posterior_ensemble_and_predicts(tmp_result_dir):
+    X, Y = _make_linear_data(n=24, d=2, theta_dim=2, seed=4)
+
+    import torch
+    from sbi.utils import BoxUniform
+
+    low = torch.tensor([-5.0, -5.0])
+    high = torch.tensor([5.0, 5.0])
+    prior = BoxUniform(low=low, high=high)
+
+    hyper = {
+        "prior": prior,
+        "inference_kwargs": {"device": "cpu"},
+        "build_posterior_kwargs": {},
+    }
+
+    inf = Inference("NPE", hyperparams=hyper)
+    inf.add_simulation_data(X, Y)
+
+    train_params = {
+        "max_num_epochs": 1,
+        "training_batch_size": 16,
+        "learning_rate": 1e-3,
+        "show_train_summary": False,
+    }
+
+    inf.train(
+        param_grid=[{"estimator_kwargs": {"estimator": "nsf"}}],
+        n_splits=2,
+        n_repeats=1,
+        train_params=train_params,
+        result_dir=tmp_result_dir,
+        seed=0,
+        sbi_eval_num_posterior_samples=20,
+        sbi_eval_batch_size=8,
+    )
+
+    with open(f"{tmp_result_dir}/model.pkl", "rb") as f:
+        model = pickle.load(f)
+
+    assert isinstance(model, list)
+    assert len(model) == 2  # n_splits * n_repeats
+    assert all(hasattr(p, "sample") for p in model)
+
+    samples = inf.predict(X[:3], result_dir=tmp_result_dir, num_posterior_samples=30, sbi_batch_size=8)
+    assert isinstance(samples, np.ndarray)
+    assert samples.shape == (30, 3, 2)
+    assert np.all(np.isfinite(samples))
+
+
+@pytest.mark.parametrize("sbi_model", ["NPE", "NLE", "NRE"])
+def test_sbi_native_workflow_and_pairplot_smoke(sbi_model):
+    """
+    Native sbi integration smoke test (not via ncpi.Inference):
+      1) simulate theta/x
+      2) train inference object
+      3) build posterior
+      4) sample posterior for x_o
+      5) render sbi.analysis.pairplot
+    """
+    import torch
+    from sbi.analysis import pairplot
+    from sbi.inference import NPE, NLE, NRE
+    from sbi.utils import BoxUniform
+
+    torch.manual_seed(0)
+    n = 96
+    theta_dim = 2
+    x_dim = 2
+
+    prior = BoxUniform(
+        low=-5.0 * torch.ones(theta_dim),
+        high=5.0 * torch.ones(theta_dim),
+    )
+
+    theta = prior.sample((n,)).to(torch.float32)
+
+    # Simple simulator: x = theta + Gaussian noise
+    def simulate(theta_batch):
+        return theta_batch + 0.1 * torch.randn(theta_batch.shape[0], x_dim)
+
+    x = simulate(theta).to(torch.float32)
+    x_o = x[0:1]
+
+    inference_cls = {"NPE": NPE, "NLE": NLE, "NRE": NRE}[sbi_model]
+    inference = inference_cls(prior=prior)
+    density_estimator = inference.append_simulations(theta, x).train(
+        max_num_epochs=1,
+        training_batch_size=32,
+        show_train_summary=False,
+    )
+    posterior = inference.build_posterior(density_estimator)
+    posterior_theta = posterior.sample((40,), x=x_o, show_progress_bars=False)
+
+    assert posterior_theta.shape == (40, theta_dim)
+    assert torch.isfinite(posterior_theta).all()
+
+    fig, ax = pairplot(posterior_theta)
+    assert fig is not None
+    assert ax is not None
+
+    import matplotlib.pyplot as plt
+    plt.close(fig)

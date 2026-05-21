@@ -16615,7 +16615,6 @@ def start_computation_redirect(computation_type):
         features_server_file_path = (request.form.get("features_server_file_path") or "").strip()
         inference_model_server_file_path = (request.form.get("inference_model_server_file_path") or "").strip()
         inference_scaler_server_file_path = (request.form.get("inference_scaler_server_file_path") or "").strip()
-        inference_density_server_file_path = (request.form.get("inference_density_server_file_path") or "").strip()
 
         has_uploaded_features = _has_upload("features_predict_file", "features_predict", "file-upload-features")
         has_server_features_path = bool(features_server_file_path)
@@ -16659,12 +16658,10 @@ def start_computation_redirect(computation_type):
 
         has_uploaded_model = _has_upload("model_file", "model-file", "file-upload-model")
         has_uploaded_scaler = _has_upload("scaler_file", "scaler-file", "file-upload-scaler")
-        has_uploaded_density = _has_upload("density_estimator_file", "density-estimator-file", "file-upload-density-estimator")
-        has_individual_assets = has_uploaded_model or has_uploaded_scaler or has_uploaded_density
+        has_individual_assets = has_uploaded_model or has_uploaded_scaler
         has_server_asset_file_paths = bool(
             inference_model_server_file_path
             or inference_scaler_server_file_path
-            or inference_density_server_file_path
         )
         inference_assets_server_files = {}
 
@@ -16697,15 +16694,6 @@ def start_computation_redirect(computation_type):
                     inference_assets_server_files["scaler_file"] = _validate_existing_file_path(
                         inference_scaler_server_file_path,
                         "Inference server scaler file",
-                    )
-                except Exception as exc:
-                    flash(str(exc), 'error')
-                    return redirect(request.referrer or url_for('inference'))
-            if inference_density_server_file_path:
-                try:
-                    inference_assets_server_files["density_estimator_file"] = _validate_existing_file_path(
-                        inference_density_server_file_path,
-                        "Inference server density estimator file",
                     )
                 except Exception as exc:
                     flash(str(exc), 'error')
@@ -17333,15 +17321,19 @@ def start_computation_redirect(computation_type):
             "scaler_file": "scaler_file",
             "scaler-file": "scaler_file",
             "file-upload-scaler": "scaler_file",
-            "density_estimator_file": "density_estimator_file",
-            "density-estimator-file": "density_estimator_file",
-            "file-upload-density-estimator": "density_estimator_file",
             # Backward-compatibility with older input keys.
             "features_sim": "features_sim",
             "parameters": "parameters",
         }
 
         for i, file_key in enumerate(files_obj):
+            if computation_type == "inference" and file_key in {
+                "density_estimator_file",
+                "density-estimator-file",
+                "file-upload-density-estimator",
+            }:
+                # Prediction flow no longer consumes density-estimator artifacts.
+                continue
             file = files_obj[file_key]
             if not file or not file.filename:
                 if computation_type in {'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg'}:
@@ -17482,7 +17474,7 @@ def start_computation_redirect(computation_type):
                             file_paths["features_predict"] = copied_path
 
             if inference_model_assets_source == "server-path":
-                for asset_key in ("model_file", "scaler_file", "density_estimator_file"):
+                for asset_key in ("model_file", "scaler_file"):
                     source_path = inference_assets_server_files.get(asset_key)
                     if not source_path:
                         continue
@@ -17511,7 +17503,6 @@ def start_computation_redirect(computation_type):
         )
         data["inference_model_server_file_path"] = inference_model_server_file_path
         data["inference_scaler_server_file_path"] = inference_scaler_server_file_path
-        data["inference_density_server_file_path"] = inference_density_server_file_path
     if computation_type == "inference_training":
         data["training_features_source_mode"] = inference_training_features_source_mode
         data["training_parameters_source_mode"] = inference_training_parameters_source_mode
