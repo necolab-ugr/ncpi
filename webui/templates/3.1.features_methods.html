@@ -1734,12 +1734,19 @@ def custom_feature(sample, params):
                 const currentPath = availablePaths.find((path) => currentPaths.includes(path)) || '';
                 const currentName = availableNames.find((name) => currentNames.includes(name)) || '';
 
-                this.parserAnalysisFolderPaths = currentPath
-                    ? [currentPath]
-                    : (availablePaths.length > 0 ? [availablePaths[0]] : []);
-                this.parserAnalysisFolderNames = currentName
-                    ? [currentName]
-                    : (availableNames.length > 0 ? [availableNames[0]] : []);
+                const selectedToken = currentPath
+                    ? { type: 'path', value: currentPath }
+                    : (currentName
+                        ? { type: 'name', value: currentName }
+                        : (availablePaths.length > 0
+                            ? { type: 'path', value: availablePaths[0] }
+                            : (availableNames.length > 0
+                                ? { type: 'name', value: availableNames[0] }
+                                : null)));
+
+                // Path and name tokens must stay mutually exclusive when data folders are mixed with metadata files.
+                this.parserAnalysisFolderPaths = selectedToken?.type === 'path' ? [selectedToken.value] : [];
+                this.parserAnalysisFolderNames = selectedToken?.type === 'name' ? [selectedToken.value] : [];
                 this.ensureDataLocatorMatchesSelectedFolder();
                 this.syncAdditionalFileSourceModeWithDataSource();
             },
