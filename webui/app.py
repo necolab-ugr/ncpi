@@ -7895,7 +7895,7 @@ def run_trial_simulation(model_type):
         run_mode, run_forms = _expand_simulation_forms(model_type, form)
     except ValueError as exc:
         flash(str(exc), "error")
-        return redirect(request.referrer or url_for(ref_page))
+        return redirect(url_for(ref_page))
 
     if model_type == "hagen":
         sim_defaults = HAGEN_DEFAULTS
@@ -7911,7 +7911,7 @@ def run_trial_simulation(model_type):
         )
     except Exception as exc:
         flash(f"Invalid simulation parameters: {exc}", "error")
-        return redirect(request.referrer or url_for(ref_page))
+        return redirect(url_for(ref_page))
     estimated_duration = max(60.0, min(24 * 3600.0, float(estimated_duration)))
 
     job_id = str(uuid.uuid4())
