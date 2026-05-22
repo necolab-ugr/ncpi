@@ -50,6 +50,7 @@
         sbiTrainParamsJson: '{\"max_num_epochs\": 50, \"training_batch_size\": 64, \"learning_rate\": 0.001, \"show_train_summary\": false}',
         scalerEnabled: false,
         scalerType: 'StandardScaler',
+        sklearnVerbose: 1,
         sbiEvalNumSamples: 2000,
         sbiEvalBatchSize: 256,
         featuresSourceMode: 'upload',
@@ -272,7 +273,7 @@
                     </select>
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-hyperparams-json">Model Hyperparameters (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-hyperparams-json">Model Hyperparameters (JSON object/dict)</label>
                     <textarea
                         id="training-hyperparams-json"
                         name="training_hyperparams_json"
@@ -280,6 +281,7 @@
                         x-model="hyperparamsJson"
                         class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                     ></textarea>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                 </div>
             </div>
         </section>
@@ -309,7 +311,7 @@
 
                 <div id="training-param-grid-section" x-show="trainingMode === 'param_grid'" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-param-grid-json">Parameter Grid (dict of lists or list of dicts)</label>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-param-grid-json">Parameter Grid (JSON object of lists or JSON list of objects)</label>
                         <textarea
                             id="training-param-grid-json"
                             name="training_param_grid_json"
@@ -317,6 +319,7 @@
                             x-model="paramGridJson"
                             class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                         ></textarea>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
@@ -370,7 +373,7 @@
                         />
                     </div>
                     <div class="md:col-span-2">
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train_params (dict)</label>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train_params (JSON object/dict)</label>
                         <textarea
                             id="training-sbi-train-params"
                             name="training_sbi_train_params_json"
@@ -378,10 +381,11 @@
                             x-model="sbiTrainParamsJson"
                             class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                         ></textarea>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                     </div>
                 </div>
 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                     <div>
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-seed">Seed</label>
                         <input
@@ -406,6 +410,18 @@
                             <option value="RobustScaler">RobustScaler</option>
                             <option value="MaxAbsScaler">MaxAbsScaler</option>
                         </select>
+                    </div>
+                    <div x-show="!isSbiModel()">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sklearn-verbose">Sklearn Verbose</label>
+                        <input
+                            id="training-sklearn-verbose"
+                            name="training_sklearn_verbose"
+                            type="number"
+                            min="0"
+                            step="1"
+                            x-model="sklearnVerbose"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
                     </div>
                     <div class="flex items-end pb-2">
                         <label class="inline-flex items-center gap-2">
@@ -475,31 +491,34 @@
                     </select>
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs override (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs override (JSON object/dict)</label>
                     <textarea
                         id="training-sbi-estimator-kwargs"
                         name="training_sbi_estimator_kwargs_json"
                         rows="2"
                         class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                     >{}</textarea>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs override (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs override (JSON object/dict)</label>
                     <textarea
                         id="training-sbi-inference-kwargs"
                         name="training_sbi_inference_kwargs_json"
                         rows="2"
                         class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                     >{}</textarea>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs override (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs override (JSON object/dict)</label>
                     <textarea
                         id="training-sbi-build-posterior-kwargs"
                         name="training_sbi_build_posterior_kwargs_json"
                         rows="2"
                         class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                     >{}</textarea>
+                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                 </div>
             </div>
         </section>

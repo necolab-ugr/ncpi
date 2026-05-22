@@ -5825,10 +5825,22 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
 
     data_value = _extract_dataframe_data_column(df, fields.data)
     mapped = {"data": data_value}
+    data_series = df[fields.data] if fields.data in df.columns else None
+    has_rowwise_sequence_data = False
+    if data_series is not None:
+        for sample_value in data_series.tolist()[:64]:
+            try:
+                sample_arr = np.asarray(sample_value)
+            except Exception:
+                continue
+            if sample_arr.ndim > 0:
+                has_rowwise_sequence_data = True
+                break
     preserve_rowwise_metadata = (
         isinstance(data_value, np.ndarray)
-        and data_value.ndim > 1
+        and data_value.ndim >= 1
         and data_value.shape[0] == len(df)
+        and has_rowwise_sequence_data
     )
 
     fs_value = None
@@ -5861,6 +5873,16 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
         ch_value = [str(v) for v in fields.ch_names]
     if ch_value is None:
         ch_value = _auto_channel_names(data_value)
+    if (
+        preserve_rowwise_metadata
+        and isinstance(data_value, np.ndarray)
+        and data_value.ndim == 2
+        and isinstance(ch_value, (list, tuple))
+        and len(ch_value) == len(df)
+    ):
+        # In row-wise mapped simulation data, channel names should not come from
+        # per-row metadata/object columns.
+        ch_value = ["ch0"]
     mapped["ch_names"] = ch_value
 
     metadata = {}
@@ -5874,12 +5896,39 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
         else:
             metadata[key] = locator
 
+    mapped_array_axes = fields.array_axes
+    if (
+        mapped_array_axes is None
+        and preserve_rowwise_metadata
+        and isinstance(data_value, np.ndarray)
+        and data_value.ndim >= 2
+    ):
+        # Keep dataframe row identity as parser "ids" so row-level metadata
+        # (condition/group/etc.) stays aligned after remapping.
+        non_row_axes = [axis for axis in range(1, data_value.ndim)]
+        sample_axis = max(non_row_axes, key=lambda axis: int(data_value.shape[axis]))
+        inferred_axes = {"ids": 0, "samples": int(sample_axis)}
+        remaining_axes = [axis for axis in non_row_axes if axis != sample_axis]
+        if remaining_axes:
+            ch_count = len(ch_value) if isinstance(ch_value, (list, tuple)) else None
+            channel_axis = None
+            if ch_count is not None and ch_count > 0:
+                for axis in remaining_axes:
+                    if int(data_value.shape[axis]) == int(ch_count):
+                        channel_axis = int(axis)
+                        break
+            if channel_axis is None and len(remaining_axes) == 1:
+                channel_axis = int(remaining_axes[0])
+            if channel_axis is not None:
+                inferred_axes["channels"] = channel_axis
+        mapped_array_axes = inferred_axes
+
     mapped_fields = CanonicalFields(
         data="data",
         fs="fs" if "fs" in mapped else None,
         ch_names="ch_names",
         metadata=metadata,
-        array_axes=fields.array_axes,
+        array_axes=mapped_array_axes,
     )
     mapped_cfg = _copy_parse_config(parse_cfg, fields=mapped_fields)
     return mapped, mapped_cfg
@@ -6421,7 +6470,15 @@ def _build_parse_config_from_form(form):
             metadata.setdefault("subject_id", 0)
             metadata.setdefault("group", "simulation")
             metadata.setdefault("species", "simulated")
-            metadata.setdefault("condition", "simulation_pipeline")
+            simulated_condition_value = _parse_metadata_field_source(
+                form,
+                "parser_metadata_condition_source",
+                "parser_metadata_condition",
+            )
+            if simulated_condition_value:
+                metadata["condition"] = simulated_condition_value
+            else:
+                metadata.setdefault("condition", "simulation_pipeline")
         else:
             subject_id_value = _parse_metadata_field_source(
                 form,
@@ -6543,6 +6600,27 @@ def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
             layout = parse_cfg.fields.table_layout
             if layout not in {"wide", "long"}:
                 parser_source, parser_cfg = _build_mapping_source_from_dataframe(source_obj, parse_cfg)
+
+        metadata_mode = (form.get("parser_metadata_mode") or "empirical").strip().lower()
+        if metadata_mode == "simulated" and "condition" in source_obj.columns:
+            metadata_map = dict(parser_cfg.fields.metadata or {})
+            condition_setting = metadata_map.get("condition")
+            condition_text = str(condition_setting).strip() if isinstance(condition_setting, str) else ""
+            needs_df_condition = (
+                condition_setting is None
+                or condition_text in {"", "simulation_pipeline", "condition"}
+            )
+            if needs_df_condition:
+                condition_values = source_obj["condition"].tolist()
+                if isinstance(parser_source, dict):
+                    parser_source["condition"] = condition_values
+                    metadata_map["condition"] = "condition"
+                else:
+                    metadata_map["condition"] = condition_values
+                parser_cfg = _copy_parse_config(
+                    parser_cfg,
+                    fields=_copy_canonical_fields(parser_cfg.fields, metadata=metadata_map),
+                )
 
     # If channel names are still missing, generate ch0..chN from detected sensor count.
     if parser_cfg.fields.ch_names is None or parser_cfg.fields.ch_names == "":
@@ -13832,7 +13910,7 @@ def analysis_plot_boxplot():
                 patch.set_facecolor((color[0], color[1], color[2], colormap_alpha))
         if show_cohend and cohen_map:
             _add_cohen_bar(ax, cohen_map, control_group_value, groups)
-        _set_category_ticks(ax, positions, groups, max_visible_labels=4)
+        _set_category_ticks(ax, positions, groups, max_visible_labels=2)
         ax.set_xlabel(group_col)
         ax.set_ylabel(value_col)
         ax.set_title(f"{value_col} by {group_col}")
@@ -13941,7 +14019,7 @@ def analysis_plot_boxplot():
                         patch.set_facecolor((color[0], color[1], color[2], colormap_alpha))
                 if show_cohend and cohen_maps:
                     _add_cohen_bar(ax, cohen_maps[dim], control_group_value, groups)
-                _set_category_ticks(ax, positions, groups, max_visible_labels=4)
+                _set_category_ticks(ax, positions, groups, max_visible_labels=2)
             else:
                 ax.text(0.5, 0.5, "No data", ha="center", va="center")
                 ax.set_xticks([])

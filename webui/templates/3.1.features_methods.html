@@ -3125,7 +3125,21 @@ def custom_feature(sample, params):
                         metadataEntries.push(`            'subject_id': 0,`);
                         metadataEntries.push(`            'group': 'simulation',`);
                         metadataEntries.push(`            'species': 'simulated',`);
-                        metadataEntries.push(`            'condition': 'simulation_pipeline',`);
+                        const simulatedConditionSource = String(this.parserMetadataConditionSource || '__none__').trim();
+                        if (simulatedConditionSource && simulatedConditionSource !== '__none__') {
+                            if (simulatedConditionSource === '__value__') {
+                                const rawCondition = String(this.parserMetadataCondition || '').trim();
+                                metadataEntries.push(
+                                    `            'condition': ${rawCondition ? toPyString(rawCondition) : toPyString('simulation_pipeline')},`
+                                );
+                            } else if (simulatedConditionSource === '__file_id__') {
+                                metadataEntries.push(`            'condition': 'file_ID',`);
+                            } else {
+                                metadataEntries.push(`            'condition': ${toPyString(simulatedConditionSource)},`);
+                            }
+                        } else {
+                            metadataEntries.push(`            'condition': 'simulation_pipeline',`);
+                        }
                     } else {
                         const addMetaFromSource = (key, source, value) => {
                             const src = String(source || '__none__').trim();
@@ -4553,7 +4567,7 @@ def custom_feature(sample, params):
                                         </fieldset>
                                     </div>
                                     <p class="text-xs text-gray-500 dark:text-gray-100" x-show="parserMetadataMode === 'simulated'">
-                                        Metadata is auto-filled as one synthetic subject.
+                                        Metadata is auto-filled as one synthetic subject. Condition is sourced from trial/repetition metadata when available.
                                     </p>
                                     <div x-show="parserMetadataMode === 'empirical'" class="space-y-4">
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

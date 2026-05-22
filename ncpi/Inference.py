@@ -484,6 +484,7 @@ class Inference:
             result_dir: str = "data",
             scaler=None,
             seed: int = 0,
+            sklearn_verbose: int | None = None,
             sbi_eval_num_posterior_samples: int = 2000,
             sbi_eval_batch_size: int = 256,
     ):
@@ -515,6 +516,10 @@ class Inference:
             If provided, used to scale features before training.
         seed : int
             Random seed for reproducibility.
+        sklearn_verbose : int or None
+            Default sklearn estimator verbosity level when the estimator exposes a
+            ``verbose`` parameter and it is not explicitly set in model/grid hyperparameters.
+            ``0`` disables verbose output; positive values enable it.
         sbi_eval_num_posterior_samples : int
             Number of posterior samples to draw per observation when evaluating SBI models during CV.
         sbi_eval_batch_size : int
@@ -532,6 +537,12 @@ class Inference:
             raise ValueError("sbi_eval_num_posterior_samples must be > 0.")
         if sbi_eval_batch_size <= 0:
             raise ValueError("sbi_eval_batch_size must be > 0.")
+        if sklearn_verbose is not None:
+            try:
+                sklearn_verbose = int(sklearn_verbose)
+            except (TypeError, ValueError):
+                raise ValueError(f"sklearn_verbose must be an integer or None, got: {sklearn_verbose}")
+            sklearn_verbose = max(0, sklearn_verbose)
 
         # --------- Validate data ----------
         if self.features is None or len(self.features) == 0:
@@ -590,6 +601,17 @@ class Inference:
 
             sklearn_clone = tools.dynamic_import("sklearn.base", "clone")
             base_model = RegressorClass(**base_params)
+            base_model_params = base_model.get_params()
+
+            default_verbose = None
+            if "verbose" in base_model_params and "verbose" not in base_params and sklearn_verbose is not None:
+                current_verbose = base_model_params.get("verbose")
+                if isinstance(current_verbose, (bool, np.bool_)):
+                    default_verbose = bool(sklearn_verbose > 0)
+                else:
+                    default_verbose = int(sklearn_verbose)
+                base_model.set_params(verbose=default_verbose)
+                print(f"Enabled sklearn verbose logging: verbose={default_verbose}")
 
             if param_grid is not None:
                 print("Starting hyperparameter search with cross-validation...")
@@ -617,6 +639,8 @@ class Inference:
                         p = dict(params)
                         if "random_state" in m.get_params():
                             p["random_state"] = repeat_seed
+                        if default_verbose is not None and "verbose" in m.get_params() and "verbose" not in p:
+                            p["verbose"] = default_verbose
 
                         m.set_params(**p)
 

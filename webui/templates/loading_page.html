@@ -38,6 +38,7 @@
             <p x-text="status === 'failed' ? 'An error occurred during computation.' : (status === 'cancelled' ? 'The computation was cancelled.' : (pending ? 'Waiting for upload to complete...' : (status === 'finished' ? 'Your results are ready.' : (cancelRequested ? 'Cancellation requested. Stopping computation...' : 'Please wait while the computation is in progress...'))))" class="text-text-light-secondary dark:text-[#929bc9] text-base"></p>
         </div>
     </div>
+    {% if computation_type != 'inference_training' %}
     <div class="w-64 mt-4">
         <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
             <div class="h-full bg-primary transition-all duration-500 ease-out" 
@@ -60,12 +61,12 @@
             Elapsed: <span x-text="elapsedTime"></span>
         </p>
 
-        <!-- Error message section - only shows when error exists -->
-        <div x-show="status === 'failed' || error" style="display: none" class="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
-            <p class="text-sm font-medium text-red-700 dark:text-red-300">
-                Error: <span x-text="error"></span>
-            </p>
-        </div>
+    </div>
+    {% endif %}
+    <div x-show="status === 'failed' || error" style="display: none" class="w-64 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg dark:bg-red-900/20 dark:border-red-800">
+        <p class="text-sm font-medium text-red-700 dark:text-red-300">
+            Error: <span x-text="error"></span>
+        </p>
     </div>
     {% if computation_type in ['simulation', 'field_potential_proxy', 'field_potential_kernel', 'field_potential_meeg', 'features', 'inference', 'inference_training'] %}
     <div class="w-full max-w-2xl mt-6">

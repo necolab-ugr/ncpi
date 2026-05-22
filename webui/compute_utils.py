@@ -80,6 +80,8 @@ MAX_OUTPUT_LINES = 200
 SIMULATION_BUNDLE_FILE = "simulation.pkl"
 SIMULATION_LEGACY_BUNDLE_FILES = {"sim_data.pkl"}
 SIMULATION_BUNDLE_FILES = {SIMULATION_BUNDLE_FILE, *SIMULATION_LEGACY_BUNDLE_FILES}
+SIMULATION_GRID_METADATA_FILE = "grid_metadata.pkl"
+SIMULATION_GRID_METADATA_LEGACY_FILES = {"simulation_grid_metadata.pkl", "simulation_grid_metadata.json"}
 SIMULATION_BUNDLE_FIELD_BY_FILE = {
     "times.pkl": "times",
     "gids.pkl": "gids",
@@ -319,6 +321,111 @@ def _load_simulation_component_from_path(path, default_file_name):
     return bundle[field]
 
 
+def _safe_int_or_none(value):
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _load_simulation_grid_metadata_from_source_path(source_path):
+    source = str(source_path or "").strip()
+    if not source:
+        return None
+    source_real = os.path.realpath(source)
+
+    # 1) Prefer grid metadata embedded in simulation bundle payloads.
+    if _is_simulation_bundle_path(source_real) and os.path.isfile(source_real):
+        try:
+            raw_payload = read_file(source_real)
+            if isinstance(raw_payload, MappingABC):
+                grid_meta = raw_payload.get("grid_metadata")
+                if isinstance(grid_meta, MappingABC):
+                    return dict(grid_meta)
+        except Exception:
+            pass
+
+    # 2) Fallback to sidecar metadata files in the same directory.
+    source_dir = source_real if os.path.isdir(source_real) else os.path.dirname(source_real)
+    if not source_dir:
+        return None
+    candidates = [
+        os.path.join(source_dir, SIMULATION_GRID_METADATA_FILE),
+        *[os.path.join(source_dir, name) for name in sorted(SIMULATION_GRID_METADATA_LEGACY_FILES)],
+    ]
+    for candidate in candidates:
+        if not os.path.isfile(candidate):
+            continue
+        try:
+            if candidate.endswith(".json"):
+                with open(candidate, "r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
+            else:
+                with open(candidate, "rb") as handle:
+                    payload = pickle.load(handle)
+            if isinstance(payload, MappingABC):
+                return dict(payload)
+        except Exception:
+            continue
+    return None
+
+
+def _trial_condition_label(trial_index, repeat_index=None, configuration_index=None):
+    ti = int(trial_index) + 1
+    rep = int(repeat_index) + 1 if repeat_index is not None else 1
+    if configuration_index is not None:
+        cfg = int(configuration_index) + 1
+        return f"cfg_{cfg}__rep_{rep}__trial_{ti}"
+    return f"trial_{ti}__rep_{rep}"
+
+
+def _build_trial_metadata_rows(grid_metadata, trial_count):
+    total = max(1, int(trial_count))
+    entries = []
+    trials = grid_metadata.get("trials") if isinstance(grid_metadata, MappingABC) else None
+    reps_per_cfg = _safe_int_or_none((grid_metadata or {}).get("repetitions_per_configuration")) if isinstance(grid_metadata, MappingABC) else None
+    by_trial_index = {}
+    if isinstance(trials, list):
+        for pos, trial_entry in enumerate(trials):
+            if not isinstance(trial_entry, MappingABC):
+                continue
+            trial_idx = _safe_int_or_none(trial_entry.get("trial_index"))
+            if trial_idx is None:
+                trial_idx = int(pos)
+            by_trial_index[int(trial_idx)] = trial_entry
+
+    for trial_idx in range(total):
+        entry = by_trial_index.get(int(trial_idx), {})
+        cfg_idx = _safe_int_or_none(entry.get("configuration_index")) if isinstance(entry, MappingABC) else None
+        rep_idx = _safe_int_or_none(entry.get("repeat_index")) if isinstance(entry, MappingABC) else None
+
+        if rep_idx is None:
+            if isinstance(reps_per_cfg, int) and reps_per_cfg > 0:
+                rep_idx = int(trial_idx % reps_per_cfg)
+            else:
+                rep_idx = 0
+        if cfg_idx is None and isinstance(reps_per_cfg, int) and reps_per_cfg > 0:
+            cfg_idx = int(trial_idx // reps_per_cfg)
+
+        condition_value = _trial_condition_label(
+            trial_index=trial_idx,
+            repeat_index=rep_idx,
+            configuration_index=cfg_idx,
+        )
+        entries.append({
+            "trial_index": int(trial_idx),
+            "repeat_index": int(rep_idx),
+            "configuration_index": int(cfg_idx) if cfg_idx is not None else None,
+            "condition": str(condition_value),
+        })
+    return entries
+
+
+def _trial_metadata_entries_from_source_path(source_path, trial_count):
+    meta = _load_simulation_grid_metadata_from_source_path(source_path)
+    return _build_trial_metadata_rows(meta, trial_count)
+
+
 def _append_job_output(job_status, job_id, message):
     if job_id not in job_status:
         return
@@ -377,6 +484,7 @@ def _mark_job_failed(job_status, job_id, exc):
 
 _PROGRESS_PERCENT_RE = re.compile(r"(?:^|\s)(\d{1,3})%")
 _FOLD_PROGRESS_RE = re.compile(r"Fold\s+(\d+)\s*/\s*(\d+)")
+_MLP_ITER_PROGRESS_RE = re.compile(r"Iteration\s+(\d+)\s*,\s*loss\s*=", re.IGNORECASE)
 FILE_EXTRACTED_VIRTUAL_FIELD = "__file_extracted_label__"
 FILE_EXTRACTED_VIRTUAL_FIELD_PREFIX = "__file_extracted_chain_"
 FILE_EXTRACTED_SEPARATOR_VIRTUAL_FIELD_PREFIX = "__file_extracted_sep__"
@@ -4478,7 +4586,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
 
         _append_job_output(job_status, job_id, f"Loaded training data: X={X.shape}, Y={Y.shape}.")
         if job_id in job_status:
-            job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 5)
+            job_status[job_id]["progress"] = 0
 
         model_name = (_get_param(params, "training_model_name", "MLPRegressor") or "").strip()
         if model_name == "__custom__":
@@ -4503,6 +4611,9 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         seed = _parse_int_param(params, "training_seed", default=0)
         n_splits = _parse_int_param(params, "training_n_splits", default=10)
         n_repeats = _parse_int_param(params, "training_n_repeats", default=10)
+        sklearn_verbose = _parse_int_param(params, "training_sklearn_verbose", default=0)
+        if sklearn_verbose is not None and sklearn_verbose < 0:
+            raise ValueError("Sklearn verbose must be >= 0.")
 
         if strategy_mode == "param_grid":
             if n_splits is None or n_splits <= 1:
@@ -4515,7 +4626,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             param_grid = _parse_param_grid(raw_grid)
             _append_job_output(job_status, job_id, f"Parameter grid enabled with {len(param_grid)} combination(s).")
         else:
-            n_splits = 2
+            n_splits = 1
             n_repeats = 1
             param_grid = None
 
@@ -4589,13 +4700,15 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
 
         inference_obj.add_simulation_data(X, Y)
         _append_job_output(job_status, job_id, f"Initialized model='{model_name}' backend='{inference_obj.backend}'.")
+        sklearn_verbose_label = str(sklearn_verbose) if inference_obj.backend == "sklearn" else "n/a"
         _append_job_output(
             job_status,
             job_id,
             (
                 f"Training config: strategy={strategy_mode}, seed={seed}, "
                 f"n_splits={n_splits}, n_repeats={n_repeats}, "
-                f"scaler={'on' if use_scaler else 'off'} ({scaler_type if use_scaler else 'n/a'})."
+                f"scaler={'on' if use_scaler else 'off'} ({scaler_type if use_scaler else 'n/a'}), "
+                f"sklearn_verbose={sklearn_verbose_label}."
             ),
         )
         total_fold_count = int(max(1, n_splits * n_repeats)) if param_grid else 1
@@ -4611,10 +4724,14 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         )
 
         os.makedirs(artifacts_dir, exist_ok=True)
+
         progress_state = {
             "param_idx": 0,
             "total_candidates": total_candidates,
             "folds_per_candidate": total_fold_count,
+            "current_fold_idx": 0,
+            "current_fold_total": max(1, total_fold_count),
+            "seen_iteration_markers": set(),
         }
 
         def _training_line_progress(line, _capture_obj):
@@ -4623,8 +4740,6 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 return
 
             if "Starting hyperparameter search with cross-validation" in text:
-                if job_id in job_status:
-                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 12)
                 return
 
             if "Evaluating params:" in text:
@@ -4632,27 +4747,38 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                     progress_state["total_candidates"],
                     progress_state["param_idx"] + 1,
                 )
-                if job_id in job_status:
-                    candidate_done = max(0, progress_state["param_idx"] - 1)
-                    coarse = 12 + int(70 * candidate_done / max(1, progress_state["total_candidates"]))
-                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), coarse)
+                progress_state["current_fold_idx"] = 0
+                progress_state["current_fold_total"] = max(1, progress_state["folds_per_candidate"])
                 return
 
             fold_match = _FOLD_PROGRESS_RE.search(text)
             if fold_match:
                 fold_idx = int(fold_match.group(1))
                 fold_total = max(1, int(fold_match.group(2)))
-                param_idx = max(1, progress_state["param_idx"]) if progress_state["total_candidates"] > 1 else 1
-                completed_units = (param_idx - 1) * fold_total + min(fold_idx, fold_total)
-                total_units = max(1, progress_state["total_candidates"] * fold_total)
-                mapped = 12 + int(75 * completed_units / total_units)
-                if job_id in job_status:
-                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), mapped)
+                progress_state["current_fold_idx"] = min(fold_idx, fold_total)
+                progress_state["current_fold_total"] = fold_total
                 return
 
             if "Training single sklearn model on full data" in text:
+                return
+
+            iter_match = _MLP_ITER_PROGRESS_RE.search(text)
+            if iter_match:
+                iter_idx = max(0, int(iter_match.group(1)))
+                if param_grid:
+                    marker = (
+                        max(1, int(progress_state["param_idx"])),
+                        max(1, int(progress_state["current_fold_idx"])),
+                        iter_idx,
+                    )
+                else:
+                    marker = ("single", iter_idx)
+                if marker in progress_state["seen_iteration_markers"]:
+                    return
+                progress_state["seen_iteration_markers"].add(marker)
                 if job_id in job_status:
-                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 30)
+                    current = int(job_status[job_id].get("progress", 0))
+                    job_status[job_id]["progress"] = min(95, current + 5)
                 return
 
             if "Model saved at" in text:
@@ -4672,8 +4798,8 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         capture = _JobOutputCapture(
             job_status,
             job_id,
-            progress_base=12,
-            progress_span=80,
+            progress_base=0,
+            progress_span=0,
             line_callback=_training_line_progress,
         )
         with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
@@ -4685,6 +4811,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 result_dir=artifacts_dir,
                 scaler=scaler_obj,
                 seed=seed,
+                sklearn_verbose=sklearn_verbose,
                 sbi_eval_num_posterior_samples=sbi_eval_num,
                 sbi_eval_batch_size=sbi_eval_batch,
             )
@@ -4787,6 +4914,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         sim_data = {}
         fr_times = None
         fr_gids = None
+        times_path = None
+        gids_path = None
         proxy_network_areas = []
         nu_ext_mode = str(params.get("nu_ext_mode") or "shared").strip().lower()
         if nu_ext_mode not in {"shared", "per-trial"}:
@@ -4866,6 +4995,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
         dt_from_stage, dt_path = _load_simulation_dt_ms(file_paths)
         proxy_sim_step = None
         dt_source = None
+        network_path = None
         try:
             network_path = _resolve_proxy_file("network_file", "network.pkl", required=False)
             if network_path:
@@ -4957,6 +5087,16 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
             fr_times,
             fr_gids,
             *(sim_data.values()),
+        )
+        trial_metadata_source_path = (
+            times_path
+            or dt_path
+            or network_path
+            or gids_path
+        )
+        trial_metadata_rows = _trial_metadata_entries_from_source_path(
+            trial_metadata_source_path,
+            trial_count,
         )
         if job_id in job_status:
             job_status[job_id]["simulation_total"] = int(trial_count)
@@ -5156,8 +5296,12 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                     "fs_hz": fs_hz,
                     "dt_source": dt_source,
                 }
-            if trial_count > 1:
-                row["trial_index"] = int(trial_idx)
+            trial_meta = _pick_trial_item(trial_metadata_rows, trial_idx)
+            row["trial_index"] = int(trial_meta.get("trial_index", trial_idx))
+            row["repeat_index"] = int(trial_meta.get("repeat_index", 0))
+            config_idx = trial_meta.get("configuration_index")
+            row["configuration_index"] = int(config_idx) if config_idx is not None else None
+            row["condition"] = str(trial_meta.get("condition", _trial_condition_label(trial_idx)))
 
             trial_proxy_payloads.append(pd.DataFrame([row]))
             _set_sample_progress(trial_idx + 1)
@@ -5483,6 +5627,10 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 )
 
         trial_count = _infer_trial_count_from_values(spike_times_raw, population_sizes_raw)
+        trial_metadata_rows = _trial_metadata_entries_from_source_path(
+            spike_times_path,
+            trial_count,
+        )
         if job_id in job_status:
             job_status[job_id]["simulation_total"] = int(trial_count)
             job_status[job_id]["simulation_completed"] = 0
@@ -5769,8 +5917,12 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 }
                 if area_sum_payload:
                     row["area_sums"] = area_sum_payload
-                if trial_count > 1:
-                    row["trial_index"] = int(trial_idx)
+                trial_meta = _pick_trial_item(trial_metadata_rows, trial_idx)
+                row["trial_index"] = int(trial_meta.get("trial_index", trial_idx))
+                row["repeat_index"] = int(trial_meta.get("repeat_index", 0))
+                config_idx = trial_meta.get("configuration_index")
+                row["configuration_index"] = int(config_idx) if config_idx is not None else None
+                row["condition"] = str(trial_meta.get("condition", _trial_condition_label(trial_idx)))
                 payload_df = pd.DataFrame([row])
                 probe_trial_payloads[probe_name].append(payload_df)
             _set_sample_progress(trial_idx + 1)
@@ -5829,8 +5981,12 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
             if remaining_probe_outputs:
                 selected_payload["probe_outputs"] = remaining_probe_outputs
             selected_payload["probe_order"] = [selected_probe] + list(remaining_probe_outputs.keys())
-            if trial_count > 1:
-                selected_payload.setdefault("trial_index", int(trial_idx))
+            trial_meta = _pick_trial_item(trial_metadata_rows, trial_idx)
+            selected_payload.setdefault("trial_index", int(trial_meta.get("trial_index", trial_idx)))
+            selected_payload.setdefault("repeat_index", int(trial_meta.get("repeat_index", 0)))
+            config_idx = trial_meta.get("configuration_index")
+            selected_payload.setdefault("configuration_index", int(config_idx) if config_idx is not None else None)
+            selected_payload.setdefault("condition", str(trial_meta.get("condition", _trial_condition_label(trial_idx))))
             cdm_trial_payloads.append(selected_payload)
 
         with open(cdm_path, "wb") as f:
@@ -6088,7 +6244,40 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 return np.repeat(seed, n_dipoles, axis=0)
             return arr
 
+        def _extract_trial_metadata_from_cdm_payload(payload, fallback_trial_idx):
+            base = {
+                "trial_index": int(fallback_trial_idx),
+                "repeat_index": 0,
+                "configuration_index": None,
+                "condition": _trial_condition_label(fallback_trial_idx),
+            }
+
+            def _from_mapping(mapping_obj):
+                trial_idx = _safe_int_or_none(mapping_obj.get("trial_index"))
+                repeat_idx = _safe_int_or_none(mapping_obj.get("repeat_index"))
+                config_idx = _safe_int_or_none(mapping_obj.get("configuration_index"))
+                condition_value = str(mapping_obj.get("condition") or "").strip()
+                out = dict(base)
+                out["trial_index"] = int(trial_idx) if trial_idx is not None else int(base["trial_index"])
+                out["repeat_index"] = int(repeat_idx) if repeat_idx is not None else int(base["repeat_index"])
+                out["configuration_index"] = int(config_idx) if config_idx is not None else None
+                out["condition"] = condition_value or _trial_condition_label(
+                    trial_index=out["trial_index"],
+                    repeat_index=out["repeat_index"],
+                    configuration_index=out["configuration_index"],
+                )
+                return out
+
+            if isinstance(payload, pd.DataFrame) and not payload.empty:
+                row0 = payload.iloc[0].to_dict()
+                if isinstance(row0, dict):
+                    return _from_mapping(row0)
+            if isinstance(payload, MappingABC):
+                return _from_mapping(payload)
+            return base
+
         for trial_idx, cdm_trial_raw in enumerate(cdm_trials_raw):
+            trial_meta = _extract_trial_metadata_from_cdm_payload(cdm_trial_raw, trial_idx)
             CDM, cdm_meta = _extract_signal_and_meta_from_source(cdm_trial_raw)
             component_mode = _normalize_cdm_component_axis(cdm_meta.get("component_axis"))
             if component_mode not in {"z", "xyz"}:
@@ -6541,8 +6730,11 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 },
                 "source_cdm_file": os.path.basename(cdm_path),
             }
-            if trial_count > 1:
-                row["trial_index"] = int(trial_idx)
+            row["trial_index"] = int(trial_meta.get("trial_index", trial_idx))
+            row["repeat_index"] = int(trial_meta.get("repeat_index", 0))
+            config_idx = trial_meta.get("configuration_index")
+            row["configuration_index"] = int(config_idx) if config_idx is not None else None
+            row["condition"] = str(trial_meta.get("condition", _trial_condition_label(trial_idx)))
             trial_payloads.append(pd.DataFrame([row]))
             if job_id in job_status:
                 job_status[job_id]["simulation_completed"] = int(trial_idx + 1)
