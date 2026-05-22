@@ -3,6 +3,7 @@ import random
 import numpy as np
 import inspect
 import pickle
+import warnings
 from ncpi import tools
 
 # --- Prediction multiprocessing helpers (worker-global state) ---
@@ -18,6 +19,7 @@ def _prediction_worker_init(model, scaler):
 
 
 def _predict_one(x):
+    """Predict one sample in a worker process; return None for invalid rows."""
     global _PRED_MODEL, _PRED_SCALER
 
     x = np.asarray(x)
@@ -57,6 +59,7 @@ class Inference:
     _SKLEARN_REGRESSORS = None  # dict[str, type]
 
     def __init__(self, model: str, hyperparams: dict | None = None):
+        """Initialize inference backend and validate model/hyperparameter inputs."""
         if not isinstance(model, str):
             raise TypeError("model must be a string.")
         model = model.strip()
@@ -65,15 +68,14 @@ class Inference:
             raise TypeError("hyperparams must be a dict or None.")
         self.hyperparams = hyperparams
 
+        self.model_name = model
+
         # Decide backend using registry-style checks
         if model in self.SBI_MODELS:
             self.backend = "sbi"
-            self.model_name = model
-            self._set_sklearn_attrs_to_none()
             self._init_sbi_modules()
         else:
             self.backend = "sklearn"
-            self.model_name = model
             self._init_sklearn_modules()
             self._ensure_sklearn_regressor_cache()
 
@@ -83,8 +85,6 @@ class Inference:
                     f"'{model}' is not valid. Use a sklearn regressor or an SBI model from {list(self.SBI_MODELS)}.\n"
                     f"Example sklearn regressors: {valid_sklearn[:10]}{' ...' if len(valid_sklearn) > 10 else ''}"
                 )
-                
-            self._set_sbi_attrs_to_none()
 
         # Training data
         self.features = None
@@ -93,7 +93,9 @@ class Inference:
     # -----------------------------
     # Module initialization
     # -----------------------------
+
     def _init_sklearn_modules(self):
+        """Load sklearn and runtime helpers needed by the sklearn backend."""
         if not tools.ensure_module("sklearn", package="scikit-learn", version_spec="==1.5.0"):
             raise ImportError("scikit-learn==1.5.0 is required (import name: 'sklearn').")
 
@@ -107,7 +109,7 @@ class Inference:
 
 
     def _ensure_sklearn_regressor_cache(self):
-        """Build a {name: class} mapping once per process."""
+        """Populate a class-level cache that maps sklearn regressor names to classes."""
         if self.__class__._SKLEARN_READY and self.__class__._SKLEARN_REGRESSORS is not None:
             return
 
@@ -121,73 +123,66 @@ class Inference:
 
 
     def _init_sbi_modules(self):
+        """Load torch plus only the SBI inference/builder callables required by the active SBI model."""
         if not tools.ensure_module("sbi", package="sbi", version_spec="==0.24.0"):
             raise ImportError("sbi==0.24.0 is required.")
         if not tools.ensure_module("torch", package="torch", raise_on_error=False):
             raise ImportError("PyTorch ('torch') is required but not importable.")
+        if not tools.ensure_module("sklearn", package="scikit-learn", version_spec="==1.5.0"):
+            raise ImportError("scikit-learn==1.5.0 is required (import name: 'sklearn').")
+        if self.model_name not in self.SBI_MODELS:
+            raise ValueError(f"Unsupported SBI model '{self.model_name}'.")
 
+        self.RepeatedKFold = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
         self.torch = tools.dynamic_import("torch")
-        self.NPE = tools.dynamic_import("sbi.inference", "NPE")
-        self.NLE = tools.dynamic_import("sbi.inference", "NLE")
-        self.NRE = tools.dynamic_import("sbi.inference", "NRE")
+        self.sbi_inference_cls = tools.dynamic_import("sbi.inference", self.model_name)
 
-        # single registry defined once per instance (small)
-        self.SBI_REGISTRY = {"NPE": self.NPE, "NLE": self.NLE, "NRE": self.NRE}
+        builder_name_by_model = {
+            "NPE": "posterior_nn",
+            "NLE": "likelihood_nn",
+            "NRE": "classifier_nn",
+        }
+        builder_name = builder_name_by_model[self.model_name]
+        self.sbi_builder_factory = tools.dynamic_import("sbi.neural_nets", builder_name)
 
-        self.posterior_nn = tools.dynamic_import("sbi.neural_nets", "posterior_nn")
-        self.likelihood_nn = tools.dynamic_import("sbi.neural_nets", "likelihood_nn")
-        self.classifier_nn = tools.dynamic_import("sbi.neural_nets", "classifier_nn")
+    # -----------------------------
+    # Posterior sampling (SBI)
+    # -----------------------------
 
-
-    def _set_sbi_attrs_to_none(self):
-        self.torch = None
-        self.SBI_REGISTRY = None
-        self.posterior_nn = None
-        self.likelihood_nn = None
-        self.classifier_nn = None
-        self.NPE = None
-        self.NLE = None
-        self.NRE = None
-
-
-    def _set_sklearn_attrs_to_none(self):
-        self.RepeatedKFold = None
-        self.all_estimators = None
-        self.RegressorMixin = None
-        self.multiprocessing = None
-        self.tqdm_inst = None
-        self.tqdm = None
-
-
-    @staticmethod
-    def _iter_repeated_kfold_indices(n_samples: int, n_splits: int, n_repeats: int, seed: int):
-        if n_splits < 2:
-            raise ValueError("n_splits must be >= 2.")
-        if n_repeats < 1:
-            raise ValueError("n_repeats must be >= 1.")
-        if n_samples < n_splits:
-            raise ValueError(
-                f"n_samples ({n_samples}) must be >= n_splits ({n_splits})."
-            )
-
-        all_splits = []
-        all_idx = np.arange(n_samples)
-        for rep in range(n_repeats):
-            rng = np.random.default_rng(seed + rep)
-            perm = rng.permutation(all_idx)
-            test_folds = np.array_split(perm, n_splits)
-            for test_idx in test_folds:
-                train_idx = np.setdiff1d(perm, test_idx, assume_unique=True)
-                all_splits.append((train_idx, test_idx))
-        return all_splits
-
-
-    def _sample_posterior_batch(self, posterior_obj, n_samples: int, xb, *, show_progress_bars: bool = False):
+    def _sample_posterior_batch(self, posterior_obj, n_samples: int, xb, *,
+                                show_progress_bars: bool = False):
         """
         Draw posterior samples for a batch of observations.
 
-        Returns samples with shape [S, B, theta_dim].
+        Parameters
+        ----------
+        posterior_obj : object
+            Posterior-like object exposing `sample(...)` and optionally `sample_batched(...)`,
+            as returned by `sbi` posterior construction.
+        n_samples : int
+            Number of samples to draw per observation.
+        xb : torch.Tensor
+            Observation batch with shape `(B, n_features)`.
+        show_progress_bars : bool, default=False
+            Forwarded to posterior sampling methods.
+
+        Returns
+        -------
+        torch.Tensor
+            Samples with shape `(S, B, theta_dim)`, where `S = n_samples`.
+
+        Notes
+        -----
+        Behavior by batch size and backend support:
+        - If `B == 1`, calls `posterior_obj.sample(...)`.
+        - If `B > 1` and `posterior_obj.sample_batched(...)` is available and compatible,
+          uses that fast path.
+        - Otherwise, falls back to per-observation sampling and concatenates along
+          the batch dimension.
+        - If sampling returns a 2D tensor `(S, theta_dim)`, it is expanded to
+          `(S, 1, theta_dim)` for consistent output shape.
         """
+
         torch = self.torch
         b = int(xb.shape[0])
 
@@ -215,10 +210,14 @@ class Inference:
                 if sb.ndim == 2:
                     sb = sb.unsqueeze(1)
                 return sb
-            except (TypeError, ValueError, NotImplementedError):
+            except Exception as exc:
                 # Fallback for posterior classes / sbi versions where batched
                 # sampling is unavailable or not compatible.
-                pass
+                warnings.warn(
+                    f"sample_batched failed ({type(exc).__name__}: {exc}); "
+                    "falling back to per-observation posterior sampling.",
+                    RuntimeWarning,
+                )
 
         parts = []
         for one_idx in range(b):
@@ -243,11 +242,10 @@ class Inference:
 
         # Drop modules and dynamic callables (they will be re-imported)
         drop_keys = {
-            "RepeatedKFold", "all_estimators", "RegressorMixin",
+            "RepeatedKFold",
+            "all_estimators", "RegressorMixin",
             "multiprocessing", "tqdm", "torch",
-            "NPE", "NLE", "NRE",
-            "posterior_nn", "likelihood_nn", "classifier_nn",
-            "SBI_REGISTRY",
+            "sbi_inference_cls", "sbi_builder_factory",
         }
         for k in drop_keys:
             state.pop(k, None)
@@ -261,20 +259,43 @@ class Inference:
 
 
     def __setstate__(self, state):
+        """Restore instance state and re-import backend-specific dynamic dependencies."""
         self.__dict__.update(state)
 
-        # Re-init only what the backend requires.
+        # Validate and normalize backend/model_name metadata before re-init.
         model_name = getattr(self, "model_name", None)
         backend = getattr(self, "backend", None)
 
-        is_sbi = (backend == "sbi") or (isinstance(model_name, str) and model_name in self.SBI_MODELS)
-        if is_sbi:
-            self._set_sklearn_attrs_to_none()
+        if not isinstance(model_name, str) or not model_name.strip():
+            raise ValueError("Invalid pickled Inference object: missing or invalid 'model_name'.")
+        model_name = model_name.strip()
+        self.model_name = model_name
+
+        if backend is None:
+            # Backward compatibility: infer backend for older pickles.
+            backend = "sbi" if model_name in self.SBI_MODELS else "sklearn"
+        elif backend not in {"sbi", "sklearn"}:
+            raise ValueError(
+                f"Invalid pickled Inference object: unsupported backend '{backend}'."
+            )
+
+        if backend == "sbi" and model_name not in self.SBI_MODELS:
+            raise ValueError(
+                f"Invalid pickled Inference object: backend='sbi' is incompatible with model '{model_name}'."
+            )
+        if backend == "sklearn" and model_name in self.SBI_MODELS:
+            raise ValueError(
+                f"Invalid pickled Inference object: backend='sklearn' is incompatible with SBI model '{model_name}'."
+            )
+
+        self.backend = backend
+
+        # Re-init only what the normalized backend requires.
+        if backend == "sbi":
             self._init_sbi_modules()
         else:
             self._init_sklearn_modules()
             self._ensure_sklearn_regressor_cache()
-            self._set_sbi_attrs_to_none()
 
 
     # -----------------------------
@@ -393,11 +414,11 @@ class Inference:
 
         # Select SBI method and its corresponding class (NPE/NLE/NRE).
         model_key = self.model_name  # "NPE" | "NLE" | "NRE"
-        if not self.SBI_REGISTRY or model_key not in self.SBI_REGISTRY:
+        inference_cls = getattr(self, "sbi_inference_cls", None)
+        if inference_cls is None:
             raise RuntimeError(
                 "SBI modules not initialized. Construct with an SBI model so _init_sbi_modules() runs."
             )
-        inference_cls = self.SBI_REGISTRY[model_key]
 
         # Optional configs.
         inference_kwargs = hyperparams.get("inference_kwargs", {}) or {}
@@ -428,14 +449,15 @@ class Inference:
             if not isinstance(estimator_name, str):
                 raise TypeError("estimator must be a string like 'nsf', 'maf', or 'mdn'.")
 
-            if model_key == "NPE":
-                builder = self.posterior_nn(model=estimator_name, **ekw)
-            elif model_key == "NLE":
-                builder = self.likelihood_nn(model=estimator_name, **ekw)
-            elif model_key == "NRE":
-                builder = self.classifier_nn(model=estimator_name, **ekw)
-            else:
+            builder_factory = getattr(self, "sbi_builder_factory", None)
+            if builder_factory is None:
+                raise RuntimeError(
+                    "SBI neural-net builder is not initialized. Construct with an SBI model so _init_sbi_modules() runs."
+                )
+
+            if model_key not in self.SBI_MODELS:
                 raise ValueError(f"Unsupported SBI model '{model_key}'.")
+            builder = builder_factory(model=estimator_name, **ekw)
 
         # ------------------------------------------------------------------
         # Instantiate the inference trainer with the correct keyword argument.
@@ -466,7 +488,7 @@ class Inference:
             sbi_eval_batch_size: int = 256,
     ):
         """
-        Train and (optionally) hyperparameter-search.
+        Train and (optionally) hyperparameter-search, then save artifacts to disk.
 
         Philosophy:
           - If param_grid is provided: train models for every fold for each candidate config,
@@ -485,7 +507,10 @@ class Inference:
         train_params : dict or None
             Additional training parameters for SBI models (e.g. max_num_epochs).
         result_dir : str
-            Directory where to save model.pkl (and scaler.pkl / density_estimator.pkl if applicable).
+            Directory where artifacts are saved:
+            - sklearn: model.pkl (single model or fold-model list) and optionally scaler.pkl
+            - sbi: inference.pkl, density_estimator.pkl, posterior.pkl (each single object or list),
+              and optionally scaler.pkl
         scaler : fitted transformer or None
             If provided, used to scale features before training.
         seed : int
@@ -496,10 +521,8 @@ class Inference:
             Batch size when evaluating SBI models during CV.
         Returns
         -------
-        model
-            The trained model(s):
-              - sklearn: single model or list of fold models if param_grid was used
-              - sbi: single posterior or list of fold posteriors if param_grid was used
+        None
+            This method saves trained artifacts to files and does not return objects.
         """
 
         train_params = train_params or {}
@@ -534,6 +557,27 @@ class Inference:
             fitted_scaler.fit(X)
             X = fitted_scaler.transform(X)
 
+        all_splits = None
+        total_folds = None
+        if param_grid is not None:
+            if n_splits < 2:
+                raise ValueError("n_splits must be >= 2.")
+            if n_repeats < 1:
+                raise ValueError("n_repeats must be >= 1.")
+            if X.shape[0] < n_splits:
+                raise ValueError(f"n_samples ({X.shape[0]}) must be >= n_splits ({n_splits}).")
+
+            if not tools.ensure_module("sklearn", package="scikit-learn", version_spec="==1.5.0"):
+                raise ImportError("scikit-learn==1.5.0 is required (import name: 'sklearn').")
+
+            repeated_kfold_cls = getattr(self, "RepeatedKFold", None)
+            if repeated_kfold_cls is None:
+                repeated_kfold_cls = tools.dynamic_import("sklearn.model_selection", "RepeatedKFold")
+
+            splitter = repeated_kfold_cls(n_splits=n_splits, n_repeats=n_repeats, random_state=seed)
+            all_splits = list(splitter.split(X))
+            total_folds = len(all_splits)
+
         # =============== SKLEARN ===============
         if self.backend == "sklearn":
             RegressorClass = self._SKLEARN_REGRESSORS.get(self.model_name)
@@ -548,14 +592,6 @@ class Inference:
             base_model = RegressorClass(**base_params)
 
             if param_grid is not None:
-                # CV splitter used only for param_grid
-                all_splits = self._iter_repeated_kfold_indices(
-                    n_samples=X.shape[0],
-                    n_splits=n_splits,
-                    n_repeats=n_repeats,
-                    seed=seed,
-                )
-                total_folds = n_splits * n_repeats
                 print("Starting hyperparameter search with cross-validation...")
                 if not isinstance(param_grid, list) or not all(isinstance(d, dict) for d in param_grid):
                     raise ValueError("param_grid must be a list of dicts.")
@@ -613,7 +649,6 @@ class Inference:
                     print(f"Best params: {best_params} | mean CV MSE: {best_score:.6f}")
 
                 model = best_fold_models  # <- ensemble list
-                density_estimator = None
 
             else:
                 print("Training single sklearn model on full data...")
@@ -627,7 +662,6 @@ class Inference:
                     y_all = y_all.ravel()
 
                 model.fit(X, y_all)
-                density_estimator = None
 
         # =============== SBI ===============
         elif self.backend == "sbi":
@@ -641,28 +675,20 @@ class Inference:
             base_cfg = dict(self.hyperparams)
 
             if param_grid is not None:
-                # CV splitter used only for param_grid
-                all_splits = self._iter_repeated_kfold_indices(
-                    n_samples=X.shape[0],
-                    n_splits=n_splits,
-                    n_repeats=n_repeats,
-                    seed=seed,
-                )
-                total_folds = n_splits * n_repeats
                 print("Starting hyperparameter search with cross-validation...")
                 if not isinstance(param_grid, list) or not all(isinstance(d, dict) for d in param_grid):
                     raise ValueError("param_grid must be a list of dicts.")
 
                 best_score = np.inf
                 best_cfg_delta = None
-                best_fold_pairs = None  # list[(posterior, density_estimator)]
+                best_fold_artifacts = None  # list[(inference, density_estimator, posterior)]
 
                 for params in param_grid:
                     print(f"Evaluating params: {params}")
                     cfg = dict(base_cfg)
                     cfg.update(params)
 
-                    fold_pairs = []
+                    fold_artifacts = []
                     fold_scores = []
 
                     for fold_i, (tr, te) in enumerate(all_splits):
@@ -704,21 +730,22 @@ class Inference:
 
                         fold_mse = total / n_te
                         fold_scores.append(fold_mse)
-                        fold_pairs.append((posterior, de))
+                        fold_artifacts.append((inf, de, posterior))
 
                     mean_mse = float(np.mean(fold_scores))
                     if mean_mse < best_score:
                         best_score = mean_mse
                         best_cfg_delta = dict(params)
-                        best_fold_pairs = fold_pairs
+                        best_fold_artifacts = fold_artifacts
 
-                if best_fold_pairs is None:
+                if best_fold_artifacts is None:
                     raise ValueError("No best hyperparameters found.")
                 else:
                     print(f"Best params: {best_cfg_delta} | mean CV MSE: {best_score:.6f}")
 
-                model = [posterior for (posterior, _) in best_fold_pairs]
-                density_estimator = [de for (_, de) in best_fold_pairs]
+                inf_artifact = [inf_obj for (inf_obj, _, _) in best_fold_artifacts]
+                density_estimator_artifact = [de for (_, de, _) in best_fold_artifacts]
+                posterior_artifact = [posterior for (_, _, posterior) in best_fold_artifacts]
 
             else:
                 # single SBI model on full data
@@ -733,7 +760,9 @@ class Inference:
                 build_kwargs = getattr(self, "_sbi_build_posterior_kwargs", {}) or {}
                 posterior = inf.build_posterior(density_estimator, **build_kwargs)
 
-                model = posterior
+                inf_artifact = inf
+                density_estimator_artifact = density_estimator
+                posterior_artifact = posterior
                 
 
         else:
@@ -742,23 +771,26 @@ class Inference:
         # --------- Save artifacts ----------
         os.makedirs(result_dir, exist_ok=True)
 
-        with open(os.path.join(result_dir, "model.pkl"), "wb") as f:
-            pickle.dump(model, f)
-        print(f"Model saved at '{result_dir}/model.pkl'")
-
         if fitted_scaler is not None:
             with open(os.path.join(result_dir, "scaler.pkl"), "wb") as f:
                 pickle.dump(fitted_scaler, f)
             print(f"Scaler saved at '{result_dir}/scaler.pkl'")
 
-        if self.backend == "sbi":
-            with open(os.path.join(result_dir, "density_estimator.pkl"), "wb") as f:
-                pickle.dump(density_estimator, f)
-            print(f"Density estimator saved at '{result_dir}/density_estimator.pkl'")
+        if self.backend == "sklearn":
+            with open(os.path.join(result_dir, "model.pkl"), "wb") as f:
+                pickle.dump(model, f)
+            print(f"Model saved at '{result_dir}/model.pkl'")
+        else:
             with open(os.path.join(result_dir, "inference.pkl"), "wb") as f:
-                pickle.dump(self, f)
+                pickle.dump(inf_artifact, f)
+            print(f"Inference object saved at '{result_dir}/inference.pkl'")
 
-        return model
+            with open(os.path.join(result_dir, "density_estimator.pkl"), "wb") as f:
+                pickle.dump(density_estimator_artifact, f)
+            print(f"Density estimator saved at '{result_dir}/density_estimator.pkl'")
+            with open(os.path.join(result_dir, "posterior.pkl"), "wb") as f:
+                pickle.dump(posterior_artifact, f)
+            print(f"Posterior saved at '{result_dir}/posterior.pkl'")
 
 
     def predict(
@@ -781,7 +813,7 @@ class Inference:
 
         Ensemble behavior:
           - sklearn: if loaded model.pkl is a list, average predictions across members.
-          - sbi: if loaded model.pkl is a list of posteriors, draw samples from each member and
+          - sbi: if loaded posterior.pkl is a list of posteriors, draw samples from each member and
             concatenate a sample set with counts distributed as evenly as possible across members.
 
         Returns
@@ -796,16 +828,24 @@ class Inference:
                 handle it outside this function.
         """
 
-        model_path = os.path.join(result_dir, "model.pkl")
         scaler_path = os.path.join(result_dir, "scaler.pkl")
         if not isinstance(scaler, (bool, np.bool_)):
             raise TypeError("scaler must be a boolean: True=load scaler.pkl, False=do not scale.")
 
-        if not os.path.exists(model_path):
-            raise FileNotFoundError(f"Model not found at '{model_path}'. Train first.")
-
-        with open(model_path, "rb") as f:
-            model = pickle.load(f)
+        if self.backend == "sklearn":
+            model_path = os.path.join(result_dir, "model.pkl")
+            if not os.path.exists(model_path):
+                raise FileNotFoundError(f"Model not found at '{model_path}'. Train first.")
+            with open(model_path, "rb") as f:
+                model = pickle.load(f)
+        elif self.backend == "sbi":
+            posterior_path = os.path.join(result_dir, "posterior.pkl")
+            if not os.path.exists(posterior_path):
+                raise FileNotFoundError(f"Posterior not found at '{posterior_path}'. Train first.")
+            with open(posterior_path, "rb") as f:
+                posterior_obj = pickle.load(f)
+        else:
+            raise RuntimeError(f"Unknown backend '{self.backend}'.")
 
         if scaler:
             if not os.path.exists(scaler_path):
@@ -935,10 +975,10 @@ class Inference:
         if self.backend != "sbi":
             raise RuntimeError(f"Unknown backend '{self.backend}'.")
 
-        # In the SBI path, model.pkl stores either:
+        # In the SBI path, posterior.pkl stores either:
         #   - a single posterior, or
         #   - a list of posteriors (CV ensemble).
-        posteriors = model if isinstance(model, list) else [model]
+        posteriors = posterior_obj if isinstance(posterior_obj, list) else [posterior_obj]
         if len(posteriors) == 0:
             raise ValueError("Loaded SBI model ensemble is empty.")
 
@@ -955,13 +995,14 @@ class Inference:
             X = X2
             finite_mask = np.isfinite(X).all(axis=1)
 
-        if not np.any(finite_mask):
-            return np.empty((0,))
-
         if num_posterior_samples is None:
             num_posterior_samples = 500
         if num_posterior_samples <= 0:
             raise ValueError("num_posterior_samples must be > 0.")
+
+        if not np.any(finite_mask):
+            td = 0 if theta_dim is None else int(theta_dim)
+            return np.empty((int(num_posterior_samples), 0, td), dtype=float)
 
         torch = self.torch
 

@@ -216,6 +216,38 @@ def test_sbi_predict_empty_input_returns_empty_sample_tensor(tmp_result_dir):
     assert empty.shape == (15, 0, 2)
 
 
+def test_sbi_predict_all_invalid_rows_returns_empty_sample_tensor_shape(tmp_result_dir):
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=2, seed=16)
+
+    import torch
+    from sbi.utils import BoxUniform
+
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    hyper = {
+        "prior": prior,
+        "inference_kwargs": {"device": "cpu"},
+        "build_posterior_kwargs": {},
+    }
+
+    inf = Inference("NPE", hyperparams=hyper)
+    inf.add_simulation_data(X, Y)
+    inf.train(
+        param_grid=None,
+        n_splits=2,
+        n_repeats=1,
+        train_params={"max_num_epochs": 1, "show_train_summary": False},
+        result_dir=tmp_result_dir,
+        seed=0,
+        sbi_eval_num_posterior_samples=10,
+        sbi_eval_batch_size=4,
+    )
+
+    X_bad = np.full((3, 2), np.nan, dtype=float)
+    out = inf.predict(X_bad, result_dir=tmp_result_dir, num_posterior_samples=12)
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (12, 0, 2)
+
+
 def test_train_rejects_nonpositive_sbi_eval_knobs(tmp_result_dir):
     X, Y = _make_linear_data(n=20, d=2, theta_dim=1, seed=15)
     inf = Inference("Ridge", hyperparams={"alpha": 1.0})
@@ -281,12 +313,18 @@ def test_sbi_param_grid_stores_posterior_ensemble_and_predicts(tmp_result_dir):
         sbi_eval_batch_size=8,
     )
 
-    with open(f"{tmp_result_dir}/model.pkl", "rb") as f:
+    with open(f"{tmp_result_dir}/posterior.pkl", "rb") as f:
         model = pickle.load(f)
+    with open(f"{tmp_result_dir}/inference.pkl", "rb") as f:
+        inference_obj = pickle.load(f)
+    with open(f"{tmp_result_dir}/density_estimator.pkl", "rb") as f:
+        density_estimator = pickle.load(f)
 
     assert isinstance(model, list)
     assert len(model) == 2  # n_splits * n_repeats
     assert all(hasattr(p, "sample") for p in model)
+    assert isinstance(inference_obj, list) and len(inference_obj) == 2
+    assert isinstance(density_estimator, list) and len(density_estimator) == 2
 
     samples = inf.predict(X[:3], result_dir=tmp_result_dir, num_posterior_samples=30, sbi_batch_size=8)
     assert isinstance(samples, np.ndarray)

@@ -1396,6 +1396,13 @@ def _parse_literal_value(value, default=None):
         return default
     if isinstance(value, (dict, list, tuple, float, int, bool)):
         return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if stripped:
+            try:
+                return json.loads(stripped)
+            except Exception:
+                pass
     try:
         return ast.literal_eval(value)
     except (ValueError, SyntaxError):
@@ -4054,12 +4061,12 @@ def _resolve_sbi_posteriors(model_obj):
             return list(source)
         if source and all(_is_inference_like(item) for item in source):
             raise ValueError(
-                "SBI model list contains inference objects. Prediction now requires posterior object(s) in model.pkl."
+                "SBI model list contains inference objects. Prediction requires posterior object(s) artifact(s)."
             )
 
     if _is_inference_like(source):
         raise ValueError(
-            "SBI inference object is not supported for prediction. Provide posterior object(s) in model.pkl."
+            "SBI inference object is not supported for prediction. Provide posterior object(s) artifact(s)."
         )
 
     raise ValueError(
@@ -4202,25 +4209,11 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
         model_source = model_uploaded
         scaler_source = scaler_uploaded
 
-        os.makedirs(artifacts_dir, exist_ok=True)
-        model_dst = os.path.join(artifacts_dir, "model.pkl")
-        scaler_dst = os.path.join(artifacts_dir, "scaler.pkl")
+        if not model_source:
+            raise ValueError("Model/posterior artifact is required for prediction.")
 
-        model_present = _copy_artifact_if_present(model_source, model_dst)
-        scaler_present = _copy_artifact_if_present(scaler_source, scaler_dst)
-        _append_job_output(
-            job_status,
-            job_id,
-            f"Prepared artifacts: model={'yes' if model_present else 'no'}, scaler={'yes' if scaler_present else 'no'}."
-        )
-        if not model_present:
-            raise ValueError("Model artifact is required for prediction.")
-
+        model_obj = _load_pickle_file(model_source)
         requested_model_name = (params.get("inference_model_name") or params.get("model") or "").strip()
-        if requested_model_name == "__custom__":
-            requested_model_name = (params.get("inference_model_name_custom") or "").strip()
-
-        model_obj = _load_pickle_file(model_dst)
         inference_obj, init_model_name, inferred_backend, inferred_type = _initialize_inference_from_artifact(
             model_obj,
             requested_model_name,
@@ -4230,6 +4223,30 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             job_id,
             f"Inferred model artifact: type={inferred_type}, backend={inferred_backend}. "
             f"Initialized ncpi.Inference(model='{init_model_name}').",
+        )
+        if inferred_backend == "sbi":
+            posteriors = _resolve_sbi_posteriors(model_obj)
+            _append_job_output(job_status, job_id, f"Resolved {len(posteriors)} SBI posterior object(s).")
+
+        os.makedirs(artifacts_dir, exist_ok=True)
+        model_dst = os.path.join(artifacts_dir, "model.pkl")
+        posterior_dst = os.path.join(artifacts_dir, "posterior.pkl")
+        scaler_dst = os.path.join(artifacts_dir, "scaler.pkl")
+
+        model_present = False
+        posterior_present = False
+        if inferred_backend == "sbi":
+            posterior_present = _copy_artifact_if_present(model_source, posterior_dst)
+        else:
+            model_present = _copy_artifact_if_present(model_source, model_dst)
+        scaler_present = _copy_artifact_if_present(scaler_source, scaler_dst)
+        _append_job_output(
+            job_status,
+            job_id,
+            "Prepared artifacts: "
+            f"model={'yes' if model_present else 'no'}, "
+            f"posterior={'yes' if posterior_present else 'no'}, "
+            f"scaler={'yes' if scaler_present else 'no'}."
         )
 
         output_df = df_features_predict.copy()
@@ -4264,7 +4281,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                     feature_matrix,
                     base_kwargs={
                         "result_dir": artifacts_dir,
-                        "scaler": True if (use_scaler and scaler_present) else None,
+                        "scaler": True if (use_scaler and scaler_present) else False,
                     },
                     exec_kwargs={
                         "n_jobs": inference_n_jobs,
@@ -4280,8 +4297,9 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                 job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 92)
 
         else:
-            # model_obj already loaded above for automatic backend/type inference.
-            _append_job_output(job_status, job_id, "Preparing SBI posterior sampling...")
+            if not posterior_present:
+                raise ValueError("SBI prediction requires posterior.pkl.")
+            _append_job_output(job_status, job_id, "Running ncpi.Inference.predict() for SBI posterior(s)...")
 
             sbi_summary_mode = (params.get("sbi_summary_mode") or "mean").strip().lower()
             if sbi_summary_mode not in {"mean", "median"}:
@@ -4310,58 +4328,57 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             if sbi_batch_size <= 0:
                 raise ValueError("SBI batch size must be > 0.")
 
-            scaler_obj = None
+            x_local = np.asarray(feature_matrix, dtype=float)
+            finite_mask = np.isfinite(x_local).all(axis=1)
+            preds = [np.nan] * int(x_local.shape[0])
             if use_scaler:
                 if not scaler_present:
                     raise ValueError("Scaler usage is enabled, but scaler.pkl was not provided.")
                 scaler_obj = _load_pickle_file(scaler_dst)
-
-            posteriors = _resolve_sbi_posteriors(model_obj)
-            _append_job_output(job_status, job_id, f"Resolved {len(posteriors)} SBI posterior object(s).")
-
-            x_local = np.asarray(feature_matrix, dtype=float)
-            finite_mask = np.isfinite(x_local).all(axis=1)
-            preds = [np.nan] * int(x_local.shape[0])
-            if np.any(finite_mask):
-                x_valid = x_local[finite_mask]
-                if scaler_obj is not None:
-                    x_valid = scaler_obj.transform(x_valid)
+                if np.any(finite_mask):
+                    x_valid = scaler_obj.transform(x_local[finite_mask])
                     valid_after_scale = np.isfinite(x_valid).all(axis=1)
                     valid_indices = np.where(finite_mask)[0]
                     finite_mask[:] = False
                     finite_mask[valid_indices[valid_after_scale]] = True
-                    x_valid = x_valid[valid_after_scale]
 
-                if x_valid.shape[0] > 0:
-                    per_model_summaries = []
-                    posterior_count = max(1, len(posteriors))
-                    for idx, posterior in enumerate(posteriors, start=1):
-                        _append_job_output(job_status, job_id, f"Sampling posterior {idx}/{len(posteriors)}...")
-                        segment_start = int(((idx - 1) * 95) / posterior_count)
-                        segment_end = int((idx * 95) / posterior_count)
-                        capture = _JobOutputCapture(
-                            job_status,
-                            job_id,
-                            progress_base=segment_start,
-                            progress_span=max(1, segment_end - segment_start),
-                        )
-                        with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
-                            samples = _sample_sbi_posterior(
-                                posterior,
-                                inference_obj.torch,
-                                x_valid,
-                                num_samples,
-                                sbi_batch_size,
-                                show_progress=True,
-                            )
-                        capture.flush()
-                        per_model_summaries.append(_summarize_sbi_samples(samples, sbi_summary_mode))
+            if np.any(finite_mask):
+                capture = _JobOutputCapture(job_status, job_id, progress_base=0, progress_span=95)
+                with contextlib.redirect_stdout(capture), contextlib.redirect_stderr(capture):
+                    samples = _predict_inference_with_compat(
+                        inference_obj,
+                        feature_matrix,
+                        base_kwargs={
+                            "result_dir": artifacts_dir,
+                            "scaler": True if (use_scaler and scaler_present) else False,
+                            "num_posterior_samples": num_samples,
+                            "sbi_batch_size": sbi_batch_size,
+                            "sbi_show_progress_bars": True,
+                        },
+                        exec_kwargs={},
+                        log_callback=lambda msg: _append_job_output(job_status, job_id, msg),
+                    )
+                capture.flush()
 
-                    stacked = np.stack(per_model_summaries, axis=0)
-                    combined = np.mean(stacked, axis=0)
-                    valid_rows = np.where(finite_mask)[0]
-                    for local_idx, global_idx in enumerate(valid_rows):
-                        preds[int(global_idx)] = _normalize_prediction_value(combined[local_idx])
+                samples = np.asarray(samples)
+                if samples.ndim == 2:
+                    samples = samples[:, np.newaxis, :]
+                elif samples.ndim != 3:
+                    raise ValueError(
+                        f"Unexpected SBI predict output shape: {samples.shape}. "
+                        "Expected (S, B, theta_dim) or (S, theta_dim)."
+                    )
+
+                valid_rows = np.where(finite_mask)[0]
+                if samples.shape[1] != valid_rows.shape[0]:
+                    raise ValueError(
+                        f"SBI prediction row mismatch: got {samples.shape[1]} valid outputs "
+                        f"for {valid_rows.shape[0]} valid input rows."
+                    )
+
+                combined = _summarize_sbi_samples(samples, sbi_summary_mode)
+                for local_idx, global_idx in enumerate(valid_rows):
+                    preds[int(global_idx)] = _normalize_prediction_value(combined[local_idx])
 
             output_df["Predictions"] = preds
             if job_id in job_status:
@@ -4472,32 +4489,35 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         base_hyperparams = _parse_dict_param(params, "training_hyperparams_json") or {}
         inference_obj = ncpi.Inference(
             model=model_name,
-            hyperparams=base_hyperparams if model_name not in {"NPE", "NLE", "NRE"} else None,
+            hyperparams=base_hyperparams,
         )
 
+        strategy_mode = (_get_param(params, "training_strategy_mode", "single_trial") or "single_trial").strip().lower()
+        if strategy_mode not in {"single_trial", "param_grid"}:
+            legacy_enable_cv = _parse_bool_param(params, "training_enable_cv", default=False)
+            legacy_enable_grid = _parse_bool_param(params, "training_enable_param_grid", default=False)
+            strategy_mode = "param_grid" if (legacy_enable_cv and legacy_enable_grid) else "single_trial"
+
         use_scaler = _parse_bool_param(params, "training_use_scaler", default=False)
+        scaler_type = (_get_param(params, "training_scaler_type", "StandardScaler") or "StandardScaler").strip()
         seed = _parse_int_param(params, "training_seed", default=0)
-        enable_cv = _parse_bool_param(params, "training_enable_cv", default=False)
         n_splits = _parse_int_param(params, "training_n_splits", default=10)
         n_repeats = _parse_int_param(params, "training_n_repeats", default=10)
-        if enable_cv:
+
+        if strategy_mode == "param_grid":
             if n_splits is None or n_splits <= 1:
-                raise ValueError("n_splits must be an integer > 1 when CV is enabled.")
+                raise ValueError("n_splits must be an integer > 1 for param_grid mode.")
             if n_repeats is None or n_repeats <= 0:
-                raise ValueError("n_repeats must be an integer > 0 when CV is enabled.")
+                raise ValueError("n_repeats must be an integer > 0 for param_grid mode.")
+            raw_grid = _get_param(params, "training_param_grid_json", None)
+            if raw_grid is None or str(raw_grid).strip() == "":
+                raise ValueError("param_grid mode requires a non-empty Parameter Grid.")
+            param_grid = _parse_param_grid(raw_grid)
+            _append_job_output(job_status, job_id, f"Parameter grid enabled with {len(param_grid)} combination(s).")
         else:
             n_splits = 2
             n_repeats = 1
-
-        param_grid = None
-        if enable_cv and _parse_bool_param(params, "training_enable_param_grid", default=False):
-            raw_grid = _get_param(params, "training_param_grid_json", None)
-            if raw_grid is None:
-                raise ValueError("Parameter grid is enabled, but no grid was provided.")
-            param_grid = _parse_param_grid(raw_grid)
-            _append_job_output(job_status, job_id, f"Parameter grid enabled with {len(param_grid)} combination(s).")
-        elif (not enable_cv) and _parse_bool_param(params, "training_enable_param_grid", default=False):
-            _append_job_output(job_status, job_id, "CV is disabled: parameter grid will be ignored.")
+            param_grid = None
 
         train_params = {}
         sbi_eval_num = 2000
@@ -4515,11 +4535,10 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             if np.any(low_vec >= high_vec):
                 raise ValueError("SBI prior bounds require low < high for every dimension.")
 
-            estimator_name = _get_param(params, "training_sbi_estimator", "nsf")
-            estimator_kwargs = _parse_dict_param(params, "training_sbi_estimator_kwargs_json") or {}
-            estimator_kwargs["estimator"] = estimator_name
-            inference_kwargs = _parse_dict_param(params, "training_sbi_inference_kwargs_json") or {}
-            build_posterior_kwargs = _parse_dict_param(params, "training_sbi_build_posterior_kwargs_json") or {}
+            estimator_name = (_get_param(params, "training_sbi_estimator", "") or "").strip()
+            estimator_override_kwargs = _parse_dict_param(params, "training_sbi_estimator_kwargs_json") or {}
+            inference_override_kwargs = _parse_dict_param(params, "training_sbi_inference_kwargs_json") or {}
+            build_posterior_override_kwargs = _parse_dict_param(params, "training_sbi_build_posterior_kwargs_json") or {}
 
             BoxUniform = ncpi.tools.dynamic_import("sbi.utils", "BoxUniform")
             torch_mod = inference_obj.torch
@@ -4528,11 +4547,21 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 high=torch_mod.tensor(high_vec, dtype=torch_mod.float32),
             )
             sbi_hyperparams = dict(base_hyperparams or {})
+            est_kwargs = dict(sbi_hyperparams.get("estimator_kwargs", {}) or {})
+            inf_kwargs = dict(sbi_hyperparams.get("inference_kwargs", {}) or {})
+            post_kwargs = dict(sbi_hyperparams.get("build_posterior_kwargs", {}) or {})
+
+            est_kwargs.update(estimator_override_kwargs)
+            inf_kwargs.update(inference_override_kwargs)
+            post_kwargs.update(build_posterior_override_kwargs)
+            if estimator_name:
+                est_kwargs["estimator"] = estimator_name
+
             sbi_hyperparams.update({
                 "prior": prior,
-                "estimator_kwargs": estimator_kwargs,
-                "inference_kwargs": inference_kwargs,
-                "build_posterior_kwargs": build_posterior_kwargs,
+                "estimator_kwargs": est_kwargs,
+                "inference_kwargs": inf_kwargs,
+                "build_posterior_kwargs": post_kwargs,
             })
             inference_obj.hyperparams = sbi_hyperparams
             train_params = _parse_dict_param(params, "training_sbi_train_params_json") or {}
@@ -4550,24 +4579,33 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
 
         scaler_obj = None
         if use_scaler:
-            StandardScaler = ncpi.tools.dynamic_import("sklearn.preprocessing", "StandardScaler")
-            scaler_obj = StandardScaler()
+            allowed_scalers = {"StandardScaler", "MinMaxScaler", "RobustScaler", "MaxAbsScaler"}
+            if scaler_type not in allowed_scalers:
+                raise ValueError(
+                    f"Unsupported scaler type '{scaler_type}'. Allowed: {sorted(allowed_scalers)}."
+                )
+            ScalerClass = ncpi.tools.dynamic_import("sklearn.preprocessing", scaler_type)
+            scaler_obj = ScalerClass()
 
         inference_obj.add_simulation_data(X, Y)
         _append_job_output(job_status, job_id, f"Initialized model='{model_name}' backend='{inference_obj.backend}'.")
         _append_job_output(
             job_status,
             job_id,
-            f"Training config: seed={seed}, n_splits={n_splits}, n_repeats={n_repeats}, scaler={'on' if use_scaler else 'off'}.",
+            (
+                f"Training config: strategy={strategy_mode}, seed={seed}, "
+                f"n_splits={n_splits}, n_repeats={n_repeats}, "
+                f"scaler={'on' if use_scaler else 'off'} ({scaler_type if use_scaler else 'n/a'})."
+            ),
         )
-        total_fold_count = int(max(1, n_splits * n_repeats)) if enable_cv and param_grid else 1
-        total_candidates = int(len(param_grid)) if (enable_cv and param_grid) else 1
+        total_fold_count = int(max(1, n_splits * n_repeats)) if param_grid else 1
+        total_candidates = int(len(param_grid)) if param_grid else 1
         _append_job_output(
             job_status,
             job_id,
             (
                 f"Planned training work: {total_candidates} configuration(s), {total_fold_count} fold(s) each."
-                if (enable_cv and param_grid)
+                if param_grid
                 else "Planned training work: direct training (no CV)."
             ),
         )
@@ -4623,6 +4661,10 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 return
 
             if "Density estimator saved at" in text:
+                if job_id in job_status:
+                    job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 94)
+                return
+            if "Posterior saved at" in text or "Inference object saved at" in text:
                 if job_id in job_status:
                     job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 94)
                 return

@@ -43,8 +43,15 @@
     x-data="{
         runtime: (window.__webuiRuntime || {}),
         modelName: 'MLPRegressor',
-        cvEnabled: false,
-        paramGridEnabled: false,
+        lastDefaultsModel: null,
+        trainingMode: 'single_trial',
+        hyperparamsJson: '{}',
+        paramGridJson: '',
+        sbiTrainParamsJson: '{\"max_num_epochs\": 50, \"training_batch_size\": 64, \"learning_rate\": 0.001, \"show_train_summary\": false}',
+        scalerEnabled: false,
+        scalerType: 'StandardScaler',
+        sbiEvalNumSamples: 2000,
+        sbiEvalBatchSize: 256,
         featuresSourceMode: 'upload',
         featuresServerFilePath: '',
         parametersSourceMode: 'upload',
@@ -63,12 +70,64 @@
             this.uploads[id] = { uploaded: true, name: file.name };
         },
         isSbiModel() {
-            const selected = this.modelName === '__custom__'
-                ? ((this.$refs.customModelName && this.$refs.customModelName.value) ? this.$refs.customModelName.value.trim() : '')
-                : this.modelName;
-            return ['NPE', 'NLE', 'NRE'].includes(selected);
+            return ['NPE', 'NLE', 'NRE'].includes(this.modelName);
+        },
+        defaultHyperparamsFor(model) {
+            const sklearnDefaults = {
+                MLPRegressor: {'hidden_layer_sizes': [100], 'activation': 'relu', 'solver': 'adam', 'max_iter': 500},
+                RandomForestRegressor: {'n_estimators': 300, 'max_depth': null, 'min_samples_split': 2, 'min_samples_leaf': 1},
+                Ridge: {'alpha': 1.0},
+                SVR: {'kernel': 'rbf', 'C': 1.0, 'gamma': 'scale', 'epsilon': 0.1},
+                LinearRegression: {}
+            };
+            const sbiDefaults = {
+                NPE: {'estimator_kwargs': {'estimator': 'nsf'}, 'inference_kwargs': {'device': 'cpu'}, 'build_posterior_kwargs': {}},
+                NLE: {'estimator_kwargs': {'estimator': 'nsf'}, 'inference_kwargs': {'device': 'cpu'}, 'build_posterior_kwargs': {}},
+                NRE: {'estimator_kwargs': {'estimator': 'mlp'}, 'inference_kwargs': {'device': 'cpu'}, 'build_posterior_kwargs': {}}
+            };
+            if (Object.prototype.hasOwnProperty.call(sbiDefaults, model)) return sbiDefaults[model];
+            if (Object.prototype.hasOwnProperty.call(sklearnDefaults, model)) return sklearnDefaults[model];
+            return {};
+        },
+        defaultParamGridFor(model) {
+            const sklearnDefaults = {
+                MLPRegressor: {'hidden_layer_sizes': [[64], [128], [128, 64]], 'alpha': [0.0001, 0.001]},
+                RandomForestRegressor: {'n_estimators': [200, 400], 'max_depth': [10, 20, null]},
+                Ridge: {'alpha': [0.1, 1.0, 10.0]},
+                SVR: {'C': [0.5, 1.0, 5.0], 'gamma': ['scale', 'auto']},
+                LinearRegression: {}
+            };
+            const sbiDefaults = {
+                NPE: {'estimator_kwargs': [{'estimator': 'nsf'}, {'estimator': 'maf'}]},
+                NLE: {'estimator_kwargs': [{'estimator': 'nsf'}, {'estimator': 'maf'}]},
+                NRE: {'estimator_kwargs': [{'estimator': 'mlp'}]}
+            };
+            if (Object.prototype.hasOwnProperty.call(sbiDefaults, model)) return sbiDefaults[model];
+            if (Object.prototype.hasOwnProperty.call(sklearnDefaults, model)) return sklearnDefaults[model];
+            return {};
+        },
+        applyModelDefaults() {
+            const model = this.modelName;
+            if (!model) return;
+            this.hyperparamsJson = JSON.stringify(this.defaultHyperparamsFor(model), null, 2);
+            this.paramGridJson = JSON.stringify(this.defaultParamGridFor(model), null, 2);
+            if (this.isSbiModel()) {
+                this.sbiTrainParamsJson = JSON.stringify(
+                    {'max_num_epochs': 50, 'training_batch_size': 64, 'learning_rate': 0.001, 'show_train_summary': false},
+                    null,
+                    2
+                );
+            }
+        },
+        syncDefaultsIfModelChanged() {
+            const model = this.modelName;
+            if (!model || model === this.lastDefaultsModel) return;
+            this.lastDefaultsModel = model;
+            this.applyModelDefaults();
         }
     }"
+    x-init="syncDefaultsIfModelChanged()"
+    x-effect="syncDefaultsIfModelChanged()"
     class="max-w-5xl mx-auto"
 >
     <h1 class="text-3xl sm:text-4xl font-bold text-slate-900 dark:text-white mb-2">Inference Training Configuration</h1>
@@ -196,6 +255,7 @@
                         id="training-model-name"
                         name="training_model_name"
                         x-model="modelName"
+                        @change="applyModelDefaults()"
                     >
                         <optgroup label="Sklearn">
                             <option value="MLPRegressor">MLPRegressor</option>
@@ -209,36 +269,17 @@
                             <option value="NLE">NLE</option>
                             <option value="NRE">NRE</option>
                         </optgroup>
-                        <option value="__custom__">Custom model name...</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-model-name-custom">Custom Model Name</label>
-                    <input
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        id="training-model-name-custom"
-                        name="training_model_name_custom"
-                        type="text"
-                        placeholder="e.g., ExtraTreesRegressor"
-                        x-ref="customModelName"
-                        :disabled="modelName !== '__custom__'"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-seed">Random Seed</label>
-                    <input
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        id="training-seed"
-                        name="training_seed"
-                        type="number"
-                        value="0"
-                    />
-                </div>
-                <div class="flex items-center pt-6">
-                    <label class="inline-flex items-center gap-2">
-                        <input class="rounded border-slate-300 text-primary focus:ring-primary" name="training_use_scaler" type="checkbox" value="1" />
-                        <span class="text-sm text-slate-700 dark:text-slate-300">Scale input features during training</span>
-                    </label>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-hyperparams-json">Model Hyperparameters (dict)</label>
+                    <textarea
+                        id="training-hyperparams-json"
+                        name="training_hyperparams_json"
+                        rows="5"
+                        x-model="hyperparamsJson"
+                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                    ></textarea>
                 </div>
             </div>
         </section>
@@ -250,48 +291,127 @@
             </h2>
 
             <div class="space-y-6">
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-hyperparams-json">Base Hyperparameters (dict)</label>
-                    <textarea
-                        id="training-hyperparams-json"
-                        name="training_hyperparams_json"
-                        rows="3"
-                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                    >{}</textarea>
-                </div>
-
-                <div class="flex items-center">
-                    <label class="inline-flex items-center gap-2">
-                        <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_enable_cv" value="1" x-model="cvEnabled" />
-                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable cross-validation / repeated CV</span>
+                <input type="hidden" name="training_strategy_mode" x-model="trainingMode" />
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label class="inline-flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+                        <input id="training-mode-single" name="training_strategy_mode_choice" class="rounded border-slate-300 text-primary focus:ring-primary" type="radio" value="single_trial" x-model="trainingMode" checked />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Single trial (no param_grid)</span>
+                    </label>
+                    <label class="inline-flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+                        <input id="training-mode-grid" name="training_strategy_mode_choice" class="rounded border-slate-300 text-primary focus:ring-primary" type="radio" value="param_grid" x-model="trainingMode" />
+                        <span class="text-sm text-slate-700 dark:text-slate-300">Hyperparameter search (param_grid)</span>
                     </label>
                 </div>
-                <p class="text-xs text-slate-500 dark:text-slate-400" x-show="!cvEnabled">
-                    Direct training mode: model is trained once on the full (or subsampled) dataset without CV.
+
+                <p class="text-xs text-slate-500 dark:text-slate-400" x-show="trainingMode === 'single_trial'">
+                    Single trial mode trains once on the full (or subsampled) dataset.
                 </p>
 
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6" x-show="cvEnabled" x-cloak>
+                <div id="training-param-grid-section" x-show="trainingMode === 'param_grid'" class="space-y-4">
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-splits">CV Splits (n_splits)</label>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-param-grid-json">Parameter Grid (dict of lists or list of dicts)</label>
+                        <textarea
+                            id="training-param-grid-json"
+                            name="training_param_grid_json"
+                            rows="5"
+                            x-model="paramGridJson"
+                            class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                        ></textarea>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-splits">CV Splits (n_splits)</label>
+                            <input
+                                id="training-n-splits"
+                                name="training_n_splits"
+                                type="number"
+                                min="2"
+                                value="10"
+                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            />
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-repeats">CV Repeats (n_repeats)</label>
+                            <input
+                                id="training-n-repeats"
+                                name="training_n_repeats"
+                                type="number"
+                                min="1"
+                                value="10"
+                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div id="training-sbi-paramgrid-settings" x-show="isSbiModel() && trainingMode === 'param_grid'" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">CV Posterior Samples (sbi_eval_num_posterior_samples)</label>
                         <input
-                            id="training-n-splits"
-                            name="training_n_splits"
+                            id="training-sbi-eval-num"
+                            name="training_sbi_eval_num_posterior_samples"
                             type="number"
-                            min="2"
-                            value="10"
+                            min="1"
+                            value="2000"
+                            x-model="sbiEvalNumSamples"
                             class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         />
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-repeats">CV Repeats (n_repeats)</label>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">CV Eval Batch Size (sbi_eval_batch_size)</label>
                         <input
-                            id="training-n-repeats"
-                            name="training_n_repeats"
+                            id="training-sbi-eval-batch"
+                            name="training_sbi_eval_batch_size"
                             type="number"
                             min="1"
-                            value="10"
+                            value="256"
+                            x-model="sbiEvalBatchSize"
                             class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                         />
+                    </div>
+                    <div class="md:col-span-2">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train_params (dict)</label>
+                        <textarea
+                            id="training-sbi-train-params"
+                            name="training_sbi_train_params_json"
+                            rows="4"
+                            x-model="sbiTrainParamsJson"
+                            class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                        ></textarea>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-seed">Seed</label>
+                        <input
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                            id="training-seed"
+                            name="training_seed"
+                            type="number"
+                            value="0"
+                        />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-scaler-type">Scaler Type</label>
+                        <select
+                            id="training-scaler-type"
+                            name="training_scaler_type"
+                            x-model="scalerType"
+                            :disabled="!scalerEnabled"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white disabled:opacity-50"
+                        >
+                            <option value="StandardScaler">StandardScaler</option>
+                            <option value="MinMaxScaler">MinMaxScaler</option>
+                            <option value="RobustScaler">RobustScaler</option>
+                            <option value="MaxAbsScaler">MaxAbsScaler</option>
+                        </select>
+                    </div>
+                    <div class="flex items-end pb-2">
+                        <label class="inline-flex items-center gap-2">
+                            <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_use_scaler" value="1" x-model="scalerEnabled" />
+                            <span class="text-sm text-slate-700 dark:text-slate-300">Use scaler</span>
+                        </label>
                     </div>
                 </div>
 
@@ -310,29 +430,13 @@
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Randomly samples this percentage of rows before training.</p>
                 </div>
 
-                <div class="flex items-center">
-                    <label class="inline-flex items-center gap-2">
-                        <input class="rounded border-slate-300 text-primary focus:ring-primary" type="checkbox" name="training_enable_param_grid" value="1" x-model="paramGridEnabled" :disabled="!cvEnabled" />
-                        <span class="text-sm text-slate-700 dark:text-slate-300">Enable hyperparameter search (param_grid)</span>
-                    </label>
-                </div>
-                <div x-show="cvEnabled && paramGridEnabled" x-cloak>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-param-grid-json">Parameter Grid (dict of lists or list of dicts)</label>
-                    <textarea
-                        id="training-param-grid-json"
-                        name="training_param_grid_json"
-                        rows="4"
-                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                        placeholder="e.g. {'n_estimators': [100, 300], 'max_depth': [5, 10]}"
-                    ></textarea>
-                </div>
             </div>
         </section>
 
         <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700" x-show="isSbiModel()" x-cloak>
             <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
                 <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">D</span>
-                SBI Settings
+                SBI Prior & Advanced Settings
             </h2>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -356,43 +460,22 @@
                         class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     />
                 </div>
-
                 <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-estimator">Estimator</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-estimator">Estimator (overrides hyperparams when provided)</label>
                     <select
                         id="training-sbi-estimator"
                         name="training_sbi_estimator"
                         class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                     >
+                        <option value="">(use hyperparams default)</option>
                         <option value="nsf">nsf</option>
                         <option value="maf">maf</option>
                         <option value="mdn">mdn</option>
+                        <option value="mlp">mlp</option>
                     </select>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">CV Posterior Samples</label>
-                    <input
-                        id="training-sbi-eval-num"
-                        name="training_sbi_eval_num_posterior_samples"
-                        type="number"
-                        min="1"
-                        value="2000"
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">CV Eval Batch Size</label>
-                    <input
-                        id="training-sbi-eval-batch"
-                        name="training_sbi_eval_batch_size"
-                        type="number"
-                        min="1"
-                        value="256"
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs override (dict)</label>
                     <textarea
                         id="training-sbi-estimator-kwargs"
                         name="training_sbi_estimator_kwargs_json"
@@ -401,7 +484,7 @@
                     >{}</textarea>
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs override (dict)</label>
                     <textarea
                         id="training-sbi-inference-kwargs"
                         name="training_sbi_inference_kwargs_json"
@@ -410,22 +493,13 @@
                     >{}</textarea>
                 </div>
                 <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs (dict)</label>
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs override (dict)</label>
                     <textarea
                         id="training-sbi-build-posterior-kwargs"
                         name="training_sbi_build_posterior_kwargs_json"
                         rows="2"
                         class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                     >{}</textarea>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train params (dict)</label>
-                    <textarea
-                        id="training-sbi-train-params"
-                        name="training_sbi_train_params_json"
-                        rows="2"
-                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                    >{"max_num_epochs": 50}</textarea>
                 </div>
             </div>
         </section>
@@ -892,6 +966,90 @@
             window.alert(`Provide both Features Data and Parameters Data. ${missing.join("; ")}`);
         }
     });
+})();
+
+(() => {
+    const modelSelect = document.getElementById("training-model-name");
+    const trainingModeSingle = document.getElementById("training-mode-single");
+    const trainingModeGrid = document.getElementById("training-mode-grid");
+    const trainingModeHidden = document.querySelector('input[name="training_strategy_mode"]');
+    const paramGridSection = document.getElementById("training-param-grid-section");
+    const sbiParamGridSettings = document.getElementById("training-sbi-paramgrid-settings");
+    const hyperparamsBox = document.getElementById("training-hyperparams-json");
+    const paramGridBox = document.getElementById("training-param-grid-json");
+    const sbiTrainParamsBox = document.getElementById("training-sbi-train-params");
+    if (!modelSelect || !hyperparamsBox || !paramGridBox || !sbiTrainParamsBox) {
+        return;
+    }
+
+    const sklearnDefaults = {
+        MLPRegressor: {hidden_layer_sizes: [100], activation: "relu", solver: "adam", max_iter: 500},
+        RandomForestRegressor: {n_estimators: 300, max_depth: null, min_samples_split: 2, min_samples_leaf: 1},
+        Ridge: {alpha: 1.0},
+        SVR: {kernel: "rbf", C: 1.0, gamma: "scale", epsilon: 0.1},
+        LinearRegression: {}
+    };
+    const sbiDefaults = {
+        NPE: {estimator_kwargs: {estimator: "nsf"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
+        NLE: {estimator_kwargs: {estimator: "nsf"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
+        NRE: {estimator_kwargs: {estimator: "mlp"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}}
+    };
+    const sklearnGridDefaults = {
+        MLPRegressor: {hidden_layer_sizes: [[64], [128], [128, 64]], alpha: [0.0001, 0.001]},
+        RandomForestRegressor: {n_estimators: [200, 400], max_depth: [10, 20, null]},
+        Ridge: {alpha: [0.1, 1.0, 10.0]},
+        SVR: {C: [0.5, 1.0, 5.0], gamma: ["scale", "auto"]},
+        LinearRegression: {}
+    };
+    const sbiGridDefaults = {
+        NPE: {estimator_kwargs: [{estimator: "nsf"}, {estimator: "maf"}]},
+        NLE: {estimator_kwargs: [{estimator: "nsf"}, {estimator: "maf"}]},
+        NRE: {estimator_kwargs: [{estimator: "mlp"}]}
+    };
+    const defaultSbiTrainParams = {max_num_epochs: 50, training_batch_size: 64, learning_rate: 0.001, show_train_summary: false};
+
+    const selectedModelName = () => {
+        return modelSelect.value;
+    };
+
+    const setFieldJson = (el, value) => {
+        el.value = JSON.stringify(value, null, 2);
+        el.dispatchEvent(new Event("input", {bubbles: true}));
+    };
+
+    const applyDefaults = () => {
+        const model = selectedModelName();
+        if (!model) return;
+        setFieldJson(hyperparamsBox, (sbiDefaults[model] ?? sklearnDefaults[model] ?? {}));
+        setFieldJson(paramGridBox, (sbiGridDefaults[model] ?? sklearnGridDefaults[model] ?? {}));
+        if (Object.prototype.hasOwnProperty.call(sbiDefaults, model)) {
+            setFieldJson(sbiTrainParamsBox, defaultSbiTrainParams);
+        }
+    };
+
+    const updateTrainingModeVisibility = () => {
+        if (!paramGridSection) return;
+        const mode = (trainingModeGrid && trainingModeGrid.checked) ? "param_grid" : "single_trial";
+        paramGridSection.style.display = mode === "param_grid" ? "" : "none";
+        if (trainingModeHidden) {
+            trainingModeHidden.value = mode;
+        }
+        const isSbi = ["NPE", "NLE", "NRE"].includes(modelSelect.value);
+        if (sbiParamGridSettings) {
+            sbiParamGridSettings.style.display = (mode === "param_grid" && isSbi) ? "" : "none";
+        }
+    };
+
+    modelSelect.addEventListener("change", applyDefaults);
+    modelSelect.addEventListener("change", updateTrainingModeVisibility);
+    if (trainingModeSingle) {
+        trainingModeSingle.addEventListener("change", updateTrainingModeVisibility);
+    }
+    if (trainingModeGrid) {
+        trainingModeGrid.addEventListener("change", updateTrainingModeVisibility);
+    }
+    updateTrainingModeVisibility();
+    applyDefaults();
 })();
 </script>
 {% endblock %}
