@@ -3680,18 +3680,24 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         samples = _extract_feature_samples(df)
         _append_job_output(job_status, job_id, f"Extracted {len(samples)} signal sample(s) from dataframe.")
 
-        features_subsample_percent = _parse_float_param(params, "features_subsample_percent", default=None)
-        if features_subsample_percent is None:
+        features_subsample_percent_raw = _parse_float_param(params, "features_subsample_percent", default=None)
+        if features_subsample_percent_raw is None:
             # Legacy fallback for older forms: "subsampling" + "sampling_percentage".
             legacy_subsampling = _parse_bool_param(params, "subsampling", default=False)
             if legacy_subsampling:
-                features_subsample_percent = _parse_float_param(params, "sampling_percentage", default=100.0)
+                features_subsample_percent_raw = _parse_float_param(params, "sampling_percentage", default=100.0)
             else:
-                features_subsample_percent = 100.0
-        if not np.isfinite(features_subsample_percent):
+                features_subsample_percent_raw = 100.0
+        if not np.isfinite(features_subsample_percent_raw):
             raise ValueError("Feature input subsample percentage must be a finite number.")
-        if features_subsample_percent <= 0 or features_subsample_percent > 100:
-            raise ValueError("Feature input subsample percentage must be in the range (0, 100].")
+        features_subsample_percent = float(np.clip(float(features_subsample_percent_raw), 0.0, 100.0))
+        if float(features_subsample_percent_raw) != features_subsample_percent:
+            _append_job_output(
+                job_status,
+                job_id,
+                "Feature input subsample percentage was cropped to valid range [0, 100]: "
+                f"{float(features_subsample_percent_raw):.6g} -> {features_subsample_percent:.6g}.",
+            )
 
         total_feature_rows = int(len(samples))
         if features_subsample_percent < 100.0:
@@ -4370,11 +4376,17 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             f"Loaded features dataframe shape={df_features_predict.shape}, rows for prediction={feature_matrix.shape[0]}."
         )
 
-        inference_subsample_percent = _parse_float_param(params, "inference_subsample_percent", default=100.0)
-        if not np.isfinite(inference_subsample_percent):
+        inference_subsample_percent_raw = _parse_float_param(params, "inference_subsample_percent", default=100.0)
+        if not np.isfinite(inference_subsample_percent_raw):
             raise ValueError("Input subsample percentage must be a finite number.")
-        if inference_subsample_percent <= 0 or inference_subsample_percent > 100:
-            raise ValueError("Input subsample percentage must be in the range (0, 100].")
+        inference_subsample_percent = float(np.clip(float(inference_subsample_percent_raw), 0.0, 100.0))
+        if float(inference_subsample_percent_raw) != inference_subsample_percent:
+            _append_job_output(
+                job_status,
+                job_id,
+                "Prediction input subsample percentage was cropped to valid range [0, 100]: "
+                f"{float(inference_subsample_percent_raw):.6g} -> {inference_subsample_percent:.6g}.",
+            )
 
         total_prediction_rows = int(feature_matrix.shape[0])
         if inference_subsample_percent < 100.0:

@@ -217,9 +217,48 @@ class Inference:
         return None
 
 
-    def _nan_posterior_samples(self, n_samples: int, xb, theta_dim: int | None = None):
+    @staticmethod
+    def _infer_theta_dim_from_posterior_obj(posterior_obj):
+        """Best-effort theta-dimension inference from SBI posterior metadata."""
+        if posterior_obj is None:
+            return None
+
+        prior = getattr(posterior_obj, "prior", None)
+        if prior is None:
+            prior = getattr(posterior_obj, "_prior", None)
+        if prior is not None:
+            event_shape = getattr(prior, "event_shape", None)
+            if event_shape is not None:
+                try:
+                    shape = tuple(int(v) for v in tuple(event_shape))
+                    if len(shape) >= 1 and shape[-1] > 0:
+                        return int(shape[-1])
+                except Exception:
+                    pass
+
+        posterior_estimator = getattr(posterior_obj, "posterior_estimator", None)
+        if posterior_estimator is not None:
+            input_shape = getattr(posterior_estimator, "input_shape", None)
+            if input_shape is not None:
+                try:
+                    shape = tuple(int(v) for v in tuple(input_shape))
+                    if len(shape) == 1 and shape[0] > 0:
+                        return int(shape[0])
+                    if len(shape) > 1 and shape[-1] > 0:
+                        return int(shape[-1])
+                except Exception:
+                    pass
+
+        return None
+
+
+    def _nan_posterior_samples(self, n_samples: int, xb, theta_dim: int | None = None, posterior_obj=None):
         """Create a `(S, 1, theta_dim)` NaN tensor on the same device/dtype as `xb`."""
-        td = theta_dim if theta_dim is not None else self._infer_theta_dim()
+        td = theta_dim
+        if td is None:
+            td = self._infer_theta_dim()
+        if td is None:
+            td = self._infer_theta_dim_from_posterior_obj(posterior_obj)
         if td is None or int(td) <= 0:
             raise RuntimeError(
                 "Posterior sampling failed, and theta dimension could not be inferred "
@@ -295,7 +334,11 @@ class Inference:
                 )
             except AssertionError:
                 self._warn_sbi_sampling_assertion_once()
-                sb = self._nan_posterior_samples(n_samples=n_samples, xb=xb)
+                sb = self._nan_posterior_samples(
+                    n_samples=n_samples,
+                    xb=xb,
+                    posterior_obj=posterior_obj,
+                )
             if sb.ndim == 2:
                 sb = sb.unsqueeze(1)
             return sb
@@ -337,6 +380,7 @@ class Inference:
                     n_samples=n_samples,
                     xb=one_x,
                     theta_dim=theta_dim_hint,
+                    posterior_obj=posterior_obj,
                 )
             if sb.ndim == 2:
                 sb = sb.unsqueeze(1)
