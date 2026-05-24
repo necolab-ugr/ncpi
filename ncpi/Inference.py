@@ -10,6 +10,15 @@ from ncpi import tools
 _PRED_MODEL = None
 _PRED_SCALER = None
 
+# --- Sklearn CV multiprocessing helpers (worker-global state) ---
+_CV_BASE_MODEL = None
+_CV_X = None
+_CV_Y = None
+_CV_PARAMS = None
+_CV_N_SPLITS = None
+_CV_SEED = None
+_CV_DEFAULT_VERBOSE = None
+
 
 def _prediction_worker_init(model, scaler):
     """Initializer: runs once per worker process (sklearn-only)."""
@@ -46,6 +55,53 @@ def _predict_one(x):
     if y0.ndim == 0:
         return float(y0)
     return y0.astype(float).tolist()
+
+
+def _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose):
+    """Initializer for sklearn CV workers (runs once per process)."""
+    global _CV_BASE_MODEL, _CV_X, _CV_Y, _CV_PARAMS, _CV_N_SPLITS, _CV_SEED, _CV_DEFAULT_VERBOSE
+    _CV_BASE_MODEL = base_model
+    _CV_X = X
+    _CV_Y = Y
+    _CV_PARAMS = params
+    _CV_N_SPLITS = n_splits
+    _CV_SEED = seed
+    _CV_DEFAULT_VERBOSE = default_verbose
+
+
+def _train_sklearn_cv_fold(task):
+    """Train one sklearn CV fold and return (fold_i, mse, trained_model)."""
+    fold_i, tr, te = task
+
+    # Local import in worker process keeps module-level imports lightweight.
+    from sklearn.base import clone as sklearn_clone
+
+    repeat_id = fold_i // _CV_N_SPLITS
+    repeat_seed = _CV_SEED + repeat_id
+
+    m = sklearn_clone(_CV_BASE_MODEL)
+    p = dict(_CV_PARAMS)
+    if "random_state" in m.get_params():
+        p["random_state"] = repeat_seed
+    if _CV_DEFAULT_VERBOSE is not None and "verbose" in m.get_params() and "verbose" not in p:
+        p["verbose"] = _CV_DEFAULT_VERBOSE
+    m.set_params(**p)
+
+    y_tr = _CV_Y[tr]
+    if y_tr.ndim == 2 and y_tr.shape[1] == 1:
+        y_tr = y_tr.ravel()
+    m.fit(_CV_X[tr], y_tr)
+
+    pred = np.asarray(m.predict(_CV_X[te]))
+
+    y_te = _CV_Y[te]
+    if y_te.ndim == 2 and y_te.shape[1] == 1:
+        y_te = y_te.ravel()
+    if np.asarray(pred).ndim > 1 and y_te.ndim == 1:
+        pred = np.asarray(pred).ravel()
+
+    mse = float(np.mean((pred - y_te) ** 2))
+    return fold_i, mse, m
 
 
 class Inference:
@@ -626,38 +682,24 @@ class Inference:
                     print(f"Evaluating params: {params}")
                     fold_models = []
                     fold_scores = []
+                    fold_tasks = [(fold_i, tr, te) for fold_i, (tr, te) in enumerate(all_splits)]
+                    max_workers = min(total_folds, os.cpu_count() or 1)
 
-                    for fold_i, (tr, te) in enumerate(all_splits):
+                    if max_workers > 1:
+                        print(f"  Running folds in parallel across {max_workers} worker(s)")
+                        ctx = self.multiprocessing.get_context("spawn")
+                        with ctx.Pool(
+                            processes=max_workers,
+                            initializer=_cv_worker_init,
+                            initargs=(base_model, X, Y, params, n_splits, seed, default_verbose),
+                        ) as pool:
+                            fold_results = pool.map(_train_sklearn_cv_fold, fold_tasks)
+                    else:
+                        _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose)
+                        fold_results = [_train_sklearn_cv_fold(task) for task in fold_tasks]
+
+                    for fold_i, mse, m in sorted(fold_results, key=lambda x: x[0]):
                         print(f"  Fold {fold_i+1}/{total_folds}")
-                        repeat_id = fold_i // n_splits
-                        repeat_seed = seed + repeat_id
-
-                        # fresh estimator each fold
-                        m = sklearn_clone(base_model)
-
-                        # fold config (never mutate the source dict)
-                        p = dict(params)
-                        if "random_state" in m.get_params():
-                            p["random_state"] = repeat_seed
-                        if default_verbose is not None and "verbose" in m.get_params() and "verbose" not in p:
-                            p["verbose"] = default_verbose
-
-                        m.set_params(**p)
-
-                        y_tr = Y[tr]
-                        if y_tr.ndim == 2 and y_tr.shape[1] == 1:
-                            y_tr = y_tr.ravel()
-                        m.fit(X[tr], y_tr)
-
-                        pred = np.asarray(m.predict(X[te]))
-
-                        y_te = Y[te]
-                        if y_te.ndim == 2 and y_te.shape[1] == 1:
-                            y_te = y_te.ravel()
-                        if np.asarray(pred).ndim > 1 and y_te.ndim == 1:
-                            pred = np.asarray(pred).ravel()
-
-                        mse = float(np.mean((pred - y_te) ** 2))
                         fold_scores.append(mse)
                         fold_models.append(m)
 
