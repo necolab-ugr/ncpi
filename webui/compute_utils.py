@@ -4710,10 +4710,46 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 raise ValueError("SBI eval posterior samples must be > 0.")
             if sbi_eval_batch is None or sbi_eval_batch <= 0:
                 raise ValueError("SBI eval batch size must be > 0.")
+            if strategy_mode == "param_grid":
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "SBI settings are shared across all CV folds: "
+                    f"train_params={train_params}, "
+                    f"sbi_eval_num_posterior_samples={sbi_eval_num}, "
+                    f"sbi_eval_batch_size={sbi_eval_batch}.",
+                )
+
+            effective_estimator = None
+            est_from_kwargs = est_kwargs.get("estimator", None)
+            if isinstance(est_from_kwargs, str):
+                est_from_kwargs = est_from_kwargs.strip()
+                if est_from_kwargs:
+                    effective_estimator = est_from_kwargs
+            elif est_from_kwargs is not None:
+                effective_estimator = type(est_from_kwargs).__name__
+
+            explicit_estimator = sbi_hyperparams.get("estimator", None)
+            if effective_estimator is None and explicit_estimator is not None:
+                if isinstance(explicit_estimator, str):
+                    explicit_estimator = explicit_estimator.strip()
+                    if explicit_estimator:
+                        effective_estimator = explicit_estimator
+                else:
+                    effective_estimator = type(explicit_estimator).__name__
+
+            if effective_estimator is None and inference_obj.model_name in {"NPE", "NLE"}:
+                # initialize_sbi() defaults to "nsf" when no estimator is provided.
+                effective_estimator = "nsf"
+
+            prior_log = f"SBI prior configured with theta_dim={theta_dim}"
+            if effective_estimator:
+                prior_log += f"; estimator={effective_estimator}"
+            prior_log += "."
             _append_job_output(
                 job_status,
                 job_id,
-                f"SBI prior configured with theta_dim={theta_dim}; estimator={estimator_name}.",
+                prior_log,
             )
 
         scaler_obj = None

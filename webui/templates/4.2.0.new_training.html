@@ -321,57 +321,6 @@
                         ></textarea>
                         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                     </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-splits">CV Splits (n_splits)</label>
-                            <input
-                                id="training-n-splits"
-                                name="training_n_splits"
-                                type="number"
-                                min="2"
-                                value="10"
-                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                            />
-                        </div>
-                        <div>
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-repeats">CV Repeats (n_repeats)</label>
-                            <input
-                                id="training-n-repeats"
-                                name="training_n_repeats"
-                                type="number"
-                                min="1"
-                                value="10"
-                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                <div id="training-sbi-paramgrid-settings" x-show="isSbiModel() && trainingMode === 'param_grid'" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">CV Posterior Samples (sbi_eval_num_posterior_samples)</label>
-                        <input
-                            id="training-sbi-eval-num"
-                            name="training_sbi_eval_num_posterior_samples"
-                            type="number"
-                            min="1"
-                            value="2000"
-                            x-model="sbiEvalNumSamples"
-                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">CV Eval Batch Size (sbi_eval_batch_size)</label>
-                        <input
-                            id="training-sbi-eval-batch"
-                            name="training_sbi_eval_batch_size"
-                            type="number"
-                            min="1"
-                            value="256"
-                            x-model="sbiEvalBatchSize"
-                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
-                    </div>
                 </div>
 
                 <div id="training-sbi-train-params-settings" x-show="isSbiModel()" class="grid grid-cols-1 gap-6">
@@ -385,6 +334,58 @@
                             class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
                         ></textarea>
                         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
+                    </div>
+                </div>
+
+                <div id="training-sbi-eval-settings" x-show="isSbiModel()" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">Posterior Samples (sbi_eval_num_posterior_samples)</label>
+                        <input
+                            id="training-sbi-eval-num"
+                            name="training_sbi_eval_num_posterior_samples"
+                            type="number"
+                            min="1"
+                            value="2000"
+                            x-model="sbiEvalNumSamples"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">Eval Batch Size (sbi_eval_batch_size)</label>
+                        <input
+                            id="training-sbi-eval-batch"
+                            name="training_sbi_eval_batch_size"
+                            type="number"
+                            min="1"
+                            value="256"
+                            x-model="sbiEvalBatchSize"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                    </div>
+                </div>
+
+                <div id="training-param-grid-cv-settings" x-show="trainingMode === 'param_grid'" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-splits">CV Splits (n_splits)</label>
+                        <input
+                            id="training-n-splits"
+                            name="training_n_splits"
+                            type="number"
+                            min="2"
+                            value="10"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-n-repeats">CV Repeats (n_repeats)</label>
+                        <input
+                            id="training-n-repeats"
+                            name="training_n_repeats"
+                            type="number"
+                            min="1"
+                            value="10"
+                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                        />
                     </div>
                 </div>
 
@@ -996,7 +997,8 @@
     const trainingModeGrid = document.getElementById("training-mode-grid");
     const trainingModeHidden = document.querySelector('input[name="training_strategy_mode"]');
     const paramGridSection = document.getElementById("training-param-grid-section");
-    const sbiParamGridSettings = document.getElementById("training-sbi-paramgrid-settings");
+    const paramGridCvSettings = document.getElementById("training-param-grid-cv-settings");
+    const sbiEvalSettings = document.getElementById("training-sbi-eval-settings");
     const sbiTrainParamsSettings = document.getElementById("training-sbi-train-params-settings");
     const hyperparamsBox = document.getElementById("training-hyperparams-json");
     const paramGridBox = document.getElementById("training-param-grid-json");
@@ -1058,11 +1060,14 @@
             trainingModeHidden.value = mode;
         }
         const isSbi = ["NPE", "NLE", "NRE"].includes(modelSelect.value);
-        if (sbiParamGridSettings) {
-            sbiParamGridSettings.style.display = (mode === "param_grid" && isSbi) ? "" : "none";
+        if (paramGridCvSettings) {
+            paramGridCvSettings.style.display = mode === "param_grid" ? "" : "none";
         }
         if (sbiTrainParamsSettings) {
             sbiTrainParamsSettings.style.display = isSbi ? "" : "none";
+        }
+        if (sbiEvalSettings) {
+            sbiEvalSettings.style.display = isSbi ? "" : "none";
         }
     };
 
