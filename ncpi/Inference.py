@@ -205,6 +205,47 @@ class Inference:
     # Posterior sampling (SBI)
     # -----------------------------
 
+    def _infer_theta_dim(self):
+        """Best-effort inference of parameter dimensionality from loaded training targets."""
+        if self.theta is None:
+            return None
+        y = np.asarray(self.theta)
+        if y.ndim == 1:
+            return 1
+        if y.ndim == 2 and y.shape[1] > 0:
+            return int(y.shape[1])
+        return None
+
+
+    def _nan_posterior_samples(self, n_samples: int, xb, theta_dim: int | None = None):
+        """Create a `(S, 1, theta_dim)` NaN tensor on the same device/dtype as `xb`."""
+        td = theta_dim if theta_dim is not None else self._infer_theta_dim()
+        if td is None or int(td) <= 0:
+            raise RuntimeError(
+                "Posterior sampling failed, and theta dimension could not be inferred "
+                "to construct NaN fallback samples."
+            )
+        return self.torch.full(
+            (int(n_samples), 1, int(td)),
+            float("nan"),
+            dtype=xb.dtype,
+            device=xb.device,
+        )
+
+
+    def _warn_sbi_sampling_assertion_once(self):
+        """Emit a single warning per Inference instance for SBI sampling AssertionError fallback."""
+        already_warned = getattr(self, "_sbi_sampling_assertion_warned", False)
+        if already_warned:
+            return
+        warnings.warn(
+            "SBI posterior sampling raised AssertionError inside nflows for one or more "
+            "observations; those rows will receive NaN samples and prediction will continue.",
+            RuntimeWarning,
+        )
+        self._sbi_sampling_assertion_warned = True
+
+
     def _sample_posterior_batch(self, posterior_obj, n_samples: int, xb, *,
                                 show_progress_bars: bool = False):
         """
@@ -246,11 +287,15 @@ class Inference:
             raise ValueError("Cannot sample posterior for an empty observation batch.")
 
         if b == 1:
-            sb = posterior_obj.sample(
-                (int(n_samples),),
-                x=xb,
-                show_progress_bars=bool(show_progress_bars),
-            )
+            try:
+                sb = posterior_obj.sample(
+                    (int(n_samples),),
+                    x=xb,
+                    show_progress_bars=bool(show_progress_bars),
+                )
+            except AssertionError:
+                self._warn_sbi_sampling_assertion_once()
+                sb = self._nan_posterior_samples(n_samples=n_samples, xb=xb)
             if sb.ndim == 2:
                 sb = sb.unsqueeze(1)
             return sb
@@ -276,15 +321,30 @@ class Inference:
                 )
 
         parts = []
+        failed_indices = []
+        theta_dim_hint = self._infer_theta_dim()
         for one_idx in range(b):
-            sb = posterior_obj.sample(
-                (int(n_samples),),
-                x=xb[one_idx:one_idx + 1],
-                show_progress_bars=bool(show_progress_bars),
-            )
+            one_x = xb[one_idx:one_idx + 1]
+            try:
+                sb = posterior_obj.sample(
+                    (int(n_samples),),
+                    x=one_x,
+                    show_progress_bars=bool(show_progress_bars),
+                )
+            except AssertionError:
+                failed_indices.append(one_idx)
+                sb = self._nan_posterior_samples(
+                    n_samples=n_samples,
+                    xb=one_x,
+                    theta_dim=theta_dim_hint,
+                )
             if sb.ndim == 2:
                 sb = sb.unsqueeze(1)
+            if theta_dim_hint is None and sb.ndim >= 3 and int(sb.shape[-1]) > 0:
+                theta_dim_hint = int(sb.shape[-1])
             parts.append(sb)
+        if failed_indices:
+            self._warn_sbi_sampling_assertion_once()
         return torch.cat(parts, dim=1)
 
 

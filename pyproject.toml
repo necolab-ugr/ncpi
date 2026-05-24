@@ -25,6 +25,7 @@ requires-python = ">=3.10"
 dependencies = [
     "scikit-learn==1.5.0",
     "sbi==0.24.0",
+    "arviz<0.22",
     "torch",
     "pycatch22",
     "specparam",

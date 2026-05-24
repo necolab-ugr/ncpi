@@ -3680,12 +3680,47 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         samples = _extract_feature_samples(df)
         _append_job_output(job_status, job_id, f"Extracted {len(samples)} signal sample(s) from dataframe.")
 
+        features_subsample_percent = _parse_float_param(params, "features_subsample_percent", default=None)
+        if features_subsample_percent is None:
+            # Legacy fallback for older forms: "subsampling" + "sampling_percentage".
+            legacy_subsampling = _parse_bool_param(params, "subsampling", default=False)
+            if legacy_subsampling:
+                features_subsample_percent = _parse_float_param(params, "sampling_percentage", default=100.0)
+            else:
+                features_subsample_percent = 100.0
+        if not np.isfinite(features_subsample_percent):
+            raise ValueError("Feature input subsample percentage must be a finite number.")
+        if features_subsample_percent <= 0 or features_subsample_percent > 100:
+            raise ValueError("Feature input subsample percentage must be in the range (0, 100].")
+
+        total_feature_rows = int(len(samples))
+        if features_subsample_percent < 100.0:
+            subsample_fraction = float(features_subsample_percent) / 100.0
+            subsample_size = max(1, int(np.ceil(total_feature_rows * subsample_fraction)))
+            rng = np.random.default_rng(0)
+            subsample_indices = np.sort(rng.choice(total_feature_rows, size=subsample_size, replace=False))
+            samples = [samples[int(idx)] for idx in subsample_indices]
+            df = df.iloc[subsample_indices].copy().reset_index(drop=True)
+            _append_job_output(
+                job_status,
+                job_id,
+                "Applied feature input subsampling: "
+                f"{features_subsample_percent:.4g}% -> {subsample_size}/{total_feature_rows} rows (seed=0).",
+            )
+        else:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Applied feature input subsampling: {features_subsample_percent:.4g}% -> {total_feature_rows}/{total_feature_rows} rows.",
+            )
+
         method = _normalize_feature_method_name(params.get('select-method'))
         method_params, exec_opts = _build_feature_method_params(method, params, df)
         _append_job_output(
             job_status,
             job_id,
-            f"Method: {method} | n_jobs={exec_opts['n_jobs']} | chunksize={exec_opts['chunksize']} | start_method={exec_opts['start_method']}"
+            f"Method: {method} | n_jobs={exec_opts['n_jobs']} | chunksize={exec_opts['chunksize']} | "
+            f"start_method={exec_opts['start_method']} | input_subsample_percent={features_subsample_percent:.4g}"
         )
         progress_state = {
             "callback_seen": False,
@@ -4335,6 +4370,33 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             f"Loaded features dataframe shape={df_features_predict.shape}, rows for prediction={feature_matrix.shape[0]}."
         )
 
+        inference_subsample_percent = _parse_float_param(params, "inference_subsample_percent", default=100.0)
+        if not np.isfinite(inference_subsample_percent):
+            raise ValueError("Input subsample percentage must be a finite number.")
+        if inference_subsample_percent <= 0 or inference_subsample_percent > 100:
+            raise ValueError("Input subsample percentage must be in the range (0, 100].")
+
+        total_prediction_rows = int(feature_matrix.shape[0])
+        if inference_subsample_percent < 100.0:
+            subsample_fraction = float(inference_subsample_percent) / 100.0
+            subsample_size = max(1, int(np.ceil(total_prediction_rows * subsample_fraction)))
+            rng = np.random.default_rng(0)
+            subsample_indices = np.sort(rng.choice(total_prediction_rows, size=subsample_size, replace=False))
+            df_features_predict = df_features_predict.iloc[subsample_indices].copy().reset_index(drop=True)
+            feature_matrix = feature_matrix[subsample_indices]
+            _append_job_output(
+                job_status,
+                job_id,
+                "Applied prediction input subsampling: "
+                f"{inference_subsample_percent:.4g}% -> {subsample_size}/{total_prediction_rows} rows (seed=0).",
+            )
+        else:
+            _append_job_output(
+                job_status,
+                job_id,
+                f"Applied prediction input subsampling: {inference_subsample_percent:.4g}% -> {total_prediction_rows}/{total_prediction_rows} rows.",
+            )
+
         model_assets_source = (params.get("model_assets_source") or "upload").strip().lower()
         if model_assets_source not in {"upload", "server-path"}:
             raise ValueError(f"Unsupported prediction artifacts source mode: {model_assets_source}")
@@ -4400,7 +4462,8 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             "Execution settings: "
             f"n_jobs={inference_n_jobs if inference_n_jobs is not None else 'auto'}, "
             f"chunksize={inference_chunksize if inference_chunksize is not None else 'auto'}, "
-            f"start_method={inference_start_method}.",
+            f"start_method={inference_start_method}, "
+            f"input_subsample_percent={inference_subsample_percent:.4g}.",
         )
 
         if inference_obj.backend == "sklearn":

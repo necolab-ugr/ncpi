@@ -465,9 +465,9 @@
             <div class="mt-6">
                 <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Execution Settings</h3>
                 <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                    Parallel prediction settings (applies to sklearn prediction backend).
+                    Parallel prediction settings (sklearn backend) and optional input subsampling (all backends).
                 </p>
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <label class="text-sm">
                         <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Parallel workers (n_jobs)</span>
                         <input
@@ -501,7 +501,22 @@
                             <option value="forkserver">forkserver</option>
                         </select>
                     </label>
+                    <label class="text-sm">
+                        <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Input subsample (%)</span>
+                        <input
+                            type="number"
+                            min="0.0001"
+                            max="100"
+                            step="0.1"
+                            name="inference_subsample_percent"
+                            class="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-[#191e33] text-sm text-slate-900 dark:text-white"
+                            value="100"
+                        />
+                    </label>
                 </div>
+                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    Percentage of input rows used for prediction. Values below 100 randomly subsample rows (deterministic seed) and save predictions for that subsample.
+                </p>
             </div>
 
             <div id="sbi-settings-section" class="mt-6 hidden">
