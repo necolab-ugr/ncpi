@@ -1696,12 +1696,13 @@
         const modelAssetsSourceInput = byId("model-assets-source");
         const assetsSourceButtons = Array.from(document.querySelectorAll("[data-assets-source-btn]"));
         const modelInput = byId("file-upload-model");
+        const modelServerPathInput = byId("inference-model-server-file-path");
         const folderInput = byId("file-upload-assets-folder");
         const individualRadio = byId("assets-mode-individual");
         const folderRadio = byId("assets-mode-folder");
         if (
             !modelSelect || !modelAssetsSourceInput ||
-            !modelInput || !folderInput || !individualRadio || !folderRadio
+            !modelInput || !modelServerPathInput || !folderInput || !individualRadio || !folderRadio
         ) return;
 
         const detectUrl = "{{ url_for('inference_detect_model_backend') }}";
@@ -1763,6 +1764,43 @@
             }
         };
 
+        const detectFromServerPath = async (serverPath) => {
+            requestCounter += 1;
+            const requestId = requestCounter;
+            const modelServerPath = String(serverPath || "").trim();
+            if (!modelServerPath) {
+                emit({});
+                return;
+            }
+
+            emit({ pending: true });
+            try {
+                const formData = new FormData();
+                formData.append("model_server_file_path", modelServerPath);
+                const response = await fetch(detectUrl, {
+                    method: "POST",
+                    body: formData,
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (requestId !== requestCounter) return;
+
+                if (response.ok && payload && payload.ok && payload.backend) {
+                    emit({
+                        backend: payload.backend,
+                        inferred_type: payload.inferred_type || "",
+                    });
+                    return;
+                }
+
+                emit({
+                    error: (payload && payload.error) ? payload.error : "Could not auto-detect model backend.",
+                });
+            } catch (err) {
+                if (requestId !== requestCounter) return;
+                emit({ error: (err && err.message) ? err.message : "Could not auto-detect model backend." });
+            }
+        };
+
         const refresh = () => {
             if (modelSelect.value !== "__auto__") {
                 requestCounter += 1;
@@ -1771,9 +1809,14 @@
             }
 
             const assetsSourceMode = String(modelAssetsSourceInput.value || "upload").trim().toLowerCase();
-            if (assetsSourceMode !== "upload") {
-                requestCounter += 1;
-                emit({});
+            if (assetsSourceMode === "server-path") {
+                const modelServerPath = String(modelServerPathInput.value || "").trim();
+                if (!modelServerPath) {
+                    requestCounter += 1;
+                    emit({});
+                    return;
+                }
+                detectFromServerPath(modelServerPath);
                 return;
             }
 
@@ -1799,6 +1842,7 @@
         modelSelect.addEventListener("change", refresh);
         modelAssetsSourceInput.addEventListener("change", refresh);
         modelInput.addEventListener("change", refresh);
+        modelServerPathInput.addEventListener("change", refresh);
         folderInput.addEventListener("change", refresh);
         individualRadio.addEventListener("change", refresh);
         folderRadio.addEventListener("change", refresh);

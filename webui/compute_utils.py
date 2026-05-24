@@ -4105,6 +4105,15 @@ def _is_inference_like(obj):
     return hasattr(obj, "build_posterior")
 
 
+def _declared_artifact_backend(obj):
+    backend = getattr(obj, "backend", None)
+    if isinstance(backend, str):
+        normalized = backend.strip().lower()
+        if normalized in {"sbi", "sklearn"}:
+            return normalized
+    return None
+
+
 def _sample_sbi_posterior(posterior, torch_mod, x_valid, num_samples, batch_size, show_progress=False):
     x_local = np.asarray(x_valid, dtype=np.float32)
     x_t = torch_mod.from_numpy(x_local)
@@ -4202,13 +4211,15 @@ def _infer_artifact_backend(model_obj):
     if model_obj is None:
         return None, "None"
 
-    if _is_posterior_like(model_obj) or _is_inference_like(model_obj):
-        return "sbi", type(model_obj).__name__
-
     if isinstance(model_obj, list):
         if not model_obj:
             return None, "list[empty]"
         first_name = type(model_obj[0]).__name__
+        declared_backends = [_declared_artifact_backend(item) for item in model_obj]
+        if declared_backends and all(backend in {"sbi", "sklearn"} for backend in declared_backends):
+            if len(set(declared_backends)) == 1:
+                return declared_backends[0], f"list[{first_name}]"
+            return None, f"list[{first_name}]"
         if all(_is_posterior_like(item) for item in model_obj):
             return "sbi", f"list[{first_name}]"
         if all(_is_inference_like(item) for item in model_obj):
@@ -4216,6 +4227,13 @@ def _infer_artifact_backend(model_obj):
         if all(hasattr(item, "predict") for item in model_obj):
             return "sklearn", f"list[{first_name}]"
         return None, f"list[{first_name}]"
+
+    declared_backend = _declared_artifact_backend(model_obj)
+    if declared_backend in {"sbi", "sklearn"}:
+        return declared_backend, type(model_obj).__name__
+
+    if _is_posterior_like(model_obj) or _is_inference_like(model_obj):
+        return "sbi", type(model_obj).__name__
 
     if hasattr(model_obj, "predict"):
         return "sklearn", type(model_obj).__name__
@@ -4238,7 +4256,17 @@ def _initialize_inference_from_artifact(model_obj, requested_model_name):
         candidates = []
         if requested:
             candidates.append(requested)
+        model_name_attr = getattr(model_obj, "model_name", None)
+        if isinstance(model_name_attr, str):
+            model_name_attr = model_name_attr.strip()
+            if model_name_attr:
+                candidates.append(model_name_attr)
         if isinstance(model_obj, list) and model_obj:
+            first_model_name = getattr(model_obj[0], "model_name", None)
+            if isinstance(first_model_name, str):
+                first_model_name = first_model_name.strip()
+                if first_model_name:
+                    candidates.append(first_model_name)
             candidates.append(type(model_obj[0]).__name__)
         elif model_obj is not None:
             candidates.append(type(model_obj).__name__)

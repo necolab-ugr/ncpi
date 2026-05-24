@@ -10500,20 +10500,33 @@ def compute_predictions():
 @app.route("/inference/detect_model_backend", methods=["POST"])
 def inference_detect_model_backend():
     upload = request.files.get("model_file")
-    if upload is None or not upload.filename:
+    server_path_raw = (request.form.get("model_server_file_path") or "").strip()
+    source_path = None
+    temp_path = None
+
+    if upload is not None and upload.filename:
+        safe_name = secure_filename(upload.filename)
+        if not safe_name:
+            return jsonify({"ok": False, "error": "Invalid uploaded file name."}), 400
+
+        inference_upload_dir = _module_uploads_dir_for("inference")
+        os.makedirs(inference_upload_dir, exist_ok=True)
+        temp_path = os.path.join(inference_upload_dir, f"detect_model_{uuid.uuid4().hex}_{safe_name}")
+        upload.save(temp_path)
+        source_path = temp_path
+    elif server_path_raw:
+        try:
+            source_path = _validate_existing_pickle_file_path(
+                server_path_raw,
+                "Inference server model file",
+            )
+        except Exception as exc:
+            return jsonify({"ok": False, "error": str(exc)}), 200
+    else:
         return jsonify({"ok": False, "error": "Upload a model file first."}), 400
 
-    safe_name = secure_filename(upload.filename)
-    if not safe_name:
-        return jsonify({"ok": False, "error": "Invalid uploaded file name."}), 400
-
-    inference_upload_dir = _module_uploads_dir_for("inference")
-    os.makedirs(inference_upload_dir, exist_ok=True)
-    temp_path = os.path.join(inference_upload_dir, f"detect_model_{uuid.uuid4().hex}_{safe_name}")
-    upload.save(temp_path)
-
     try:
-        model_obj = compute_utils._load_pickle_file(temp_path)
+        model_obj = compute_utils._load_pickle_file(source_path)
         backend, inferred_type = compute_utils._infer_artifact_backend(model_obj)
         if backend not in {"sbi", "sklearn"}:
             return jsonify({
@@ -10531,7 +10544,7 @@ def inference_detect_model_backend():
     except Exception as exc:
         return jsonify({"ok": False, "error": str(exc)}), 200
     finally:
-        if os.path.exists(temp_path):
+        if temp_path and os.path.exists(temp_path):
             try:
                 os.remove(temp_path)
             except OSError:
