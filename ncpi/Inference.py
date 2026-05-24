@@ -821,7 +821,9 @@ class Inference:
 
                 inf = self.initialize_sbi(base_cfg)
                 inf.append_simulations(Y_t, X_t)
+                print("Starting single-trial SBI training (inf.train)...")
                 density_estimator = inf.train(**train_params)
+                print("Finished single-trial SBI training (inf.train).")
                 
                 build_kwargs = getattr(self, "_sbi_build_posterior_kwargs", {}) or {}
                 posterior = inf.build_posterior(density_estimator, **build_kwargs)

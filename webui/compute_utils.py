@@ -4719,6 +4719,16 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                     f"sbi_eval_num_posterior_samples={sbi_eval_num}, "
                     f"sbi_eval_batch_size={sbi_eval_batch}.",
                 )
+            else:
+                _append_job_output(
+                    job_status,
+                    job_id,
+                    "SBI training settings: "
+                    f"train_params={train_params}, "
+                    f"inference_kwargs={inf_kwargs}, "
+                    f"sbi_eval_num_posterior_samples={sbi_eval_num}, "
+                    f"sbi_eval_batch_size={sbi_eval_batch}.",
+                )
 
             effective_estimator = None
             est_from_kwargs = est_kwargs.get("estimator", None)
