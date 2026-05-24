@@ -1,4 +1,0 @@
-# requirements.txt
-ncpi
-pytest
-# LFPykernels
