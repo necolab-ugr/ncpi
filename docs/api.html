@@ -62,7 +62,7 @@
       <article class="doc">
         <section id="overview">
           <h1>API</h1>
-          <p><span class="pill">Version 1.0</span></p>
+          <p><span class="pill">Version 0.2.6</span></p>
           <p>
             This page maps the core public API to its source location in the repository.
             All links below point directly to the implementation in GitHub.
@@ -76,6 +76,9 @@
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py">ncpi/Simulation.py</a>
           </p>
           <ul>
+            <li><code>run_script()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L34">source</a>
+            </li>
             <li><code>Simulation.__init__()</code>:
               <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L70">source</a>
             </li>
@@ -106,6 +109,9 @@
           <ul>
             <li><code>FieldPotential.__init__()</code>:
               <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L19">source</a>
+            </li>
+            <li><code>FieldPotential.roll_with_zeros()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L218">source</a>
             </li>
             <li><code>FieldPotential.create_kernel()</code>:
               <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L317">source</a>
@@ -161,19 +167,19 @@
           </p>
           <ul>
             <li><code>Inference.__init__()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L59">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L117">source</a>
             </li>
             <li><code>Inference.add_simulation_data()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L201">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L465">source</a>
             </li>
             <li><code>Inference.initialize_sbi()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L270">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L534">source</a>
             </li>
             <li><code>Inference.train()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L372">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L637">source</a>
             </li>
             <li><code>Inference.predict()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L665">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L968">source</a>
             </li>
           </ul>
         </section>
@@ -185,6 +191,9 @@
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py">ncpi/Analysis.py</a>
           </p>
           <ul>
+            <li><code>extract_variables()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L15">source</a>
+            </li>
             <li><code>Analysis.__init__()</code>:
               <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L142">source</a>
             </li>
@@ -198,10 +207,10 @@
               <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L739">source</a>
             </li>
             <li><code>Analysis.eeg_topomap()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L829">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L864">source</a>
             </li>
             <li><code>Analysis.meg_surface()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L976">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L1014">source</a>
             </li>
           </ul>
         </section>
@@ -214,16 +223,68 @@
           </p>
           <ul>
             <li><code>CanonicalFields</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L368">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L861">source</a>
             </li>
             <li><code>ParseConfig</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L434">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L927">source</a>
             </li>
             <li><code>EphysDatasetParser.__init__()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L505">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L1001">source</a>
             </li>
             <li><code>EphysDatasetParser.parse()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L512">source</a>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L1008">source</a>
+            </li>
+          </ul>
+        </section>
+
+        <section id="tools">
+          <h2>tools</h2>
+          <p>
+            Module:
+            <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py">ncpi/tools.py</a>
+          </p>
+          <ul>
+            <li><code>ensure_module()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L70">source</a>
+            </li>
+            <li><code>dynamic_import()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L159">source</a>
+            </li>
+            <li><code>record_id_from_api_url()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L272">source</a>
+            </li>
+            <li><code>ensure_fresh_dir()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L280">source</a>
+            </li>
+            <li><code>safe_extract_zip()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L296">source</a>
+            </li>
+            <li><code>safe_extract_tar()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L310">source</a>
+            </li>
+            <li><code>extract_and_delete_all_archives()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L324">source</a>
+            </li>
+            <li><code>get_requests_and_tqdm()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L356">source</a>
+            </li>
+            <li><code>fetch_record_json()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L373">source</a>
+            </li>
+            <li><code>download_file_streaming()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L380">source</a>
+            </li>
+            <li><code>is_http_403()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L414">source</a>
+            </li>
+            <li><code>download_files_archive_with_curl()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L420">source</a>
+            </li>
+            <li><code>download_zenodo_record()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L465">source</a>
+            </li>
+            <li><code>timer()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L538">source</a>
             </li>
           </ul>
         </section>
@@ -240,6 +301,7 @@
         <li><a href="#inference">Inference</a></li>
         <li><a href="#analysis">Analysis</a></li>
         <li><a href="#parser">EphysDatasetParser</a></li>
+        <li><a href="#tools">tools</a></li>
       </ul>
     </aside>
   </div>
