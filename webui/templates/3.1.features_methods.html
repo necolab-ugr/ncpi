@@ -150,6 +150,26 @@
             parserAggregateLabels: '',
             parserAggregateLabelValue: '',
             selectedMethod: '',
+            dfaInputIsEnvelope: 'false',
+            dfaFrequencyMin: '5',
+            dfaFrequencyMax: '45',
+            dfaSpectrumMin: '',
+            dfaSpectrumMax: '',
+            dfaFitIntervalMin: '',
+            dfaFitIntervalMax: '',
+            dfaComputeIntervalMin: '',
+            dfaComputeIntervalMax: '',
+            feiInputIsEnvelope: 'false',
+            feiFrequencyMin: '5',
+            feiFrequencyMax: '45',
+            feiSpectrumMin: '',
+            feiSpectrumMax: '',
+            feiWindowSizeSec: '',
+            feiWindowOverlap: '0.0',
+            feiDfaFitIntervalMin: '',
+            feiDfaFitIntervalMax: '',
+            feiDfaComputeIntervalMin: '',
+            feiDfaComputeIntervalMax: '',
             customFeatureScript: `import numpy as np
 
 def custom_feature(sample, params):
@@ -1774,6 +1794,105 @@ def custom_feature(sample, params):
                 this.parserDataLocator = preferred || allowed[0] || '';
                 this.syncParserSelectDom();
             },
+            hasFeatureFieldValue(value) {
+                return String(value ?? '').trim().length > 0;
+            },
+            hasFeatureRange(minValue, maxValue) {
+                return this.hasFeatureFieldValue(minValue) || this.hasFeatureFieldValue(maxValue);
+            },
+            dfaUsesEnvelope() {
+                return String(this.dfaInputIsEnvelope || '').toLowerCase() === 'true';
+            },
+            dfaHasBandRange() {
+                return this.hasFeatureRange(this.dfaFrequencyMin, this.dfaFrequencyMax);
+            },
+            dfaHasSpectrumRange() {
+                return this.hasFeatureRange(this.dfaSpectrumMin, this.dfaSpectrumMax);
+            },
+            dfaFilteringEnabled() {
+                return !this.dfaUsesEnvelope() && (this.dfaHasBandRange() || this.dfaHasSpectrumRange());
+            },
+            feiUsesEnvelope() {
+                return String(this.feiInputIsEnvelope || '').toLowerCase() === 'true';
+            },
+            feiHasBandRange() {
+                return this.hasFeatureRange(this.feiFrequencyMin, this.feiFrequencyMax);
+            },
+            feiHasSpectrumRange() {
+                return this.hasFeatureRange(this.feiSpectrumMin, this.feiSpectrumMax);
+            },
+            feiFilteringEnabled() {
+                return !this.feiUsesEnvelope() && (this.feiHasBandRange() || this.feiHasSpectrumRange());
+            },
+            numericFeatureValue(value) {
+                const text = String(value ?? '').trim();
+                if (!text) return null;
+                const parsed = Number(text);
+                return Number.isFinite(parsed) ? parsed : NaN;
+            },
+            featureRangeBlockReason(label, minValue, maxValue) {
+                const hasMin = this.hasFeatureFieldValue(minValue);
+                const hasMax = this.hasFeatureFieldValue(maxValue);
+                if (hasMin !== hasMax) return `${label}: provide both minimum and maximum values.`;
+                if (!hasMin) return '';
+                const minNum = this.numericFeatureValue(minValue);
+                const maxNum = this.numericFeatureValue(maxValue);
+                if (!Number.isFinite(minNum) || !Number.isFinite(maxNum)) return `${label}: values must be numeric.`;
+                if (minNum >= maxNum) return `${label}: minimum must be lower than maximum.`;
+                return '';
+            },
+            featureNestedRangeBlockReason(label, fitMin, fitMax, computeMin, computeMax) {
+                const hasFit = this.hasFeatureRange(fitMin, fitMax);
+                const hasCompute = this.hasFeatureRange(computeMin, computeMax);
+                if (!hasFit || !hasCompute) return '';
+                const fitLo = this.numericFeatureValue(fitMin);
+                const fitHi = this.numericFeatureValue(fitMax);
+                const computeLo = this.numericFeatureValue(computeMin);
+                const computeHi = this.numericFeatureValue(computeMax);
+                if (![fitLo, fitHi, computeLo, computeHi].every(Number.isFinite)) return '';
+                if (fitLo < computeLo || fitHi > computeHi) return `${label}: fit interval must be inside compute interval.`;
+                return '';
+            },
+            dfaWindowBlockReason() {
+                return this.featureRangeBlockReason('DFA fit interval', this.dfaFitIntervalMin, this.dfaFitIntervalMax)
+                    || this.featureRangeBlockReason('DFA compute interval', this.dfaComputeIntervalMin, this.dfaComputeIntervalMax)
+                    || this.featureNestedRangeBlockReason('DFA', this.dfaFitIntervalMin, this.dfaFitIntervalMax, this.dfaComputeIntervalMin, this.dfaComputeIntervalMax);
+            },
+            feiDfaWindowBlockReason() {
+                return this.featureRangeBlockReason('fEI DFA fit interval', this.feiDfaFitIntervalMin, this.feiDfaFitIntervalMax)
+                    || this.featureRangeBlockReason('fEI DFA compute interval', this.feiDfaComputeIntervalMin, this.feiDfaComputeIntervalMax)
+                    || this.featureNestedRangeBlockReason('fEI DFA', this.feiDfaFitIntervalMin, this.feiDfaFitIntervalMax, this.feiDfaComputeIntervalMin, this.feiDfaComputeIntervalMax);
+            },
+            dfaConfigurationBlockReason() {
+                if (!this.dfaUsesEnvelope() && this.dfaHasBandRange() && this.dfaHasSpectrumRange()) {
+                    return 'DFA: use either Band frequency or Spectrum range, not both.';
+                }
+                if (!this.dfaUsesEnvelope() && !this.dfaHasBandRange() && !this.dfaHasSpectrumRange()) {
+                    return 'DFA: raw-signal mode requires Band frequency or Spectrum range.';
+                }
+                return (!this.dfaUsesEnvelope() && this.featureRangeBlockReason('DFA band frequency', this.dfaFrequencyMin, this.dfaFrequencyMax))
+                    || (!this.dfaUsesEnvelope() && this.featureRangeBlockReason('DFA spectrum range', this.dfaSpectrumMin, this.dfaSpectrumMax))
+                    || this.dfaWindowBlockReason();
+            },
+            feiConfigurationBlockReason() {
+                if (!this.feiUsesEnvelope() && this.feiHasBandRange() && this.feiHasSpectrumRange()) {
+                    return 'fEI: use either Band frequency or Spectrum range, not both.';
+                }
+                if (!this.feiUsesEnvelope() && !this.feiHasBandRange() && !this.feiHasSpectrumRange()) {
+                    return 'fEI: raw-signal mode requires Band frequency or Spectrum range.';
+                }
+                const windowSize = this.numericFeatureValue(this.feiWindowSizeSec);
+                if (!Number.isFinite(windowSize) || windowSize <= 0) {
+                    return 'fEI: set Window size to a value greater than 0 seconds.';
+                }
+                const windowOverlap = this.numericFeatureValue(this.feiWindowOverlap);
+                if (windowOverlap !== null && (!Number.isFinite(windowOverlap) || windowOverlap < 0 || windowOverlap >= 1)) {
+                    return 'fEI: Window overlap must be in [0, 1).';
+                }
+                return (!this.feiUsesEnvelope() && this.featureRangeBlockReason('fEI band frequency', this.feiFrequencyMin, this.feiFrequencyMax))
+                    || (!this.feiUsesEnvelope() && this.featureRangeBlockReason('fEI spectrum range', this.feiSpectrumMin, this.feiSpectrumMax))
+                    || this.feiDfaWindowBlockReason();
+            },
             canSubmitFeatures() {
                 return !this.computeSubmitBlockReason();
             },
@@ -1783,6 +1902,14 @@ def custom_feature(sample, params):
                 if (!this.selectedMethod) return 'Select a feature method in "Select Method".';
                 if (this.selectedMethod === 'custom' && !String(this.customFeatureScript || '').trim()) {
                     return 'Provide a custom feature extraction script.';
+                }
+                if (this.selectedMethod === 'dfa') {
+                    const dfaIssue = this.dfaConfigurationBlockReason();
+                    if (dfaIssue) return dfaIssue;
+                }
+                if (this.selectedMethod === 'fEI') {
+                    const feiIssue = this.feiConfigurationBlockReason();
+                    if (feiIssue) return feiIssue;
                 }
                 if (!this.parserDataLocator) return 'Select a Data locator in EphysDatasetParser configuration.';
                 if (this.segmentBoundsInvalid()) return this.segmentValidationError();
@@ -5163,143 +5290,199 @@ def custom_feature(sample, params):
                         <section x-show="selectedMethod === 'dfa'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">DFA options</h2>
                             <fieldset :disabled="selectedMethod !== 'dfa'" class="space-y-5">
-
-                            <div class="flex flex-wrap gap-5">
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="dfa_normalize" value="1"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Normalize each sample
-                                </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="dfa_overlap" value="1" checked
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    50% overlapping DFA windows
-                                </label>
+                            <div class="space-y-4">
+                                <div class="flex items-center gap-2 border-b border-slate-200 dark:border-[#323b67] pb-2">
+                                    <span class="material-symbols-outlined text-base text-primary">tune</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Core setup</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Set the sampling rate and optional per-sample normalization used before DFA is computed.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
+                                        <input type="number" step="any" name="dfa_fs"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional: fallback to parsed dataframe fs">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Required unless the parsed dataframe already contains a sampling frequency.</span>
+                                    </label>
+                                    <div class="flex items-center pt-5">
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                            <input type="checkbox" name="dfa_normalize" value="1"
+                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                            Normalize each sample before DFA
+                                        </label>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
-                                    <input type="number" step="any" name="dfa_fs"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional: fallback to parsed dataframe fs">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Input is envelope</span>
-                                    <select name="dfa_input_is_envelope"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                        <option value="true" selected>true</option>
-                                        <option value="false">false</option>
-                                    </select>
-                                </label>
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5 pl-4 border-l-2 border-l-cyan-500/70">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-cyan-600 dark:text-cyan-300">waves</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Input / preprocessing</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Choose whether the provided samples are already amplitude envelopes or raw signals that must be filtered and Hilbert-transformed.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Input is envelope</span>
+                                        <select name="dfa_input_is_envelope" x-model="dfaInputIsEnvelope"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                            <option value="false" selected>false</option>
+                                            <option value="true">true</option>
+                                        </select>
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Use false for raw EEG/MEG/LFP. Use true only when every sample is already a band-limited amplitude envelope.</span>
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
+                                        <input type="number" step="any" min="0" name="dfa_trim_seconds" value="1.0"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Removes edge samples after filtering/envelope extraction to reduce boundary artifacts.</span>
+                                    </label>
+                                </div>
+                                <p x-show="dfaUsesEnvelope()" class="text-xs text-amber-700 dark:text-amber-300">Envelope input skips frequency filtering, spectrum bands, Hilbert n_fft, and filter kwargs.</p>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Fit interval min (s)</span>
-                                    <input type="number" step="any" name="dfa_fit_interval_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. 5">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Fit interval max (s)</span>
-                                    <input type="number" step="any" name="dfa_fit_interval_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. 30">
-                                </label>
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-indigo-600 dark:text-indigo-300">stacked_line_chart</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">DFA windows</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Compute interval controls which window sizes are evaluated; fit interval controls the subset used for the log-log slope. Fit should sit inside compute.</p>
+                                <p x-show="dfaWindowBlockReason()" x-text="dfaWindowBlockReason()"
+                                    class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300"></p>
+                                <div class="flex flex-wrap gap-5">
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                        <input type="checkbox" name="dfa_overlap" value="1" checked
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        50% overlapping DFA windows
+                                    </label>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Fit interval min (s)</span>
+                                        <input type="number" step="any" name="dfa_fit_interval_min" x-model="dfaFitIntervalMin"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="e.g. 5">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Fit interval max (s)</span>
+                                        <input type="number" step="any" name="dfa_fit_interval_max" x-model="dfaFitIntervalMax"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="e.g. 30">
+                                    </label>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Compute interval min (s)</span>
+                                        <input type="number" step="any" name="dfa_compute_interval_min" x-model="dfaComputeIntervalMin"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Compute interval max (s)</span>
+                                        <input type="number" step="any" name="dfa_compute_interval_max" x-model="dfaComputeIntervalMax"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Compute interval min (s)</span>
-                                    <input type="number" step="any" name="dfa_compute_interval_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Compute interval max (s)</span>
-                                    <input type="number" step="any" name="dfa_compute_interval_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-emerald-600 dark:text-emerald-300">filter_alt</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Frequency selection</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Band frequency computes DFA for one filtered band. Spectrum range asks crosci-style logic to create several bands inside the requested range. Use only one.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': dfaUsesEnvelope() || dfaHasSpectrumRange() }">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency min (Hz)</span>
+                                        <input type="number" step="any" name="dfa_frequency_min" x-model="dfaFrequencyMin" value="5"
+                                            :disabled="dfaUsesEnvelope() || dfaHasSpectrumRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency max (Hz)</span>
+                                        <input type="number" step="any" name="dfa_frequency_max" x-model="dfaFrequencyMax" value="45"
+                                            :disabled="dfaUsesEnvelope() || dfaHasSpectrumRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
+                                <p x-show="!dfaUsesEnvelope() && dfaHasSpectrumRange()" class="text-xs text-amber-700 dark:text-amber-300">Band frequency is disabled because Spectrum range is filled.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': dfaUsesEnvelope() || dfaHasBandRange() }">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
+                                        <input type="number" step="any" name="dfa_spectrum_min" x-model="dfaSpectrumMin"
+                                            :disabled="dfaUsesEnvelope() || dfaHasBandRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
+                                        <input type="number" step="any" name="dfa_spectrum_max" x-model="dfaSpectrumMax"
+                                            :disabled="dfaUsesEnvelope() || dfaHasBandRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
+                                <p x-show="!dfaUsesEnvelope() && dfaHasBandRange()" class="text-xs text-amber-700 dark:text-amber-300">Spectrum range is disabled because Band frequency is filled.</p>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency min (Hz)</span>
-                                    <input type="number" step="any" name="dfa_frequency_min" value="5"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency max (Hz)</span>
-                                    <input type="number" step="any" name="dfa_frequency_max" value="45"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
-                                    <input type="number" step="any" name="dfa_spectrum_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
-                                    <input type="number" step="any" name="dfa_spectrum_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indexes</span>
-                                    <input type="text" name="dfa_bad_idxes"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional, e.g. 0,2,5">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
-                                    <input type="number" step="any" min="0" name="dfa_trim_seconds" value="1.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
-                                    <input type="number" step="1" min="1" name="dfa_hilbert_n_fft"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-slate-600 dark:text-slate-300">settings</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Advanced options</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Exclude bad channels or override the Hilbert/filter implementation used when raw signals are converted to envelopes.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indexes</span>
+                                        <input type="text" name="dfa_bad_idxes"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional, e.g. 0,2,5">
+                                    </label>
+                                    <label class="text-sm" :class="{ 'opacity-50': dfaUsesEnvelope() }">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
+                                        <input type="number" step="1" min="1" name="dfa_hilbert_n_fft"
+                                            :disabled="dfaUsesEnvelope()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Only used when raw signals are filtered and transformed to envelopes.</span>
+                                    </label>
+                                </div>
+                                <label class="text-sm block" :class="{ 'opacity-50': dfaUsesEnvelope() }">
                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (dict)</span>
                                     <input type="text" name="dfa_filter_kwargs"
+                                        :disabled="dfaUsesEnvelope()"
                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                         placeholder='Optional, e.g. {"fir_design":"firwin"}'>
+                                    <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Optional keyword arguments passed to the filtering step before Hilbert envelope extraction.</span>
                                 </label>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Saved output value</span>
-                                    <select name="dfa_output_key"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                        <option value="dfa_value" selected>DFA value (scalar)</option>
-                                        <option value="dfa_intercept">DFA intercept</option>
-                                        <option value="full_dict">Full DFA dictionary</option>
-                                        <option value="custom">Custom path</option>
-                                    </select>
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
-                                    <input type="text" name="dfa_output_path"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. DFA or dfa_intercept">
-                                </label>
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-violet-600 dark:text-violet-300">save</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Saved output</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Select which value from the DFA result dictionary is stored in the Features column.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Saved output value</span>
+                                        <select name="dfa_output_key"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                            <option value="dfa_value" selected>DFA value (scalar)</option>
+                                            <option value="dfa_intercept">DFA intercept</option>
+                                            <option value="full_dict">Full DFA dictionary</option>
+                                            <option value="custom">Custom path</option>
+                                        </select>
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
+                                        <input type="text" name="dfa_output_path"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="e.g. DFA or dfa_intercept">
+                                    </label>
+                                </div>
                             </div>
                             </fieldset>
                         </section>
@@ -5307,151 +5490,232 @@ def custom_feature(sample, params):
                         <section x-show="selectedMethod === 'fEI'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">fEI options</h2>
                             <fieldset :disabled="selectedMethod !== 'fEI'" class="space-y-5">
+                            <div class="space-y-4">
+                                <div class="flex items-center gap-2 border-b border-slate-200 dark:border-[#323b67] pb-2">
+                                    <span class="material-symbols-outlined text-base text-primary">tune</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Core setup</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Set the sampling rate and optional per-sample normalization used before DFA is computed as part of fEI.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
+                                        <input type="number" step="any" name="fei_fs"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional: fallback to parsed dataframe fs">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Required unless the parsed dataframe already contains a sampling frequency.</span>
+                                    </label>
+                                    <div class="flex items-center pt-5">
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                            <input type="checkbox" name="fei_normalize" value="1"
+                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                            Normalize each sample before fEI
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
 
-                            <div class="flex flex-wrap gap-5">
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="fei_normalize" value="1"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Normalize each sample
-                                </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
-                                    <input type="checkbox" name="fei_dfa_overlap" value="1" checked
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Use overlap when estimating DFA
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5 pl-4 border-l-2 border-l-cyan-500/70">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-cyan-600 dark:text-cyan-300">waves</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Input / preprocessing</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Choose whether the provided samples are already amplitude envelopes or raw signals that must be filtered and Hilbert-transformed.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Input is envelope</span>
+                                        <select name="fei_input_is_envelope" x-model="feiInputIsEnvelope"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                            <option value="false" selected>false</option>
+                                            <option value="true">true</option>
+                                        </select>
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Use false for raw EEG/MEG/LFP. Use true only when every sample is already a band-limited amplitude envelope.</span>
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
+                                        <input type="number" step="any" min="0" name="fei_trim_seconds" value="1.0"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Removes edge samples after filtering/envelope extraction to reduce boundary artifacts.</span>
+                                    </label>
+                                </div>
+                                <p x-show="feiUsesEnvelope()" class="text-xs text-amber-700 dark:text-amber-300">Envelope input skips frequency filtering, spectrum bands, Hilbert n_fft, and filter kwargs.</p>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-rose-600 dark:text-rose-300">view_timeline</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">fEI windows</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">fEI is estimated across amplitude windows. Window size is required; overlap is the fraction shared by consecutive windows.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Window size (s)</span>
+                                        <input type="number" step="any" min="0" name="fei_window_size_sec" x-model="feiWindowSizeSec"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Required, e.g. 5">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Window overlap [0,1)</span>
+                                        <input type="number" step="any" min="0" max="0.99" name="fei_window_overlap" x-model="feiWindowOverlap" value="0.0"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA threshold</span>
+                                        <input type="number" step="any" name="fei_dfa_threshold" value="0.6"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Minimum DFA value used to keep windows in the fEI estimate.</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-indigo-600 dark:text-indigo-300">stacked_line_chart</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">DFA windows</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Compute interval controls which DFA window sizes are evaluated; fit interval controls the subset used for the log-log slope. Fit should sit inside compute.</p>
+                                <p x-show="feiDfaWindowBlockReason()" x-text="feiDfaWindowBlockReason()"
+                                    class="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs font-medium text-red-700 dark:border-red-500/40 dark:bg-red-950/30 dark:text-red-300"></p>
+                                <div class="flex flex-wrap gap-5">
+                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
+                                        <input type="checkbox" name="fei_dfa_overlap" value="1" checked
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        50% overlapping DFA windows
+                                    </label>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA fit interval min (s)</span>
+                                        <input type="number" step="any" name="fei_dfa_fit_interval_min" x-model="feiDfaFitIntervalMin"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA fit interval max (s)</span>
+                                        <input type="number" step="any" name="fei_dfa_fit_interval_max" x-model="feiDfaFitIntervalMax"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA compute interval min (s)</span>
+                                        <input type="number" step="any" name="fei_dfa_compute_interval_min" x-model="feiDfaComputeIntervalMin"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA compute interval max (s)</span>
+                                        <input type="number" step="any" name="fei_dfa_compute_interval_max" x-model="feiDfaComputeIntervalMax"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-emerald-600 dark:text-emerald-300">filter_alt</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Frequency selection</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Band frequency computes fEI for one filtered band. Spectrum range asks crosci-style logic to create several bands inside the requested range. Use only one.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': feiUsesEnvelope() || feiHasSpectrumRange() }">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency min (Hz)</span>
+                                        <input type="number" step="any" name="fei_frequency_min" x-model="feiFrequencyMin" value="5"
+                                            :disabled="feiUsesEnvelope() || feiHasSpectrumRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency max (Hz)</span>
+                                        <input type="number" step="any" name="fei_frequency_max" x-model="feiFrequencyMax" value="45"
+                                            :disabled="feiUsesEnvelope() || feiHasSpectrumRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
+                                <p x-show="!feiUsesEnvelope() && feiHasSpectrumRange()" class="text-xs text-amber-700 dark:text-amber-300">Band frequency is disabled because Spectrum range is filled.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': feiUsesEnvelope() || feiHasBandRange() }">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
+                                        <input type="number" step="any" name="fei_spectrum_min" x-model="feiSpectrumMin"
+                                            :disabled="feiUsesEnvelope() || feiHasBandRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
+                                        <input type="number" step="any" name="fei_spectrum_max" x-model="feiSpectrumMax"
+                                            :disabled="feiUsesEnvelope() || feiHasBandRange()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                    </label>
+                                </div>
+                                <p x-show="!feiUsesEnvelope() && feiHasBandRange()" class="text-xs text-amber-700 dark:text-amber-300">Spectrum range is disabled because Band frequency is filled.</p>
+                            </div>
+
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-slate-600 dark:text-slate-300">settings</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Advanced options</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Exclude bad channels or override the Hilbert/filter implementation used when raw signals are converted to envelopes.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indexes</span>
+                                        <input type="text" name="fei_bad_idxes"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional, e.g. 0,2,5">
+                                    </label>
+                                    <label class="text-sm" :class="{ 'opacity-50': feiUsesEnvelope() }">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
+                                        <input type="number" step="1" min="1" name="fei_hilbert_n_fft"
+                                            :disabled="feiUsesEnvelope()"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="Optional">
+                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Only used when raw signals are filtered and transformed to envelopes.</span>
+                                    </label>
+                                </div>
+                                <label class="text-sm block" :class="{ 'opacity-50': feiUsesEnvelope() }">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (dict)</span>
+                                    <input type="text" name="fei_filter_kwargs"
+                                        :disabled="feiUsesEnvelope()"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder='Optional, e.g. {"fir_design":"firwin"}'>
+                                    <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Optional keyword arguments passed to the filtering step before Hilbert envelope extraction.</span>
                                 </label>
                             </div>
 
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Sampling frequency (Hz)</span>
-                                    <input type="number" step="any" name="fei_fs"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional: fallback to parsed dataframe fs">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Input is envelope</span>
-                                    <select name="fei_input_is_envelope"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                        <option value="true" selected>true</option>
-                                        <option value="false">false</option>
-                                    </select>
-                                </label>
+                            <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
+                                <div class="flex items-center gap-2">
+                                    <span class="material-symbols-outlined text-base text-violet-600 dark:text-violet-300">save</span>
+                                    <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Saved output</h3>
+                                </div>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Select which fEI result is stored in the Features column. The default stores the scalar fEI value used for analysis.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Saved output value</span>
+                                        <select name="fei_output_key"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                            <option value="fei" selected>fEI (scalar)</option>
+                                            <option value="fei_outliers_removed">fEI outliers removed</option>
+                                            <option value="fei_val">fEI with outliers</option>
+                                            <option value="dfa">DFA value</option>
+                                            <option value="num_outliers">Number of outliers</option>
+                                            <option value="w_amp">Window amplitudes</option>
+                                            <option value="w_dnf">Window detrended fluctuations</option>
+                                            <option value="full_dict">Full fEI dictionary</option>
+                                            <option value="custom">Custom path</option>
+                                        </select>
+                                    </label>
+                                    <label class="text-sm">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
+                                        <input type="text" name="fei_output_path"
+                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                            placeholder="e.g. fEI_outliers_removed, DFA, wAmp">
+                                    </label>
+                                </div>
                             </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Window size (s)</span>
-                                    <input type="number" step="any" min="0" name="fei_window_size_sec"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="e.g. 5">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Window overlap [0,1)</span>
-                                    <input type="number" step="any" min="0" max="0.99" name="fei_window_overlap" value="0.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA threshold</span>
-                                    <input type="number" step="any" name="fei_dfa_threshold" value="0.6"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Provided DFA value</span>
-                                    <input type="number" step="any" name="fei_dfa_value"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional, envelope-only mode">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
-                                    <input type="number" step="any" min="0" name="fei_trim_seconds" value="1.0"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA fit interval min (s)</span>
-                                    <input type="number" step="any" name="fei_dfa_fit_interval_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA fit interval max (s)</span>
-                                    <input type="number" step="any" name="fei_dfa_fit_interval_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA compute interval min (s)</span>
-                                    <input type="number" step="any" name="fei_dfa_compute_interval_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">DFA compute interval max (s)</span>
-                                    <input type="number" step="any" name="fei_dfa_compute_interval_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency min (Hz)</span>
-                                    <input type="number" step="any" name="fei_frequency_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency max (Hz)</span>
-                                    <input type="number" step="any" name="fei_frequency_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
-                                    <input type="number" step="any" name="fei_spectrum_min"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
-                                    <input type="number" step="any" name="fei_spectrum_max"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indexes</span>
-                                    <input type="text" name="fei_bad_idxes"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional, e.g. 0,2,5">
-                                </label>
-                                <label class="text-sm">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
-                                    <input type="number" step="1" min="1" name="fei_hilbert_n_fft"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder="Optional">
-                                </label>
-                            </div>
-
-                            <label class="text-sm block">
-                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (dict)</span>
-                                <input type="text" name="fei_filter_kwargs"
-                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                    placeholder='Optional, e.g. {"fir_design":"firwin"}'>
-                            </label>
                             </fieldset>
                         </section>
 
