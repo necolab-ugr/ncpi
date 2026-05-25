@@ -60,11 +60,27 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
+        <section id="overview">
           <h1>Simulate a LIF Network</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
+          <p>
+            This tutorial provides a Jupyter notebook that runs the Hagen LIF network with default parameters,
+            while sweeping <code>J_ext</code> from <code>28</code> to <code>32</code> with step <code>2</code>.
+            It then plots spike rasters and mean firing rates.
+          </p>
+          <p>
+            Notebook file:
+            <a class="link" href="./notebooks/simulate-lif-network.ipynb">simulate-lif-network.ipynb</a>
+          </p>
           <p><a class="link" href="../jupyter-index.html">Back to Jupyter Tutorials Index</a></p>
+        </section>
+
+        <section id="rendered-notebook">
+          <h2>Rendered Notebook</h2>
+          <iframe
+            src="./notebooks/simulate-lif-network.html"
+            title="Simulate a LIF Network Notebook"
+            style="width:100%; min-height:760px; border:1px solid rgba(0,137,199,0.22); border-radius:10px;">
+          </iframe>
         </section>
       </article>
     </main>
@@ -72,7 +88,8 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#rendered-notebook">Rendered Notebook</a></li>
       </ul>
     </aside>
   </div>
