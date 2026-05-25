@@ -2913,6 +2913,14 @@ _DFA_OUTPUT_PATHS = {
     "dfa_intercept": "dfa_intercept",
 }
 
+_FEI_OUTPUT_PATHS = {
+    "fei": "fEI",
+    "fei_outliers_removed": "fEI_outliers_removed",
+    "fei_val": "fEI_val",
+    "dfa": "DFA",
+    "num_outliers": "num_outliers",
+}
+
 
 def _is_missing_feature_value(value):
     if value is None:
@@ -3120,11 +3128,56 @@ def _postprocess_dfa_output(output_df, params, job_status=None, job_id=None):
     return output_df
 
 
+def _fei_output_path_from_params(params):
+    output_key = str(_get_param(params, "fei_output_key", "fei") or "fei").strip()
+    if output_key in {"", "fei", "fEI", "fei_outliers_removed"}:
+        return "fei", _FEI_OUTPUT_PATHS["fei"]
+    if output_key in {"full", "dict", "full_dict"}:
+        return "full_dict", None
+    if output_key == "custom":
+        custom_path = str(_get_param(params, "fei_output_path", "") or "").strip()
+        if not custom_path:
+            raise ValueError("Custom fEI output requires a non-empty output path.")
+        return output_key, custom_path
+    if output_key not in _FEI_OUTPUT_PATHS:
+        raise ValueError(f"Unsupported fEI output value: {output_key}")
+    return output_key, _FEI_OUTPUT_PATHS[output_key]
+
+
+def _postprocess_fei_output(output_df, params, job_status=None, job_id=None):
+    if "Features" not in output_df.columns:
+        return output_df
+
+    def _log(message):
+        if job_status is not None and job_id is not None:
+            _append_job_output(job_status, job_id, message)
+
+    output_key, output_path = _fei_output_path_from_params(params)
+    if output_path is None:
+        return output_df
+
+    values = [_get_mapping_path_value(feature, output_path) for feature in output_df["Features"].tolist()]
+    if output_key == "fei":
+        values = [
+            _get_mapping_path_value(feature, "fEI_outliers_removed")
+            if _is_missing_feature_value(value) else value
+            for feature, value in zip(output_df["Features"].tolist(), values)
+        ]
+    if output_key != "custom":
+        values = [_as_numeric_scalar(value) for value in values]
+    output_df = output_df.copy()
+    output_df["Features"] = values
+    _log(f"fEI output field selected: {output_path}.")
+    return output_df
+
+
 def _postprocess_features_output(method, output_df, params, job_status=None, job_id=None):
     if method == "specparam":
         return _postprocess_specparam_output(output_df, params, job_status, job_id)
     if method == "dfa":
         return _postprocess_dfa_output(output_df, params, job_status, job_id)
+    if method == "fEI":
+        return _postprocess_fei_output(output_df, params, job_status, job_id)
     return output_df
 
 

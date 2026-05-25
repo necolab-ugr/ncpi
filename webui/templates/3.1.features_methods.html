@@ -5452,6 +5452,27 @@ def custom_feature(sample, params):
                                     class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                     placeholder='Optional, e.g. {"fir_design":"firwin"}'>
                             </label>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Saved output value</span>
+                                    <select name="fei_output_key"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        <option value="fei" selected>fEI (scalar)</option>
+                                        <option value="fei_val">fEI with outliers</option>
+                                        <option value="dfa">DFA value</option>
+                                        <option value="num_outliers">Number of outliers</option>
+                                        <option value="full_dict">Full fEI dictionary</option>
+                                        <option value="custom">Custom path</option>
+                                    </select>
+                                </label>
+                                <label class="text-sm">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
+                                    <input type="text" name="fei_output_path"
+                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                        placeholder="e.g. fEI_outliers_removed, DFA, wAmp">
+                                </label>
+                            </div>
                             </fieldset>
                         </section>
 
