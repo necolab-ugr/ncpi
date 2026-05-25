@@ -60,11 +60,27 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
+        <section id="overview">
           <h1>Compute Field Potentials</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
+          <p>
+            This tutorial provides a Jupyter notebook that loads spike trains from the LIF sweep
+            tutorial, computes kernel-based CDMs for <code>J_ext = 28, 30, 32</code>, builds
+            firing-based proxies, and compares normalized signals and spectra.
+          </p>
+          <p>
+            Notebook file:
+            <a class="link" href="./notebooks/compute-field-potentials.ipynb">compute-field-potentials.ipynb</a>
+          </p>
           <p><a class="link" href="../jupyter-index.html">Back to Jupyter Tutorials Index</a></p>
+        </section>
+
+        <section id="rendered-notebook">
+          <h2>Rendered Notebook</h2>
+          <iframe
+            src="./notebooks/compute-field-potentials.html"
+            title="Compute Field Potentials Notebook"
+            style="width:100%; min-height:760px; border:1px solid rgba(0,137,199,0.22); border-radius:10px;">
+          </iframe>
         </section>
       </article>
     </main>
@@ -72,7 +88,8 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#rendered-notebook">Rendered Notebook</a></li>
       </ul>
     </aside>
   </div>
