@@ -9775,9 +9775,16 @@ def features_parser_inspect():
             metadata_server_paths = _metadata_server_paths_raw
             upload_entries = []
             for upl in uploads:
-                upl_name = secure_filename(upl.filename)
+                # Extract actual filename and folder from relative browser paths
+                raw_path = upl.filename.replace("\\", "/")
+                parts = [p for p in raw_path.split("/") if p]
+                base_name = parts[-1] if parts else upl.filename
+                upl_name = secure_filename(base_name)
                 if not upl_name:
                     return jsonify({"error": "Invalid file name."}), 400
+
+                # Retrieve the parent folder name if it exists in the path
+                folder_name = secure_filename(parts[-2]) if len(parts) > 1 else upl_name
                 ext = Path(upl_name).suffix.lower()
                 if ext not in FEATURES_PARSER_FILE_EXTENSIONS:
                     return jsonify({"error": f"Unsupported file type for inspection: {ext}"}), 400
@@ -9785,8 +9792,12 @@ def features_parser_inspect():
                 temp_path = os.path.join(inspect_root, temp_name)
                 upl.save(temp_path)
                 cleanup_paths.append(temp_path)
-                name_candidates.append(upl_name)
-                upload_entries.append({"path": temp_path, "name": upl_name, "folder_name": upl_name})
+                
+                # Avoid duplicating the filename if frontend already sent the full path
+                if upl.filename not in name_candidates and upl_name not in name_candidates:
+                    name_candidates.append(upl_name)
+                    
+                upload_entries.append({"path": temp_path, "name": upl_name, "folder_name": folder_name})
             for srv_path in metadata_server_paths:
                 real_path = os.path.realpath(srv_path)
                 if not _is_supported_parser_path(real_path):
@@ -9825,6 +9836,8 @@ def features_parser_inspect():
                     )
             inspect_path = upload_entries[0]["path"]
             file_name = upload_entries[0]["name"]
+            # Save the true folder name derived from the upload
+            actual_folder = upload_entries[0]["folder_name"]
             if len(upload_entries) > 1:
                 folder_entries = upload_entries
                 folder_file_count = len(upload_entries)
@@ -10127,27 +10140,38 @@ def features_parser_inspect():
                 description["candidate_field_origins"] = {
                     key: sorted(values)
                     for key, values in candidate_field_origins.items()
-                }
+                 }
             
-            # Build extension_profiles so the response renders in "Folder and File Inspection"
-            _ext_key = Path(str(file_name)).suffix.lower()
-            _ext_profile = {
-                "extension": _ext_key,
-                "source_type": description.get("source_type", ""),
-                "candidate_fields": list(description.get("candidate_fields") or []),
-                "field_details": [d for d in (description.get("field_details") or []) if isinstance(d, dict)],
-                "summary": description.get("summary", ""),
-                "sample_file": file_name,
-                "file_count": 1,
-                "folder_name": file_name,
-                "folder_path": "",
-                "virtual_field_details": list(description.get("virtual_field_details") or []),
-            }
-            description["extension_profiles"] = [_ext_profile]
-            description["extension_summaries"] = [{"extension": _ext_key, "count": 1}]
-            if not description.get("folder_summaries"):
-                description["folder_summaries"] = [{"folder_name": file_name, "folder_path": "", "file_count": 1}]
+                # Check if frontend provided a full list of names to summarize
+                listed_summary = _summarize_listed_file_names(listed_file_names) if listed_file_names else None
+                rep_folder = actual_folder if 'actual_folder' in locals() else file_name
+                rep_count = 1
+                if listed_summary and listed_summary.get("total_files", 0) > 0:
+                    rep_count = listed_summary["total_files"]
+                    if listed_summary.get("folder_summaries"):
+                        rep_folder = listed_summary["folder_summaries"][0]["folder_name"]
 
+                # Build extension_profiles so the response renders in "Folder and File Inspection"
+                _ext_key = Path(str(file_name)).suffix.lower()
+                _ext_profile = {
+                    "extension": _ext_key,
+                    "source_type": description.get("source_type", ""),
+                    "candidate_fields": list(description.get("candidate_fields") or []),
+                    "field_details": [d for d in (description.get("field_details") or []) if isinstance(d, dict)],
+                    "summary": description.get("summary", ""),
+                    "sample_file": file_name,
+                    "file_count": rep_count,
+                    "folder_name": rep_folder,
+                    "folder_path": "",
+                    "virtual_field_details": list(description.get("virtual_field_details") or []),
+                }
+                description["extension_profiles"] = [_ext_profile]
+                
+                # Rely on the bottom fallback if no listed_summary exists
+                if not listed_summary:
+                    description["extension_summaries"] = [{"extension": _ext_key, "count": 1}]
+                    if not description.get("folder_summaries"):
+                        description["folder_summaries"] = [{"folder_name": rep_folder, "folder_path": "", "file_count": 1}]  
             
         description = _attach_file_extracted_virtual_field(
             description,
