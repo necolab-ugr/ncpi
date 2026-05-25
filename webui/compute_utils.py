@@ -2451,6 +2451,15 @@ def _parse_range_pair(params, min_key, max_key):
     return [float(lo), float(hi)]
 
 
+def _validate_fit_interval_inside_compute(label, fit_interval, compute_interval):
+    if fit_interval is None or compute_interval is None:
+        return
+    fit_lo, fit_hi = fit_interval
+    compute_lo, compute_hi = compute_interval
+    if fit_lo < compute_lo or fit_hi > compute_hi:
+        raise ValueError(f"{label}: fit interval must be inside compute interval.")
+
+
 def _parse_optional_bool_param(params, key):
     raw = _get_param(params, key, None)
     if raw is None:
@@ -2779,21 +2788,28 @@ def _build_feature_method_params(method, params, df):
         method_params["normalize"] = _parse_bool_param(params, "dfa_normalize", default=False)
         method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "dfa_fs", df, "dfa")
 
+        input_is_envelope = _parse_optional_bool_param(params, "dfa_input_is_envelope")
+        input_is_envelope = False if input_is_envelope is None else bool(input_is_envelope)
         fit_interval = _parse_range_pair(params, "dfa_fit_interval_min", "dfa_fit_interval_max")
         compute_interval = _parse_range_pair(params, "dfa_compute_interval_min", "dfa_compute_interval_max")
-        frequency_range = _parse_range_pair(params, "dfa_frequency_min", "dfa_frequency_max")
-        spectrum_range = _parse_range_pair(params, "dfa_spectrum_min", "dfa_spectrum_max")
-        if frequency_range is not None and spectrum_range is not None:
-            raise ValueError("DFA: provide only one of band frequency range or spectrum range.")
-        if frequency_range is None and spectrum_range is None:
-            frequency_range = (5.0, 45.0)
+        _validate_fit_interval_inside_compute("DFA", fit_interval, compute_interval)
+
+        if input_is_envelope:
+            frequency_range = None
+            spectrum_range = None
+        else:
+            frequency_range = _parse_range_pair(params, "dfa_frequency_min", "dfa_frequency_max")
+            spectrum_range = _parse_range_pair(params, "dfa_spectrum_min", "dfa_spectrum_max")
+            if frequency_range is not None and spectrum_range is not None:
+                raise ValueError("DFA: provide only one of band frequency range or spectrum range.")
+            if frequency_range is None and spectrum_range is None:
+                raise ValueError("DFA: raw-signal mode requires band frequency range or spectrum range.")
 
         overlap = _parse_optional_bool_param(params, "dfa_overlap")
-        input_is_envelope = _parse_optional_bool_param(params, "dfa_input_is_envelope")
         bad_idxes = _parse_idx_list_param(params, "dfa_bad_idxes")
-        filter_kwargs = _parse_dict_param(params, "dfa_filter_kwargs")
+        filter_kwargs = None if input_is_envelope else _parse_dict_param(params, "dfa_filter_kwargs")
         trim_seconds = _parse_float_param(params, "dfa_trim_seconds", default=None)
-        hilbert_n_fft = _parse_int_param(params, "dfa_hilbert_n_fft", default=None)
+        hilbert_n_fft = None if input_is_envelope else _parse_int_param(params, "dfa_hilbert_n_fft", default=None)
 
         if fit_interval is not None:
             method_params["fit_interval"] = tuple(fit_interval)
@@ -2805,8 +2821,7 @@ def _build_feature_method_params(method, params, df):
             method_params["spectrum_range"] = tuple(spectrum_range)
         if overlap is not None:
             method_params["overlap"] = bool(overlap)
-        if input_is_envelope is not None:
-            method_params["input_is_envelope"] = bool(input_is_envelope)
+        method_params["input_is_envelope"] = bool(input_is_envelope)
         if bad_idxes is not None:
             method_params["bad_idxes"] = bad_idxes
         if filter_kwargs:
@@ -2822,23 +2837,31 @@ def _build_feature_method_params(method, params, df):
         method_params["normalize"] = _parse_bool_param(params, "fei_normalize", default=False)
         method_params["sampling_frequency"] = _resolve_sampling_frequency(params, "fei_fs", df, "fEI")
 
-        frequency_range = _parse_range_pair(params, "fei_frequency_min", "fei_frequency_max")
-        spectrum_range = _parse_range_pair(params, "fei_spectrum_min", "fei_spectrum_max")
-        if frequency_range is not None and spectrum_range is not None:
-            raise ValueError("fEI: provide only one of band frequency range or spectrum range.")
+        input_is_envelope = _parse_optional_bool_param(params, "fei_input_is_envelope")
+        input_is_envelope = False if input_is_envelope is None else bool(input_is_envelope)
+        if input_is_envelope:
+            frequency_range = None
+            spectrum_range = None
+        else:
+            frequency_range = _parse_range_pair(params, "fei_frequency_min", "fei_frequency_max")
+            spectrum_range = _parse_range_pair(params, "fei_spectrum_min", "fei_spectrum_max")
+            if frequency_range is not None and spectrum_range is not None:
+                raise ValueError("fEI: provide only one of band frequency range or spectrum range.")
+            if frequency_range is None and spectrum_range is None:
+                raise ValueError("fEI: raw-signal mode requires band frequency range or spectrum range.")
 
         dfa_fit_interval = _parse_range_pair(params, "fei_dfa_fit_interval_min", "fei_dfa_fit_interval_max")
         dfa_compute_interval = _parse_range_pair(params, "fei_dfa_compute_interval_min", "fei_dfa_compute_interval_max")
+        _validate_fit_interval_inside_compute("fEI DFA", dfa_fit_interval, dfa_compute_interval)
+
         window_size_sec = _parse_float_param(params, "fei_window_size_sec", default=None)
         window_overlap = _parse_float_param(params, "fei_window_overlap", default=None)
-        dfa_value = _parse_float_param(params, "fei_dfa_value", default=None)
         dfa_threshold = _parse_float_param(params, "fei_dfa_threshold", default=None)
         dfa_overlap = _parse_optional_bool_param(params, "fei_dfa_overlap")
-        input_is_envelope = _parse_optional_bool_param(params, "fei_input_is_envelope")
         bad_idxes = _parse_idx_list_param(params, "fei_bad_idxes")
-        filter_kwargs = _parse_dict_param(params, "fei_filter_kwargs")
+        filter_kwargs = None if input_is_envelope else _parse_dict_param(params, "fei_filter_kwargs")
         trim_seconds = _parse_float_param(params, "fei_trim_seconds", default=None)
-        hilbert_n_fft = _parse_int_param(params, "fei_hilbert_n_fft", default=None)
+        hilbert_n_fft = None if input_is_envelope else _parse_int_param(params, "fei_hilbert_n_fft", default=None)
 
         if frequency_range is not None:
             method_params["frequency_range"] = tuple(frequency_range)
@@ -2848,22 +2871,20 @@ def _build_feature_method_params(method, params, df):
             method_params["dfa_fit_interval"] = tuple(dfa_fit_interval)
         if dfa_compute_interval is not None:
             method_params["dfa_compute_interval"] = tuple(dfa_compute_interval)
-        if window_size_sec is not None:
-            if float(window_size_sec) <= 0:
-                raise ValueError("fEI window_size_sec must be > 0.")
-            method_params["window_size_sec"] = float(window_size_sec)
+        if window_size_sec is None:
+            raise ValueError("fEI window_size_sec is required.")
+        if float(window_size_sec) <= 0:
+            raise ValueError("fEI window_size_sec must be > 0.")
+        method_params["window_size_sec"] = float(window_size_sec)
         if window_overlap is not None:
             if float(window_overlap) < 0 or float(window_overlap) >= 1:
                 raise ValueError("fEI window_overlap must be in [0, 1).")
             method_params["window_overlap"] = float(window_overlap)
-        if dfa_value is not None:
-            method_params["dfa_value"] = float(dfa_value)
         if dfa_threshold is not None:
             method_params["dfa_threshold"] = float(dfa_threshold)
         if dfa_overlap is not None:
             method_params["dfa_overlap"] = bool(dfa_overlap)
-        if input_is_envelope is not None:
-            method_params["input_is_envelope"] = bool(input_is_envelope)
+        method_params["input_is_envelope"] = bool(input_is_envelope)
         if bad_idxes is not None:
             method_params["bad_idxes"] = bad_idxes
         if filter_kwargs:
@@ -2919,6 +2940,8 @@ _FEI_OUTPUT_PATHS = {
     "fei_val": "fEI_val",
     "dfa": "DFA",
     "num_outliers": "num_outliers",
+    "w_amp": "wAmp",
+    "w_dnf": "wDNF",
 }
 
 
@@ -3130,7 +3153,7 @@ def _postprocess_dfa_output(output_df, params, job_status=None, job_id=None):
 
 def _fei_output_path_from_params(params):
     output_key = str(_get_param(params, "fei_output_key", "fei") or "fei").strip()
-    if output_key in {"", "fei", "fEI", "fei_outliers_removed"}:
+    if output_key in {"", "fei", "fEI"}:
         return "fei", _FEI_OUTPUT_PATHS["fei"]
     if output_key in {"full", "dict", "full_dict"}:
         return "full_dict", None
@@ -3163,7 +3186,7 @@ def _postprocess_fei_output(output_df, params, job_status=None, job_id=None):
             if _is_missing_feature_value(value) else value
             for feature, value in zip(output_df["Features"].tolist(), values)
         ]
-    if output_key != "custom":
+    if output_key not in {"custom", "w_amp", "w_dnf"}:
         values = [_as_numeric_scalar(value) for value in values]
     output_df = output_df.copy()
     output_df["Features"] = values
