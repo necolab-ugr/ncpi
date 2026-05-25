@@ -495,6 +495,30 @@ def test_aggregation_over_sensor_mean() -> None:
     assert np.allclose(x, np.array([5.5, 11.0, 16.5]))
 
 
+@pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
+def test_exclude_incomplete_final_epoch_accepts_list_metadata() -> None:
+    parser = EphysDatasetParser(ParseConfig())
+    df = pd.DataFrame(
+        {
+            "source_file": ["sample.mat"] * 3,
+            "subject_id": ["S01"] * 3,
+            "group": [["AD"], ["AD"], ["AD"]],
+            "condition": [["eyes_closed"], ["eyes_closed"], ["eyes_closed"]],
+            "sensor": ["Cz", "Cz", "Cz"],
+            "fs": [250.0, 250.0, 250.0],
+            "data_domain": ["time", "time", "time"],
+            "epoch": [0, 1, 2],
+            "data": [np.arange(100), np.arange(100), np.arange(40)],
+        }
+    )
+
+    out = parser._exclude_incomplete_final_epoch(df)
+
+    assert out["epoch"].tolist() == [0, 1]
+    assert out["group"].tolist() == [["AD"], ["AD"]]
+    assert out["condition"].tolist() == [["eyes_closed"], ["eyes_closed"]]
+
+
 # -------------------------
 # MNE smoke (if installed)
 # -------------------------

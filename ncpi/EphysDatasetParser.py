@@ -2803,7 +2803,8 @@ class EphysDatasetParser:
             ]
             if col in df.columns and not df[col].isna().all()
         ]
-        grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
+        grouped_df, group_cols = self._with_hashable_group_columns(df, group_cols)
+        grouped = grouped_df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
         any_incomplete_group = False
         drop_indices = []
         for _, frame in grouped:
@@ -2852,6 +2853,7 @@ class EphysDatasetParser:
             ]
             if col in df.columns and not df[col].isna().all()
         ]
+        grouped_df, group_cols = self._with_hashable_group_columns(df, group_cols)
 
         # Fast numeric path for common epoch labels produced by parser epoching.
         # This avoids per-group Python loops on large non-aggregated datasets.
@@ -2872,7 +2874,9 @@ class EphysDatasetParser:
             # clipping by the smallest per-group max epoch index.
             if group_cols:
                 per_group_max = (
-                    df_fast.groupby(group_cols, sort=False, dropna=False)["_epoch_num"].max()
+                    df_fast.assign(**grouped_df[group_cols])
+                    .groupby(group_cols, sort=False, dropna=False)["_epoch_num"]
+                    .max()
                 )
             else:
                 per_group_max = pd.Series([float(df_fast["_epoch_num"].max())])
@@ -2925,7 +2929,7 @@ class EphysDatasetParser:
                 values.append(value)
             return sorted(values, key=epoch_sort_key)
 
-        grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
+        grouped = grouped_df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
         num_groups_with_epochs = 0
         min_count = None
         max_count = 0
@@ -2947,7 +2951,7 @@ class EphysDatasetParser:
             return df
 
         drop_indices = []
-        grouped = df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
+        grouped = grouped_df.groupby(group_cols, sort=False, dropna=False) if group_cols else [(None, df)]
         for _, frame in grouped:
             values = ordered_epoch_values(frame)
             if not values:
@@ -2968,6 +2972,36 @@ class EphysDatasetParser:
             RuntimeWarning,
         )
         return df.drop(index=list(set(drop_indices))).reset_index(drop=True)
+
+    def _with_hashable_group_columns(self, df: "Any", group_cols: list[str]) -> tuple["Any", list[str]]:
+        """Return a view-like copy whose group columns can be used by pandas.groupby."""
+        if not group_cols:
+            return df, group_cols
+
+        def make_hashable(value):
+            if self._is_missing_value(value):
+                return value
+            if isinstance(value, np.ndarray):
+                return tuple(make_hashable(v) for v in value.tolist())
+            if isinstance(value, list):
+                return tuple(make_hashable(v) for v in value)
+            if isinstance(value, tuple):
+                return tuple(make_hashable(v) for v in value)
+            if isinstance(value, dict):
+                return tuple(
+                    (make_hashable(k), make_hashable(v))
+                    for k, v in sorted(value.items(), key=lambda item: str(item[0]))
+                )
+            try:
+                hash(value)
+            except TypeError:
+                return repr(value)
+            return value
+
+        out = df.copy()
+        for col in group_cols:
+            out[col] = out[col].map(make_hashable)
+        return out, group_cols
 
     def _is_missing_value(self, value: Any) -> bool:
         if value is None:
