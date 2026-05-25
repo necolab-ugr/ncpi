@@ -9150,7 +9150,7 @@ def features_browse_dirs():
                 if entry.is_dir(follow_symlinks=False):
                     dirs.append({
                         "name": entry.name,
-                        "path": os.path.realpath(entry.path),
+                        "path": os.path.abspath(entry.path),
                     })
                     continue
                 if include_files and entry.is_file(follow_symlinks=False):
@@ -9159,7 +9159,7 @@ def features_browse_dirs():
                         continue
                     files.append({
                         "name": entry.name,
-                        "path": os.path.realpath(entry.path),
+                        "path": os.path.abspath(entry.path),
                     })
     except PermissionError:
         return jsonify({"error": f"Permission denied: {current}"}), 403
@@ -10515,7 +10515,7 @@ def inference_detect_model_backend():
         source_path = temp_path
     elif server_path_raw:
         try:
-            source_path = _validate_existing_pickle_file_path(
+            source_path = _validate_existing_file_path(
                 server_path_raw,
                 "Inference server model file",
             )
@@ -16261,6 +16261,8 @@ def start_computation_redirect(computation_type):
     inference_training_parameters_source_mode = "upload"
     inference_training_features_server_path = ""
     inference_training_parameters_server_path = ""
+    features_input_subsample_percent = 100.0
+    features_input_subsample_applied = False
 
     def _ensure_files_parsed():
         nonlocal files, uploaded_files
@@ -16276,6 +16278,29 @@ def start_computation_redirect(computation_type):
             )
             uploaded_files = [f for f in files.values() if f.filename]
         return files
+
+    def _parse_subsample_percent(value, default=100.0):
+        try:
+            numeric = float(value)
+        except Exception:
+            numeric = float(default)
+        if not np.isfinite(numeric):
+            numeric = float(default)
+        return float(np.clip(numeric, 0.0, 100.0))
+
+    def _subsample_sequence(items, percent, *, seed=0):
+        total = len(items)
+        if total <= 1:
+            return list(items)
+        pct = float(percent)
+        if pct >= 100.0:
+            return list(items)
+        if pct <= 0.0:
+            return []
+        n_keep = max(1, int(np.floor((pct / 100.0) * total)))
+        rng = np.random.default_rng(seed)
+        picked = sorted(rng.choice(total, size=n_keep, replace=False).tolist())
+        return [items[idx] for idx in picked]
 
     # File filter and checks for every computation type
     if computation_type == 'features':
@@ -16308,6 +16333,15 @@ def start_computation_redirect(computation_type):
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
         app.logger.warning("[compute %s] features data_source_kind=%s", job_id, data_source_kind)
+        features_input_subsample_percent = _parse_subsample_percent(
+            request.form.get("features_subsample_percent"),
+            default=100.0,
+        )
+        app.logger.warning(
+            "[compute %s] features requested input subsample percent=%.4g",
+            job_id,
+            features_input_subsample_percent,
+        )
         empirical_source_mode = (request.form.get("empirical_source_mode") or "upload").strip()
         existing_data_path = (request.form.get("existing_data_path") or "").strip()
         parser_deep_scan_status = (request.form.get("parser_deep_scan_status") or "").strip().lower()
@@ -16944,6 +16978,25 @@ def start_computation_redirect(computation_type):
                             raise ValueError(
                                 f"No files match filename format '{filename_format_spec['raw']}'."
                             )
+                    if features_input_subsample_percent < 100.0:
+                        before_subsample = len(selected_entries)
+                        selected_entries = _subsample_sequence(
+                            selected_entries,
+                            features_input_subsample_percent,
+                            seed=0,
+                        )
+                        features_input_subsample_applied = True
+                        app.logger.warning(
+                            "[compute %s] simulation pre-load subsample applied: %.4g%% -> %d/%d files (seed=0)",
+                            job_id,
+                            features_input_subsample_percent,
+                            len(selected_entries),
+                            before_subsample,
+                        )
+                        if not selected_entries:
+                            raise ValueError(
+                                f"Input subsampling ({features_input_subsample_percent:.4g}%) produced zero files."
+                            )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
                         logical_name = _prefixed_file_name(
@@ -17029,6 +17082,25 @@ def start_computation_redirect(computation_type):
                                 f"No files match filename format '{filename_format_spec['raw']}'."
                             )
                         raise ValueError("No files available in the selected analysis folder(s).")
+                    if features_input_subsample_percent < 100.0:
+                        before_subsample = len(upload_items)
+                        upload_items = _subsample_sequence(
+                            upload_items,
+                            features_input_subsample_percent,
+                            seed=0,
+                        )
+                        features_input_subsample_applied = True
+                        app.logger.warning(
+                            "[compute %s] simulation local pre-load subsample applied: %.4g%% -> %d/%d files (seed=0)",
+                            job_id,
+                            features_input_subsample_percent,
+                            len(upload_items),
+                            before_subsample,
+                        )
+                        if not upload_items:
+                            raise ValueError(
+                                f"Input subsampling ({features_input_subsample_percent:.4g}%) produced zero files."
+                            )
                     use_prefix = len(local_folder_tokens) > 1
 
                     save_started = time.perf_counter()
@@ -17212,6 +17284,25 @@ def start_computation_redirect(computation_type):
                             raise ValueError(
                                 f"No files match filename format '{filename_format_spec['raw']}'."
                             )
+                    if features_input_subsample_percent < 100.0:
+                        before_subsample = len(selected_entries)
+                        selected_entries = _subsample_sequence(
+                            selected_entries,
+                            features_input_subsample_percent,
+                            seed=0,
+                        )
+                        features_input_subsample_applied = True
+                        app.logger.warning(
+                            "[compute %s] empirical pre-load subsample applied: %.4g%% -> %d/%d files (seed=0)",
+                            job_id,
+                            features_input_subsample_percent,
+                            len(selected_entries),
+                            before_subsample,
+                        )
+                        if not selected_entries:
+                            raise ValueError(
+                                f"Input subsampling ({features_input_subsample_percent:.4g}%) produced zero files."
+                            )
                     use_prefix = len(folder_summaries) > 1
                     for entry in selected_entries:
                         logical_name = _prefixed_file_name(
@@ -17341,6 +17432,25 @@ def start_computation_redirect(computation_type):
                                 f"No files match filename format '{filename_format_spec['raw']}'."
                             )
                         raise ValueError("No files available in the selected analysis folder(s).")
+                    if features_input_subsample_percent < 100.0:
+                        before_subsample = len(upload_items)
+                        upload_items = _subsample_sequence(
+                            upload_items,
+                            features_input_subsample_percent,
+                            seed=0,
+                        )
+                        features_input_subsample_applied = True
+                        app.logger.warning(
+                            "[compute %s] empirical local pre-load subsample applied: %.4g%% -> %d/%d files (seed=0)",
+                            job_id,
+                            features_input_subsample_percent,
+                            len(upload_items),
+                            before_subsample,
+                        )
+                        if not upload_items:
+                            raise ValueError(
+                                f"Input subsampling ({features_input_subsample_percent:.4g}%) produced zero files."
+                            )
                     use_prefix = len(local_folder_tokens) > 1
 
                     save_started = time.perf_counter()
@@ -17585,6 +17695,14 @@ def start_computation_redirect(computation_type):
                 file_paths["training_parameters_file"] = copied_path
 
     data = request.form.to_dict() # Get parameters from form POST
+    if computation_type == "features" and features_input_subsample_applied:
+        data["features_subsample_percent"] = "100"
+        data["features_preload_subsample_percent"] = f"{features_input_subsample_percent:.10g}"
+        app.logger.warning(
+            "[compute %s] features compute-stage row subsample disabled after pre-load subsample (pre-load=%.4g%%).",
+            job_id,
+            features_input_subsample_percent,
+        )
     if computation_type == "inference":
         data["features_source_mode"] = inference_features_source_mode
         data["model_assets_source"] = inference_model_assets_source
