@@ -1,402 +1,358 @@
+import os
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
 import numpy as np
-import numpy.ma as np_ma
 import pytest
-from scipy.stats import t as scipy_t
+from scipy.signal import hilbert
 
 from ncpi.Features import Features
 
 
-def _create_window_indices(length_signal, length_window, window_offset):
-    window_starts = np.arange(0, length_signal - length_window, window_offset)
-    num_windows = len(window_starts)
+GLOBAL_SEED = int(os.environ.get("NCPI_CROSCI_PARITY_SEED", "0"))
+PARITY_DURATION_SECONDS = float(
+    os.environ.get("NCPI_CROSCI_PARITY_DURATION_SECONDS", "60")
+)
+PARITY_NUM_CHANNELS = int(os.environ.get("NCPI_CROSCI_PARITY_NUM_CHANNELS", "2"))
 
-    one_window_index = np.arange(0, length_window)
-    all_window_index = np.tile(one_window_index, (num_windows, 1)).astype(int)
+DFA_FIT_INTERVAL = [5, 30]
+DFA_COMPUTE_INTERVAL = [5, 30]
+DFA_OVERLAP = True
+FEI_WINDOW_SIZE_SEC = 5
+FEI_WINDOW_OVERLAP = 0.8
 
-    all_window_index = all_window_index + np.tile(
-        np.transpose(window_starts[np.newaxis, :]), (1, length_window)
-    ).astype(int)
+DFA_TOL = {"rtol": 1e-8, "atol": 1e-8}
+FEI_TOL = {"rtol": 1e-7, "atol": 1e-7}
 
-    return all_window_index
+pytestmark = pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true",
+    reason="crosci parity test is intended for local/manual execution only.",
+)
 
 
-def _generalized_esd(x, max_ols, alpha=0.05, full_output=False, ubvar=False):
-    if max_ols < 1:
-        raise ValueError(
-            "Maximum number of outliers, `max_ols`, must be > 1. "
-            "Specify, e.g., max_ols = 2."
-        )
-    xm = np_ma.array(x)
-    n = len(xm)
+@dataclass(frozen=True)
+class ParityCase:
+    name: str
+    signal: np.ndarray
+    sampling_frequency: int
 
-    r_vals = []
-    l_vals = []
-    max_indices = []
-    for i in range(max_ols + 1):
-        xmean = xm.mean()
-        xstd = xm.std(ddof=int(ubvar))
-        rr = np.abs((xm - xmean) / xstd)
-        max_indices.append(np.argmax(rr))
-        r_vals.append(rr[max_indices[-1]])
-        if i >= 1:
-            p = 1.0 - alpha / (2.0 * (n - i + 1))
-            per_point = scipy_t.ppf(p, n - i - 1)
-            l_vals.append(
-                (n - i) * per_point / np.sqrt((n - i - 1 + per_point**2) * (n - i + 1))
+
+def _log(message):
+    print(f"[crosci parity] {message}", flush=True)
+
+
+@pytest.fixture(scope="session")
+def crosci_biomarkers(tmp_path_factory):
+    tmp_dir = tmp_path_factory.mktemp("crosci_runtime")
+    os.environ["HOME"] = str(tmp_dir)
+    os.environ["MNE_HOME"] = str(tmp_dir / "mne")
+    os.environ["NUMBA_CACHE_DIR"] = str(tmp_dir / "numba_cache")
+
+    _log("Importing crosci biomarkers.")
+    try:
+        from crosci.biomarkers import DFA, fEI
+    except Exception as exc:
+        pytest.skip(f"crosci is not importable in this environment: {exc}")
+    _log("crosci biomarkers imported successfully.")
+
+    return DFA, fEI
+
+
+def _test_duration_seconds():
+    minimum = DFA_COMPUTE_INTERVAL[1] + 10
+    return max(PARITY_DURATION_SECONDS, minimum)
+
+
+def _rng(offset=0):
+    return np.random.default_rng(GLOBAL_SEED + offset)
+
+
+def _demo_signal(duration_seconds, num_channels):
+    _log("Generating random envelope data from the crosci demo setup.")
+    sampling_frequency = 250
+    rng = _rng(0)
+    signal = rng.random((num_channels, int(duration_seconds * sampling_frequency)))
+    return ParityCase(
+        name="crosci_demo_random_envelope",
+        signal=signal,
+        sampling_frequency=sampling_frequency,
+    )
+
+
+def _readme_lfp_signal(duration_seconds, num_channels):
+    _log("Generating synthetic LFP envelope data from the README example setup.")
+    rng = _rng(1)
+    sampling_frequency = 1000
+    dt = 1.0 / sampling_frequency
+    n_samples = int(sampling_frequency * duration_seconds)
+
+    rate_e_hz = 2.0
+    rate_i_hz = 5.0
+    n_e = 8000
+    n_i = 2000
+    v_rest_mv = -65.0
+    e_ampa_mv = 0.0
+    e_gabaa_mv = -80.0
+    tau_rise_ampa_ms = 0.1
+    tau_decay_ampa_ms = 2.0
+    tau_rise_gabaa_ms = 0.5
+    tau_decay_gabaa_ms = 10.0
+    eps = 1e-12
+
+    def conductance_kernel(tau_rise_ms, tau_decay_ms, support_ms=200.0):
+        t = np.arange(0.0, support_ms / 1000.0, 1.0 / sampling_frequency)
+        tau_r = tau_rise_ms / 1000.0
+        tau_d = tau_decay_ms / 1000.0
+        k = np.exp(-t / tau_d) - np.exp(-t / tau_r)
+        k[k < 0.0] = 0.0
+        return k / (np.sum(k) + eps)
+
+    k_ampa = conductance_kernel(tau_rise_ampa_ms, tau_decay_ampa_ms)
+    k_gabaa = conductance_kernel(tau_rise_gabaa_ms, tau_decay_gabaa_ms)
+
+    def poisson_counts_from_isi(rate_hz):
+        expected_spikes = max(1, int(rate_hz * duration_seconds))
+        n_draws = max(32, int(expected_spikes + 8.0 * np.sqrt(expected_spikes) + 64))
+        isi = rng.exponential(scale=1.0 / rate_hz, size=n_draws)
+        spike_times = np.cumsum(isi)
+        while spike_times[-1] < duration_seconds:
+            extra = rng.exponential(scale=1.0 / rate_hz, size=n_draws)
+            spike_times = np.concatenate(
+                [spike_times, spike_times[-1] + np.cumsum(extra)]
             )
-        xm[max_indices[-1]] = np_ma.masked
+        spike_bins = (spike_times[spike_times < duration_seconds] / dt).astype(int)
+        return np.bincount(spike_bins, minlength=n_samples).astype(float)
 
-    r_vals.pop(-1)
-    ofound = False
-    for i in range(max_ols - 1, -1, -1):
-        if r_vals[i] > l_vals[i]:
-            ofound = True
-            break
+    def simulate_lfp(target_inh_over_exc):
+        spikes_e = poisson_counts_from_isi(rate_e_hz * n_e)
+        spikes_i = poisson_counts_from_isi(rate_i_hz * n_i)
+        g_e = np.convolve(spikes_e, k_ampa, mode="same")
+        g_i = np.convolve(spikes_i, k_gabaa, mode="same")
+        g_i *= (target_inh_over_exc * np.mean(g_e)) / (np.mean(g_i) + eps)
+        i_e = g_e * (v_rest_mv - e_ampa_mv)
+        i_i = g_i * (v_rest_mv - e_gabaa_mv)
+        lfp = i_e + i_i
+        norm = np.sqrt(np.sum(np.abs(np.fft.rfft(lfp)) ** 2) + eps)
+        return np.abs(lfp / norm)
 
-    if ofound:
-        if not full_output:
-            return i + 1, max_indices[0: i + 1]
-        return i + 1, max_indices[0: i + 1], r_vals, l_vals, max_indices
+    targets = np.linspace(2.0, 6.0, num_channels)
+    signal = np.vstack([simulate_lfp(target) for target in targets])
+    return ParityCase(
+        name="readme_gao_2017_lfp_envelope",
+        signal=signal,
+        sampling_frequency=sampling_frequency,
+    )
 
-    if not full_output:
-        return 0, []
-    return 0, [], r_vals, l_vals, max_indices
+
+def _mne_sample_signal(duration_seconds, num_channels):
+    _log("Preparing MNE sample alpha-envelope data.")
+    mne = pytest.importorskip("mne")
+
+    with tempfile.TemporaryDirectory(prefix="mne_sample_") as temp_dir:
+        _log("Downloading MNE sample dataset into a temporary directory.")
+        try:
+            data_path = mne.datasets.sample.data_path(
+                path=temp_dir,
+                download=True,
+                update_path=False,
+                verbose=False,
+            )
+        except Exception as exc:
+            pytest.skip(f"MNE sample dataset could not be downloaded: {exc}")
+
+        raw_path = Path(data_path) / "MEG/sample/sample_audvis_raw.fif"
+        _log("Loading MNE sample raw FIF file.")
+        raw = mne.io.read_raw_fif(raw_path, preload=True, verbose=False)
+        raw.pick(picks="eeg", exclude="bads")
+        if len(raw.ch_names) < num_channels:
+            pytest.skip("MNE sample dataset does not have enough EEG channels")
+
+        fs = float(raw.info["sfreq"])
+        n_samples = int(fs * duration_seconds)
+        if raw.n_times < n_samples:
+            pytest.skip(
+                f"MNE sample dataset is shorter than {duration_seconds:.1f} seconds"
+            )
+
+        signal = raw.get_data(picks=list(range(num_channels)))[:, :n_samples]
+
+        band = [8.0, 13.0]
+        _log("Filtering MNE EEG data in the alpha band.")
+        filtered = mne.filter.filter_data(
+            signal,
+            fs,
+            band[0],
+            band[1],
+            filter_length="auto",
+            fir_window="hamming",
+            phase="zero",
+            fir_design="firwin",
+            pad="reflect_limited",
+            verbose=False,
+        )
+
+    trim = int(fs)
+    filtered = filtered[:, trim:-trim]
+    n_fft = mne.filter.next_fast_len(filtered.shape[1])
+    _log("Computing the MNE alpha amplitude envelope.")
+    analytic = hilbert(filtered, N=n_fft, axis=-1)[..., : filtered.shape[1]]
+    amplitude_envelope = np.abs(analytic)
+
+    return ParityCase(
+        name="mne_sample_alpha_envelope",
+        signal=amplitude_envelope,
+        sampling_frequency=int(round(fs)),
+    )
 
 
-def _dfa_reference(sample, sampling_frequency, fit_interval, compute_interval, overlap):
-    window_sizes = np.floor(np.logspace(-1, 3, 81) * sampling_frequency).astype(int)
-    window_sizes = np.sort(np.unique(window_sizes))
-    window_sizes = window_sizes[
-        (window_sizes >= compute_interval[0] * sampling_frequency)
-        & (window_sizes <= compute_interval[1] * sampling_frequency)
+def _make_case(origin):
+    duration_seconds = _test_duration_seconds()
+    num_channels = PARITY_NUM_CHANNELS
+    if origin == "crosci_demo":
+        return _demo_signal(duration_seconds, num_channels)
+    if origin == "readme":
+        return _readme_lfp_signal(duration_seconds, num_channels)
+    if origin == "mne_sample":
+        return _mne_sample_signal(duration_seconds, num_channels)
+    raise ValueError(f"Unknown parity origin: {origin}")
+
+
+def _ncpi_dfa(signal, sampling_frequency):
+    _log("Computing DFA with ncpi Features.")
+    feat = Features(
+        method="dfa",
+        params={
+            "sampling_frequency": sampling_frequency,
+            "fit_interval": DFA_FIT_INTERVAL,
+            "compute_interval": DFA_COMPUTE_INTERVAL,
+            "overlap": DFA_OVERLAP,
+        },
+    )
+    return feat.dfa(signal)
+
+
+def _ncpi_fei_from_dfa(signal, sampling_frequency, dfa_array):
+    _log("Computing fE/I with ncpi Features using ncpi DFA values.")
+    feat = Features(
+        method="fEI",
+        params={
+            "sampling_frequency": sampling_frequency,
+            "window_size_sec": FEI_WINDOW_SIZE_SEC,
+            "window_overlap": FEI_WINDOW_OVERLAP,
+        },
+    )
+
+    out_by_channel = [
+        feat.fEI(signal[ch_idx], dfa_value=float(dfa_array[ch_idx]))
+        for ch_idx in range(signal.shape[0])
     ]
 
-    fluctuations = np.full(window_sizes.shape, np.nan, dtype=float)
-
-    window_overlap = 0.5 if overlap else 0.0
-    window_offset = np.floor(window_sizes * (1 - window_overlap)).astype(int)
-    signal_profile = np.cumsum(sample - np.mean(sample))
-
-    for i_window_size, window_size in enumerate(window_sizes):
-        offset = int(window_offset[i_window_size])
-        if offset <= 0:
-            continue
-        all_window_index = _create_window_indices(sample.shape[0], int(window_size), offset)
-        if all_window_index.size == 0:
-            continue
-        x_signal = signal_profile[all_window_index]
-        _, fluc, _, _, _ = np.polyfit(
-            np.arange(window_size), np.transpose(x_signal), deg=1, full=True
-        )
-        fluctuations[i_window_size] = np.mean(np.sqrt(fluc / window_size))
-
-    fit_interval_first_window = np.argwhere(
-        window_sizes >= fit_interval[0] * sampling_frequency
-    )[0][0]
-    fit_interval_last_window = np.argwhere(
-        window_sizes <= fit_interval[1] * sampling_frequency
-    )[-1][0]
-
-    if fit_interval_first_window > 0:
-        if (
-            np.abs(
-                window_sizes[fit_interval_first_window - 1] / sampling_frequency
-                - fit_interval[0]
-            )
-            <= fit_interval[0] / 100
-        ):
-            if np.abs(
-                window_sizes[fit_interval_first_window - 1] / sampling_frequency
-                - fit_interval[0]
-            ) < np.abs(
-                window_sizes[fit_interval_first_window] / sampling_frequency
-                - fit_interval[0]
-            ):
-                fit_interval_first_window = fit_interval_first_window - 1
-
-    x_fit = np.log10(
-        window_sizes[fit_interval_first_window: fit_interval_last_window + 1]
-    )
-    y_fit = np.log10(
-        fluctuations[fit_interval_first_window: fit_interval_last_window + 1]
-    )
-    model = np.polyfit(x_fit, y_fit, 1)
-    dfa_intercept = model[1]
-    dfa_val = model[0]
-
-    return dfa_val, window_sizes, fluctuations, dfa_intercept
+    return {
+        "fEI_outliers_removed": np.asarray(
+            [out["fEI_outliers_removed"] for out in out_by_channel],
+            dtype=float,
+        )[:, np.newaxis],
+        "fEI_val": np.asarray(
+            [out["fEI_val"] for out in out_by_channel],
+            dtype=float,
+        )[:, np.newaxis],
+        "num_outliers": np.asarray(
+            [out["num_outliers"] for out in out_by_channel],
+            dtype=float,
+        )[:, np.newaxis],
+        "wAmp": np.vstack([out["wAmp"] for out in out_by_channel]),
+        "wDNF": np.vstack([out["wDNF"] for out in out_by_channel]),
+    }
 
 
-def _fei_reference(
-    sample,
-    sampling_frequency,
-    window_size_sec,
-    window_overlap,
-    dfa_value,
-    dfa_threshold=0.6,
-):
-    window_size = int(window_size_sec * sampling_frequency)
-    window_offset = int(np.floor(window_size * (1 - window_overlap)))
-    all_window_index = _create_window_indices(sample.shape[0], window_size, window_offset)
-
-    signal_profile = np.cumsum(sample - np.mean(sample))
-    w_original_amp = np.mean(sample[all_window_index], axis=1)
-
-    x_amp = np.tile(np.transpose(w_original_amp[np.newaxis, :]), (1, window_size))
-    x_signal = signal_profile[all_window_index]
-    x_signal = np.divide(x_signal, x_amp)
-
-    _, fluc, _, _, _ = np.polyfit(
-        np.arange(window_size), np.transpose(x_signal), deg=1, full=True
-    )
-    w_dnf = np.sqrt(fluc / window_size)
-
-    fei_val = 1 - np.corrcoef(w_original_amp, w_dnf)[0, 1]
-
-    gesd_alpha = 0.05
-    max_outliers_percentage = 0.025
-    max_num_outliers = max(int(np.round(max_outliers_percentage * len(w_original_amp))), 2)
-
-    outlier_indexes_wamp = _generalized_esd(w_original_amp, max_num_outliers, gesd_alpha)[1]
-    outlier_indexes_wdnf = _generalized_esd(w_dnf, max_num_outliers, gesd_alpha)[1]
-    outlier_union = outlier_indexes_wamp + outlier_indexes_wdnf
-    num_outliers = len(outlier_union)
-    not_outlier_both = np.setdiff1d(np.arange(len(w_original_amp)), np.array(outlier_union))
-
-    fei_outliers_removed = 1 - np.corrcoef(
-        w_original_amp[not_outlier_both], w_dnf[not_outlier_both]
-    )[0, 1]
-
-    if dfa_value <= dfa_threshold:
-        fei_val = np.nan
-        fei_outliers_removed = np.nan
-
-    return fei_outliers_removed, fei_val, num_outliers, w_original_amp, w_dnf
-
-
-def _make_demo_signal(num_channels=2, num_seconds=40, sampling_frequency=250, seed=42):
-    rng = np.random.default_rng(seed)
-    n = int(num_seconds * sampling_frequency)
-    return rng.random((num_channels, n))
-
-
-def test_dfa_parity_against_reference_demo():
-    sampling_frequency = 250
-    fit_interval = [5, 30]
-    compute_interval = [5, 30]
-    overlap = True
-
-    signal = _make_demo_signal(
-        num_channels=2,
-        num_seconds=40,
-        sampling_frequency=sampling_frequency,
-        seed=1,
-    )
-    amplitude_envelope = signal
-
-    dfa_val, window_sizes, fluctuations, dfa_intercept = _dfa_reference(
-        amplitude_envelope[0],
-        sampling_frequency,
-        fit_interval,
-        compute_interval,
-        overlap,
+def _assert_dfa_parity(ncpi_out, crosci_out):
+    _log("Comparing DFA outputs from ncpi and crosci.")
+    crosci_dfa, crosci_window_sizes, crosci_fluctuations, crosci_intercept = (
+        crosci_out
     )
 
-    feat = Features(
-        method="dfa",
-        params={
-            "sampling_frequency": sampling_frequency,
-            "fit_interval": fit_interval,
-            "compute_interval": compute_interval,
-            "overlap": overlap,
-        },
+    assert np.array_equal(ncpi_out["window_sizes"], crosci_window_sizes)
+    np.testing.assert_allclose(
+        ncpi_out["DFA"], crosci_dfa, equal_nan=True, **DFA_TOL
     )
-    out = feat.dfa(amplitude_envelope[0])
-
-    assert np.array_equal(out["window_sizes"], window_sizes)
-    assert np.allclose(
-        out["fluctuations"], fluctuations, rtol=1e-7, atol=1e-7, equal_nan=True
-    )
-    assert np.isclose(out["dfa"], dfa_val, rtol=1e-7, atol=1e-7, equal_nan=True)
-    assert np.isclose(
-        out["dfa_intercept"], dfa_intercept, rtol=1e-7, atol=1e-7, equal_nan=True
-    )
-
-
-def test_fei_parity_against_reference_demo():
-    sampling_frequency = 250
-    fit_interval = [5, 30]
-    compute_interval = [5, 30]
-    overlap = True
-    window_size_sec = 5
-    window_overlap = 0.8
-
-    signal = _make_demo_signal(
-        num_channels=2,
-        num_seconds=40,
-        sampling_frequency=sampling_frequency,
-        seed=2,
-    )
-    amplitude_envelope = signal
-
-    dfa_val, _, _, _ = _dfa_reference(
-        amplitude_envelope[0],
-        sampling_frequency,
-        fit_interval,
-        compute_interval,
-        overlap,
-    )
-
-    fei_outliers_removed, fei_val, num_outliers, w_amp, w_dnf = _fei_reference(
-        amplitude_envelope[0],
-        sampling_frequency,
-        window_size_sec,
-        window_overlap,
-        dfa_val,
-    )
-
-    feat = Features(
-        method="fEI",
-        params={
-            "sampling_frequency": sampling_frequency,
-            "window_size_sec": window_size_sec,
-            "window_overlap": window_overlap,
-            "dfa_value": float(dfa_val),
-        },
-    )
-    out = feat.fEI(amplitude_envelope[0], dfa_value=float(dfa_val))
-
-    assert np.allclose(out["wAmp"], w_amp, rtol=1e-7, atol=1e-7, equal_nan=True)
-    assert np.allclose(out["wDNF"], w_dnf, rtol=1e-7, atol=1e-7, equal_nan=True)
-    assert np.isclose(out["fEI_val"], fei_val, rtol=1e-7, atol=1e-7, equal_nan=True)
-    assert np.isclose(
-        out["fEI_outliers_removed"],
-        fei_outliers_removed,
-        rtol=1e-7,
-        atol=1e-7,
+    np.testing.assert_allclose(
+        ncpi_out["fluctuations"],
+        crosci_fluctuations,
         equal_nan=True,
+        **DFA_TOL,
     )
-    assert np.isclose(
-        out["num_outliers"], num_outliers, rtol=1e-7, atol=1e-7, equal_nan=True
+    np.testing.assert_allclose(
+        ncpi_out["dfa_intercept"], crosci_intercept, equal_nan=True, **DFA_TOL
     )
+    _log("DFA parity comparison passed.")
 
 
-def test_dfa_multichannel_envelope_schema():
-    sampling_frequency = 250
-    fit_interval = [5, 30]
-    compute_interval = [5, 30]
-    overlap = True
-
-    signal = _make_demo_signal(
-        num_channels=3,
-        num_seconds=40,
-        sampling_frequency=sampling_frequency,
-        seed=10,
-    )
-    amplitude_envelope = signal
-
-    feat = Features(
-        method="dfa",
-        params={
-            "sampling_frequency": sampling_frequency,
-            "fit_interval": fit_interval,
-            "compute_interval": compute_interval,
-            "overlap": overlap,
-        },
-    )
-    out = feat.dfa(amplitude_envelope)
-
-    assert "DFA" in out
-    assert "window_sizes" in out
-    assert "fluctuations" in out
-    assert "dfa_intercept" in out
-    assert out["DFA"].shape == (3,)
-    assert out["fluctuations"].shape[0] == 3
-
-
-def test_fei_multichannel_envelope_schema():
-    sampling_frequency = 250
-    fit_interval = [5, 30]
-    compute_interval = [5, 30]
-    overlap = True
-    window_size_sec = 5
-    window_overlap = 0.8
-
-    signal = _make_demo_signal(
-        num_channels=3,
-        num_seconds=40,
-        sampling_frequency=sampling_frequency,
-        seed=11,
-    )
-    amplitude_envelope = signal
-
-    feat = Features(
-        method="fEI",
-        params={
-            "sampling_frequency": sampling_frequency,
-            "window_size_sec": window_size_sec,
-            "window_overlap": window_overlap,
-            "fit_interval": fit_interval,
-            "compute_interval": compute_interval,
-            "overlap": overlap,
-        },
-    )
-    out = feat.fEI(amplitude_envelope)
-
-    assert "fEI_outliers_removed" in out
-    assert "fEI_val" in out
-    assert "num_outliers" in out
-    assert "wAmp" in out
-    assert "wDNF" in out
-    assert "DFA" in out
-    assert out["fEI_outliers_removed"].shape[0] == 3
-    assert out["wAmp"].shape[0] == 3
-
-
-def test_dfa_band_smoke():
-    pytest.importorskip("mne")
-
-    sampling_frequency = 250
-    signal = _make_demo_signal(
-        num_channels=2,
-        num_seconds=40,
-        sampling_frequency=sampling_frequency,
-        seed=12,
+def _assert_fei_parity(ncpi_out, crosci_out):
+    _log("Comparing fE/I outputs from ncpi and crosci.")
+    crosci_fei_or, crosci_fei_val, crosci_num_outliers, crosci_w_amp, crosci_w_dnf = (
+        crosci_out
     )
 
-    feat = Features(method="dfa", params={"sampling_frequency": sampling_frequency})
-    out = feat.dfa(signal, frequency_range=[8, 16])
+    np.testing.assert_allclose(
+        ncpi_out["fEI_outliers_removed"],
+        crosci_fei_or,
+        equal_nan=True,
+        **FEI_TOL,
+    )
+    np.testing.assert_allclose(
+        ncpi_out["fEI_val"], crosci_fei_val, equal_nan=True, **FEI_TOL
+    )
+    np.testing.assert_allclose(
+        ncpi_out["num_outliers"],
+        crosci_num_outliers,
+        equal_nan=True,
+        **FEI_TOL,
+    )
+    np.testing.assert_allclose(
+        ncpi_out["wAmp"], crosci_w_amp, equal_nan=True, **FEI_TOL
+    )
+    np.testing.assert_allclose(
+        ncpi_out["wDNF"], crosci_w_dnf, equal_nan=True, **FEI_TOL
+    )
+    _log("fE/I parity comparison passed.")
 
-    assert "DFA" in out
-    assert "frequency_range" in out
-    assert "fit_interval" in out
-    assert "compute_interval" in out
-    assert out["DFA"].shape == (2,)
 
-
-def test_fei_spectrum_smoke():
-    pytest.importorskip("mne")
-
-    sampling_frequency = 250
-    signal = _make_demo_signal(
-        num_channels=2,
-        num_seconds=40,
-        sampling_frequency=sampling_frequency,
-        seed=13,
+@pytest.mark.parametrize("origin", ["crosci_demo", "readme", "mne_sample"])
+def test_dfa_and_fei_parity_against_crosci(origin, crosci_biomarkers):
+    crosci_dfa, crosci_fei = crosci_biomarkers
+    _log(f"Starting parity test for origin: {origin}.")
+    case = _make_case(origin)
+    _log(
+        f"Generated case '{case.name}' with shape {case.signal.shape} "
+        f"and sampling frequency {case.sampling_frequency} Hz."
     )
 
-    feat = Features(
-        method="fEI",
-        params={
-            "sampling_frequency": sampling_frequency,
-            "window_size_sec": 5,
-            "window_overlap": 0.8,
-        },
+    ncpi_dfa_out = _ncpi_dfa(case.signal, case.sampling_frequency)
+    _log("Computing DFA with crosci.")
+    crosci_dfa_out = crosci_dfa(
+        case.signal,
+        case.sampling_frequency,
+        DFA_FIT_INTERVAL,
+        DFA_COMPUTE_INTERVAL,
+        overlap=DFA_OVERLAP,
+        runtime="c",
     )
-    out = feat.fEI(signal, spectrum_range=[1, 45])
+    _assert_dfa_parity(ncpi_dfa_out, crosci_dfa_out)
 
-    assert "DFA" in out
-    assert "fEI" in out
-    assert "frequency_bins" in out
-    assert out["DFA"].shape[0] == 2
-    assert out["fEI"].shape[0] == 2
+    ncpi_fei_out = _ncpi_fei_from_dfa(
+        case.signal,
+        case.sampling_frequency,
+        ncpi_dfa_out["DFA"],
+    )
+    _log("Computing fE/I with crosci using crosci DFA values.")
+    crosci_fei_out = crosci_fei(
+        case.signal,
+        case.sampling_frequency,
+        FEI_WINDOW_SIZE_SEC,
+        FEI_WINDOW_OVERLAP,
+        crosci_dfa_out[0],
+        runtime="c",
+    )
+    _assert_fei_parity(ncpi_fei_out, crosci_fei_out)
+    _log(f"Finished parity test for origin: {origin}.")
