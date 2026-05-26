@@ -1,7 +1,10 @@
 import numpy as np
 import pytest
 import pickle
-from ncpi import Inference
+import os
+
+os.environ.setdefault("NEURON_MODULE_OPTIONS", "-nogui")
+from ncpi.Inference import Inference
 
 
 @pytest.fixture(scope="function")
@@ -19,6 +22,114 @@ def _make_linear_data(n=40, d=2, theta_dim=1, seed=0):
     if theta_dim == 1:
         Y = Y.reshape(-1, 1)
     return X, Y
+
+
+def _require_sbi():
+    pytest.importorskip("torch")
+    pytest.importorskip("sbi")
+
+
+def _sbi_sampling_kwargs(model_name: str, n_samples: int, *, show_progress_bars: bool = False):
+    if model_name == "NPE":
+        return {
+            "sample_shape": (int(n_samples),),
+            "max_sampling_batch_size": 10_000,
+            "show_progress_bars": bool(show_progress_bars),
+        }
+    return {
+        "sample_shape": (int(n_samples),),
+        "method": "slice_np_vectorized",
+        "thin": 1,
+        "num_chains": 1,
+        "num_workers": 1,
+        "show_progress_bars": bool(show_progress_bars),
+    }
+
+
+def _native_sbi_samples(
+        sbi_model: str,
+        *,
+        prior,
+        theta,
+        x,
+        x_query,
+        train_params: dict,
+        sample_kwargs: dict,
+        estimator_name: str | None = None,
+):
+    from sbi.inference import NPE, NLE, NRE
+
+    inference_cls = {"NPE": NPE, "NLE": NLE, "NRE": NRE}[sbi_model]
+    if estimator_name is None:
+        inference = inference_cls(prior=prior)
+    elif sbi_model in {"NPE", "NLE"}:
+        inference = inference_cls(prior=prior, density_estimator=estimator_name)
+    else:
+        inference = inference_cls(prior=prior, classifier=estimator_name)
+    density_estimator = inference.append_simulations(theta, x).train(**train_params)
+    posterior = inference.build_posterior(density_estimator)
+
+    kwargs = dict(sample_kwargs)
+    kwargs["x"] = x_query
+
+    if x_query.ndim >= 2 and x_query.shape[0] > 1 and hasattr(posterior, "sample_batched"):
+        samples = posterior.sample_batched(**kwargs)
+    else:
+        samples = posterior.sample(**kwargs)
+
+    return samples
+
+
+def _ncpi_sbi_samples(
+        sbi_model: str,
+        *,
+        prior,
+        theta,
+        x,
+        x_query,
+        train_params: dict,
+        sample_kwargs: dict,
+        result_dir: str,
+        estimator_kwargs: dict | None = None,
+        seed: int = 0,
+):
+    hyper = {
+        "prior": prior,
+        "inference_kwargs": {"device": "cpu"},
+        "build_posterior_kwargs": {},
+    }
+    if estimator_kwargs is not None:
+        hyper["estimator_kwargs"] = dict(estimator_kwargs)
+
+    inf = Inference(sbi_model, hyperparams=hyper)
+    inf.add_simulation_data(x.detach().cpu().numpy(), theta.detach().cpu().numpy())
+    inf.train(
+        param_grid=None,
+        n_splits=2,
+        n_repeats=1,
+        train_params=train_params,
+        result_dir=result_dir,
+        seed=seed,
+        sbi_eval_sampling_kwargs=sample_kwargs,
+    )
+    return inf.predict(
+        x_query.detach().cpu().numpy(),
+        result_dir=result_dir,
+        sbi_eval_sampling_kwargs=sample_kwargs,
+    )
+
+
+def _assert_samples_close(native_samples, ncpi_samples, *, atol_mean=0.45, atol_std=0.45):
+    native_np = native_samples.detach().cpu().numpy()
+    ncpi_np = np.asarray(ncpi_samples)
+    assert native_np.shape == ncpi_np.shape
+    assert np.all(np.isfinite(native_np))
+    assert np.all(np.isfinite(ncpi_np))
+
+    mean_delta = float(np.max(np.abs(native_np.mean(axis=0) - ncpi_np.mean(axis=0))))
+    std_delta = float(np.max(np.abs(native_np.std(axis=0) - ncpi_np.std(axis=0))))
+    assert mean_delta < atol_mean
+    assert std_delta < atol_std
 
 
 def test_sklearn_ridge_train_predict_shapes(tmp_result_dir):
@@ -169,18 +280,37 @@ def test_sbi_train_predict_and_sample(tmp_result_dir, sbi_model):
         train_params=train_params,
         result_dir=tmp_result_dir,
         seed=0,
-        sbi_eval_num_posterior_samples=30,
-        sbi_eval_batch_size=8,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs(
+            sbi_model,
+            30,
+            show_progress_bars=False,
+        ),
     )
 
     # Predict posterior samples for multiple observations
-    samples = inf.predict(X[:4], result_dir=tmp_result_dir, num_posterior_samples=30, sbi_batch_size=8)
+    samples = inf.predict(
+        X[:4],
+        result_dir=tmp_result_dir,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs(
+            sbi_model,
+            30,
+            show_progress_bars=False,
+        ),
+    )
     assert isinstance(samples, np.ndarray)
     assert samples.shape == (30, 4, 2)
     assert np.all(np.isfinite(samples))
 
     # Sample posterior for a single observation (returns S x theta_dim)
-    samples1 = inf.predict(X[0], result_dir=tmp_result_dir, num_posterior_samples=40, sbi_batch_size=8)
+    samples1 = inf.predict(
+        X[0],
+        result_dir=tmp_result_dir,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs(
+            sbi_model,
+            40,
+            show_progress_bars=False,
+        ),
+    )
     assert samples1.shape == (40, 2)
     assert np.all(np.isfinite(samples1))
 
@@ -207,11 +337,14 @@ def test_sbi_predict_empty_input_returns_empty_sample_tensor(tmp_result_dir):
         train_params={"max_num_epochs": 1, "show_train_summary": False},
         result_dir=tmp_result_dir,
         seed=0,
-        sbi_eval_num_posterior_samples=10,
-        sbi_eval_batch_size=4,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 10, show_progress_bars=False),
     )
 
-    empty = inf.predict(np.empty((0, 2)), result_dir=tmp_result_dir, num_posterior_samples=15)
+    empty = inf.predict(
+        np.empty((0, 2)),
+        result_dir=tmp_result_dir,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 15, show_progress_bars=False),
+    )
     assert isinstance(empty, np.ndarray)
     assert empty.shape == (15, 0, 2)
 
@@ -238,42 +371,48 @@ def test_sbi_predict_all_invalid_rows_returns_empty_sample_tensor_shape(tmp_resu
         train_params={"max_num_epochs": 1, "show_train_summary": False},
         result_dir=tmp_result_dir,
         seed=0,
-        sbi_eval_num_posterior_samples=10,
-        sbi_eval_batch_size=4,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 10, show_progress_bars=False),
     )
 
     X_bad = np.full((3, 2), np.nan, dtype=float)
-    out = inf.predict(X_bad, result_dir=tmp_result_dir, num_posterior_samples=12)
+    out = inf.predict(
+        X_bad,
+        result_dir=tmp_result_dir,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 12, show_progress_bars=False),
+    )
     assert isinstance(out, np.ndarray)
     assert out.shape == (12, 0, 2)
 
 
-def test_train_rejects_nonpositive_sbi_eval_knobs(tmp_result_dir):
-    X, Y = _make_linear_data(n=20, d=2, theta_dim=1, seed=15)
-    inf = Inference("Ridge", hyperparams={"alpha": 1.0})
+def test_sbi_train_predict_allow_missing_sample_shape_sampling_kwargs(tmp_result_dir):
+    _require_sbi()
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=2, seed=15)
+
+    import torch
+    from sbi.utils import BoxUniform
+
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    inf = Inference("NPE", hyperparams={"prior": prior})
     inf.add_simulation_data(X, Y)
 
-    with pytest.raises(ValueError):
-        inf.train(
-            param_grid=None,
-            n_splits=2,
-            n_repeats=1,
-            result_dir=tmp_result_dir,
-            seed=0,
-            sbi_eval_num_posterior_samples=0,
-            sbi_eval_batch_size=8,
-        )
+    inf.train(
+        param_grid=None,
+        n_splits=2,
+        n_repeats=1,
+        train_params={"max_num_epochs": 1, "show_train_summary": False},
+        result_dir=tmp_result_dir,
+        seed=0,
+        sbi_eval_sampling_kwargs={"show_progress_bars": False},
+    )
 
-    with pytest.raises(ValueError):
-        inf.train(
-            param_grid=None,
-            n_splits=2,
-            n_repeats=1,
-            result_dir=tmp_result_dir,
-            seed=0,
-            sbi_eval_num_posterior_samples=10,
-            sbi_eval_batch_size=0,
-        )
+    preds = inf.predict(
+        X[:3],
+        result_dir=tmp_result_dir,
+        sbi_eval_sampling_kwargs={"show_progress_bars": False},
+    )
+    assert isinstance(preds, np.ndarray)
+    assert preds.shape == (1, 3, 2)
+    assert np.all(np.isfinite(preds))
 
 
 def test_sbi_param_grid_stores_posterior_ensemble_and_predicts(tmp_result_dir):
@@ -309,8 +448,7 @@ def test_sbi_param_grid_stores_posterior_ensemble_and_predicts(tmp_result_dir):
         train_params=train_params,
         result_dir=tmp_result_dir,
         seed=0,
-        sbi_eval_num_posterior_samples=20,
-        sbi_eval_batch_size=8,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 20, show_progress_bars=False),
     )
 
     with open(f"{tmp_result_dir}/posterior.pkl", "rb") as f:
@@ -326,7 +464,11 @@ def test_sbi_param_grid_stores_posterior_ensemble_and_predicts(tmp_result_dir):
     assert isinstance(inference_obj, list) and len(inference_obj) == 2
     assert isinstance(density_estimator, list) and len(density_estimator) == 2
 
-    samples = inf.predict(X[:3], result_dir=tmp_result_dir, num_posterior_samples=30, sbi_batch_size=8)
+    samples = inf.predict(
+        X[:3],
+        result_dir=tmp_result_dir,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 30, show_progress_bars=False),
+    )
     assert isinstance(samples, np.ndarray)
     assert samples.shape == (30, 3, 2)
     assert np.all(np.isfinite(samples))
@@ -385,3 +527,231 @@ def test_sbi_native_workflow_and_pairplot_smoke(sbi_model):
 
     import matplotlib.pyplot as plt
     plt.close(fig)
+
+
+def test_sbi_pairing_tutorial_npe_single_observation(tmp_path):
+    """
+    Pairing test (tutorial-like): compare native sbi NPE vs ncpi.Inference NPE.
+    """
+    _require_sbi()
+    import random
+    import torch
+    from sbi.utils import BoxUniform
+
+    seed = 7
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    num_dims = 2
+    num_sims = 300
+
+    prior = BoxUniform(low=torch.zeros(num_dims), high=torch.ones(num_dims))
+    theta = prior.sample((num_sims,)).to(torch.float32)
+    x = (theta + torch.randn_like(theta) * 0.1).to(torch.float32)
+    x_o = torch.tensor([0.5, 0.5], dtype=torch.float32)
+
+    train_params = {
+        "max_num_epochs": 1,
+        "training_batch_size": 64,
+        "show_train_summary": False,
+    }
+    sample_kwargs = _sbi_sampling_kwargs("NPE", 100, show_progress_bars=False)
+
+    torch.manual_seed(seed)
+    native_samples = _native_sbi_samples(
+        "NPE",
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_o,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+    )
+
+    torch.manual_seed(seed)
+    ncpi_samples = _ncpi_sbi_samples(
+        "NPE",
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_o,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        result_dir=str(tmp_path / "pair_npe"),
+        seed=seed,
+    )
+
+    _assert_samples_close(native_samples, ncpi_samples)
+
+
+@pytest.mark.parametrize("sbi_model", ["NPE", "NLE", "NRE"])
+def test_sbi_pairing_tutorial_models_single_and_batch(tmp_path, sbi_model):
+    """
+    Pairing test (tutorial-like): compare native sbi and ncpi for NPE/NLE/NRE.
+    Verifies both single-observation and batched-observation sampling.
+    """
+    _require_sbi()
+    import random
+    import torch
+    from sbi.utils import BoxUniform
+
+    seed = 11
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    num_dims = 2
+    num_sims = 250
+
+    prior = BoxUniform(low=torch.zeros(num_dims), high=torch.ones(num_dims))
+    theta = prior.sample((num_sims,)).to(torch.float32)
+    x = (theta + torch.randn_like(theta) * 0.1).to(torch.float32)
+    x_o = torch.tensor([0.5, 0.5], dtype=torch.float32)
+    x_batch = x[:4]
+
+    train_params = {
+        "max_num_epochs": 1,
+        "training_batch_size": 64,
+        "show_train_summary": False,
+    }
+    sample_kwargs = _sbi_sampling_kwargs(sbi_model, 120, show_progress_bars=False)
+    estimator_kwargs = {"estimator": "mlp"} if sbi_model == "NRE" else None
+
+    torch.manual_seed(seed)
+    native_single = _native_sbi_samples(
+        sbi_model,
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_o,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        estimator_name=(None if estimator_kwargs is None else estimator_kwargs["estimator"]),
+    )
+    torch.manual_seed(seed)
+    ncpi_single = _ncpi_sbi_samples(
+        sbi_model,
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_o,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        result_dir=str(tmp_path / f"pair_single_{sbi_model}"),
+        estimator_kwargs=estimator_kwargs,
+        seed=seed,
+    )
+    _assert_samples_close(native_single, ncpi_single)
+
+    torch.manual_seed(seed + 1)
+    native_batch = _native_sbi_samples(
+        sbi_model,
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_batch,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        estimator_name=(None if estimator_kwargs is None else estimator_kwargs["estimator"]),
+    )
+    torch.manual_seed(seed + 1)
+    ncpi_batch = _ncpi_sbi_samples(
+        sbi_model,
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_batch,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        result_dir=str(tmp_path / f"pair_batch_{sbi_model}"),
+        estimator_kwargs=estimator_kwargs,
+        seed=seed,
+    )
+    _assert_samples_close(native_batch, ncpi_batch, atol_mean=0.55, atol_std=0.55)
+
+
+@pytest.mark.parametrize("sbi_model", ["NPE", "NLE", "NRE"])
+def test_sbi_pairing_modified_hyperparams_and_sampling_kwargs(tmp_path, sbi_model):
+    """
+    Pairing test with modified model hyperparameters and sbi_eval_sampling_kwargs.
+    """
+    _require_sbi()
+    import random
+    import torch
+    from sbi.utils import BoxUniform
+
+    seed = 19
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+
+    num_dims = 2
+    num_sims = 220
+
+    prior = BoxUniform(low=torch.zeros(num_dims), high=torch.ones(num_dims))
+    theta = prior.sample((num_sims,)).to(torch.float32)
+    x = (theta + torch.randn_like(theta) * 0.1).to(torch.float32)
+    x_o = torch.tensor([0.25, 0.75], dtype=torch.float32)
+
+    train_params = {
+        "max_num_epochs": 1,
+        "training_batch_size": 32,
+        "learning_rate": 1e-3,
+        "show_train_summary": False,
+    }
+
+    if sbi_model == "NPE":
+        estimator_kwargs = {"estimator": "maf"}
+        sample_kwargs = {
+            "sample_shape": (90,),
+            "max_sampling_batch_size": 64,
+            "show_progress_bars": False,
+        }
+    elif sbi_model == "NLE":
+        estimator_kwargs = {"estimator": "maf"}
+        sample_kwargs = {
+            "sample_shape": (90,),
+            "method": "slice_np_vectorized",
+            "thin": 1,
+            "num_chains": 1,
+            "num_workers": 1,
+            "show_progress_bars": False,
+        }
+    else:
+        estimator_kwargs = {"estimator": "mlp"}
+        sample_kwargs = {
+            "sample_shape": (90,),
+            "method": "slice_np_vectorized",
+            "thin": 1,
+            "num_chains": 1,
+            "num_workers": 1,
+            "show_progress_bars": False,
+        }
+
+    torch.manual_seed(seed)
+    native_samples = _native_sbi_samples(
+        sbi_model,
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_o,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        estimator_name=estimator_kwargs["estimator"],
+    )
+    torch.manual_seed(seed)
+    ncpi_samples = _ncpi_sbi_samples(
+        sbi_model,
+        prior=prior,
+        theta=theta,
+        x=x,
+        x_query=x_o,
+        train_params=train_params,
+        sample_kwargs=sample_kwargs,
+        result_dir=str(tmp_path / f"pair_modified_{sbi_model}"),
+        estimator_kwargs=estimator_kwargs,
+        seed=seed,
+    )
+
+    _assert_samples_close(native_samples, ncpi_samples, atol_mean=0.6, atol_std=0.6)

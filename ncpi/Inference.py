@@ -3,7 +3,6 @@ import random
 import numpy as np
 import inspect
 import pickle
-import warnings
 from ncpi import tools
 
 # --- Prediction multiprocessing helpers (worker-global state) ---
@@ -184,8 +183,11 @@ class Inference:
             raise ImportError("sbi==0.24.0 is required.")
         if not tools.ensure_module("torch", package="torch", raise_on_error=False):
             raise ImportError("PyTorch ('torch') is required but not importable.")
+
+        # sklearn is necessary for RepeatedKFold
         if not tools.ensure_module("sklearn", package="scikit-learn", version_spec="==1.5.0"):
             raise ImportError("scikit-learn==1.5.0 is required (import name: 'sklearn').")
+
         if self.model_name not in self.SBI_MODELS:
             raise ValueError(f"Unsupported SBI model '{self.model_name}'.")
 
@@ -205,191 +207,63 @@ class Inference:
     # Posterior sampling (SBI)
     # -----------------------------
 
-    def _infer_theta_dim(self):
-        """Best-effort inference of parameter dimensionality from loaded training targets."""
-        if self.theta is None:
-            return None
-        y = np.asarray(self.theta)
-        if y.ndim == 1:
-            return 1
-        if y.ndim == 2 and y.shape[1] > 0:
-            return int(y.shape[1])
-        return None
+    def _coerce_sample_shape(self, sample_shape):
+        """Normalize sample_shape into torch.Size, accepting scalar ints as (int,)."""
+        if isinstance(sample_shape, (int, np.integer)):
+            sample_shape = (int(sample_shape),)
+        return self.torch.Size(sample_shape)
 
-
-    @staticmethod
-    def _infer_theta_dim_from_posterior_obj(posterior_obj):
-        """Best-effort theta-dimension inference from SBI posterior metadata."""
-        if posterior_obj is None:
-            return None
-
-        prior = getattr(posterior_obj, "prior", None)
-        if prior is None:
-            prior = getattr(posterior_obj, "_prior", None)
-        if prior is not None:
-            event_shape = getattr(prior, "event_shape", None)
-            if event_shape is not None:
-                try:
-                    shape = tuple(int(v) for v in tuple(event_shape))
-                    if len(shape) >= 1 and shape[-1] > 0:
-                        return int(shape[-1])
-                except Exception:
-                    pass
-
-        posterior_estimator = getattr(posterior_obj, "posterior_estimator", None)
-        if posterior_estimator is not None:
-            input_shape = getattr(posterior_estimator, "input_shape", None)
-            if input_shape is not None:
-                try:
-                    shape = tuple(int(v) for v in tuple(input_shape))
-                    if len(shape) == 1 and shape[0] > 0:
-                        return int(shape[0])
-                    if len(shape) > 1 and shape[-1] > 0:
-                        return int(shape[-1])
-                except Exception:
-                    pass
-
-        return None
-
-
-    def _nan_posterior_samples(self, n_samples: int, xb, theta_dim: int | None = None, posterior_obj=None):
-        """Create a `(S, 1, theta_dim)` NaN tensor on the same device/dtype as `xb`."""
-        td = theta_dim
-        if td is None:
-            td = self._infer_theta_dim()
-        if td is None:
-            td = self._infer_theta_dim_from_posterior_obj(posterior_obj)
-        if td is None or int(td) <= 0:
-            raise RuntimeError(
-                "Posterior sampling failed, and theta dimension could not be inferred "
-                "to construct NaN fallback samples."
-            )
-        return self.torch.full(
-            (int(n_samples), 1, int(td)),
-            float("nan"),
-            dtype=xb.dtype,
-            device=xb.device,
-        )
-
-
-    def _warn_sbi_sampling_assertion_once(self):
-        """Emit a single warning per Inference instance for SBI sampling AssertionError fallback."""
-        already_warned = getattr(self, "_sbi_sampling_assertion_warned", False)
-        if already_warned:
-            return
-        warnings.warn(
-            "SBI posterior sampling raised AssertionError inside nflows for one or more "
-            "observations; those rows will receive NaN samples and prediction will continue.",
-            RuntimeWarning,
-        )
-        self._sbi_sampling_assertion_warned = True
-
-
-    def _sample_posterior_batch(self, posterior_obj, n_samples: int, xb, *,
-                                show_progress_bars: bool = False):
+    def _sample_posterior(
+            self,
+            posterior_obj,
+            *,
+            x=None,
+            **sbi_eval_sampling_kwargs,
+    ):
         """
-        Draw posterior samples for a batch of observations.
+        Draw posterior samples for one observation or a batch of observations.
 
-        Parameters
-        ----------
-        posterior_obj : object
-            Posterior-like object exposing `sample(...)` and optionally `sample_batched(...)`,
-            as returned by `sbi` posterior construction.
-        n_samples : int
-            Number of samples to draw per observation.
-        xb : torch.Tensor
-            Observation batch with shape `(B, n_features)`.
-        show_progress_bars : bool, default=False
-            Forwarded to posterior sampling methods.
-
-        Returns
-        -------
-        torch.Tensor
-            Samples with shape `(S, B, theta_dim)`, where `S = n_samples`.
-
-        Notes
-        -----
-        Behavior by batch size and backend support:
-        - If `B == 1`, calls `posterior_obj.sample(...)`.
-        - If `B > 1` and `posterior_obj.sample_batched(...)` is available and compatible,
-          uses that fast path.
-        - Otherwise, falls back to per-observation sampling and concatenates along
-          the batch dimension.
-        - If sampling returns a 2D tensor `(S, theta_dim)`, it is expanded to
-          `(S, 1, theta_dim)` for consistent output shape.
+        Any kwargs accepted by the underlying SBI posterior `sample(...)` or
+        `sample_batched(...)` can be forwarded via `sbi_eval_sampling_kwargs`.
+        This method injects/overrides `x` from its explicit argument and uses
+        `sample_batched(...)` when `x` is a batch (batch size > 1).
         """
+        kwargs = dict(sbi_eval_sampling_kwargs or {})
+        kwargs["x"] = x
+        if "sample_shape" in kwargs:
+            kwargs["sample_shape"] = self._coerce_sample_shape(kwargs["sample_shape"])
+        else:
+            kwargs["sample_shape"] = self.torch.Size(())
 
-        torch = self.torch
-        b = int(xb.shape[0])
+        batch_size = None
+        x_arg = kwargs.get("x", None)
+        if x_arg is not None:
+            x_shape = getattr(x_arg, "shape", None)
+            if x_shape is not None:
+                ndim = len(x_shape)
+                if ndim >= 2:
+                    batch_size = int(x_shape[0])
+                else:
+                    batch_size = 1
+            else:
+                batch_size = 1
 
-        if b <= 0:
-            raise ValueError("Cannot sample posterior for an empty observation batch.")
+        use_batched = bool(batch_size is not None and batch_size > 1)
 
-        if b == 1:
-            try:
-                sb = posterior_obj.sample(
-                    (int(n_samples),),
-                    x=xb,
-                    show_progress_bars=bool(show_progress_bars),
+        if use_batched:
+            sample_batched = getattr(posterior_obj, "sample_batched", None)
+            if not callable(sample_batched):
+                raise AttributeError(
+                    f"Posterior object of type {type(posterior_obj)} does not expose "
+                    "'sample_batched', required for batched observations."
                 )
-            except AssertionError:
-                self._warn_sbi_sampling_assertion_once()
-                sb = self._nan_posterior_samples(
-                    n_samples=n_samples,
-                    xb=xb,
-                    posterior_obj=posterior_obj,
-                )
-            if sb.ndim == 2:
-                sb = sb.unsqueeze(1)
-            return sb
+            samples = sample_batched(**kwargs)
+        else:
+            samples = posterior_obj.sample(**kwargs)
 
-        sample_batched = getattr(posterior_obj, "sample_batched", None)
-        if callable(sample_batched):
-            try:
-                sb = sample_batched(
-                    (int(n_samples),),
-                    x=xb,
-                    show_progress_bars=bool(show_progress_bars),
-                )
-                if sb.ndim == 2:
-                    sb = sb.unsqueeze(1)
-                return sb
-            except Exception as exc:
-                # Fallback for posterior classes / sbi versions where batched
-                # sampling is unavailable or not compatible.
-                warnings.warn(
-                    f"sample_batched failed ({type(exc).__name__}: {exc}); "
-                    "falling back to per-observation posterior sampling.",
-                    RuntimeWarning,
-                )
-
-        parts = []
-        failed_indices = []
-        theta_dim_hint = self._infer_theta_dim()
-        for one_idx in range(b):
-            one_x = xb[one_idx:one_idx + 1]
-            try:
-                sb = posterior_obj.sample(
-                    (int(n_samples),),
-                    x=one_x,
-                    show_progress_bars=bool(show_progress_bars),
-                )
-            except AssertionError:
-                failed_indices.append(one_idx)
-                sb = self._nan_posterior_samples(
-                    n_samples=n_samples,
-                    xb=one_x,
-                    theta_dim=theta_dim_hint,
-                    posterior_obj=posterior_obj,
-                )
-            if sb.ndim == 2:
-                sb = sb.unsqueeze(1)
-            if theta_dim_hint is None and sb.ndim >= 3 and int(sb.shape[-1]) > 0:
-                theta_dim_hint = int(sb.shape[-1])
-            parts.append(sb)
-        if failed_indices:
-            self._warn_sbi_sampling_assertion_once()
-        return torch.cat(parts, dim=1)
+        if samples.ndim == 2:
+            samples = samples.unsqueeze(1)
+        return samples
 
 
     # -----------------------------
@@ -645,8 +519,7 @@ class Inference:
             scaler=None,
             seed: int = 0,
             sklearn_verbose: int | None = None,
-            sbi_eval_num_posterior_samples: int = 2000,
-            sbi_eval_batch_size: int = 256,
+            sbi_eval_sampling_kwargs: dict | None = None,
     ):
         """
         Train and (optionally) hyperparameter-search, then save artifacts to disk.
@@ -680,10 +553,10 @@ class Inference:
             Default sklearn estimator verbosity level when the estimator exposes a
             ``verbose`` parameter and it is not explicitly set in model/grid hyperparameters.
             ``0`` disables verbose output; positive values enable it.
-        sbi_eval_num_posterior_samples : int
-            Number of posterior samples to draw per observation when evaluating SBI models during CV.
-        sbi_eval_batch_size : int
-            Batch size when evaluating SBI models during CV.
+        sbi_eval_sampling_kwargs : dict or None
+            Extra kwargs forwarded to `_sample_posterior(...)` during SBI CV evaluation.
+            Any keyword arguments supported by the underlying SBI posterior sampling
+            API are accepted. `x` is managed internally and must not be provided.
         Returns
         -------
         None
@@ -693,10 +566,24 @@ class Inference:
         train_params = train_params or {}
         if not isinstance(train_params, dict):
             raise TypeError("train_params must be a dict or None.")
-        if sbi_eval_num_posterior_samples <= 0:
-            raise ValueError("sbi_eval_num_posterior_samples must be > 0.")
-        if sbi_eval_batch_size <= 0:
-            raise ValueError("sbi_eval_batch_size must be > 0.")
+        if sbi_eval_sampling_kwargs is None:
+            sbi_eval_sampling_kwargs = {}
+        if not isinstance(sbi_eval_sampling_kwargs, dict):
+            raise TypeError("sbi_eval_sampling_kwargs must be a dict or None.")
+        if "x" in sbi_eval_sampling_kwargs:
+            raise ValueError(
+                "sbi_eval_sampling_kwargs must not include 'x'; "
+                "it is managed internally."
+            )
+        if self.backend == "sbi" and "sample_shape" in sbi_eval_sampling_kwargs:
+            try:
+                sample_shape_eval = self._coerce_sample_shape(sbi_eval_sampling_kwargs["sample_shape"])
+            except Exception as exc:
+                raise ValueError(
+                    "sbi_eval_sampling_kwargs['sample_shape'] must be an int, tuple/list, or torch.Size."
+                ) from exc
+            if sample_shape_eval.numel() <= 0:
+                raise ValueError("sbi_eval_sampling_kwargs['sample_shape'] must define at least one sample.")
         if sklearn_verbose is not None:
             try:
                 sklearn_verbose = int(sklearn_verbose)
@@ -881,24 +768,21 @@ class Inference:
                         # posterior mean MSE over test fold (batched)
                         te_idx = np.asarray(te)
                         total = 0.0
-                        n_te = te_idx.shape[0]
-                        for i in range(0, n_te, sbi_eval_batch_size):
-                            idx = te_idx[i:i + sbi_eval_batch_size]
-                            xb = X_t[idx]
-                            yb = Y_t[idx]
+                        xb = X_t[te_idx]
+                        yb = Y_t[te_idx]
 
-                            samples = self._sample_posterior_batch(
-                                posterior,
-                                n_samples=sbi_eval_num_posterior_samples,
-                                xb=xb,
-                                show_progress_bars=False,
-                            )
+                        samples = self._sample_posterior(
+                            posterior,
+                            x=xb,
+                            **sbi_eval_sampling_kwargs,
+                        )
+                        if samples.ndim > 3:
+                            samples = samples.reshape(-1, samples.shape[-2], samples.shape[-1])
 
-                            mean = samples.mean(dim=0)  # [B, theta_dim]
-                            mse = torch.mean((mean - yb) ** 2).item()
-                            total += mse * idx.shape[0]
-
-                        fold_mse = total / n_te
+                        mean = samples.mean(dim=0)  # [B, theta_dim]
+                        mse = torch.mean((mean - yb) ** 2).item()
+                        total += mse * te_idx.shape[0]
+                        fold_mse = total / te_idx.shape[0]
                         fold_scores.append(fold_mse)
                         fold_artifacts.append((inf, de, posterior))
 
@@ -976,9 +860,7 @@ class Inference:
             chunksize: int | None = None,
             start_method: str = "spawn",
             # SBI knobs
-            num_posterior_samples: int | None = None,
-            sbi_batch_size: int = 256,
-            sbi_show_progress_bars: bool = False,
+            sbi_eval_sampling_kwargs: dict | None = None,
     ):
         """
         Predict parameters.
@@ -994,15 +876,49 @@ class Inference:
             list where each element is float (scalar) or list[float] (multi-output), invalid rows -> nan_row
         sbi:
             np.ndarray of posterior samples:
-            - shape (S, B, theta_dim) for B valid rows (batch sampling), where S=num_posterior_samples
+            - shape (S, B, theta_dim) for B valid rows (batch sampling), where
+              S = torch.Size(sbi_eval_sampling_kwargs.get("sample_shape", ())).numel()
               (for posterior ensembles, S total samples are split across members and concatenated),
             - invalid rows are NOT included (fast path). If you need alignment to original indices,
                 handle it outside this function.
+
+        sbi_eval_sampling_kwargs:
+            Extra kwargs forwarded to `_sample_posterior(...)`.
+            Any keyword arguments supported by the underlying SBI posterior sampling
+            API are accepted. `x` is managed internally and must not be provided.
         """
 
         scaler_path = os.path.join(result_dir, "scaler.pkl")
         if not isinstance(scaler, (bool, np.bool_)):
             raise TypeError("scaler must be a boolean: True=load scaler.pkl, False=do not scale.")
+        if sbi_eval_sampling_kwargs is None:
+            sbi_eval_sampling_kwargs = {}
+        if not isinstance(sbi_eval_sampling_kwargs, dict):
+            raise TypeError("sbi_eval_sampling_kwargs must be a dict or None.")
+        if "x" in sbi_eval_sampling_kwargs:
+            raise ValueError(
+                "sbi_eval_sampling_kwargs must not include 'x'; "
+                "it is managed internally."
+            )
+        if self.backend == "sbi" and "sample_shape" in sbi_eval_sampling_kwargs:
+            try:
+                sample_shape_pred = self._coerce_sample_shape(sbi_eval_sampling_kwargs["sample_shape"])
+            except Exception as exc:
+                raise ValueError(
+                    "sbi_eval_sampling_kwargs['sample_shape'] must be an int, tuple/list, or torch.Size."
+                ) from exc
+            if sample_shape_pred.numel() <= 0:
+                raise ValueError("sbi_eval_sampling_kwargs['sample_shape'] must define at least one sample.")
+
+        def _requested_num_samples_from_kwargs(kwargs: dict) -> int:
+            shape = kwargs.get("sample_shape", ())
+            size = self._coerce_sample_shape(shape)
+            n_samples = int(size.numel())
+            if n_samples <= 0:
+                raise ValueError(
+                    "sbi_eval_sampling_kwargs['sample_shape'] must define at least one sample."
+                )
+            return n_samples
 
         if self.backend == "sklearn":
             model_path = os.path.join(result_dir, "model.pkl")
@@ -1098,9 +1014,7 @@ class Inference:
         n = X.shape[0]
         if n == 0:
             if self.backend == "sbi":
-                s = 500 if num_posterior_samples is None else int(num_posterior_samples)
-                if s <= 0:
-                    raise ValueError("num_posterior_samples must be > 0.")
+                s = _requested_num_samples_from_kwargs(sbi_eval_sampling_kwargs)
                 td = 0 if theta_dim is None else int(theta_dim)
                 return np.empty((s, 0, td), dtype=float)
             return []
@@ -1167,14 +1081,10 @@ class Inference:
             X = X2
             finite_mask = np.isfinite(X).all(axis=1)
 
-        if num_posterior_samples is None:
-            num_posterior_samples = 500
-        if num_posterior_samples <= 0:
-            raise ValueError("num_posterior_samples must be > 0.")
-
         if not np.any(finite_mask):
+            s = _requested_num_samples_from_kwargs(sbi_eval_sampling_kwargs)
             td = 0 if theta_dim is None else int(theta_dim)
-            return np.empty((int(num_posterior_samples), 0, td), dtype=float)
+            return np.empty((s, 0, td), dtype=float)
 
         torch = self.torch
 
@@ -1183,50 +1093,44 @@ class Inference:
             Xf = Xf.astype(np.float32, copy=False)
         Xf_t = torch.from_numpy(Xf)
 
-        B = Xf_t.shape[0]
-        if sbi_batch_size is None or sbi_batch_size <= 0:
-            sbi_batch_size = B
+        total_samples = _requested_num_samples_from_kwargs(sbi_eval_sampling_kwargs)
 
-        # Batched posterior sampling 
+        # Batched posterior sampling
         with torch.no_grad():
-            chunks = []
+            xb = Xf_t
+            n_post = len(posteriors)
 
-            for i in range(0, B, sbi_batch_size):
-                xb = Xf_t[i:i + sbi_batch_size]  
-                n_post = len(posteriors)
+            if n_post == 1:
+                samples = self._sample_posterior(
+                    posteriors[0],
+                    x=xb,
+                    **sbi_eval_sampling_kwargs,
+                )
+                if samples.ndim > 3:
+                    samples = samples.reshape(-1, samples.shape[-2], samples.shape[-1])
+            else:
+                base = total_samples // n_post
+                rem = total_samples % n_post
+                per_model_counts = [base + (1 if j < rem else 0) for j in range(n_post)]
 
-                if n_post == 1:
-                    sb = self._sample_posterior_batch(
-                        posteriors[0],
-                        n_samples=num_posterior_samples,
-                        xb=xb,
-                        show_progress_bars=bool(sbi_show_progress_bars),
+                parts = []
+                for posterior_obj, n_samples in zip(posteriors, per_model_counts):
+                    if n_samples <= 0:
+                        continue
+                    kw = dict(sbi_eval_sampling_kwargs)
+                    kw["sample_shape"] = (int(n_samples),)
+                    sb = self._sample_posterior(
+                        posterior_obj,
+                        x=xb,
+                        **kw,
                     )
-                else:
-                    base = num_posterior_samples // n_post
-                    rem = num_posterior_samples % n_post
-                    per_model_counts = [base + (1 if j < rem else 0) for j in range(n_post)]
+                    if sb.ndim > 3:
+                        sb = sb.reshape(-1, sb.shape[-2], sb.shape[-1])
+                    parts.append(sb)
 
-                    parts = []
-                    for posterior_obj, n_samples in zip(posteriors, per_model_counts):
-                        if n_samples <= 0:
-                            continue
-                        parts.append(
-                            self._sample_posterior_batch(
-                                posterior_obj,
-                                n_samples=n_samples,
-                                xb=xb,
-                                show_progress_bars=bool(sbi_show_progress_bars),
-                            )
-                        )
-
-                    if not parts:
-                        raise RuntimeError("No posterior samples drawn from ensemble.")
-                    sb = torch.cat(parts, dim=0)
-
-                chunks.append(sb)
-
-            samples = torch.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]
+                if not parts:
+                    raise RuntimeError("No posterior samples drawn from ensemble.")
+                samples = torch.cat(parts, dim=0)
 
         if X.shape[0] == 1 and np.isfinite(X).all():
             return samples[:, 0, :].detach().cpu().numpy()

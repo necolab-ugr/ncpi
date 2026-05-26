@@ -65,6 +65,8 @@
         hasScalerArtifact: false,
         assetsUploadMode: 'individual',
         modelName: '__auto__',
+        sbiEvalSamplingKwargsJson: '{\"sample_shape\": [2000], \"max_sampling_batch_size\": 10000, \"show_progress_bars\": false}',
+        lastSbiDefaultsAlgorithm: '',
         autoDetectedBackend: '',
         autoDetectedType: '',
         autoDetectError: '',
@@ -84,6 +86,31 @@
             const normalized = value.replace(/\\/g, '/');
             const parts = normalized.split('/').filter(Boolean);
             return parts.length ? parts[parts.length - 1] : value;
+        },
+        detectedSbiAlgorithm() {
+            const selected = String(this.modelName || '').trim().toUpperCase();
+            if (['NPE', 'NLE', 'NRE'].includes(selected)) return selected;
+            const inferred = String(this.autoDetectedType || '').trim().toUpperCase();
+            if (inferred.includes('NPE')) return 'NPE';
+            if (inferred.includes('NLE')) return 'NLE';
+            if (inferred.includes('NRE')) return 'NRE';
+            return 'NPE';
+        },
+        defaultSbiEvalSamplingKwargsFor(model) {
+            const defaults = {
+                NPE: {'sample_shape': [2000], 'max_sampling_batch_size': 10000, 'show_progress_bars': false},
+                NLE: {'sample_shape': [2000], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false},
+                NRE: {'sample_shape': [2000], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false}
+            };
+            return defaults[model] || {'sample_shape': [2000], 'show_progress_bars': false};
+        },
+        syncSbiEvalSamplingDefaults(force = false) {
+            const algo = this.detectedSbiAlgorithm();
+            if (!force && this.lastSbiDefaultsAlgorithm === algo && String(this.sbiEvalSamplingKwargsJson || '').trim()) {
+                return;
+            }
+            this.sbiEvalSamplingKwargsJson = JSON.stringify(this.defaultSbiEvalSamplingKwargsFor(algo), null, 2);
+            this.lastSbiDefaultsAlgorithm = algo;
         },
         isSbiModel() {
             const selected = this.modelName;
@@ -412,6 +439,7 @@
                         id="inference-model-name"
                         name="inference_model_name"
                         x-model="modelName"
+                        @change="if (isSbiModel()) syncSbiEvalSamplingDefaults(true)"
                     >
                         <option value="__auto__">Auto (infer from uploaded model file)</option>
                         <optgroup label="Sklearn">
@@ -464,13 +492,11 @@
 
             <div class="mt-6">
                 <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Execution Settings</h3>
-                <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                    Parallel prediction settings (sklearn backend) and optional input subsampling (all backends).
-                </p>
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div id="sklearn-exec-settings-section" class="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <label class="text-sm">
                         <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Parallel workers (n_jobs)</span>
                         <input
+                            id="inference-n-jobs"
                             type="number"
                             min="1"
                             step="1"
@@ -482,6 +508,7 @@
                     <label class="text-sm">
                         <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Chunksize</span>
                         <input
+                            id="inference-chunksize"
                             type="number"
                             min="1"
                             step="1"
@@ -493,6 +520,7 @@
                     <label class="text-sm">
                         <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Start method</span>
                         <select
+                            id="inference-start-method"
                             name="inference_start_method"
                             class="w-full rounded-lg border-slate-300 dark:border-slate-600 bg-white dark:bg-[#191e33] text-sm text-slate-900 dark:text-white"
                         >
@@ -501,6 +529,38 @@
                             <option value="forkserver">forkserver</option>
                         </select>
                     </label>
+                </div>
+                <div id="sbi-settings-section" class="mt-4 hidden">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 rounded-lg border border-slate-200 dark:border-slate-700 p-3">
+                        <div class="md:col-span-2">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="inference-sbi-eval-sampling-kwargs">
+                                sbi_eval_sampling_kwargs (JSON object/dict)
+                            </label>
+                            <textarea
+                                id="inference-sbi-eval-sampling-kwargs"
+                                name="inference_sbi_eval_sampling_kwargs_json"
+                                rows="4"
+                                x-model="sbiEvalSamplingKwargsJson"
+                                class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                            ></textarea>
+                            <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Auto-filled per SBI algorithm. You can add extra SBI sampling kwargs as needed.</p>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="sbi-summary-mode">
+                                SBI Summary Mode
+                            </label>
+                            <select
+                                class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
+                                id="sbi-summary-mode"
+                                name="sbi_summary_mode"
+                            >
+                                <option value="mean">Posterior mean</option>
+                                <option value="median">Posterior median</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-4 grid grid-cols-1 md:grid-cols-4 gap-4">
                     <label class="text-sm">
                         <span class="block text-xs text-slate-500 dark:text-slate-400 mb-1">Input subsample (%)</span>
                         <input
@@ -515,54 +575,6 @@
                 <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
                     Percentage of input rows used for prediction. Values below 100 randomly subsample rows (deterministic seed) and save predictions for that subsample.
                 </p>
-            </div>
-
-            <div id="sbi-settings-section" class="mt-6 hidden">
-                <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-2">Other Settings (SBI)</h3>
-                <p class="text-xs text-slate-500 dark:text-slate-400 mb-4">
-                    Optional parameters. If left empty: <code>num_posterior_samples=500</code>, <code>sbi_batch_size=256</code>.
-                </p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 rounded-lg border border-slate-200 dark:border-slate-700 p-3">
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="sbi-num-posterior-samples">
-                        num_posterior_samples (optional)
-                    </label>
-                    <input
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        id="sbi-num-posterior-samples"
-                        min="1"
-                        name="sbi_num_posterior_samples"
-                        placeholder="500"
-                        type="number"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="sbi-batch-size">
-                        sbi_batch_size (optional)
-                    </label>
-                    <input
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        id="sbi-batch-size"
-                        min="1"
-                        name="sbi_batch_size"
-                        placeholder="256"
-                        type="number"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="sbi-summary-mode">
-                        SBI Summary Mode
-                    </label>
-                    <select
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        id="sbi-summary-mode"
-                        name="sbi_summary_mode"
-                    >
-                        <option value="mean">Posterior mean</option>
-                        <option value="median">Posterior median</option>
-                    </select>
-                </div>
-                </div>
             </div>
         </section>
         <div class="flex justify-center pt-2">
@@ -915,6 +927,49 @@
         refreshAutoDetectionStatusUI();
     }
 
+    function _defaultSbiEvalSamplingKwargsForModel(modelName) {
+        const key = String(modelName || "").trim().toUpperCase();
+        if (key === "NPE") {
+            return { sample_shape: [2000], max_sampling_batch_size: 10000, show_progress_bars: false };
+        }
+        if (key === "NLE" || key === "NRE") {
+            return {
+                sample_shape: [2000],
+                method: null,
+                thin: null,
+                num_chains: null,
+                num_workers: null,
+                show_progress_bars: false,
+            };
+        }
+        return { sample_shape: [2000], show_progress_bars: false };
+    }
+
+    function _resolveSbiAlgorithmForDefaults() {
+        const modelSelect = byId("inference-model-name");
+        const selected = modelSelect ? String(modelSelect.value || "").trim().toUpperCase() : "";
+        if (["NPE", "NLE", "NRE"].includes(selected)) return selected;
+
+        const state = getInferenceState();
+        const inferredType = String(
+            (state ? state.autoDetectedType : "") || lastAutoDetection.inferred_type || ""
+        ).trim().toUpperCase();
+        if (inferredType.includes("NPE")) return "NPE";
+        if (inferredType.includes("NLE")) return "NLE";
+        if (inferredType.includes("NRE")) return "NRE";
+        return "NPE";
+    }
+
+    function ensureSbiSamplingTextareaDefaults(force = false) {
+        const textarea = byId("inference-sbi-eval-sampling-kwargs");
+        if (!textarea) return;
+        const raw = String(textarea.value || "").trim();
+        if (!force && raw) return;
+        const algo = _resolveSbiAlgorithmForDefaults();
+        textarea.value = JSON.stringify(_defaultSbiEvalSamplingKwargsForModel(algo), null, 2);
+        syncInputValue(textarea);
+    }
+
     function refreshSbiSettingsVisibility() {
         const state = getInferenceState();
         const modelSelect = byId("inference-model-name");
@@ -929,20 +984,38 @@
         } else {
             sbiEnabled = ["NPE", "NLE", "NRE"].includes(selectedModel);
         }
-        const section = byId("sbi-settings-section");
+        const sbiSection = byId("sbi-settings-section");
+        const sklearnSection = byId("sklearn-exec-settings-section");
         const sbiInputs = [
-            byId("sbi-num-posterior-samples"),
-            byId("sbi-batch-size"),
+            byId("inference-sbi-eval-sampling-kwargs"),
             byId("sbi-summary-mode"),
         ];
+        const sklearnInputs = [
+            byId("inference-n-jobs"),
+            byId("inference-chunksize"),
+            byId("inference-start-method"),
+        ];
 
-        if (section) {
-            section.classList.toggle("hidden", !sbiEnabled);
+        if (sbiSection) {
+            sbiSection.classList.toggle("hidden", !sbiEnabled);
+        }
+        if (sklearnSection) {
+            sklearnSection.classList.toggle("hidden", sbiEnabled);
         }
         sbiInputs.forEach((el) => {
             if (!el) return;
             el.disabled = !sbiEnabled;
         });
+        sklearnInputs.forEach((el) => {
+            if (!el) return;
+            el.disabled = sbiEnabled;
+        });
+        if (sbiEnabled && state && typeof state.syncSbiEvalSamplingDefaults === "function") {
+            state.syncSbiEvalSamplingDefaults();
+        }
+        if (sbiEnabled) {
+            ensureSbiSamplingTextareaDefaults(false);
+        }
     }
 
     function refreshAutoDetectionStatusUI() {
@@ -1942,6 +2015,11 @@
         }
         if (inferenceModelSelect) {
             inferenceModelSelect.addEventListener("change", () => {
+                const liveState = getInferenceState();
+                if (liveState && typeof liveState.syncSbiEvalSamplingDefaults === "function") {
+                    liveState.syncSbiEvalSamplingDefaults(true);
+                }
+                ensureSbiSamplingTextareaDefaults(true);
                 refreshSbiSettingsVisibility();
                 refreshAutoDetectionStatusUI();
             });
@@ -2355,6 +2433,7 @@
         refreshFeaturesLoadStatus();
         refreshAssetsIndividualCards();
         refreshSbiSettingsVisibility();
+        ensureSbiSamplingTextareaDefaults(false);
         refreshAutoDetectionStatusUI();
     };
 

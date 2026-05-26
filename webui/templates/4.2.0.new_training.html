@@ -48,11 +48,10 @@
         hyperparamsJson: '{}',
         paramGridJson: '',
         sbiTrainParamsJson: '{\"max_num_epochs\": 50, \"training_batch_size\": 64, \"learning_rate\": 0.001, \"show_train_summary\": false}',
+        sbiEvalSamplingKwargsJson: '{\"sample_shape\": [2000], \"max_sampling_batch_size\": 10000, \"show_progress_bars\": false}',
         scalerEnabled: false,
         scalerType: 'StandardScaler',
         sklearnVerbose: 1,
-        sbiEvalNumSamples: 2000,
-        sbiEvalBatchSize: 256,
         featuresSourceMode: 'upload',
         featuresServerFilePath: '',
         parametersSourceMode: 'upload',
@@ -107,6 +106,15 @@
             if (Object.prototype.hasOwnProperty.call(sklearnDefaults, model)) return sklearnDefaults[model];
             return {};
         },
+        defaultSbiEvalSamplingKwargsFor(model) {
+            const sbiEvalDefaults = {
+                NPE: {'sample_shape': [2000], 'max_sampling_batch_size': 10000, 'show_progress_bars': false},
+                NLE: {'sample_shape': [2000], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false},
+                NRE: {'sample_shape': [2000], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false}
+            };
+            if (Object.prototype.hasOwnProperty.call(sbiEvalDefaults, model)) return sbiEvalDefaults[model];
+            return {'sample_shape': [2000], 'show_progress_bars': false};
+        },
         applyModelDefaults() {
             const model = this.modelName;
             if (!model) return;
@@ -115,6 +123,11 @@
             if (this.isSbiModel()) {
                 this.sbiTrainParamsJson = JSON.stringify(
                     {'max_num_epochs': 50, 'training_batch_size': 64, 'learning_rate': 0.001, 'show_train_summary': false},
+                    null,
+                    2
+                );
+                this.sbiEvalSamplingKwargsJson = JSON.stringify(
+                    this.defaultSbiEvalSamplingKwargsFor(model),
                     null,
                     2
                 );
@@ -323,8 +336,8 @@
                     </div>
                 </div>
 
-                <div id="training-sbi-train-params-settings" x-show="isSbiModel()" class="grid grid-cols-1 gap-6">
-                    <div class="md:col-span-2">
+                <div id="training-sbi-train-params-settings" x-show="isSbiModel()" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
                         <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-train-params">SBI train_params (JSON object/dict)</label>
                         <textarea
                             id="training-sbi-train-params"
@@ -335,32 +348,16 @@
                         ></textarea>
                         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                     </div>
-                </div>
-
-                <div id="training-sbi-eval-settings" x-show="isSbiModel()" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-num">Posterior Samples (sbi_eval_num_posterior_samples)</label>
-                        <input
-                            id="training-sbi-eval-num"
-                            name="training_sbi_eval_num_posterior_samples"
-                            type="number"
-                            min="1"
-                            value="2000"
-                            x-model="sbiEvalNumSamples"
-                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-eval-batch">Eval Batch Size (sbi_eval_batch_size)</label>
-                        <input
-                            id="training-sbi-eval-batch"
-                            name="training_sbi_eval_batch_size"
-                            type="number"
-                            min="1"
-                            value="256"
-                            x-model="sbiEvalBatchSize"
-                            class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
+                    <div id="training-sbi-eval-settings" x-show="trainingMode === 'param_grid'">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-eval-sampling-kwargs">SBI sbi_eval_sampling_kwargs (JSON object/dict)</label>
+                        <textarea
+                            id="training-sbi-eval-sampling-kwargs"
+                            name="training_sbi_eval_sampling_kwargs_json"
+                            rows="4"
+                            x-model="sbiEvalSamplingKwargsJson"
+                            class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
+                        ></textarea>
+                        <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Auto-filled per SBI algorithm. You can add extra SBI sampling kwargs as needed.</p>
                     </div>
                 </div>
 
@@ -1003,7 +1000,8 @@
     const hyperparamsBox = document.getElementById("training-hyperparams-json");
     const paramGridBox = document.getElementById("training-param-grid-json");
     const sbiTrainParamsBox = document.getElementById("training-sbi-train-params");
-    if (!modelSelect || !hyperparamsBox || !paramGridBox || !sbiTrainParamsBox) {
+    const sbiEvalSamplingBox = document.getElementById("training-sbi-eval-sampling-kwargs");
+    if (!modelSelect || !hyperparamsBox || !paramGridBox || !sbiTrainParamsBox || !sbiEvalSamplingBox) {
         return;
     }
 
@@ -1032,6 +1030,11 @@
         NRE: {estimator_kwargs: [{estimator: "mlp"}]}
     };
     const defaultSbiTrainParams = {max_num_epochs: 50, training_batch_size: 64, learning_rate: 0.001, show_train_summary: false};
+    const defaultSbiEvalSamplingKwargs = {
+        NPE: {sample_shape: [2000], max_sampling_batch_size: 10000, show_progress_bars: false},
+        NLE: {sample_shape: [2000], method: null, thin: null, num_chains: null, num_workers: null, show_progress_bars: false},
+        NRE: {sample_shape: [2000], method: null, thin: null, num_chains: null, num_workers: null, show_progress_bars: false},
+    };
 
     const selectedModelName = () => {
         return modelSelect.value;
@@ -1049,6 +1052,10 @@
         setFieldJson(paramGridBox, (sbiGridDefaults[model] ?? sklearnGridDefaults[model] ?? {}));
         if (Object.prototype.hasOwnProperty.call(sbiDefaults, model)) {
             setFieldJson(sbiTrainParamsBox, defaultSbiTrainParams);
+            setFieldJson(
+                sbiEvalSamplingBox,
+                (defaultSbiEvalSamplingKwargs[model] ?? {sample_shape: [2000], show_progress_bars: false}),
+            );
         }
     };
 
@@ -1067,7 +1074,7 @@
             sbiTrainParamsSettings.style.display = isSbi ? "" : "none";
         }
         if (sbiEvalSettings) {
-            sbiEvalSettings.style.display = isSbi ? "" : "none";
+            sbiEvalSettings.style.display = (isSbi && mode === "param_grid") ? "" : "none";
         }
     };
 

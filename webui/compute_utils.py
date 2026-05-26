@@ -2425,6 +2425,29 @@ def _parse_dict_param(params, key):
     return dict(value)
 
 
+def _default_sbi_eval_sampling_kwargs(model_name):
+    model_key = str(model_name or "").strip().upper()
+    if model_key == "NPE":
+        return {
+            "sample_shape": [2000],
+            "max_sampling_batch_size": 10000,
+            "show_progress_bars": False,
+        }
+    if model_key in {"NLE", "NRE"}:
+        return {
+            "sample_shape": [2000],
+            "method": None,
+            "thin": None,
+            "num_chains": None,
+            "num_workers": None,
+            "show_progress_bars": False,
+        }
+    return {
+        "sample_shape": [2000],
+        "show_progress_bars": False,
+    }
+
+
 def _parse_idx_list_param(params, key):
     raw = _get_param(params, key, None)
     if raw is None:
@@ -4539,19 +4562,10 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
 
         use_scaler = str(params.get("use_scaler", "")).lower() in {"1", "true", "on", "yes"}
         _append_job_output(job_status, job_id, f"Scaler enabled={'yes' if use_scaler else 'no'}.")
-        inference_n_jobs = _parse_int_param(params, "inference_n_jobs", default=1)
-        inference_chunksize = _parse_int_param(params, "inference_chunksize", default=None)
-        inference_start_method = _get_param(params, "inference_start_method", "spawn")
-        if inference_start_method not in {"spawn", "fork", "forkserver"}:
-            inference_start_method = "spawn"
         _append_job_output(
             job_status,
             job_id,
-            "Execution settings: "
-            f"n_jobs={inference_n_jobs if inference_n_jobs is not None else 'auto'}, "
-            f"chunksize={inference_chunksize if inference_chunksize is not None else 'auto'}, "
-            f"start_method={inference_start_method}, "
-            f"input_subsample_percent={inference_subsample_percent:.4g}.",
+            f"Input subsample percent={inference_subsample_percent:.4g}.",
         )
 
         if inference_obj.backend == "sklearn":
@@ -4559,6 +4573,19 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                 raise ValueError("Sklearn prediction requires model.pkl.")
             if use_scaler and not scaler_present:
                 raise ValueError("Scaler usage is enabled, but scaler.pkl was not provided.")
+            inference_n_jobs = _parse_int_param(params, "inference_n_jobs", default=1)
+            inference_chunksize = _parse_int_param(params, "inference_chunksize", default=None)
+            inference_start_method = _get_param(params, "inference_start_method", "spawn")
+            if inference_start_method not in {"spawn", "fork", "forkserver"}:
+                inference_start_method = "spawn"
+            _append_job_output(
+                job_status,
+                job_id,
+                "Sklearn execution settings: "
+                f"n_jobs={inference_n_jobs if inference_n_jobs is not None else 'auto'}, "
+                f"chunksize={inference_chunksize if inference_chunksize is not None else 'auto'}, "
+                f"start_method={inference_start_method}.",
+            )
 
             _append_job_output(job_status, job_id, "Running ncpi.Inference.predict() for sklearn model(s)...")
             capture = _JobOutputCapture(job_status, job_id, progress_base=0, progress_span=95)
@@ -4592,28 +4619,21 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             if sbi_summary_mode not in {"mean", "median"}:
                 raise ValueError("SBI summary mode must be 'mean' or 'median'.")
 
-            num_samples_raw = (
-                params.get("sbi_num_posterior_samples")
-                or params.get("posterior-samples")
-                or "500"
+            sbi_eval_sampling_kwargs = (
+                _parse_dict_param(params, "inference_sbi_eval_sampling_kwargs_json")
+                or _default_sbi_eval_sampling_kwargs(inference_obj.model_name)
             )
-            sbi_batch_raw = (
-                params.get("sbi_batch_size")
-                or params.get("sbi-batch-size")
-                or "256"
+            if "sample_shape" not in sbi_eval_sampling_kwargs:
+                sbi_eval_sampling_kwargs["sample_shape"] = _default_sbi_eval_sampling_kwargs(
+                    inference_obj.model_name
+                ).get("sample_shape", [2000])
+            _append_job_output(
+                job_status,
+                job_id,
+                "SBI sampling settings: "
+                f"sbi_eval_sampling_kwargs={sbi_eval_sampling_kwargs}, "
+                f"summary_mode={sbi_summary_mode}.",
             )
-            try:
-                num_samples = int(num_samples_raw)
-            except Exception as exc:
-                raise ValueError("SBI posterior samples must be a valid integer.") from exc
-            try:
-                sbi_batch_size = int(sbi_batch_raw)
-            except Exception as exc:
-                raise ValueError("SBI batch size must be a valid integer.") from exc
-            if num_samples <= 0:
-                raise ValueError("SBI posterior samples must be > 0.")
-            if sbi_batch_size <= 0:
-                raise ValueError("SBI batch size must be > 0.")
 
             x_local = np.asarray(feature_matrix, dtype=float)
             finite_mask = np.isfinite(x_local).all(axis=1)
@@ -4638,9 +4658,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                         base_kwargs={
                             "result_dir": artifacts_dir,
                             "scaler": True if (use_scaler and scaler_present) else False,
-                            "num_posterior_samples": num_samples,
-                            "sbi_batch_size": sbi_batch_size,
-                            "sbi_show_progress_bars": True,
+                            "sbi_eval_sampling_kwargs": sbi_eval_sampling_kwargs,
                         },
                         exec_kwargs={},
                         log_callback=lambda msg: _append_job_output(job_status, job_id, msg),
@@ -4651,10 +4669,13 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                 if samples.ndim == 2:
                     samples = samples[:, np.newaxis, :]
                 elif samples.ndim != 3:
-                    raise ValueError(
-                        f"Unexpected SBI predict output shape: {samples.shape}. "
-                        "Expected (S, B, theta_dim) or (S, theta_dim)."
-                    )
+                    if samples.ndim > 3:
+                        samples = samples.reshape(-1, samples.shape[-2], samples.shape[-1])
+                    else:
+                        raise ValueError(
+                            f"Unexpected SBI predict output shape: {samples.shape}. "
+                            "Expected (S, B, theta_dim) or (S, theta_dim)."
+                        )
 
                 valid_rows = np.where(finite_mask)[0]
                 if samples.shape[1] != valid_rows.shape[0]:
@@ -4810,8 +4831,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             param_grid = None
 
         train_params = {}
-        sbi_eval_num = 2000
-        sbi_eval_batch = 256
+        sbi_eval_sampling_kwargs = None
         if inference_obj.backend == "sbi":
             theta_dim = int(Y.shape[1]) if Y.ndim == 2 else 1
             low_vec = _parse_numeric_vector(_get_param(params, "training_sbi_prior_low", None), np.zeros(theta_dim, dtype=float))
@@ -4855,30 +4875,30 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             })
             inference_obj.hyperparams = sbi_hyperparams
             train_params = _parse_dict_param(params, "training_sbi_train_params_json") or {}
-            sbi_eval_num = _parse_int_param(params, "training_sbi_eval_num_posterior_samples", default=2000)
-            sbi_eval_batch = _parse_int_param(params, "training_sbi_eval_batch_size", default=256)
-            if sbi_eval_num is None or sbi_eval_num <= 0:
-                raise ValueError("SBI eval posterior samples must be > 0.")
-            if sbi_eval_batch is None or sbi_eval_batch <= 0:
-                raise ValueError("SBI eval batch size must be > 0.")
             if strategy_mode == "param_grid":
+                sbi_eval_sampling_kwargs = (
+                    _parse_dict_param(params, "training_sbi_eval_sampling_kwargs_json")
+                    or _default_sbi_eval_sampling_kwargs(inference_obj.model_name)
+                )
+                if "sample_shape" not in sbi_eval_sampling_kwargs:
+                    sbi_eval_sampling_kwargs["sample_shape"] = _default_sbi_eval_sampling_kwargs(
+                        inference_obj.model_name
+                    ).get("sample_shape", [2000])
                 _append_job_output(
                     job_status,
                     job_id,
                     "SBI settings are shared across all CV folds: "
                     f"train_params={train_params}, "
-                    f"sbi_eval_num_posterior_samples={sbi_eval_num}, "
-                    f"sbi_eval_batch_size={sbi_eval_batch}.",
+                    f"sbi_eval_sampling_kwargs={sbi_eval_sampling_kwargs}.",
                 )
             else:
+                sbi_eval_sampling_kwargs = None
                 _append_job_output(
                     job_status,
                     job_id,
                     "SBI training settings: "
                     f"train_params={train_params}, "
-                    f"inference_kwargs={inf_kwargs}, "
-                    f"sbi_eval_num_posterior_samples={sbi_eval_num}, "
-                    f"sbi_eval_batch_size={sbi_eval_batch}.",
+                    f"inference_kwargs={inf_kwargs}.",
                 )
 
             effective_estimator = None
@@ -5037,8 +5057,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 scaler=scaler_obj,
                 seed=seed,
                 sklearn_verbose=sklearn_verbose,
-                sbi_eval_num_posterior_samples=sbi_eval_num,
-                sbi_eval_batch_size=sbi_eval_batch,
+                sbi_eval_sampling_kwargs=sbi_eval_sampling_kwargs,
             )
         capture.flush()
         if job_id in job_status:
@@ -5056,19 +5075,46 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         zip_path = shutil.make_archive(archive_base, "zip", root_dir=artifacts_dir)
         _append_job_output(job_status, job_id, f"Saved training artifacts archive: {zip_path}")
         persisted_zip_path = None
+        persisted_artifacts_dir = None
         try:
             persisted_dir = INFERENCE_TRAINING_DATA_DIR
             os.makedirs(persisted_dir, exist_ok=True)
-            persisted_zip_path = os.path.join(persisted_dir, "training_artifacts.zip")
+            # Keep one immutable archive per job for safeguard.
+            persisted_zip_path = os.path.join(persisted_dir, f"training_artifacts_{job_id}.zip")
             shutil.copy2(zip_path, persisted_zip_path)
-            _append_job_output(job_status, job_id, f"Persisted training artifacts to: {persisted_zip_path}")
+            _append_job_output(job_status, job_id, f"Persisted training artifacts (job archive): {persisted_zip_path}")
+
+            # Refresh latest archive alias for convenience.
+            latest_zip_path = os.path.join(persisted_dir, "training_artifacts.zip")
+            shutil.copy2(zip_path, latest_zip_path)
+            _append_job_output(job_status, job_id, f"Updated latest training archive: {latest_zip_path}")
+
+            # Persist extracted artifacts in a per-job folder as an additional safeguard.
+            persisted_artifacts_dir = os.path.join(persisted_dir, f"training_artifacts_{job_id}")
+            if os.path.isdir(persisted_artifacts_dir):
+                shutil.rmtree(persisted_artifacts_dir, ignore_errors=True)
+            shutil.copytree(artifacts_dir, persisted_artifacts_dir)
+            _append_job_output(job_status, job_id, f"Persisted training artifacts (job folder): {persisted_artifacts_dir}")
+
+            # Refresh latest folder alias.
+            latest_artifacts_dir = os.path.join(persisted_dir, "training_artifacts_latest")
+            if os.path.isdir(latest_artifacts_dir):
+                shutil.rmtree(latest_artifacts_dir, ignore_errors=True)
+            shutil.copytree(artifacts_dir, latest_artifacts_dir)
+            _append_job_output(job_status, job_id, f"Updated latest training artifacts folder: {latest_artifacts_dir}")
         except Exception as persist_exc:
             _append_job_output(
                 job_status,
                 job_id,
                 f"Warning: could not persist training artifacts to {TMP_ROOT}: {persist_exc}",
             )
-        _announce_saved_output_folders(job_status, job_id, "inference_training", persisted_zip_path or zip_path)
+        _announce_saved_output_folders(
+            job_status,
+            job_id,
+            "inference_training",
+            persisted_zip_path or zip_path,
+            persisted_artifacts_dir,
+        )
 
         job_status[job_id].update({
             "status": "finished",
