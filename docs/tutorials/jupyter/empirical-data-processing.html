@@ -57,11 +57,36 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
+        <section id="overview">
           <h1>Load Empirical Data, Extract Features, and Compute Predictions</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
+          <p>
+            This tutorial provides a Jupyter notebook for the empirical LFP analysis workflow:
+            loading empirical recordings, extracting <code>catch22</code> features, and computing
+            predictions from pre-trained ML assets.
+          </p>
+          <p>
+            It follows the same script logic as
+            <code>examples/LFP_developing_brain/LFP_developing_brain.py</code>.
+          </p>
+          <p>
+            The notebook computes predictions directly from the provided model/scaler files
+            and plots boxplots of:
+            <code>E/I</code>, <code>tau_exc</code>, <code>tau_inh</code>, and <code>J_ext</code>.
+          </p>
+          <p>
+            Notebook file:
+            <a class="link" href="./notebooks/empirical-data-processing.ipynb">empirical-data-processing.ipynb</a>
+          </p>
           <p><a class="link" href="../jupyter-index.html">Back to Jupyter Tutorials Index</a></p>
+        </section>
+
+        <section id="rendered-notebook">
+          <h2>Rendered Notebook</h2>
+          <iframe
+            src="./notebooks/empirical-data-processing.html"
+            title="Load Empirical Data, Extract Features, and Compute Predictions Notebook"
+            style="width:100%; min-height:760px; border:1px solid rgba(0,137,199,0.22); border-radius:10px;">
+          </iframe>
         </section>
       </article>
     </main>
@@ -69,7 +94,8 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#rendered-notebook">Rendered Notebook</a></li>
       </ul>
     </aside>
   </div>

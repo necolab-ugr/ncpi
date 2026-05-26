@@ -1,465 +1,888 @@
-<!doctype html>
+<!DOCTYPE html>
+
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ncpi Docs | API</title>
-  <link rel="stylesheet" href="./docs_style.css">
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1" name="viewport"/>
+<title>ncpi Docs | API</title>
+<link href="./docs_style.css" rel="stylesheet"/>
 </head>
 <body>
-  <div class="layout">
-    <aside class="sidebar-left">
-      <div class="brand">
-        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
-        <div class="title">Documentation</div>
-      </div>
-      <ul class="left-nav">
-        <li><a href="./index.html">Home</a></li>
-        <li><a href="./installation.html">Installation</a></li>
-        <li><a href="./tutorials.html">Tutorials</a></li>
-        <li>
-          <details class="left-nav-collapse">
-            <summary class="subnav">WebUI</summary>
-            <ul class="left-nav nested-nav">
-              <li class="subnav-group">Simulation Pipeline</li>
-              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
-              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
-              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
-              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
-              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
-              <li class="subnav-group">Empirical Dataset Analysis</li>
-              <li><a class="subnav2" href="./tutorials/webui/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
-              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
-            </ul>
-          </details>
-        </li>
-        <li>
-          <details class="left-nav-collapse">
-            <summary class="subnav">Jupyter</summary>
-            <ul class="left-nav nested-nav">
-              <li class="subnav-group">Simulation Pipeline</li>
-              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
-              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
-              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
-              <li><a class="subnav2" href="./tutorials/jupyter/training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
-              <li class="subnav-group">Empirical Dataset Analysis</li>
-              <li><a class="subnav2" href="./tutorials/jupyter/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
-            </ul>
-          </details>
-        </li>
-        <li><a class="active" href="./api.html">API</a></li>
-        <li><a href="./faq.html">FAQ</a></li>
-        <li><a href="./contributing.html">Contributing</a></li>
-        <li><a href="./citation.html">Citation</a></li>
-        <li><a href="./credits.html">Credits</a></li>
-      </ul>
-    </aside>
-
-    <main class="content">
-      <article class="doc api-doc">
-        <section id="overview">
-          <h1>API</h1>
-          <p><span class="pill">Version 0.2.6</span></p>
-          <p>
+<div class="layout">
+<aside class="sidebar-left">
+<div class="brand">
+<img alt="ncpi logo" src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png"/>
+<div class="title">Documentation</div>
+</div>
+<ul class="left-nav">
+<li><a href="./index.html">Home</a></li>
+<li><a href="./installation.html">Installation</a></li>
+<li><a href="./tutorials.html">Tutorials</a></li>
+<li>
+<details class="left-nav-collapse">
+<summary class="subnav">WebUI</summary>
+<ul class="left-nav nested-nav">
+<li class="subnav-group">Simulation Pipeline</li>
+<li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+<li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+<li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+<li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+<li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+<li class="subnav-group">Empirical Dataset Analysis</li>
+<li><a class="subnav2" href="./tutorials/webui/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+<li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+</ul>
+</details>
+</li>
+<li>
+<details class="left-nav-collapse">
+<summary class="subnav">Jupyter</summary>
+<ul class="left-nav nested-nav">
+<li class="subnav-group">Simulation Pipeline</li>
+<li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+<li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+<li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+<li><a class="subnav2" href="./tutorials/jupyter/training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
+<li class="subnav-group">Empirical Dataset Analysis</li>
+<li><a class="subnav2" href="./tutorials/jupyter/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+</ul>
+</details>
+</li>
+<li><a class="active" href="./api.html">API</a></li>
+<li><a href="./faq.html">FAQ</a></li>
+<li><a href="./contributing.html">Contributing</a></li>
+<li><a href="./citation.html">Citation</a></li>
+<li><a href="./credits.html">Credits</a></li>
+</ul>
+</aside>
+<main class="content">
+<article class="doc api-doc">
+<section id="overview">
+<h1>API</h1>
+<p><span class="pill">Version 0.2.6</span></p>
+<p>
             This page provides a detailed reference for the public API surface used in tutorials and scripts.
             For each method below you get: purpose, full parameter list, and direct source link.
           </p>
-        </section>
-
-        <section id="simulation">
-          <h2>Simulation</h2>
-          <p>
+</section>
+<section id="simulation">
+<h2>Simulation</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py">ncpi/Simulation.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>run_script(script_path, param_path, output_folder)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L34">source</a><br>
-              Run a Python script with a parameter module and output folder.<br>
-              Parameters: <code>script_path</code> script filename, <code>param_path</code> parameter filename, <code>output_folder</code> destination directory.
-            </li>
-            <li>
-              <code>Simulation.__init__(param_folder, python_folder, output_folder)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L70">source</a><br>
-              Create a simulation runner bound to folders for parameter files, executable scripts, and outputs.<br>
-              Parameters: <code>param_folder</code> params directory, <code>python_folder</code> scripts directory, <code>output_folder</code> output directory (created if missing).
-            </li>
-            <li>
-              <code>Simulation.network(script_path, param_path)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L87">source</a><br>
-              Execute network-generation stage.<br>
-              Parameters: <code>script_path</code> script under <code>python_folder</code>, <code>param_path</code> params under <code>param_folder</code>.
-            </li>
-            <li>
-              <code>Simulation.simulate(script_path, param_path)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L92">source</a><br>
-              Execute simulation stage with the same path semantics as <code>network</code>.<br>
-              Parameters: <code>script_path</code> simulation script filename relative to <code>python_folder</code> (or absolute path), <code>param_path</code> parameter filename relative to <code>param_folder</code> (or absolute path).
-            </li>
-            <li>
-              <code>Simulation.analysis(script_path, param_path)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L98">source</a><br>
+</p>
+<ul>
+<li>
+<code>run_script(script_path, param_path, output_folder)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L34">source</a><br/>
+              Run a Python script with a parameter module and output folder.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>script_path</code> script filename <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>param_path</code> parameter filename <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>output_folder</code> destination directory. <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Simulation.__init__(param_folder, python_folder, output_folder)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L70">source</a><br/>
+              Create a simulation runner bound to folders for parameter files, executable scripts, and outputs.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>param_folder</code> params directory <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>python_folder</code> scripts directory <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>output_folder</code> output directory (created if missing). <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Simulation.network(script_path, param_path)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L87">source</a><br/>
+              Execute network-generation stage.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>script_path</code> script under <code>python_folder</code> <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>param_path</code> params under <code>param_folder</code>. <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Simulation.simulate(script_path, param_path)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L92">source</a><br/>
+              Execute simulation stage with the same path semantics as <code>network</code>.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>script_path</code> simulation script filename relative to <code>python_folder</code> (or absolute path) <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>param_path</code> parameter filename relative to <code>param_folder</code> (or absolute path). <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Simulation.analysis(script_path, param_path)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L98">source</a><br/>
               Execute analysis stage with the same path semantics as <code>network</code>.
             </li>
-            <li>
-              <code>Simulation.bundle_output_folder(output_folder, output_filename='simulation.pkl', remove_source_files=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L104">source</a><br>
-              Pack core simulation artifacts into one pickle payload for downstream use.<br>
-              Parameters: <code>output_folder</code> folder to bundle, <code>output_filename</code> bundle name, <code>remove_source_files</code> delete source pickle files after bundling.
-            </li>
-            <li>
-              <code>Simulation.bundle_outputs(output_filename='simulation.pkl', remove_source_files=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L166">source</a><br>
-              Convenience wrapper around <code>bundle_output_folder</code> using the instance output folder.<br>
-              Parameters: <code>output_filename</code> name of the bundled pickle written inside <code>output_folder</code>, <code>remove_source_files</code> remove per-run pickle files after successful bundling.
-            </li>
-          </ul>
-        </section>
-
-        <section id="fieldpotential">
-          <h2>FieldPotential</h2>
-          <p>
+<li>
+<code>Simulation.bundle_output_folder(output_folder, output_filename='simulation.pkl', remove_source_files=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L104">source</a><br/>
+              Pack core simulation artifacts into one pickle payload for downstream use.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>output_folder</code> folder to bundle <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>output_filename</code> bundle name <span class="api-param-type">type: str</span></li>
+<li><code>remove_source_files</code> delete source pickle files after bundling. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Simulation.bundle_outputs(output_filename='simulation.pkl', remove_source_files=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Simulation.py#L166">source</a><br/>
+              Convenience wrapper around <code>bundle_output_folder</code> using the instance output folder.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>output_filename</code> name of the bundled pickle written inside <code>output_folder</code> <span class="api-param-type">type: str</span></li>
+<li><code>remove_source_files</code> remove per-run pickle files after successful bundling. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+<section id="fieldpotential">
+<h2>FieldPotential</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py">ncpi/FieldPotential.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>FieldPotential.__init__()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L19">source</a><br>
+</p>
+<ul>
+<li>
+<code>FieldPotential.__init__()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L19">source</a><br/>
               Initialize internal kernel/proxy registries and lazy dependency handles.
             </li>
-            <li>
-              <code>FieldPotential.roll_with_zeros(arr, shift)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L218">source</a><br>
-              Shift a 1D array and zero-fill exposed elements.<br>
-              Parameters: <code>arr</code> input array, <code>shift</code> positive/negative integer shift.
-            </li>
-            <li>
-              <code>FieldPotential.create_kernel(MC_folder, params, biophys, dt, tstop, *, output_sim_path=None, electrodeParameters=None, CDM=True, probes=None, cdm_probe=None, mean_nu_X=None, Vrest=None, t_X=None, tau=None, g_eff=None, n_ext=None, weights=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L317">source</a><br>
-              Build multicompartment kernels for CDM/LFP workflows.<br>
-              Parameters: <code>MC_folder</code> model folder, <code>params</code> network parameter object/module, <code>biophys</code> biophysical setup list, <code>dt</code>/<code>tstop</code> simulation timing, <code>output_sim_path</code> optional path to simulation outputs for inferred rates/resting state, <code>electrodeParameters</code> LFP probe settings, <code>CDM</code> include CDM probe, <code>probes</code> direct probe override, <code>cdm_probe</code> CDM probe class/name, <code>mean_nu_X</code>/<code>Vrest</code> manual alternatives when no output path is provided, <code>t_X</code>/<code>tau</code>/<code>g_eff</code>/<code>n_ext</code>/<code>weights</code> kernel and synaptic overrides.
-            </li>
-            <li>
-              <code>FieldPotential.compute_cdm_lfp_from_kernels(kernels, spike_times, dt, tstop, population_sizes=None, transient=0.0, probe='KernelApproxCurrentDipoleMoment', component=2, mode='same', scale=1.0, aggregate=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L634">source</a><br>
-              Convolve spike trains with precomputed kernels to obtain CDM/LFP traces.<br>
-              Parameters: <code>kernels</code> kernel dictionary, <code>spike_times</code> spikes by population, <code>dt</code>/<code>tstop</code> output grid, <code>population_sizes</code> optional normalization, <code>transient</code> discard pre-window, <code>probe</code> probe key, <code>component</code> dipole component selection, <code>mode</code> convolution mode, <code>scale</code> scalar multiplier, <code>aggregate</code> optional sum output.
-            </li>
-            <li>
-              <code>FieldPotential.compute_MEEG(CDM, dipole_locations=None, sensor_locations=None, model=None, model_kwargs=None, align_to_surface=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L800">source</a><br>
-              Apply EEG/MEG forward models to CDM trajectories.<br>
-              Parameters: <code>CDM</code> dipole time series (single or multi-dipole), <code>dipole_locations</code> dipole positions, <code>sensor_locations</code> sensor positions (non-NYHead models), <code>model</code> forward model name, <code>model_kwargs</code> constructor args, <code>align_to_surface</code> NYHead orientation alignment.
-            </li>
-            <li>
-              <code>FieldPotential.compute_proxy(method, sim_data, sim_step, *, excitatory_only=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L1094">source</a><br>
-              Compute scalar proxy signals (FR/AMPA/GABA/Vm/I/I_abs/LRWS/ERWS1/ERWS2).<br>
-              Parameters: <code>method</code> proxy key, <code>sim_data</code> required simulation arrays map, <code>sim_step</code> timestep in ms (mandatory for delayed proxies), <code>excitatory_only</code> key-resolution preference for excitatory/all channels.
-            </li>
-          </ul>
-        </section>
-
-        <section id="features">
-          <h2>Features</h2>
-          <p>
+<li>
+<code>FieldPotential.roll_with_zeros(arr, shift)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L218">source</a><br/>
+              Shift a 1D array and zero-fill exposed elements.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>arr</code> input array <span class="api-param-type">type: np.ndarray</span></li>
+<li><code>shift</code> positive/negative integer shift. <span class="api-param-type">type: int</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>FieldPotential.create_kernel(MC_folder, params, biophys, dt, tstop, *, output_sim_path=None, electrodeParameters=None, CDM=True, probes=None, cdm_probe=None, mean_nu_X=None, Vrest=None, t_X=None, tau=None, g_eff=None, n_ext=None, weights=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L317">source</a><br/>
+              Build multicompartment kernels for CDM/LFP workflows.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>MC_folder</code> model folder <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>params</code> network parameter object/module <span class="api-param-type">type: object | module | dict</span></li>
+<li><code>biophys</code> biophysical setup list <span class="api-param-type">type: list[dict]</span></li>
+<li><code>dt</code>/<code>tstop</code> simulation timing <span class="api-param-type">type: float</span></li>
+<li><code>output_sim_path</code> optional path to simulation outputs for inferred rates/resting state <span class="api-param-type">type: str | PathLike | None</span></li>
+<li><code>electrodeParameters</code> LFP probe settings <span class="api-param-type">type: dict | None</span></li>
+<li><code>CDM</code> include CDM probe <span class="api-param-type">type: bool</span></li>
+<li><code>probes</code> direct probe override <span class="api-param-type">type: object | list | None</span></li>
+<li><code>cdm_probe</code> CDM probe class/name <span class="api-param-type">type: str | object | None</span></li>
+<li><code>mean_nu_X</code>/<code>Vrest</code> manual alternatives when no output path is provided <span class="api-param-type">type: array-like | None</span></li>
+<li><code>t_X</code>/<code>tau</code>/<code>g_eff</code>/<code>n_ext</code>/<code>weights</code> kernel and synaptic overrides. <span class="api-param-type">type: array-like | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>FieldPotential.compute_cdm_lfp_from_kernels(kernels, spike_times, dt, tstop, population_sizes=None, transient=0.0, probe='KernelApproxCurrentDipoleMoment', component=2, mode='same', scale=1.0, aggregate=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L634">source</a><br/>
+              Convolve spike trains with precomputed kernels to obtain CDM/LFP traces.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>kernels</code> kernel dictionary <span class="api-param-type">type: dict</span></li>
+<li><code>spike_times</code> spikes by population <span class="api-param-type">type: dict[str, array-like]</span></li>
+<li><code>dt</code>/<code>tstop</code> output grid <span class="api-param-type">type: float</span></li>
+<li><code>population_sizes</code> optional normalization <span class="api-param-type">type: dict | None</span></li>
+<li><code>transient</code> discard pre-window <span class="api-param-type">type: float</span></li>
+<li><code>probe</code> probe key <span class="api-param-type">type: str</span></li>
+<li><code>component</code> dipole component selection <span class="api-param-type">type: int</span></li>
+<li><code>mode</code> convolution mode <span class="api-param-type">type: str</span></li>
+<li><code>scale</code> scalar multiplier <span class="api-param-type">type: float</span></li>
+<li><code>aggregate</code> optional sum output. <span class="api-param-type">type: str | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>FieldPotential.compute_MEEG(CDM, dipole_locations=None, sensor_locations=None, model=None, model_kwargs=None, align_to_surface=True)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L800">source</a><br/>
+              Apply EEG/MEG forward models to CDM trajectories.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>CDM</code> dipole time series (single or multi-dipole) <span class="api-param-type">type: np.ndarray | array-like</span></li>
+<li><code>dipole_locations</code> dipole positions <span class="api-param-type">type: array-like | None</span></li>
+<li><code>sensor_locations</code> sensor positions (non-NYHead models) <span class="api-param-type">type: array-like | None</span></li>
+<li><code>model</code> forward model name <span class="api-param-type">type: str | None</span></li>
+<li><code>model_kwargs</code> constructor args <span class="api-param-type">type: dict | None</span></li>
+<li><code>align_to_surface</code> NYHead orientation alignment. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>FieldPotential.compute_proxy(method, sim_data, sim_step, *, excitatory_only=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/FieldPotential.py#L1094">source</a><br/>
+              Compute scalar proxy signals (FR/AMPA/GABA/Vm/I/I_abs/LRWS/ERWS1/ERWS2).<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>method</code> proxy key <span class="api-param-type">type: str</span></li>
+<li><code>sim_data</code> required simulation arrays map <span class="api-param-type">type: dict</span></li>
+<li><code>sim_step</code> timestep in ms (mandatory for delayed proxies) <span class="api-param-type">type: float</span></li>
+<li><code>excitatory_only</code> key-resolution preference for excitatory/all channels. <span class="api-param-type">type: bool | None</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+<section id="features">
+<h2>Features</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py">ncpi/Features.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>Features.__init__(method='catch22', params=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L221">source</a><br>
-              Configure feature extraction backend and options.<br>
-              Parameters: <code>method</code> one of <code>catch22</code>, <code>specparam</code>, <code>dfa</code>, <code>fEI</code>, <code>hctsa</code>; <code>params</code> method-specific options (includes <code>normalize</code>).
-            </li>
-            <li>
-              <code>Features.catch22(sample)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1085">source</a><br>
-              Compute the 22 canonical catch22 features from a 1D sample.<br>
-              Parameters: <code>sample</code> input time-series.
-            </li>
-            <li>
-              <code>Features.specparam(sample=None, *, freqs=None, power_spectrum=None, fs=None, freq_range=None, welch_kwargs=None, model_kwargs=None, select_peak=None, debug=None, metric_thresholds=None, metric_policy=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1108">source</a><br>
-              Fit an aperiodic/periodic spectral model from time-domain or PSD inputs.<br>
-              Parameters: <code>sample</code> time-domain signal (mutually exclusive with <code>freqs</code>/<code>power_spectrum</code>), <code>freqs</code> frequency axis, <code>power_spectrum</code> PSD values, <code>fs</code> sampling frequency (when <code>sample</code> used), <code>freq_range</code> fit range, <code>welch_kwargs</code> PSD options, <code>model_kwargs</code> spectral-model options, <code>select_peak</code> peak selection strategy, <code>debug</code> enable debug output, <code>metric_thresholds</code> fit-quality thresholds, <code>metric_policy</code> threshold handling (<code>reject</code>/<code>flag</code>).
-            </li>
-            <li>
-              <code>Features.dfa(sample, *, sampling_frequency=None, fit_interval=None, compute_interval=None, overlap=None, frequency_range=None, spectrum_range=None, bad_idxes=None, input_is_envelope=None, filter_kwargs=None, trim_seconds=None, hilbert_n_fft=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1450">source</a><br>
-              Compute detrended fluctuation analysis features.<br>
-              Parameters: <code>sample</code> 1D/2D input, <code>sampling_frequency</code> Hz, <code>fit_interval</code>/<code>compute_interval</code> DFA windows, <code>overlap</code> overlapping windows flag, <code>frequency_range</code> band mode, <code>spectrum_range</code> spectrum mode, <code>bad_idxes</code> channel exclusions, <code>input_is_envelope</code> envelope flag, <code>filter_kwargs</code> MNE filter settings, <code>trim_seconds</code> edge trim, <code>hilbert_n_fft</code> Hilbert FFT length.
-            </li>
-            <li>
-              <code>Features.fEI(sample, *, sampling_frequency=None, window_size_sec=None, window_overlap=None, dfa_value=None, dfa_threshold=None, dfa_fit_interval=None, dfa_compute_interval=None, dfa_overlap=None, frequency_range=None, spectrum_range=None, bad_idxes=None, input_is_envelope=None, filter_kwargs=None, trim_seconds=None, hilbert_n_fft=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1611">source</a><br>
-              Compute functional excitation-inhibition index from envelopes/spectra.<br>
-              Parameters: <code>sample</code> 1D/2D input, <code>sampling_frequency</code> Hz, <code>window_size_sec</code>/<code>window_overlap</code> fEI window config, <code>dfa_value</code> optional precomputed DFA, <code>dfa_threshold</code> minimum DFA threshold, <code>dfa_fit_interval</code>/<code>dfa_compute_interval</code>/<code>dfa_overlap</code> internal DFA settings, <code>frequency_range</code>/<code>spectrum_range</code> band mode, <code>bad_idxes</code>, <code>input_is_envelope</code>, <code>filter_kwargs</code>, <code>trim_seconds</code>, <code>hilbert_n_fft</code>.
-            </li>
-            <li>
-              <code>Features.hctsa(samples, hctsa_folder, workers=None, return_meta=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1854">source</a><br>
-              Run MATLAB-based hctsa feature extraction.<br>
-              Parameters: <code>samples</code> collection of 1D series, <code>hctsa_folder</code> HCTSA installation path, <code>workers</code> MATLAB worker count, <code>return_meta</code> include metadata in output.
-            </li>
-            <li>
-              <code>Features.compute_features(samples, n_jobs=None, chunksize=None, start_method='spawn', progress_callback=None, log_callback=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L2013">source</a><br>
-              Parallel feature extraction entry point.<br>
-              Parameters: <code>samples</code> list/array of 1D signals, <code>n_jobs</code> worker count, <code>chunksize</code> dispatch chunk size, <code>start_method</code> multiprocessing method, <code>progress_callback</code> progress hook, <code>log_callback</code> log hook.
-            </li>
-          </ul>
-        </section>
-
-        <section id="inference">
-          <h2>Inference</h2>
-          <p>
+</p>
+<ul>
+<li>
+<code>Features.__init__(method='catch22', params=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L221">source</a><br/>
+              Configure feature extraction backend and options.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list"><li><code>method</code> one of <code>catch22</code>, <code>specparam</code>, <code>dfa</code>, <code>fEI</code>, <code>hctsa</code>. <span class="api-param-type">type: str</span></li><li><code>params</code> method-specific options dictionary (e.g., <code>{'normalize': True}</code>). <span class="api-param-type">type: dict | None</span></li></ul>
+</div>
+</li>
+<li>
+<code>Features.catch22(sample)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1085">source</a><br/>
+              Compute the 22 canonical catch22 features from a 1D sample.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>sample</code> input time-series. <span class="api-param-type">type: np.ndarray</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Features.specparam(sample=None, *, freqs=None, power_spectrum=None, fs=None, freq_range=None, welch_kwargs=None, model_kwargs=None, select_peak=None, debug=None, metric_thresholds=None, metric_policy=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1108">source</a><br/>
+              Fit an aperiodic/periodic spectral model from time-domain or PSD inputs.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>sample</code> time-domain signal (mutually exclusive with <code>freqs</code>/<code>power_spectrum</code>) <span class="api-param-type">type: np.ndarray</span></li>
+<li><code>freqs</code> frequency axis <span class="api-param-type">type: np.ndarray | None</span></li>
+<li><code>power_spectrum</code> PSD values <span class="api-param-type">type: np.ndarray | None</span></li>
+<li><code>fs</code> sampling frequency (when <code>sample</code> used) <span class="api-param-type">type: float | None</span></li>
+<li><code>freq_range</code> fit range <span class="api-param-type">type: tuple[float, float] | None</span></li>
+<li><code>welch_kwargs</code> PSD options <span class="api-param-type">type: dict | None</span></li>
+<li><code>model_kwargs</code> spectral-model options <span class="api-param-type">type: dict | None</span></li>
+<li><code>select_peak</code> peak selection strategy <span class="api-param-type">type: str | None</span></li>
+<li><code>debug</code> enable debug output <span class="api-param-type">type: bool | None</span></li>
+<li><code>metric_thresholds</code> fit-quality thresholds <span class="api-param-type">type: dict | None</span></li>
+<li><code>metric_policy</code> threshold handling (<code>reject</code>/<code>flag</code>). <span class="api-param-type">type: str | None ('reject'|'flag')</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Features.dfa(sample, *, sampling_frequency=None, fit_interval=None, compute_interval=None, overlap=None, frequency_range=None, spectrum_range=None, bad_idxes=None, input_is_envelope=None, filter_kwargs=None, trim_seconds=None, hilbert_n_fft=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1450">source</a><br/>
+              Compute detrended fluctuation analysis features.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>sample</code> 1D/2D input <span class="api-param-type">type: np.ndarray</span></li>
+<li><code>sampling_frequency</code> Hz <span class="api-param-type">type: float | None</span></li>
+<li><code>fit_interval</code>/<code>compute_interval</code> DFA windows <span class="api-param-type">type: tuple[float, float] | None</span></li>
+<li><code>overlap</code> overlapping windows flag <span class="api-param-type">type: bool | None</span></li>
+<li><code>frequency_range</code> band mode <span class="api-param-type">type: tuple[float, float] | None</span></li>
+<li><code>spectrum_range</code> spectrum mode <span class="api-param-type">type: tuple[float, float] | None</span></li>
+<li><code>bad_idxes</code> channel exclusions <span class="api-param-type">type: array-like[int] | None</span></li>
+<li><code>input_is_envelope</code> envelope flag <span class="api-param-type">type: bool | None</span></li>
+<li><code>filter_kwargs</code> MNE filter settings <span class="api-param-type">type: dict | None</span></li>
+<li><code>trim_seconds</code> edge trim <span class="api-param-type">type: float | None</span></li>
+<li><code>hilbert_n_fft</code> Hilbert FFT length. <span class="api-param-type">type: int | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Features.fEI(sample, *, sampling_frequency=None, window_size_sec=None, window_overlap=None, dfa_value=None, dfa_threshold=None, dfa_fit_interval=None, dfa_compute_interval=None, dfa_overlap=None, frequency_range=None, spectrum_range=None, bad_idxes=None, input_is_envelope=None, filter_kwargs=None, trim_seconds=None, hilbert_n_fft=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1611">source</a><br/>
+              Compute functional excitation-inhibition index from envelopes/spectra.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>sample</code> 1D/2D input <span class="api-param-type">type: np.ndarray</span></li>
+<li><code>sampling_frequency</code> Hz <span class="api-param-type">type: float | None</span></li>
+<li><code>window_size_sec</code>/<code>window_overlap</code> fEI window config <span class="api-param-type">type: float | None</span></li>
+<li><code>dfa_value</code> optional precomputed DFA <span class="api-param-type">type: float | None</span></li>
+<li><code>dfa_threshold</code> minimum DFA threshold <span class="api-param-type">type: float | None</span></li>
+<li><code>dfa_fit_interval</code>/<code>dfa_compute_interval</code>/<code>dfa_overlap</code> internal DFA settings <span class="api-param-type">type: tuple[float, float] | None</span></li>
+<li><code>frequency_range</code>/<code>spectrum_range</code> band mode <span class="api-param-type">type: tuple[float, float] | None</span></li>
+<li><code>bad_idxes</code> channel indices to exclude. <span class="api-param-type">type: array-like[int] | None</span></li>
+<li><code>input_is_envelope</code> set to True if the input already is an amplitude envelope. <span class="api-param-type">type: bool | None</span></li>
+<li><code>filter_kwargs</code> extra filtering options passed to MNE filtering utilities. <span class="api-param-type">type: dict | None</span></li>
+<li><code>trim_seconds</code> seconds trimmed from each edge after filtering/Hilbert transform. <span class="api-param-type">type: float | None</span></li>
+<li><code>hilbert_n_fft</code>. <span class="api-param-type">type: int | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Features.hctsa(samples, hctsa_folder, workers=None, return_meta=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L1854">source</a><br/>
+              Run MATLAB-based hctsa feature extraction.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>samples</code> collection of 1D series <span class="api-param-type">type: list[np.ndarray] | np.ndarray</span></li>
+<li><code>hctsa_folder</code> HCTSA installation path <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>workers</code> MATLAB worker count <span class="api-param-type">type: int | None</span></li>
+<li><code>return_meta</code> include metadata in output. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Features.compute_features(samples, n_jobs=None, chunksize=None, start_method='spawn', progress_callback=None, log_callback=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Features.py#L2013">source</a><br/>
+              Parallel feature extraction entry point.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>samples</code> list/array of 1D signals <span class="api-param-type">type: list[np.ndarray] | np.ndarray</span></li>
+<li><code>n_jobs</code> worker count <span class="api-param-type">type: int | None</span></li>
+<li><code>chunksize</code> dispatch chunk size <span class="api-param-type">type: int | None</span></li>
+<li><code>start_method</code> multiprocessing method <span class="api-param-type">type: str</span></li>
+<li><code>progress_callback</code> progress hook <span class="api-param-type">type: callable | None</span></li>
+<li><code>log_callback</code> log hook. <span class="api-param-type">type: callable | None</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+<section id="inference">
+<h2>Inference</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py">ncpi/Inference.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>Inference.__init__(model, hyperparams=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L116">source</a><br>
-              Initialize sklearn or SBI backend based on <code>model</code>.<br>
-              Parameters: <code>model</code> regressor name or SBI key (<code>NPE</code>/<code>NLE</code>/<code>NRE</code>), <code>hyperparams</code> backend-specific configuration.
-            </li>
-            <li>
-              <code>Inference._coerce_sample_shape(sample_shape)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L210">source</a><br>
+</p>
+<ul>
+<li>
+<code>Inference.__init__(model, hyperparams=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L116">source</a><br/>
+              Initialize sklearn or SBI backend based on <code>model</code>.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>model</code> regressor name or SBI key (<code>NPE</code>/<code>NLE</code>/<code>NRE</code>) <span class="api-param-type">type: str | None</span></li>
+<li><code>hyperparams</code> backend-specific configuration. <span class="api-param-type">type: dict | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Inference._coerce_sample_shape(sample_shape)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L210">source</a><br/>
               Normalize scalar/tuple sample shape into torch-compatible shape object.
             </li>
-            <li>
-              <code>Inference._sample_posterior(posterior_obj, *, x=None, **sbi_eval_sampling_kwargs)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L216">source</a><br>
-              Draw posterior samples from SBI posterior objects for single or batched observations.<br>
-              Parameters: <code>posterior_obj</code> trained posterior object, <code>x</code> conditioning observation(s), <code>sbi_eval_sampling_kwargs</code> forwarded sampler kwargs.
-            </li>
-            <li>
-              <code>Inference.add_simulation_data(features, parameters, *, append=False, copy=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L339">source</a><br>
-              Register training feature/target arrays, with optional append mode.<br>
-              Parameters: <code>features</code> feature matrix/vector, <code>parameters</code> target matrix/vector, <code>append</code> concatenate to existing data, <code>copy</code> force copying.
-            </li>
-            <li>
-              <code>Inference.initialize_sbi(hyperparams)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L408">source</a><br>
-              Build an SBI inference object and estimator configuration.<br>
-              Parameters: <code>hyperparams</code> dict including required <code>prior</code> and optional <code>inference_kwargs</code>, <code>estimator</code>, <code>estimator_kwargs</code>, <code>build_posterior_kwargs</code>.
-            </li>
-            <li>
-              <code>Inference.train(param_grid=None, *, n_splits=10, n_repeats=10, train_params=None, result_dir='data', scaler=None, seed=0, sklearn_verbose=None, sbi_eval_sampling_kwargs=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L511">source</a><br>
-              Train a model (single-fit or repeated CV search) and persist artifacts.<br>
-              Parameters: <code>param_grid</code> optional hyperparameter candidates, <code>n_splits</code>/<code>n_repeats</code> repeated CV settings, <code>train_params</code> extra SBI train args, <code>result_dir</code> artifact output folder, <code>scaler</code> transformer or bool flag, <code>seed</code> reproducibility seed, <code>sklearn_verbose</code> default estimator verbosity, <code>sbi_eval_sampling_kwargs</code> posterior-sampling kwargs used for SBI CV scoring.
-            </li>
-            <li>
-              <code>Inference.predict(features, *, result_dir='data', scaler=False, n_jobs=None, chunksize=None, start_method='spawn', sbi_eval_sampling_kwargs=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L852">source</a><br>
-              Load trained artifacts and generate predictions from new feature rows.<br>
-              Parameters: <code>features</code> input feature rows, <code>result_dir</code> artifact location, <code>scaler</code> whether to apply saved scaler, <code>n_jobs</code>/<code>chunksize</code>/<code>start_method</code> sklearn parallelism settings, <code>sbi_eval_sampling_kwargs</code> posterior sampling controls.
-            </li>
-          </ul>
-        </section>
-
-        <section id="analysis">
-          <h2>Analysis</h2>
-          <p>
+<li>
+<code>Inference._sample_posterior(posterior_obj, *, x=None, **sbi_eval_sampling_kwargs)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L216">source</a><br/>
+              Draw posterior samples from SBI posterior objects for single or batched observations.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>posterior_obj</code> trained posterior object <span class="api-param-type">type: object</span></li>
+<li><code>x</code> conditioning observation(s) <span class="api-param-type">type: array-like | None</span></li>
+<li><code>sbi_eval_sampling_kwargs</code> forwarded sampler kwargs. <span class="api-param-type">type: dict | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Inference.add_simulation_data(features, parameters, *, append=False, copy=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L339">source</a><br/>
+              Register training feature/target arrays, with optional append mode.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>features</code> feature matrix/vector <span class="api-param-type">type: array-like</span></li>
+<li><code>parameters</code> target matrix/vector <span class="api-param-type">type: array-like</span></li>
+<li><code>append</code> concatenate to existing data <span class="api-param-type">type: bool</span></li>
+<li><code>copy</code> force copying. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Inference.initialize_sbi(hyperparams)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L408">source</a><br/>
+              Build an SBI inference object and estimator configuration.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>hyperparams</code> dict including required <code>prior</code> and optional <code>inference_kwargs</code> <span class="api-param-type">type: dict | None</span></li>
+<li><code>estimator</code> optional SBI estimator identifier/constructor override. <span class="api-param-type">type: str | callable | None</span></li>
+<li><code>estimator_kwargs</code> extra keyword arguments passed to the SBI estimator builder. <span class="api-param-type">type: dict | None</span></li>
+<li><code>build_posterior_kwargs</code>. <span class="api-param-type">type: dict | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Inference.train(param_grid=None, *, n_splits=10, n_repeats=10, train_params=None, result_dir='data', scaler=None, seed=0, sklearn_verbose=None, sbi_eval_sampling_kwargs=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L511">source</a><br/>
+              Train a model (single-fit or repeated CV search) and persist artifacts.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>param_grid</code> optional hyperparameter candidates <span class="api-param-type">type: list[dict] | None</span></li>
+<li><code>n_splits</code>/<code>n_repeats</code> repeated CV settings <span class="api-param-type">type: int</span></li>
+<li><code>train_params</code> extra SBI train args <span class="api-param-type">type: dict | None</span></li>
+<li><code>result_dir</code> artifact output folder <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>scaler</code> transformer or bool flag <span class="api-param-type">type: bool | object</span></li>
+<li><code>seed</code> reproducibility seed <span class="api-param-type">type: int</span></li>
+<li><code>sklearn_verbose</code> default estimator verbosity <span class="api-param-type">type: int | bool | None</span></li>
+<li><code>sbi_eval_sampling_kwargs</code> posterior-sampling kwargs used for SBI CV scoring. <span class="api-param-type">type: dict | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Inference.predict(features, *, result_dir='data', scaler=False, n_jobs=None, chunksize=None, start_method='spawn', sbi_eval_sampling_kwargs=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L852">source</a><br/>
+              Load trained artifacts and generate predictions from new feature rows.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>features</code> input feature rows <span class="api-param-type">type: array-like</span></li>
+<li><code>result_dir</code> artifact location <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>scaler</code> whether to apply saved scaler <span class="api-param-type">type: bool | object</span></li>
+<li><code>n_jobs</code>/<code>chunksize</code>/<code>start_method</code> sklearn parallelism settings <span class="api-param-type">type: int | None</span></li>
+<li><code>sbi_eval_sampling_kwargs</code> posterior sampling controls. <span class="api-param-type">type: dict | None</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+<section id="analysis">
+<h2>Analysis</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py">ncpi/Analysis.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>extract_variables(formula)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L15">source</a><br>
-              Tokenize an R-style formula and extract variable-like terms.<br>
-              Parameters: <code>formula</code> expression like <code>Y ~ group * epoch + (1|id)</code>.
-            </li>
-            <li>
-              <code>Analysis.__init__(data)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L142">source</a><br>
-              Store an analysis data object (typically a pandas DataFrame for statistical methods).<br>
-              Parameters: <code>data</code> source container.
-            </li>
-            <li>
-              <code>Analysis.lmer_tests(models, group_col=None, control_group=None, numeric=None, specs=None, *, posthoc=None, print_info=True, lrt=False, lrt_drop=None, return_model_info=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L201">source</a><br>
-              Fit lm/lmer models through R, run post-hoc tests, optionally run LRT and return model metadata.<br>
-              Parameters: <code>models</code> formula(s), <code>group_col</code> group field, <code>control_group</code> control level, <code>numeric</code> numeric variables, <code>specs</code> post-hoc specs, <code>posthoc</code> post-hoc policy/config, <code>print_info</code> print diagnostics, <code>lrt</code> run likelihood-ratio test, <code>lrt_drop</code> reduced-model terms, <code>return_model_info</code> include selection metadata.
-            </li>
-            <li>
-              <code>Analysis.lmer_selection(full_model, numeric=None, *, crit=None, random_crit='BIC', fixed_crit='LRT', include=None, print_info=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L573">source</a><br>
-              Backward model selection using R buildmer for random and/or fixed terms.<br>
-              Parameters: <code>full_model</code> starting formula, <code>numeric</code> numeric variable list, <code>crit</code> single criterion override, <code>random_crit</code> random-effects criterion, <code>fixed_crit</code> fixed-effects criterion, <code>include</code> forced terms, <code>print_info</code> print selected model.
-            </li>
-            <li>
-              <code>Analysis.cohend(*, control_group='HC', data_col='Y', data_index=-1, group_col='group', sensor_col='sensor', min_n=3, drop_zeros=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L739">source</a><br>
-              Compute sensor-wise Cohen’s d for each non-control group vs control.<br>
-              Parameters: <code>control_group</code> baseline level, <code>data_col</code> measurement column, <code>data_index</code> element index for sequence-valued rows, <code>group_col</code> group column, <code>sensor_col</code> sensor column, <code>min_n</code> minimum per-group samples, <code>drop_zeros</code> remove zero-valued rows.
-            </li>
-            <li>
-              <code>Analysis.eeg_topomap(values=None, ch_names=None, *, position_offset, sensor_col='sensor', data_col='data', data_index=-1, montage='standard_1005', ch_type='eeg', sphere=0.28, cmap='jet', vmin=None, vmax=None, colorbar=True, colorbar_fmt='%0.2f', colorbar_label=None, colorbar_label_fontsize=None, colorbar_tick_fontsize=8, sensors=None, outlines=None, contours=None, res=300, extrapolate=None, image_interp=None, axes=None, show=True, title=None, names=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L864">source</a><br>
-              Render EEG scalp topography from passed values or from <code>self.data</code>.<br>
-              Parameters: <code>values</code>/<code>ch_names</code> explicit map input (or infer from data columns), <code>position_offset</code> mandatory (y,z) offset, <code>sensor_col</code>/<code>data_col</code>/<code>data_index</code> DataFrame mapping, <code>montage</code>/<code>ch_type</code> channel geometry, <code>sphere</code>/<code>cmap</code>/<code>vmin</code>/<code>vmax</code> style and limits, <code>colorbar*</code> colorbar controls, <code>sensors</code>/<code>outlines</code>/<code>contours</code>/<code>res</code>/<code>extrapolate</code>/<code>image_interp</code> MNE topomap options, <code>axes</code>/<code>show</code>/<code>title</code>/<code>names</code> display controls.
-            </li>
-            <li>
-              <code>Analysis.meg_surface(values, *, atlas='dk', subject='fsaverage', subjects_dir=None, surface='inflated', hemisphere='both', views='lat', cmap='coolwarm', vmin=None, vmax=None, center=None, alpha=1.0, smoothing_steps=5, colorbar=True, colorbar_kwargs=None, cortex='low_contrast', background='white', size=(1000, 600), show=True, axes=None, auto_fetch=True, hcp_accept=False, verbose=None, **brain_kwargs)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L1014">source</a><br>
-              Plot parcel-wise MEG values on cortical surfaces using MNE/FreeSurfer parcellations.<br>
-              Parameters: <code>values</code> one value per parcel, <code>atlas</code> parcellation name, <code>subject</code>/<code>subjects_dir</code> source anatomy, <code>surface</code>/<code>hemisphere</code>/<code>views</code> viewing geometry, <code>cmap</code>/<code>vmin</code>/<code>vmax</code>/<code>center</code>/<code>alpha</code>/<code>smoothing_steps</code> rendering style, <code>colorbar</code>/<code>colorbar_kwargs</code> color scale, <code>cortex</code>/<code>background</code>/<code>size</code> scene styling, <code>show</code>/<code>axes</code> matplotlib target behavior, <code>auto_fetch</code> auto-download fsaverage, <code>hcp_accept</code> HCP-MMP license acceptance, <code>verbose</code> MNE verbosity, <code>brain_kwargs</code> additional Brain constructor args.
-            </li>
-          </ul>
-        </section>
-
-        <section id="parser">
-          <h2>EphysDatasetParser</h2>
-          <p>
+</p>
+<ul>
+<li>
+<code>extract_variables(formula)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L15">source</a><br/>
+              Tokenize an R-style formula and extract variable-like terms.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>formula</code> expression like <code>Y ~ group * epoch + (1|id)</code>. <span class="api-param-type">type: str</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Analysis.__init__(data)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L142">source</a><br/>
+              Store an analysis data object (typically a pandas DataFrame for statistical methods).<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>data</code> source container. <span class="api-param-type">type: DataFrame | Any</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Analysis.lmer_tests(models, group_col=None, control_group=None, numeric=None, specs=None, *, posthoc=None, print_info=True, lrt=False, lrt_drop=None, return_model_info=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L201">source</a><br/>
+              Fit lm/lmer models through R, run post-hoc tests, optionally run LRT and return model metadata.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>models</code> formula(s) <span class="api-param-type">type: str | list[str]</span></li>
+<li><code>group_col</code> group field <span class="api-param-type">type: str | None</span></li>
+<li><code>control_group</code> control level <span class="api-param-type">type: str | None</span></li>
+<li><code>numeric</code> numeric variables <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>specs</code> post-hoc specs <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>posthoc</code> post-hoc policy/config <span class="api-param-type">type: dict | bool | None</span></li>
+<li><code>print_info</code> print diagnostics <span class="api-param-type">type: bool</span></li>
+<li><code>lrt</code> run likelihood-ratio test <span class="api-param-type">type: bool</span></li>
+<li><code>lrt_drop</code> reduced-model terms <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>return_model_info</code> include selection metadata. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Analysis.lmer_selection(full_model, numeric=None, *, crit=None, random_crit='BIC', fixed_crit='LRT', include=None, print_info=True)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L573">source</a><br/>
+              Backward model selection using R buildmer for random and/or fixed terms.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>full_model</code> starting formula <span class="api-param-type">type: str</span></li>
+<li><code>numeric</code> numeric variable list <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>crit</code> single criterion override <span class="api-param-type">type: str | None</span></li>
+<li><code>random_crit</code> random-effects criterion <span class="api-param-type">type: str</span></li>
+<li><code>fixed_crit</code> fixed-effects criterion <span class="api-param-type">type: str</span></li>
+<li><code>include</code> forced terms <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>print_info</code> print selected model. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Analysis.cohend(*, control_group='HC', data_col='Y', data_index=-1, group_col='group', sensor_col='sensor', min_n=3, drop_zeros=True)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L739">source</a><br/>
+              Compute sensor-wise Cohen’s d for each non-control group vs control.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>control_group</code> baseline level <span class="api-param-type">type: str | None</span></li>
+<li><code>data_col</code> measurement column <span class="api-param-type">type: str</span></li>
+<li><code>data_index</code> element index for sequence-valued rows <span class="api-param-type">type: int</span></li>
+<li><code>group_col</code> group column <span class="api-param-type">type: str | None</span></li>
+<li><code>sensor_col</code> sensor column <span class="api-param-type">type: str</span></li>
+<li><code>min_n</code> minimum per-group samples <span class="api-param-type">type: int</span></li>
+<li><code>drop_zeros</code> remove zero-valued rows. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Analysis.eeg_topomap(values=None, ch_names=None, *, position_offset, sensor_col='sensor', data_col='data', data_index=-1, montage='standard_1005', ch_type='eeg', sphere=0.28, cmap='jet', vmin=None, vmax=None, colorbar=True, colorbar_fmt='%0.2f', colorbar_label=None, colorbar_label_fontsize=None, colorbar_tick_fontsize=8, sensors=None, outlines=None, contours=None, res=300, extrapolate=None, image_interp=None, axes=None, show=True, title=None, names=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L864">source</a><br/>
+              Render EEG scalp topography from passed values or from <code>self.data</code>.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>values</code>/<code>ch_names</code> explicit map input (or infer from data columns) <span class="api-param-type">type: array-like | None</span></li>
+<li><code>position_offset</code> mandatory (y,z) offset <span class="api-param-type">type: tuple[float, float]</span></li>
+<li><code>sensor_col</code>/<code>data_col</code>/<code>data_index</code> DataFrame mapping <span class="api-param-type">type: str</span></li>
+<li><code>montage</code>/<code>ch_type</code> channel geometry <span class="api-param-type">type: str</span></li>
+<li><code>sphere</code>/<code>cmap</code>/<code>vmin</code>/<code>vmax</code> style and limits <span class="api-param-type">type: float | tuple</span></li>
+<li><code>colorbar*</code> colorbar controls <span class="api-param-type">type: Any</span></li>
+<li><code>sensors</code>/<code>outlines</code>/<code>contours</code>/<code>res</code>/<code>extrapolate</code>/<code>image_interp</code> MNE topomap options <span class="api-param-type">type: bool | str | None</span></li>
+<li><code>axes</code>/<code>show</code>/<code>title</code>/<code>names</code> display controls. <span class="api-param-type">type: matplotlib.axes.Axes | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>Analysis.meg_surface(values, *, atlas='dk', subject='fsaverage', subjects_dir=None, surface='inflated', hemisphere='both', views='lat', cmap='coolwarm', vmin=None, vmax=None, center=None, alpha=1.0, smoothing_steps=5, colorbar=True, colorbar_kwargs=None, cortex='low_contrast', background='white', size=(1000, 600), show=True, axes=None, auto_fetch=True, hcp_accept=False, verbose=None, **brain_kwargs)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L1014">source</a><br/>
+              Plot parcel-wise MEG values on cortical surfaces using MNE/FreeSurfer parcellations.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>values</code> one value per parcel <span class="api-param-type">type: array-like | None</span></li>
+<li><code>atlas</code> parcellation name <span class="api-param-type">type: str</span></li>
+<li><code>subject</code>/<code>subjects_dir</code> source anatomy <span class="api-param-type">type: str</span></li>
+<li><code>surface</code>/<code>hemisphere</code>/<code>views</code> viewing geometry <span class="api-param-type">type: str</span></li>
+<li><code>cmap</code>/<code>vmin</code>/<code>vmax</code>/<code>center</code>/<code>alpha</code>/<code>smoothing_steps</code> rendering style <span class="api-param-type">type: str</span></li>
+<li><code>colorbar</code>/<code>colorbar_kwargs</code> color scale <span class="api-param-type">type: bool</span></li>
+<li><code>cortex</code>/<code>background</code>/<code>size</code> scene styling <span class="api-param-type">type: str</span></li>
+<li><code>show</code>/<code>axes</code> matplotlib target behavior <span class="api-param-type">type: bool</span></li>
+<li><code>auto_fetch</code> auto-download fsaverage <span class="api-param-type">type: bool</span></li>
+<li><code>hcp_accept</code> HCP-MMP license acceptance <span class="api-param-type">type: bool</span></li>
+<li><code>verbose</code> MNE verbosity <span class="api-param-type">type: bool | str | int | None</span></li>
+<li><code>brain_kwargs</code> additional Brain constructor args. <span class="api-param-type">type: dict</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+<section id="parser">
+<h2>EphysDatasetParser</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py">ncpi/EphysDatasetParser.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>CanonicalFields</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L861">source</a><br>
-              Declarative locator map for canonical parsed fields.<br>
-              Fields (parameters): <code>data</code>, <code>fs</code>, <code>ch_names</code>, <code>time</code>, <code>data_domain</code>, <code>freqs</code>, <code>spectral_kind</code>, <code>epoch</code>, <code>metadata</code>, <code>table_layout</code>, <code>channel_columns</code>, <code>long_channel_col</code>, <code>long_value_col</code>, <code>long_time_col</code>, <code>array_axes</code>.
-            </li>
-            <li>
-              <code>ParseConfig</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L927">source</a><br>
-              Parser behavior configuration for loading, segmentation, epoching, normalization, and aggregation.<br>
-              Fields (parameters): <code>fields</code>, <code>epoch_length_s</code>, <code>epoch_step_s</code>, <code>segment_t0_s</code>, <code>segment_t1_s</code>, <code>preload</code>, <code>pick_types</code>, <code>max_seconds</code>, <code>drop_bads</code>, <code>zscore</code>, <code>zscore_after_epoch</code>, <code>exclude_last_epoch</code>, <code>align_epoch_count_to_minimum</code>, <code>aggregate_over</code>, <code>aggregate_method</code>, <code>aggregate_labels</code>, <code>warn_unimplemented</code>.
-            </li>
-            <li>
-              <code>EphysDatasetParser.__init__(config=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L1001">source</a><br>
-              Construct a parser instance with explicit configuration.<br>
-              Parameters: <code>config</code> optional <code>ParseConfig</code> (defaults applied when omitted).
-            </li>
-            <li>
-              <code>EphysDatasetParser.parse(source)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L1008">source</a><br>
-              Parse in-memory objects or file paths into canonical DataFrame rows.<br>
-              Parameters: <code>source</code> path or object (supports MNE objects, arrays, dict-like, DataFrame, and several file formats).
-            </li>
-          </ul>
-        </section>
-
-        <section id="tools">
-          <h2>tools</h2>
-          <p>
+</p>
+<ul>
+<li>
+<code>CanonicalFields</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L861">source</a><br/>
+              Declarative locator map for canonical parsed fields.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Fields</div>
+<ul class="api-params-list">
+<li><code>data</code> signal accessor (array-like expected). <span class="api-param-type">type: DataFrame | Any</span></li>
+<li><code>fs</code> sampling-frequency accessor in Hz. <span class="api-param-type">type: float | None</span></li>
+<li><code>ch_names</code> channel-name accessor/list. <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>time</code> time-axis accessor. <span class="api-param-type">type: field spec | None</span></li>
+<li><code>data_domain</code> domain label accessor (time/frequency). <span class="api-param-type">type: field spec | None</span></li>
+<li><code>freqs</code> frequency-axis accessor for spectral inputs. <span class="api-param-type">type: np.ndarray | None</span></li>
+<li><code>spectral_kind</code> spectral representation accessor. <span class="api-param-type">type: field spec | None</span></li>
+<li><code>epoch</code> epoch index accessor. <span class="api-param-type">type: field spec | None</span></li>
+<li><code>metadata</code> extra metadata accessor/map. <span class="api-param-type">type: dict | callable | None</span></li>
+<li><code>table_layout</code> tabular layout selector. <span class="api-param-type">type: str | None</span></li>
+<li><code>channel_columns</code> channel columns for wide tables. <span class="api-param-type">type: list[str] | None</span></li>
+<li><code>long_channel_col</code> channel-name column for long tables. <span class="api-param-type">type: str | None</span></li>
+<li><code>long_value_col</code> value column for long tables. <span class="api-param-type">type: str | None</span></li>
+<li><code>long_time_col</code> time column for long tables. <span class="api-param-type">type: str | None</span></li>
+<li><code>array_axes</code>. <span class="api-param-type">type: tuple | list | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>ParseConfig</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L927">source</a><br/>
+              Parser behavior configuration for loading, segmentation, epoching, normalization, and aggregation.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Fields</div>
+<ul class="api-params-list">
+<li><code>fields</code> canonical field locator configuration. <span class="api-param-type">type: CanonicalFields</span></li>
+<li><code>epoch_length_s</code> epoch length in seconds. <span class="api-param-type">type: float | None</span></li>
+<li><code>epoch_step_s</code> epoch step in seconds. <span class="api-param-type">type: float | None</span></li>
+<li><code>segment_t0_s</code> optional segment start time (seconds). <span class="api-param-type">type: float | None</span></li>
+<li><code>segment_t1_s</code> optional segment end time (seconds). <span class="api-param-type">type: float | None</span></li>
+<li><code>preload</code> whether to preload source data into memory. <span class="api-param-type">type: bool</span></li>
+<li><code>pick_types</code> channel-picking rules. <span class="api-param-type">type: dict | None</span></li>
+<li><code>max_seconds</code> optional maximum duration to keep from each recording. <span class="api-param-type">type: float | None</span></li>
+<li><code>drop_bads</code> drop channels marked as bad. <span class="api-param-type">type: bool</span></li>
+<li><code>zscore</code> apply z-score normalization. <span class="api-param-type">type: bool</span></li>
+<li><code>zscore_after_epoch</code> apply z-score after epoching. <span class="api-param-type">type: bool</span></li>
+<li><code>exclude_last_epoch</code> drop incomplete last epoch. <span class="api-param-type">type: bool</span></li>
+<li><code>align_epoch_count_to_minimum</code> align all channels to minimum epoch count. <span class="api-param-type">type: bool</span></li>
+<li><code>aggregate_over</code> axes to aggregate over (e.g., sensor). <span class="api-param-type">type: tuple[str, ...] | None</span></li>
+<li><code>aggregate_method</code> aggregation operation name. <span class="api-param-type">type: str</span></li>
+<li><code>aggregate_labels</code> custom labels for aggregated outputs. <span class="api-param-type">type: dict | None</span></li>
+<li><code>warn_unimplemented</code>. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>EphysDatasetParser.__init__(config=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L1001">source</a><br/>
+              Construct a parser instance with explicit configuration.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>config</code> optional <code>ParseConfig</code> (defaults applied when omitted). <span class="api-param-type">type: ParseConfig | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>EphysDatasetParser.parse(source)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/EphysDatasetParser.py#L1008">source</a><br/>
+              Parse in-memory objects or file paths into canonical DataFrame rows.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>source</code> path or object (supports MNE objects, arrays, dict-like, DataFrame, and several file formats). <span class="api-param-type">type: str | PathLike | object</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+<section id="tools">
+<h2>tools</h2>
+<p>
             Module:
             <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py">ncpi/tools.py</a>
-          </p>
-          <ul>
-            <li>
-              <code>ensure_module(module_name, package=None, *, version_spec=None, upgrade=False, user=False, quiet=False, extra_pip_args=None, reload_module=False, raise_on_error=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L70">source</a><br>
-              Verify/install importable dependencies at runtime.<br>
-              Parameters: <code>module_name</code> import path, <code>package</code> pip package name, <code>version_spec</code> version constraint, <code>upgrade</code>/<code>user</code>/<code>quiet</code>/<code>extra_pip_args</code> pip behavior, <code>reload_module</code> force reload, <code>raise_on_error</code> raise vs return False.
-            </li>
-            <li>
-              <code>dynamic_import(module_path, attribute_name=None, package=None, *, default=None, raise_on_error=True, reload_module=False, ensure_type=None, ensure_callable=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L159">source</a><br>
-              Import modules/attributes dynamically with optional type/callable checks.<br>
-              Parameters: <code>module_path</code>, <code>attribute_name</code>, <code>package</code>, <code>default</code>, <code>raise_on_error</code>, <code>reload_module</code>, <code>ensure_type</code>, <code>ensure_callable</code>.
-            </li>
-            <li>
-              <code>record_id_from_api_url(api_url)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L272">source</a><br>
-              Extract a Zenodo record ID from API URL text.<br>
-              Parameters: <code>api_url</code> Zenodo record API URL.
-            </li>
-            <li>
-              <code>ensure_fresh_dir(download_dir)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L280">source</a><br>
-              Recreate an empty directory.<br>
-              Parameters: <code>download_dir</code> target directory path.
-            </li>
-            <li>
-              <code>safe_extract_zip(zip_path, outdir)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L296">source</a><br>
-              Safely extract ZIP archives with path-traversal checks.<br>
-              Parameters: <code>zip_path</code> archive file, <code>outdir</code> extraction folder.
-            </li>
-            <li>
-              <code>safe_extract_tar(tar_path, outdir)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L310">source</a><br>
-              Safely extract TAR archives with path-traversal checks.<br>
-              Parameters: <code>tar_path</code> archive file, <code>outdir</code> extraction folder.
-            </li>
-            <li>
-              <code>extract_and_delete_all_archives(outdir, *, verbose=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L324">source</a><br>
-              Recursively extract ZIP/TAR files and delete each archive after extraction.<br>
-              Parameters: <code>outdir</code> root folder, <code>verbose</code> print progress.
-            </li>
-            <li>
-              <code>get_requests_and_tqdm()</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L356">source</a><br>
+</p>
+<ul>
+<li>
+<code>ensure_module(module_name, package=None, *, version_spec=None, upgrade=False, user=False, quiet=False, extra_pip_args=None, reload_module=False, raise_on_error=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L70">source</a><br/>
+              Verify/install importable dependencies at runtime.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>module_name</code> import path <span class="api-param-type">type: str</span></li>
+<li><code>package</code> pip package name <span class="api-param-type">type: str | None</span></li>
+<li><code>version_spec</code> version constraint <span class="api-param-type">type: str | None</span></li>
+<li><code>upgrade</code>/<code>user</code>/<code>quiet</code>/<code>extra_pip_args</code> pip behavior <span class="api-param-type">type: bool</span></li>
+<li><code>reload_module</code> force reload <span class="api-param-type">type: bool</span></li>
+<li><code>raise_on_error</code> raise vs return False. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>dynamic_import(module_path, attribute_name=None, package=None, *, default=None, raise_on_error=True, reload_module=False, ensure_type=None, ensure_callable=False)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L159">source</a><br/>
+              Import modules/attributes dynamically with optional type/callable checks.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>module_path</code> module import path. <span class="api-param-type">type: str</span></li>
+<li><code>attribute_name</code> attribute/class/function name to import from the module. <span class="api-param-type">type: str | None</span></li>
+<li><code>package</code> optional package context for relative imports. <span class="api-param-type">type: str | None</span></li>
+<li><code>default</code> fallback return value when import fails and raise_on_error=False. <span class="api-param-type">type: Any</span></li>
+<li><code>raise_on_error</code> raise exception on failure instead of returning default. <span class="api-param-type">type: bool</span></li>
+<li><code>reload_module</code> force module reload before returning attribute/module. <span class="api-param-type">type: bool</span></li>
+<li><code>ensure_type</code> optional runtime type check for the imported object. <span class="api-param-type">type: type | tuple[type, ...] | None</span></li>
+<li><code>ensure_callable</code>. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>record_id_from_api_url(api_url)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L272">source</a><br/>
+              Extract a Zenodo record ID from API URL text.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>api_url</code> Zenodo record API URL. <span class="api-param-type">type: str</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>ensure_fresh_dir(download_dir)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L280">source</a><br/>
+              Recreate an empty directory.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>download_dir</code> target directory path. <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>safe_extract_zip(zip_path, outdir)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L296">source</a><br/>
+              Safely extract ZIP archives with path-traversal checks.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>zip_path</code> archive file <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>outdir</code> extraction folder. <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>safe_extract_tar(tar_path, outdir)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L310">source</a><br/>
+              Safely extract TAR archives with path-traversal checks.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>tar_path</code> archive file <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>outdir</code> extraction folder. <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>extract_and_delete_all_archives(outdir, *, verbose=True)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L324">source</a><br/>
+              Recursively extract ZIP/TAR files and delete each archive after extraction.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>outdir</code> root folder <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>verbose</code> print progress. <span class="api-param-type">type: bool | str | int | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>get_requests_and_tqdm()</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L356">source</a><br/>
               Resolve and return <code>requests</code> and <code>tqdm</code> modules.
             </li>
-            <li>
-              <code>fetch_record_json(requests, api_url, headers, timeout=60)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L373">source</a><br>
-              Request record metadata JSON from Zenodo API.<br>
-              Parameters: <code>requests</code> requests module/object, <code>api_url</code> record URL, <code>headers</code> HTTP headers, <code>timeout</code> request timeout.
-            </li>
-            <li>
-              <code>download_file_streaming(requests, tqdm, file_url, dest_path, *, headers, timeout=120, chunk_size=8192, desc=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L380">source</a><br>
-              Stream-download a file with progress reporting.<br>
-              Parameters: <code>requests</code> HTTP client module, <code>tqdm</code> progress helper, <code>file_url</code> source URL, <code>dest_path</code> output path, <code>headers</code> request headers, <code>timeout</code> seconds, <code>chunk_size</code> transfer chunk bytes, <code>desc</code> progress label.
-            </li>
-            <li>
-              <code>is_http_403(err)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L414">source</a><br>
-              Detect whether an exception corresponds to HTTP 403.<br>
-              Parameters: <code>err</code> caught exception object.
-            </li>
-            <li>
-              <code>download_files_archive_with_curl(record_id, outdir)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L420">source</a><br>
-              Fallback downloader using Zenodo files-archive endpoint plus extraction.<br>
-              Parameters: <code>record_id</code> Zenodo record ID, <code>outdir</code> destination folder.
-            </li>
-            <li>
-              <code>download_zenodo_record(api_url, download_dir='zenodo_files', fallback_files_archive=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L465">source</a><br>
-              Download and extract all files from one Zenodo record.<br>
-              Parameters: <code>api_url</code> record API URL, <code>download_dir</code> local output folder, <code>fallback_files_archive</code> use archive fallback when direct downloads fail.
-            </li>
-            <li>
-              <code>timer(description=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L538">source</a><br>
-              Decorator to measure and print function execution time.<br>
-              Parameters: <code>description</code> optional label shown in timing output.
-            </li>
-          </ul>
-        </section>
-      </article>
-    </main>
-
-    <aside class="sidebar-right">
-      <h2 class="right-title">On This Page</h2>
-      <ul class="right-nav">
-        <li><a class="active" href="#overview">Overview</a></li>
-        <li><a href="#simulation">Simulation</a></li>
-        <li><a href="#fieldpotential">FieldPotential</a></li>
-        <li><a href="#features">Features</a></li>
-        <li><a href="#inference">Inference</a></li>
-        <li><a href="#analysis">Analysis</a></li>
-        <li><a href="#parser">EphysDatasetParser</a></li>
-        <li><a href="#tools">tools</a></li>
-      </ul>
-    </aside>
-  </div>
-  <script src="./nav-submenu-link.js"></script>
+<li>
+<code>fetch_record_json(requests, api_url, headers, timeout=60)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L373">source</a><br/>
+              Request record metadata JSON from Zenodo API.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>requests</code> requests module/object <span class="api-param-type">type: module | object</span></li>
+<li><code>api_url</code> record URL <span class="api-param-type">type: str</span></li>
+<li><code>headers</code> HTTP headers <span class="api-param-type">type: dict</span></li>
+<li><code>timeout</code> request timeout. <span class="api-param-type">type: int | float</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>download_file_streaming(requests, tqdm, file_url, dest_path, *, headers, timeout=120, chunk_size=8192, desc=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L380">source</a><br/>
+              Stream-download a file with progress reporting.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>requests</code> HTTP client module <span class="api-param-type">type: module | object</span></li>
+<li><code>tqdm</code> progress helper <span class="api-param-type">type: callable | module</span></li>
+<li><code>file_url</code> source URL <span class="api-param-type">type: str</span></li>
+<li><code>dest_path</code> output path <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>headers</code> request headers <span class="api-param-type">type: dict</span></li>
+<li><code>timeout</code> seconds <span class="api-param-type">type: int | float</span></li>
+<li><code>chunk_size</code> transfer chunk bytes <span class="api-param-type">type: int</span></li>
+<li><code>desc</code> progress label. <span class="api-param-type">type: str | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>is_http_403(err)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L414">source</a><br/>
+              Detect whether an exception corresponds to HTTP 403.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>err</code> caught exception object. <span class="api-param-type">type: Exception</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>download_files_archive_with_curl(record_id, outdir)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L420">source</a><br/>
+              Fallback downloader using Zenodo files-archive endpoint plus extraction.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>record_id</code> Zenodo record ID <span class="api-param-type">type: str | int</span></li>
+<li><code>outdir</code> destination folder. <span class="api-param-type">type: str | PathLike</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>download_zenodo_record(api_url, download_dir='zenodo_files', fallback_files_archive=True)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L465">source</a><br/>
+              Download and extract all files from one Zenodo record.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>api_url</code> record API URL <span class="api-param-type">type: str</span></li>
+<li><code>download_dir</code> local output folder <span class="api-param-type">type: str | PathLike</span></li>
+<li><code>fallback_files_archive</code> use archive fallback when direct downloads fail. <span class="api-param-type">type: bool</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>timer(description=None)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/tools.py#L538">source</a><br/>
+              Decorator to measure and print function execution time.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Parameters</div>
+<ul class="api-params-list">
+<li><code>description</code> optional label shown in timing output. <span class="api-param-type">type: str | None</span></li>
+</ul>
+</div>
+</li>
+</ul>
+</section>
+</article>
+</main>
+<aside class="sidebar-right">
+<h2 class="right-title">On This Page</h2>
+<ul class="right-nav">
+<li><a class="active" href="#overview">Overview</a></li>
+<li><a href="#simulation">Simulation</a></li>
+<li><a href="#fieldpotential">FieldPotential</a></li>
+<li><a href="#features">Features</a></li>
+<li><a href="#inference">Inference</a></li>
+<li><a href="#analysis">Analysis</a></li>
+<li><a href="#parser">EphysDatasetParser</a></li>
+<li><a href="#tools">tools</a></li>
+</ul>
+</aside>
+</div>
+<script src="./nav-submenu-link.js"></script>
 </body>
 </html>

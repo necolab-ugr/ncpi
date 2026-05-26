@@ -413,6 +413,58 @@ table {
   content: "";
 }
 
+.api-params-block {
+  margin-top: 0.62rem;
+  padding-top: 0.52rem;
+  border-top: 1px dashed rgba(0, 137, 199, 0.28);
+}
+
+.api-params-title {
+  display: inline-block;
+  margin-bottom: 0.34rem;
+  padding: 0.16rem 0.52rem;
+  border: 1px solid rgba(0, 137, 199, 0.34);
+  border-radius: 999px;
+  background: linear-gradient(130deg, rgba(0, 137, 199, 0.12), rgba(0, 184, 169, 0.12));
+  color: #0f4469;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.api-params-list {
+  list-style: none;
+  margin: 0.18rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.24rem;
+}
+
+.api-params-list li {
+  margin: 0;
+  color: var(--muted);
+}
+
+.api-params-list li code {
+  margin-right: 0.22rem;
+}
+
+.api-param-type {
+  display: inline-block;
+  margin-left: 0.26rem;
+  padding: 0.04rem 0.35rem;
+  border: 1px solid rgba(31, 77, 191, 0.26);
+  border-radius: 999px;
+  background: rgba(31, 77, 191, 0.08);
+  color: #1f4dbf;
+  font-family: "IBM Plex Mono", "Consolas", monospace;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
 @media (max-width: 1040px) {
   .layout {
     grid-template-columns: 1fr;
