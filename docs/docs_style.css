@@ -369,6 +369,50 @@ table {
   border-bottom-color: rgba(0, 184, 169, 0.45);
 }
 
+/* API page readability */
+.api-doc section > p {
+  margin: 0.4rem 0;
+}
+
+.api-doc section > ul {
+  list-style: none;
+  margin: 0.7rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.74rem;
+}
+
+.api-doc section > ul > li {
+  margin: 0;
+  padding: 0.82rem 0.9rem;
+  border: 1px solid rgba(0, 137, 199, 0.2);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  line-height: 1.55;
+}
+
+.api-doc section > ul > li > code:first-child {
+  display: block;
+  width: 100%;
+  margin: 0 0 0.34rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.api-doc section > ul > li > .link {
+  display: inline-block;
+  margin: 0 0 0.42rem;
+}
+
+.api-doc section > ul > li br {
+  display: block;
+  margin: 0.2rem 0 0;
+  content: "";
+}
+
 @media (max-width: 1040px) {
   .layout {
     grid-template-columns: 1fr;

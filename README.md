@@ -337,9 +337,9 @@ if __name__ == "__main__":
     model.add_simulation_data(X_train, y_train)
 
     print("[5/7] Training model...")
-    model.train(param_grid=None, scaler=None, seed=42)
+    model.train(param_grid=None, scaler=False, seed=42)
     print("[6/7] Computing predictions...")
-    y_pred = model.predict(X_test, scaler=None, n_jobs=1)
+    y_pred = model.predict(X_test, scaler=False, n_jobs=1)
  
     mse = mean_squared_error(y_test, y_pred)
     print(f"Test MSE (E/I ratio): {mse:.5f}")

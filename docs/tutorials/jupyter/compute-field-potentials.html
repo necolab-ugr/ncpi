@@ -41,12 +41,9 @@
               <li><a class="subnav2" href="./simulate-lif-network.html">1. Simulate a LIF Network</a></li>
               <li><a class="subnav2 active" href="./compute-field-potentials.html">2. Compute Field Potentials</a></li>
               <li><a class="subnav2" href="./extract-features.html">3. Feature Extraction</a></li>
-              <li><a class="subnav2" href="./train-inverse-model.html">4. Inverse Model Training</a></li>
-              <li><a class="subnav2" href="./compute-predictions.html">5. Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li><a class="subnav2" href="./training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
               <li class="subnav-group">Empirical Dataset Analysis</li>
               <li><a class="subnav2" href="./empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-empirical-results.html">2. Plot Empirical Results</a></li>
             </ul>
           </details>
         </li>
@@ -64,8 +61,9 @@
           <h1>Compute Field Potentials</h1>
           <p>
             This tutorial provides a Jupyter notebook that loads spike trains from the LIF sweep
-            tutorial, computes kernel-based CDMs for <code>J_ext = 28, 30, 32</code>, builds
-            firing-based proxies, and compares normalized signals and spectra.
+            where <code>J_ext = 28, 30, 32</code>, computes CDMs with a biophysical kernel
+            informed by the equivalent multicompartment network, computes a simple firing-rate
+            proxy from the same spikes, and compares both outputs in time and frequency domains.
           </p>
           <p>
             Notebook file:

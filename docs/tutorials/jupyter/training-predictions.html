@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ncpi Docs | Jupyter | Plot Simulation Results</title>
+  <title>ncpi Docs | Jupyter | Training an Inverse Model and Computing Predictions</title>
   <link rel="stylesheet" href="../../docs_style.css">
 </head>
 <body>
@@ -41,12 +41,9 @@
               <li><a class="subnav2" href="./simulate-lif-network.html">1. Simulate a LIF Network</a></li>
               <li><a class="subnav2" href="./compute-field-potentials.html">2. Compute Field Potentials</a></li>
               <li><a class="subnav2" href="./extract-features.html">3. Feature Extraction</a></li>
-              <li><a class="subnav2" href="./train-inverse-model.html">4. Inverse Model Training</a></li>
-              <li><a class="subnav2" href="./compute-predictions.html">5. Compute Predictions</a></li>
-              <li><a class="subnav2 active" href="./plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li><a class="subnav2 active" href="./training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
               <li class="subnav-group">Empirical Dataset Analysis</li>
               <li><a class="subnav2" href="./empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-empirical-results.html">2. Plot Empirical Results</a></li>
             </ul>
           </details>
         </li>
@@ -60,11 +57,33 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
-          <h1>Plot Simulation Results</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
+        <section id="overview">
+          <h1>Training an Inverse Model and Computing Predictions</h1>
+          <p>
+            This tutorial mirrors the <code>ncpi</code> README pipeline and explicitly
+            combines both stages: training inverse models from simulation-derived
+            features and computing predictions of the ground-truth E/I ratio.
+            It also includes a side-by-side comparison of multiple
+            machine-learning regressors.
+          </p>
+          <p>
+            Models compared in the notebook:
+            <code>RandomForestRegressor</code>, <code>Ridge</code>, and <code>MLPRegressor</code>.
+          </p>
+          <p>
+            Notebook file:
+            <a class="link" href="./notebooks/training-predictions.ipynb">training-predictions.ipynb</a>
+          </p>
           <p><a class="link" href="../jupyter-index.html">Back to Jupyter Tutorials Index</a></p>
+        </section>
+
+        <section id="rendered-notebook">
+          <h2>Rendered Notebook</h2>
+          <iframe
+            src="./notebooks/training-predictions.html"
+            title="Training an Inverse Model and Computing Predictions Notebook"
+            style="width:100%; min-height:760px; border:1px solid rgba(0,137,199,0.22); border-radius:10px;">
+          </iframe>
         </section>
       </article>
     </main>
@@ -72,7 +91,8 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#rendered-notebook">Rendered Notebook</a></li>
       </ul>
     </aside>
   </div>

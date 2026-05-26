@@ -610,8 +610,13 @@ class Inference:
 
         # --------- Scale (do not mutate self.features) ----------
         fitted_scaler = None
-        if scaler is not None:
+        if scaler is True:
+            from sklearn.preprocessing import StandardScaler
+            fitted_scaler = StandardScaler()
+        elif scaler is not None and not isinstance(scaler, (bool, np.bool_)):
             fitted_scaler = scaler
+
+        if fitted_scaler is not None:
             fitted_scaler.fit(X)
             X = fitted_scaler.transform(X)
 
@@ -950,7 +955,7 @@ class Inference:
         expected_n_features = None
 
         # 1) scaler is best (it was fit on training X)
-        if scaler is not None and hasattr(scaler, "n_features_in_"):
+        if scaler is not None and not isinstance(scaler, (bool, np.bool_)) and hasattr(scaler, "n_features_in_"):
             expected_n_features = int(scaler.n_features_in_)
 
         # 2) sklearn model(s) sometimes store n_features_in_
@@ -1075,7 +1080,7 @@ class Inference:
                     f"(missing 'sample' method): {type(p)}"
                 )
 
-        if scaler is not None and np.any(finite_mask):
+        if scaler is not None and not isinstance(scaler, (bool, np.bool_)) and np.any(finite_mask):
             X2 = X.copy()
             X2[finite_mask] = scaler.transform(X[finite_mask])
             X = X2

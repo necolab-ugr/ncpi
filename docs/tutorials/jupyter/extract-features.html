@@ -41,12 +41,9 @@
               <li><a class="subnav2" href="./simulate-lif-network.html">1. Simulate a LIF Network</a></li>
               <li><a class="subnav2" href="./compute-field-potentials.html">2. Compute Field Potentials</a></li>
               <li><a class="subnav2 active" href="./extract-features.html">3. Feature Extraction</a></li>
-              <li><a class="subnav2" href="./train-inverse-model.html">4. Inverse Model Training</a></li>
-              <li><a class="subnav2" href="./compute-predictions.html">5. Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-simulation-results.html">6. Plot Simulation Results</a></li>
+              <li><a class="subnav2" href="./training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
               <li class="subnav-group">Empirical Dataset Analysis</li>
               <li><a class="subnav2" href="./empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
-              <li><a class="subnav2" href="./plot-empirical-results.html">2. Plot Empirical Results</a></li>
             </ul>
           </details>
         </li>
@@ -60,11 +57,32 @@
 
     <main class="content">
       <article class="doc">
-        <section id="tutorial">
+        <section id="overview">
           <h1>Feature Extraction</h1>
-          <p><span class="pill">Under Construction</span></p>
-          <p>This tutorial page is under construction.</p>
+          <p>
+            This tutorial provides a Jupyter notebook that loads CDM signals from the field-potential
+            tutorial and computes feature vectors for each <code>J_ext</code> condition.
+            It extracts all <code>22</code> <code>catch22</code> features to capture complementary
+            time-structure, statistical, and spectral-related aspects of biological signals, and
+            computes <code>specparam</code> descriptors that separate aperiodic and oscillatory
+            components, focusing on slope and gamma peak frequency. It then visualizes the
+            <code>24</code> feature trends in a
+            <code>6 x 4</code> subplot figure.
+          </p>
+          <p>
+            Notebook file:
+            <a class="link" href="./notebooks/extract-features.ipynb">extract-features.ipynb</a>
+          </p>
           <p><a class="link" href="../jupyter-index.html">Back to Jupyter Tutorials Index</a></p>
+        </section>
+
+        <section id="rendered-notebook">
+          <h2>Rendered Notebook</h2>
+          <iframe
+            src="./notebooks/extract-features.html"
+            title="Feature Extraction Notebook"
+            style="width:100%; min-height:760px; border:1px solid rgba(0,137,199,0.22); border-radius:10px;">
+          </iframe>
         </section>
       </article>
     </main>
@@ -72,7 +90,8 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#tutorial">Status</a></li>
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#rendered-notebook">Rendered Notebook</a></li>
       </ul>
     </aside>
   </div>
