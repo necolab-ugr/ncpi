@@ -436,7 +436,8 @@ function createNuExtManager() {
 
 function setupUploadZones() {
     const runtime = window.__webuiRuntime || {};
-    const defaultMode = String(runtime.default_simulation_source_mode || '').trim().toLowerCase() === 'server-path'
+    const allowServerSource = runtime.is_server_runtime !== false;
+    const defaultMode = (allowServerSource && String(runtime.default_simulation_source_mode || '').trim().toLowerCase() === 'server-path')
         ? 'server-path'
         : 'upload';
     const nuExtManager = createNuExtManager();
@@ -545,6 +546,9 @@ function setupUploadZones() {
         const autoBtn = controls.querySelector('.proxy-upload-auto');
         const localBtn = controls.querySelector('.proxy-upload-local');
         const serverBtn = controls.querySelector('.proxy-upload-server');
+        if (!allowServerSource && serverBtn) {
+            serverBtn.classList.add('hidden');
+        }
 
         const applyModeVisuals = (mode) => {
             const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
@@ -624,7 +628,7 @@ function setupUploadZones() {
 
         const setMode = (mode) => {
             const normalized = String(mode || '').trim().toLowerCase();
-            const nextMode = normalized === 'server-path'
+            const nextMode = (allowServerSource && normalized === 'server-path')
                 ? 'server-path'
                 : (normalized === 'auto-detected' ? 'auto-detected' : 'upload');
             sourceModeInput.value = nextMode;
@@ -641,6 +645,9 @@ function setupUploadZones() {
         };
 
         const openServerPicker = () => {
+            if (!allowServerSource) {
+                return;
+            }
             if (!serverBrowser) {
                 return;
             }
@@ -676,6 +683,7 @@ function setupUploadZones() {
         if (serverBtn) {
             serverBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
+                if (!allowServerSource) return;
                 setMode('server-path');
                 notifyNuExtTrialDetection();
             });
@@ -702,7 +710,7 @@ function setupUploadZones() {
                 return;
             }
             const mode = String(sourceModeInput.value || '').trim().toLowerCase();
-            if (mode === 'server-path') {
+            if (allowServerSource && mode === 'server-path') {
                 openServerPicker();
                 return;
             }
@@ -750,7 +758,7 @@ function setupUploadZones() {
                 return { fileKey, kind: 'local', file: selectedFile };
             }
             const selectedServerPath = String(serverPathInput.value || '').trim();
-            if (selectedServerPath) {
+            if (allowServerSource && selectedServerPath) {
                 return { fileKey, kind: 'server', path: selectedServerPath };
             }
             const mode = String(sourceModeInput.value || '').trim().toLowerCase();
@@ -761,7 +769,10 @@ function setupUploadZones() {
         });
 
         const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
-        if (initialMode === 'server-path') {
+        if (!allowServerSource) {
+            serverPathInput.value = '';
+            setMode('upload');
+        } else if (initialMode === 'server-path') {
             setMode('server-path');
         } else if (initialMode === 'auto-detected' || (hasDetectedDefault && !isDefaultIgnored())) {
             setMode('auto-detected');

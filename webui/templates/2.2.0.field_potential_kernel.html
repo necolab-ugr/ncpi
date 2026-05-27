@@ -437,7 +437,7 @@
                                 data-source-mode-input="kernel_spike_times_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelSpikeTimesFile" name="kernel_spike_times_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="{{ 'auto-detected' if default_sim.times else 'server-path' }}" />
+                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="{{ 'auto-detected' if default_sim.times else ('server-path' if webui_runtime.is_server_runtime else 'upload') }}" />
                                 <input type="hidden" name="kernel_spike_times_file_server_path" value="{{ default_sim_paths.times if default_sim.times else '' }}" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times in simulation.pkl or times.pkl)</span>
@@ -2433,6 +2433,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const autoBtn = controls.querySelector('.kernel-upload-auto');
         const localBtn = controls.querySelector('.kernel-upload-local');
         const serverBtn = controls.querySelector('.kernel-upload-server');
+        if (!kernelServerModeEnabled && serverBtn) {
+            serverBtn.classList.add('hidden');
+        }
         const hintEl = zone.querySelector('[data-role="hint"]') || zone.querySelector('p.text-\\[10px\\]');
 
         const localSummary = document.createElement('div');
@@ -2499,7 +2502,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const getMode = () => {
             const mode = String(modeInput.value || '').trim().toLowerCase();
-            if (mode === 'server-path') return 'server-path';
+            if (mode === 'server-path') return kernelServerModeEnabled ? 'server-path' : 'upload';
             if (mode === 'auto-detected') return 'auto-detected';
             return 'upload';
         };
@@ -2547,7 +2550,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const setMode = (mode) => {
             const normalized = String(mode || '').trim().toLowerCase();
-            const nextMode = normalized === 'server-path'
+            const nextMode = (kernelServerModeEnabled && normalized === 'server-path')
                 ? 'server-path'
                 : (normalized === 'auto-detected' ? 'auto-detected' : 'upload');
             modeInput.value = nextMode;
@@ -2577,6 +2580,7 @@ document.addEventListener('DOMContentLoaded', () => {
         serverBtn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();
+            if (!kernelServerModeEnabled) return;
             setMode('server-path');
         });
 
@@ -2608,7 +2612,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const mode = getMode();
-            if (mode === 'server-path') {
+            if (kernelServerModeEnabled && mode === 'server-path') {
                 await openServerFileModal(serverPathInput, cfg.extensions, cfg.historyKey || KERNEL_SERVER_FILE_HISTORY_KEY);
                 renderServerMode();
                 return;
@@ -2674,7 +2678,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const initialModeRaw = String(modeInput.value || '').trim().toLowerCase();
         const initialMode = initialModeRaw === 'auto-detected'
             ? 'auto-detected'
-            : (initialModeRaw === 'server-path' ? 'server-path' : 'upload');
+            : ((kernelServerModeEnabled && initialModeRaw === 'server-path') ? 'server-path' : 'upload');
+        if (!kernelServerModeEnabled) {
+            serverPathInput.value = '';
+        }
         applyModeVisuals(initialMode);
         if (initialMode === 'server-path') {
             renderServerMode();

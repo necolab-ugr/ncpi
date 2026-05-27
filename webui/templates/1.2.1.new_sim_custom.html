@@ -277,7 +277,10 @@
 (() => {
     const runtime = window.__webuiRuntime || {};
     const SERVER_BROWSER_HISTORY_KEY = "simulation_custom:file_browser";
-    const defaultMode = String(runtime.default_simulation_source_mode || "upload").toLowerCase() === "server-path" ? "server-path" : "upload";
+    const allowServerSource = runtime.is_server_runtime !== false;
+    const defaultMode = (allowServerSource && String(runtime.default_simulation_source_mode || "upload").toLowerCase() === "server-path")
+        ? "server-path"
+        : "upload";
     const form = document.getElementById("custom-simulation-form");
     const formError = document.getElementById("custom-form-error");
 
@@ -330,25 +333,28 @@
         const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
 
         [uploadBtn, serverBtn].forEach((btn) => {
+            if (!btn) return;
             btn.classList.remove(...activeClasses);
             btn.classList.add(...inactiveClasses);
         });
 
-        if (mode === "server-path") {
+        if (mode === "server-path" && allowServerSource && serverBtn) {
             serverBtn.classList.add(...activeClasses);
             serverBtn.classList.remove(...inactiveClasses);
             hint.textContent = "Drag and drop pkl files or click to browse";
             localSummary.classList.add("hidden");
         } else {
-            uploadBtn.classList.add(...activeClasses);
-            uploadBtn.classList.remove(...inactiveClasses);
+            if (uploadBtn) {
+                uploadBtn.classList.add(...activeClasses);
+                uploadBtn.classList.remove(...inactiveClasses);
+            }
             hint.textContent = "Drag and drop pkl files or click to browse";
             serverSummary.classList.add("hidden");
         }
     };
 
     const setMode = (field, mode) => {
-        const normalized = mode === "server-path" ? "server-path" : "upload";
+        const normalized = (!allowServerSource || mode !== "server-path") ? "upload" : "server-path";
         const modeInput = getModeInput(field);
         const fileInput = getFileInput(field);
         const serverInput = getServerInput(field);
@@ -524,17 +530,26 @@
         const localClearBtn = card.querySelector('[data-role="local-clear"]');
         const serverClearBtn = card.querySelector('[data-role="server-clear"]');
 
+        if (!allowServerSource && serverBtn) {
+            serverBtn.classList.add("hidden");
+        }
+
         setMode(field, defaultMode);
 
-        uploadBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            setMode(field, "upload");
-        });
+        if (uploadBtn) {
+            uploadBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                setMode(field, "upload");
+            });
+        }
 
-        serverBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            setMode(field, "server-path");
-        });
+        if (serverBtn) {
+            serverBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                if (!allowServerSource) return;
+                setMode(field, "server-path");
+            });
+        }
 
         if (localClearBtn) {
             localClearBtn.addEventListener("click", (event) => {
@@ -558,8 +573,10 @@
         card.addEventListener("click", () => {
             if (modeInput.value === "upload") {
                 fileInput.click();
-            } else {
+            } else if (allowServerSource) {
                 openModalForField(field);
+            } else {
+                setMode(field, "upload");
             }
         });
 
@@ -633,7 +650,8 @@
         cards.forEach((card) => {
             const field = card.dataset.field;
             const label = card.dataset.label || field;
-            const mode = String(getModeInput(field)?.value || "upload").trim().toLowerCase();
+            const rawMode = String(getModeInput(field)?.value || "upload").trim().toLowerCase();
+            const mode = (!allowServerSource || rawMode !== "server-path") ? "upload" : "server-path";
             const fileInput = getFileInput(field);
             const serverPath = String(getServerInput(field)?.value || "").trim();
 

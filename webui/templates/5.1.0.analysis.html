@@ -56,7 +56,11 @@
             tabOrder: ['upload-data', 'boxplot', 'topomap', 'simulation-outputs'],
             uploads: {},
             runtime: (window.__webuiRuntime || {}),
-            analysisSourceMode: ((window.__webuiRuntime || {}).default_analysis_source_mode || 'server-path'),
+            allowServerSource: ((window.__webuiRuntime || {}).is_server_runtime !== false),
+            analysisSourceMode: (
+                ((window.__webuiRuntime || {}).is_server_runtime !== false) &&
+                String((window.__webuiRuntime || {}).default_analysis_source_mode || '').toLowerCase() === 'server-path'
+            ) ? 'server-path' : 'upload',
             analysisUploadKind: 'dataframe',
             dfColumns: [],
             columnsLoading: false,
@@ -195,7 +199,7 @@
                 }
             },
             setAnalysisSourceMode(mode) {
-                this.analysisSourceMode = mode === 'upload' ? 'upload' : 'server-path';
+                this.analysisSourceMode = (this.allowServerSource && mode === 'server-path') ? 'server-path' : 'upload';
                 this.analysisBrowseRequestId += 1;
                 const uploadInput = document.getElementById('analysis-upload-auto');
                 if (this.analysisSourceMode === 'upload') {
@@ -256,7 +260,7 @@
                 }
             },
             async openAnalysisServerFileBrowser() {
-                if (this.analysisSourceMode !== 'server-path') {
+                if (!this.allowServerSource || this.analysisSourceMode !== 'server-path') {
                     return;
                 }
                 this.serverFileBrowserOpen = true;
@@ -326,7 +330,7 @@
                 }
                 const requestId = this.analysisBrowseRequestId + 1;
                 this.analysisBrowseRequestId = requestId;
-                if (this.analysisSourceMode === 'server-path') {
+                if (this.allowServerSource && this.analysisSourceMode === 'server-path') {
                     await this.pickServerAnalysisFile(requestId);
                     return;
                 }
@@ -729,6 +733,9 @@
                 }
             },
             init() {
+                if (!this.allowServerSource) {
+                    this.analysisSourceMode = 'upload';
+                }
                 if (this.hasExistingData) {
                     const name = this.currentDataFile();
                     if (name) {
@@ -1087,6 +1094,10 @@
                 }
             },
             async loadAutoDetectedServerPath(filePath) {
+                if (!this.allowServerSource) {
+                    this.columnsError = 'Server file selection is unavailable in local runtime.';
+                    return;
+                }
                 const selectedPath = String(filePath || '').trim();
                 if (!selectedPath) {
                     this.columnsError = 'No server file path was selected.';
@@ -1198,6 +1209,10 @@
                 }
             },
             async loadColumnsFromServerPath(filePath) {
+                if (!this.allowServerSource) {
+                    this.columnsError = 'Server file selection is unavailable in local runtime.';
+                    return;
+                }
                 if (!this.canSelectDataframe()) {
                     this.columnsError = 'Unselect simulation outputs before selecting a dataframe.';
                     return;
@@ -1251,7 +1266,7 @@
             },
             async pickServerAnalysisFile(requestId = null) {
                 this.columnsError = '';
-                if ((requestId !== null && requestId !== this.analysisBrowseRequestId) || this.analysisSourceMode !== 'server-path') {
+                if (!this.allowServerSource || (requestId !== null && requestId !== this.analysisBrowseRequestId) || this.analysisSourceMode !== 'server-path') {
                     return;
                 }
                 await this.openAnalysisServerFileBrowser();
@@ -1734,7 +1749,7 @@
                                             : 'border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300'">
                                         Local upload
                                     </button>
-                                    <button type="button" @click.stop="setAnalysisSourceMode('server-path')"
+                                    <button type="button" x-show="allowServerSource" x-cloak @click.stop="setAnalysisSourceMode('server-path')"
                                         class="px-3 py-1.5 text-xs rounded-lg border"
                                         :class="analysisSourceMode === 'server-path'
                                             ? 'border-primary bg-primary/10 text-primary font-semibold'

@@ -50,6 +50,7 @@
     id="compute-predictions-root"
     x-data="{
         runtime: (window.__webuiRuntime || {}),
+        allowServerSource: ((window.__webuiRuntime || {}).is_server_runtime !== false),
         featuresSourceMode: '{{ "auto-detected" if default_feature_file else inference_default_source_mode }}',
         featuresServerFilePath: '',
         assetsSourceMode: '{{ inference_default_source_mode }}',
@@ -190,7 +191,7 @@
                                 Pipeline detection
                             </button>
                             <button id="features-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
-                            <button id="features-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                            <button id="features-source-server-btn" type="button" x-show="allowServerSource" x-cloak class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
                             <button id="features-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                         </div>
                         <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
@@ -320,7 +321,7 @@
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
                                 <button id="assets-model-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'upload' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Local upload</button>
-                                <button id="assets-model-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'server-path' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Server upload</button>
+                                <button id="assets-model-source-server-btn" type="button" x-show="allowServerSource" x-cloak class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'server-path' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Server upload</button>
                                 <button id="assets-model-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                             </div>
                             <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
@@ -355,7 +356,7 @@
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
                                 <button id="assets-scaler-source-upload-btn" type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'upload' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Local upload</button>
-                                <button id="assets-scaler-source-server-btn" type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'server-path' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Server upload</button>
+                                <button id="assets-scaler-source-server-btn" type="button" x-show="allowServerSource" x-cloak class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'server-path' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Server upload</button>
                                 <button id="assets-scaler-server-browse-btn" type="button" class="hidden" aria-hidden="true" tabindex="-1"></button>
                             </div>
                             <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
@@ -1194,6 +1195,10 @@
 
     function bindInferenceServerBrowsers(onAssetsSourceChange) {
         const runtime = window.__webuiRuntime || {};
+        const allowServerSource = runtime.is_server_runtime !== false;
+        if (!allowServerSource) {
+            return;
+        }
         const FEATURES_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:features_file_browser";
         const ASSETS_MODEL_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:assets_model_file_browser";
         const ASSETS_SCALER_SERVER_FILES_HISTORY_KEY = "inference_compute_predictions:assets_scaler_file_browser";
@@ -1945,6 +1950,7 @@
         if (pageInitialized) return;
         pageInitialized = true;
         const state = getInferenceState();
+        const allowServerSource = (window.__webuiRuntime || {}).is_server_runtime !== false;
         const form = document.querySelector("form[action*='start_computation_redirect/inference']");
         const input = byId("file-upload-features");
         const featuresDropZone = byId("features-drop-zone");
@@ -1981,6 +1987,36 @@
         const assetsScalerBrowseBtn = byId("assets-scaler-server-browse-btn");
         const assetsScalerLocalClearBtn = byId("assets-scaler-local-clear");
         const assetsScalerServerClearBtn = byId("assets-scaler-server-clear");
+
+        if (!allowServerSource) {
+            if (state) {
+                state.featuresSourceMode = (String(featuresSourceModeInput && featuresSourceModeInput.value || "").trim().toLowerCase() === "auto-detected")
+                    ? "auto-detected"
+                    : "upload";
+                state.assetsSourceMode = "upload";
+                state.featuresServerFilePath = "";
+                state.assetsServerFolderPath = "";
+                state.assetsModelServerFilePath = "";
+                state.assetsScalerServerFilePath = "";
+            }
+            if (featuresSourceModeInput && String(featuresSourceModeInput.value || "").trim().toLowerCase() === "server-path") {
+                featuresSourceModeInput.value = "upload";
+                syncInputValue(featuresSourceModeInput);
+            }
+            if (modelAssetsSourceInput) {
+                modelAssetsSourceInput.value = "upload";
+                syncInputValue(modelAssetsSourceInput);
+            }
+            [featuresServerFilePathInput, assetsServerFolderInput, assetsModelServerFilePathInput, assetsScalerServerFilePathInput].forEach((el) => {
+                if (!el) return;
+                el.value = "";
+                syncInputValue(el);
+            });
+            [featuresSourceServerBtn, assetsModelServerBtn, assetsScalerServerBtn].forEach((el) => {
+                if (!el) return;
+                el.classList.add("hidden");
+            });
+        }
 
         const setInputFiles = (targetInput, files, limitToFirst = false) => {
             if (!targetInput) return false;
@@ -2079,6 +2115,7 @@
             featuresSourceServerBtn.addEventListener("click", (event) => {
                 event.preventDefault();
                 event.stopPropagation();
+                if (!allowServerSource) return;
                 if (state) {
                     state.featuresSourceMode = "server-path";
                 }
@@ -2100,7 +2137,7 @@
                 event.preventDefault();
                 event.stopPropagation();
                 featuresServerFilePathInput.value = "";
-                featuresSourceModeInput.value = "server-path";
+                featuresSourceModeInput.value = allowServerSource ? "server-path" : "upload";
                 syncInputValue(featuresSourceModeInput);
                 syncInputValue(featuresServerFilePathInput);
                 refreshFeaturesLoadStatus();
@@ -2108,7 +2145,9 @@
         }
         const applyAssetsSourceMode = (mode) => {
             if (!modelAssetsSourceInput) return;
-            const normalizedMode = String(mode || "upload").trim().toLowerCase() === "server-path" ? "server-path" : "upload";
+            const normalizedMode = (allowServerSource && String(mode || "upload").trim().toLowerCase() === "server-path")
+                ? "server-path"
+                : "upload";
             if (state) {
                 state.assetsSourceMode = normalizedMode;
             }
@@ -2127,7 +2166,7 @@
         if (featuresDropZone && input && featuresSourceModeInput) {
             featuresDropZone.addEventListener("click", () => {
                 const mode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
-                if (mode === "server-path") {
+                if (allowServerSource && mode === "server-path") {
                     if (featuresServerBrowseBtn) {
                         featuresServerBrowseBtn.click();
                     }
@@ -2185,6 +2224,7 @@
                 config.serverBtn.addEventListener("click", (event) => {
                     event.preventDefault();
                     event.stopPropagation();
+                    if (!allowServerSource) return;
                     setAssetsIndividualSourceMode("server-path");
                     if (config.browseBtn) {
                         config.browseBtn.click();
@@ -2210,7 +2250,7 @@
             }
             config.dropZone.addEventListener("click", () => {
                 const sourceMode = String(modelAssetsSourceInput && modelAssetsSourceInput.value ? modelAssetsSourceInput.value : "upload").trim().toLowerCase();
-                if (sourceMode === "server-path") {
+                if (allowServerSource && sourceMode === "server-path") {
                     if (config.browseBtn) {
                         config.browseBtn.click();
                     }
@@ -2284,10 +2324,13 @@
                 const hasLocalFeatures = Boolean(input && input.files && input.files.length);
                 const hasExistingFeatures = Boolean(existingInput && String(existingInput.value || "").trim());
                 const hasServerFeatures = Boolean(featuresServerFilePathInput && String(featuresServerFilePathInput.value || "").trim());
+                if (!allowServerSource && featuresMode === "server-path") {
+                    featuresMode = "upload";
+                }
                 if (!["upload", "server-path", "auto-detected"].includes(featuresMode)) {
                     if (hasExistingFeatures) {
                         featuresMode = "auto-detected";
-                    } else if (hasServerFeatures) {
+                    } else if (allowServerSource && hasServerFeatures) {
                         featuresMode = "server-path";
                     } else {
                         featuresMode = "upload";
@@ -2349,8 +2392,11 @@
                 const hasServerAny = hasServerFolder || hasServerIndividual;
 
                 let assetsSource = String(modelAssetsSourceInput.value || "upload").trim().toLowerCase();
+                if (!allowServerSource && assetsSource === "server-path") {
+                    assetsSource = "upload";
+                }
                 if (assetsSource !== "upload" && assetsSource !== "server-path") {
-                    assetsSource = hasServerAny ? "server-path" : "upload";
+                    assetsSource = (allowServerSource && hasServerAny) ? "server-path" : "upload";
                 }
                 modelAssetsSourceInput.value = assetsSource;
                 syncInputValue(modelAssetsSourceInput);

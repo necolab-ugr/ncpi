@@ -12,8 +12,13 @@
     function featuresPage() {
         const runtime = window.__featuresRuntime || {};
         const SERVER_DIRECTORY_HISTORY_KEY = 'features:directory_browser';
-        const defaultEmpiricalSourceMode = runtime.default_empirical_source_mode || 'server-path';
-        const defaultSimulationSourceMode = runtime.default_simulation_source_mode || 'server-path';
+        const allowServerSource = runtime.is_server_runtime !== false;
+        const defaultEmpiricalSourceMode = (allowServerSource && String(runtime.default_empirical_source_mode || '').toLowerCase() === 'server-path')
+            ? 'server-path'
+            : 'upload';
+        const defaultSimulationSourceMode = (allowServerSource && String(runtime.default_simulation_source_mode || '').toLowerCase() === 'server-path')
+            ? 'server-path'
+            : 'upload';
         const initialEntry = String(window.__featuresInitialEntry || '').trim().toLowerCase();
         const initialTab = String(window.__featuresInitialTab || '').trim().toLowerCase();
         const startOnLoadPrecomputed = initialEntry === 'load' || initialTab === 'load-precomputed';
@@ -45,6 +50,7 @@
             uploads: {},
             pipelineFiles: window.__featuresPipelineFiles || [],
             runtime,
+            allowServerSource,
             defaultEmpiricalSourceMode,
             defaultSimulationSourceMode,
             selectedPipelinePath: '',
@@ -477,7 +483,7 @@ def custom_feature(sample, params):
                 this.simulationLocalFiles = [];
             },
             setSimulationSourceMode(mode) {
-                const nextMode = mode === 'upload' ? 'upload' : 'server-path';
+                const nextMode = (this.allowServerSource && mode === 'server-path') ? 'server-path' : 'upload';
                 if (this.simulationSourceMode === nextMode) {
                     if (nextMode === 'server-path') {
                         this.syncAdditionalFileSourceModeWithDataSource();
@@ -619,7 +625,7 @@ def custom_feature(sample, params):
                 this.onSimulationUploadSelected({ target: { files: dataTransfer.files } });
             },
             setEmpiricalSourceMode(mode) {
-                const nextMode = mode === 'upload' ? 'upload' : 'server-path';
+                const nextMode = (this.allowServerSource && mode === 'server-path') ? 'server-path' : 'upload';
                 if (this.empiricalSourceMode === nextMode) return;
                 this.empiricalSourceMode = nextMode;
                 this.parserFilenameFormat = '';
@@ -697,12 +703,14 @@ def custom_feature(sample, params):
                 }
             },
             async openServerDirectoryBrowser() {
+                if (!this.allowServerSource) return;
                 this.serverDirBrowserTarget = 'empirical';
                 this.serverDirBrowserOpen = true;
                 const startPath = String(this.empiricalFolderPath || '').trim() || '';
                 await this.loadServerDirectory(startPath);
             },
             async openServerDirectoryBrowserFor(target) {
+                if (!this.allowServerSource) return;
                 this.serverDirBrowserTarget = target === 'simulation' ? 'simulation' : 'empirical';
                 this.serverDirBrowserOpen = true;
                 const preferredPath = this.serverDirBrowserTarget === 'simulation'
@@ -714,6 +722,7 @@ def custom_feature(sample, params):
                 await this.loadServerDirectory(startPath);
             },
             async addSimulationFolderPath(path) {
+                if (!this.allowServerSource) return;
                 const selectedPath = String(path || '').trim();
                 if (!selectedPath) return;
                 const current = Array.isArray(this.simulationFolderPaths) ? [...this.simulationFolderPaths] : [];
@@ -894,7 +903,7 @@ def custom_feature(sample, params):
                 await this.inspectSimulationFolderPath();
             },
             isServerDataFolderMode() {
-                return this.computeFlowChoice === 'new-data' && this.simulationSourceMode === 'server-path';
+                return this.allowServerSource && this.computeFlowChoice === 'new-data' && this.simulationSourceMode === 'server-path';
             },
             selectedServerDataFolderPath() {
                 if (!this.isServerDataFolderMode()) return '';
@@ -943,6 +952,7 @@ def custom_feature(sample, params):
                 return String(Math.max(1, Math.round(Number(fsHz))));
             },
             async chooseServerDirectory() {
+                if (!this.allowServerSource) return;
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
                 if (!selectedPath) {
                     this.serverDirBrowserError = 'No server directory selected.';
@@ -985,7 +995,7 @@ def custom_feature(sample, params):
                 }
             },
             setAdditionalFileSourceMode(mode) {
-                const nextMode = mode === 'server-path' ? 'server-path' : 'upload';
+                const nextMode = (this.allowServerSource && mode === 'server-path') ? 'server-path' : 'upload';
                 if (nextMode === 'upload' && this.isServerDataFolderMode()) {
                     this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                     return;
@@ -1028,6 +1038,7 @@ def custom_feature(sample, params):
                 await this.inspectAllAdditionalFiles();
             },
             async openServerFileBrowser() {
+                if (!this.allowServerSource) return;
                 this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                 this.serverFileBrowserError = '';
                 this.serverFileBrowserOpen = true;
@@ -2239,6 +2250,10 @@ def custom_feature(sample, params):
                 await this.openServerDirectoryBrowserFor('simulation');
             },
             async inspectSimulationFolderPath() {
+                if (!this.allowServerSource) {
+                    this.parserError = 'Server folder selection is unavailable in local runtime.';
+                    return;
+                }
                 const folderPaths = Array.isArray(this.simulationFolderPaths) && this.simulationFolderPaths.length > 0
                     ? this.simulationFolderPaths
                     : (String(this.simulationFolderPath || '').trim() ? [String(this.simulationFolderPath || '').trim()] : []);
@@ -2394,11 +2409,16 @@ def custom_feature(sample, params):
                 }
             },
             async pickEmpiricalFolder() {
+                if (!this.allowServerSource) return;
                 this.submitError = '';
                 this.parserError = '';
                 await this.openServerDirectoryBrowser();
             },
             async inspectEmpiricalFolderPath() {
+                if (!this.allowServerSource) {
+                    this.parserError = 'Server folder selection is unavailable in local runtime.';
+                    return;
+                }
                 const folder = String(this.empiricalFolderPath || '').trim();
                 this.submitError = '';
                 this.parserError = '';
@@ -3883,7 +3903,7 @@ def custom_feature(sample, params):
                                     :class="simulationSourceMode === 'upload' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
                                     Local folder
                                 </button>
-                                <button type="button" @click.stop="setSimulationSourceMode('server-path')"
+                                <button type="button" x-show="allowServerSource" x-cloak @click.stop="setSimulationSourceMode('server-path')"
                                     class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
                                     :class="simulationSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
                                     Server folder
@@ -4001,7 +4021,7 @@ def custom_feature(sample, params):
                                             : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300')">
                                     Local files
                                 </button>
-                                <button type="button" @click.stop="setAdditionalFileSourceMode('server-path')"
+                                <button type="button" x-show="allowServerSource" x-cloak @click.stop="setAdditionalFileSourceMode('server-path')"
                                     class="px-3 py-1.5 text-xs rounded-lg border transition-colors"
                                     :class="additionalFileSourceMode === 'server-path' ? 'border-primary bg-primary/10 text-primary font-semibold' : 'border-gray-200 dark:border-[#323b67] text-gray-600 dark:text-gray-300'">
                                     Server files
