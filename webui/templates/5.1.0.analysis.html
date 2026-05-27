@@ -2154,9 +2154,9 @@
                                     <p x-show="!columnsLoading && !dfColumns.length" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Upload a dataframe to enable column selection.</p>
                                 </div>
 
-                                <div class="sm:col-span-3" x-show="topomapSignalType === 'eeg'" x-cloak>
+                                <div class="sm:col-span-3">
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
-                                        for="topomap-sensor-col">Sensor column</label>
+                                        for="topomap-sensor-col" x-text="topomapSignalType === 'meg' ? 'Region column' : 'Sensor column'">Sensor column</label>
                                     <div class="mt-2">
                                         <select
                                             class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
@@ -2169,7 +2169,7 @@
                                         </select>
                                     </div>
                                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                                        Leave empty to auto-detect sensor, channel, ch, or electrode.
+                                        Leave empty to auto-detect sensor/channel/region column.
                                     </p>
                                 </div>
 

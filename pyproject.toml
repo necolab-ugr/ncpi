@@ -56,8 +56,12 @@ analysis = [
     "rpy2",
     "mne",
     "nibabel",
+    "pyvista",
     "pyvistaqt",
+    "qtpy",
     "PyQt5",
+    "ipywidgets",
+    "ipyevents",
 ]
 
 # Field potential / kernel workflows + M/EEG utilities

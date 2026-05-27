@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import warnings
 from dataclasses import dataclass
@@ -140,6 +141,14 @@ class Analysis:
     """
 
     def __init__(self, data: Any):
+        """Initialize the analysis helper with an arbitrary data container.
+
+        Parameters
+        ----------
+        data:
+            Input object stored on the instance. Methods that require tabular
+            input validate and coerce this value via :meth:`_as_dataframe`.
+        """
         self.data = data
 
     # ------------------------------------------------------------------
@@ -823,9 +832,9 @@ class Analysis:
 
         return results
 
-    # ------------------------------------------------------------------
-    # EEG plotting using MNE
-    # ------------------------------------------------------------------
+    # --------------
+    # EEG plotting
+    # --------------
 
     @staticmethod
     def _make_eeg_info(
@@ -834,6 +843,24 @@ class Analysis:
         position_offset: Tuple[float, float],
         ch_type: str = "eeg",
     ) -> Any:
+        """Build an MNE ``Info`` object with montage coordinates for selected channels.
+
+        Parameters
+        ----------
+        ch_names:
+            Channel names to include in the ``Info`` object.
+        montage:
+            Name of an MNE built-in montage (for example ``"standard_1005"``).
+        position_offset:
+            Tuple ``(y_offset, z_offset)`` applied to montage channel positions.
+        ch_type:
+            MNE channel type assigned to all channels.
+
+        Returns
+        -------
+        Any
+            MNE ``Info`` object with a dig montage set.
+        """
         mne = tools.dynamic_import("mne")
 
         if len(position_offset) != 2:
@@ -892,13 +919,49 @@ class Analysis:
         title=None,
         names=None,
     ):
+        """Plot EEG topography from channel-wise values using MNE.
+
+        Parameters
+        ----------
+        values:
+            Channel values as a ``pandas.Series``, mapping, or 1D array-like.
+            If None, values are derived from ``self.data`` using ``sensor_col``,
+            ``data_col``, and ``data_index``.
+        ch_names:
+            Channel names corresponding to ``values`` when ``values`` is array-like.
+        position_offset:
+            Tuple ``(y_offset, z_offset)`` used to shift montage coordinates.
+        sensor_col, data_col, data_index:
+            DataFrame extraction options used when ``values`` is None.
+        montage, ch_type:
+            MNE montage and channel type used to construct sensor geometry.
+        sphere, cmap, vmin, vmax:
+            Topomap interpolation sphere, colormap, and color limits.
+        colorbar, colorbar_fmt, colorbar_label, colorbar_label_fontsize, colorbar_tick_fontsize:
+            Colorbar visibility and formatting options.
+        sensors, outlines, contours, res, extrapolate, image_interp:
+            Optional keyword arguments forwarded to ``mne.viz.plot_topomap``.
+        axes:
+            Optional Matplotlib axes where the topomap is rendered.
+        show:
+            If True, displays the figure with ``matplotlib.pyplot.show``.
+        title:
+            Optional axes title.
+        names:
+            Reserved for API compatibility; currently not used.
+
+        Returns
+        -------
+        Any
+            Matplotlib image handle returned by ``mne.viz.plot_topomap``.
+        """
         if not tools.ensure_module("mne"):
             raise ImportError("mne is required for eeg_topomap but is not installed.")
 
         import matplotlib.pyplot as plt
         mne_viz = tools.dynamic_import("mne", "viz")
 
-        # Paso A — Resolver datos y nombres de canales
+        # Step A — Resolve data and channel names
         if values is None:
             df = self._as_dataframe()
             if sensor_col not in df.columns:
@@ -946,20 +1009,20 @@ class Analysis:
         if len(ch_names_in) != data_arr.shape[0]:
             raise ValueError(f"Length mismatch: {len(ch_names_in)} channel names vs {data_arr.shape[0]} values.")
 
-        # Paso B — Validar position_offset
+        # Step B — Validate position_offset
         if len(position_offset) != 2 or not all(isinstance(v, (int, float)) for v in position_offset):
             raise ValueError("position_offset must be a tuple/list of two numbers: (y_offset, z_offset).")
 
-        # Paso C — Crear Info
+        # Step C — Create MNE Info
         info_use = self._make_eeg_info(ch_names_in, montage, position_offset, ch_type)
 
-        # Paso D — All-zeros
+        # Step D — Handle all-zero input
         if np.all(data_arr == 0):
             cmap = "Greys"
             colorbar = False
             vmin = vmax = 0.0
 
-        # Paso E — vmin/vmax
+        # Step E — Resolve vmin/vmax
         if vmin is None:
             vmin = float(np.nanmin(data_arr))
         if vmax is None:
@@ -967,7 +1030,7 @@ class Analysis:
         if vmin > vmax:
             raise ValueError(f"vmin ({vmin}) must be <= vmax ({vmax}).")
 
-        # Paso F — Plot
+        # Step F — Plot
         # Match the legacy plots.py call by default. Optional MNE kwargs are
         # forwarded only when explicitly provided, because forcing them can
         # change interpolation/contours across MNE versions.
@@ -989,7 +1052,7 @@ class Analysis:
         )
         im.set_clim(vmin, vmax)
 
-        # Paso G — Colorbar manual
+        # Step G — Manual colorbar
         if colorbar:
             mid = vmin + (vmax - vmin) / 2
             cbar = plt.colorbar(
@@ -1000,7 +1063,7 @@ class Analysis:
             if colorbar_label:
                 cbar.set_label(colorbar_label, fontsize=colorbar_label_fontsize)
 
-        # Paso H — Título y show
+        # Step H — Title and show
         if title:
             (axes if axes is not None else im.axes).set_title(title)
         if show:
@@ -1011,10 +1074,77 @@ class Analysis:
     # --------------
     # MEG plotting
     # --------------
+
+    @staticmethod
+    def _normalize_meg_region_name(name: Any) -> str:
+        """Normalize a region label for robust atlas-name matching.
+
+        The normalization accepts common hemisphere spellings and separators,
+        for example ``"bankssts L"``, ``"bankssts-lh"``, ``"ctx_lh_bankssts"``,
+        and maps them to a canonical key such as ``"bankssts-lh"``.
+        """
+        text = str(name or "").strip().lower()
+        if not text:
+            return ""
+        text = text.replace("ctx-lh-", "lh ").replace("ctx-rh-", "rh ")
+        text = text.replace("ctx_lh_", "lh ").replace("ctx_rh_", "rh ")
+        text = re.sub(r"[\._\-]+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        tokens = [tok for tok in text.split(" ") if tok]
+        if not tokens:
+            return ""
+
+        hemi = None
+        left_tokens = {"lh", "left", "l"}
+        right_tokens = {"rh", "right", "r"}
+
+        if tokens and tokens[0] in left_tokens | right_tokens:
+            hemi = "lh" if tokens[0] in left_tokens else "rh"
+            tokens = tokens[1:]
+        elif tokens and tokens[-1] in left_tokens | right_tokens:
+            hemi = "lh" if tokens[-1] in left_tokens else "rh"
+            tokens = tokens[:-1]
+        elif "lh" in tokens:
+            hemi = "lh"
+            tokens = [tok for tok in tokens if tok != "lh"]
+        elif "rh" in tokens:
+            hemi = "rh"
+            tokens = [tok for tok in tokens if tok != "rh"]
+
+        tokens = [tok for tok in tokens if tok not in {"ctx", "cortex"}]
+        if not tokens:
+            return hemi or ""
+        region = "".join(tokens)
+        return f"{region}-{hemi}" if hemi else region
+
+    @staticmethod
+    def _extract_region_index(name: Any) -> Optional[int]:
+        """Extract a trailing integer index from a region-like label.
+
+        Examples
+        --------
+        ``"ch0" -> 0``, ``"region_17" -> 17``, ``"DK-12" -> 12``.
+        """
+        text = str(name or "").strip()
+        if not text:
+            return None
+        match = re.search(r"(\d+)\s*$", text)
+        if match is None:
+            return None
+        try:
+            return int(match.group(1))
+        except (TypeError, ValueError):
+            return None
+
+
     def meg_surface(
         self,
-        values: Union[Sequence[float], np.ndarray, pd.Series],
+        values: Optional[Union[Sequence[float], np.ndarray, pd.Series, Mapping[Any, Any]]] = None,
+        ch_names: Optional[Sequence[str]] = None,
         *,
+        sensor_col: str = "sensor",
+        data_col: str = "data",
+        data_index: Optional[int] = -1,
         atlas: str = "dk",
         subject: str = "fsaverage",
         subjects_dir: Optional[str] = None,
@@ -1036,6 +1166,7 @@ class Analysis:
         axes: Optional[Any] = None,
         auto_fetch: bool = True,
         hcp_accept: bool = False,
+        backend: str = "auto",
         verbose: Optional[Union[bool, str, int]] = None,
         **brain_kwargs: Any,
     ) -> Tuple[Any, Any, List[str]]:
@@ -1052,9 +1183,20 @@ class Analysis:
         Parameters
         ----------
         values:
-            1D array-like with one value per atlas parcel. Order is:
-            sorted left-hemisphere labels followed by sorted right-hemisphere labels
-            (after removing ``unknown``, ``corpuscallosum``, and ``medialwall`` labels).
+            Parcel values as one of:
+            - ``pandas.Series`` with region names in the index
+            - mapping ``{region_name: value}``
+            - 1D array-like numeric values
+            - None (derive values from ``self.data`` using ``sensor_col``/``data_col``)
+            When region names are non-atlas tokens with numeric suffixes (e.g.
+            ``ch0``, ``ch1``), the numeric suffix is used as atlas-order index
+            (0-based or 1-based) as a fallback.
+        ch_names:
+            Region names corresponding to ``values`` when ``values`` is array-like.
+            If omitted, array values are assumed to already be in atlas order.
+        sensor_col, data_col, data_index:
+            DataFrame extraction options used when ``values`` is None.
+            ``data_index`` follows :meth:`eeg_topomap` semantics.
         atlas:
             Atlas/parcellation name (MNE/FreeSurfer annotation name).
         subject:
@@ -1100,6 +1242,10 @@ class Analysis:
         hcp_accept:
             Required only when downloading HCP-MMP files and they are not already present.
             Set True to accept HCP-MMP license terms.
+        backend:
+            3D backend selection for MNE Brain. Use ``"auto"`` (default) to try
+            a headless-friendly order (``notebook`` then ``pyvistaqt`` when
+            ``show=False``), or force a specific backend name.
         verbose:
             MNE verbosity setting.
         **brain_kwargs:
@@ -1144,9 +1290,54 @@ class Analysis:
         }
         parc = alias_to_parc.get(atlas_norm, atlas.strip())
 
-        arr = np.asarray(values, dtype=float).reshape(-1)
+        region_names: Optional[List[str]] = None
+        if values is None:
+            df = self._as_dataframe()
+            if sensor_col not in df.columns:
+                raise ValueError(f"Column '{sensor_col}' not found in data.")
+            if data_col not in df.columns:
+                raise ValueError(f"Column '{data_col}' not found in data.")
+            if df.empty:
+                raise ValueError("DataFrame is empty.")
+            region_names = []
+            data_vals: List[float] = []
+            for sensor, group in df.groupby(sensor_col, sort=False):
+                raw = group[data_col].values
+                if data_index == -1:
+                    if len(raw) != 1:
+                        raise ValueError(
+                            f"data_index=-1 expects a scalar per sensor, but sensor '{sensor}' has {len(raw)} rows."
+                        )
+                    val = float(raw[0])
+                elif data_index is None:
+                    val = float(np.mean(raw))
+                else:
+                    if data_index >= len(raw):
+                        raise IndexError(
+                            f"data_index={data_index} out of range for sensor '{sensor}' with {len(raw)} rows."
+                        )
+                    val = float(raw[data_index])
+                region_names.append(str(sensor))
+                data_vals.append(val)
+            arr = np.asarray(data_vals, dtype=float)
+        else:
+            if isinstance(values, pd.Series):
+                region_names = list(values.index.astype(str))
+                arr = values.to_numpy(dtype=float)
+            elif isinstance(values, Mapping):
+                region_names = [str(k) for k in values.keys()]
+                arr = np.asarray(list(values.values()), dtype=float)
+            else:
+                arr = np.asarray(values, dtype=float).reshape(-1)
+                if ch_names is not None:
+                    region_names = [str(c) for c in ch_names]
+
+        if arr.ndim != 1:
+            raise ValueError(f"values must be 1D, got shape {arr.shape}.")
         if arr.size == 0:
             raise ValueError("values must contain at least one element.")
+        if region_names is not None and len(region_names) != arr.shape[0]:
+            raise ValueError(f"Length mismatch: {len(region_names)} region names vs {arr.shape[0]} values.")
         if not np.all(np.isfinite(arr)):
             raise ValueError("values must contain only finite numeric values.")
 
@@ -1220,10 +1411,79 @@ class Analysis:
         labels_rh = [lab for lab in labels if lab.hemi == "rh"]
         label_order = [lab.name for lab in labels_lh + labels_rh]
 
-        if arr.shape[0] != len(label_order):
-            raise ValueError(
-                f"Atlas '{parc}' expects {len(label_order)} values "
-                f"(LH {len(labels_lh)} + RH {len(labels_rh)}), got {arr.shape[0]}."
+        if region_names is None:
+            if arr.shape[0] != len(label_order):
+                raise ValueError(
+                    f"Atlas '{parc}' expects {len(label_order)} values "
+                    f"(LH {len(labels_lh)} + RH {len(labels_rh)}), got {arr.shape[0]}."
+                )
+        else:
+            atlas_by_norm: Dict[str, str] = {}
+            for atlas_label in label_order:
+                norm_key = self._normalize_meg_region_name(atlas_label)
+                if norm_key and norm_key not in atlas_by_norm:
+                    atlas_by_norm[norm_key] = atlas_label
+
+            label_to_values: Dict[str, List[float]] = {}
+            unmatched_regions: List[str] = []
+            unmatched_payload: List[Tuple[str, float]] = []
+            for region_name, value in zip(region_names, arr):
+                region_text = str(region_name)
+                if region_text in label_order:
+                    matched_label = region_text
+                else:
+                    matched_label = atlas_by_norm.get(self._normalize_meg_region_name(region_text))
+                if matched_label is None:
+                    unmatched_regions.append(region_text)
+                    unmatched_payload.append((region_text, float(value)))
+                    continue
+                label_to_values.setdefault(matched_label, []).append(float(value))
+
+            if unmatched_regions:
+                # Fallback: map labels with numeric suffixes (e.g., ch0/ch1)
+                # to atlas order by index when possible.
+                extracted = [self._extract_region_index(name) for name in unmatched_regions]
+                if all(idx is not None for idx in extracted):
+                    idx_values = [int(idx) for idx in extracted if idx is not None]
+                    n_labels = len(label_order)
+                    is_zero_based = all(0 <= idx < n_labels for idx in idx_values)
+                    is_one_based = all(1 <= idx <= n_labels for idx in idx_values)
+                    if is_zero_based or is_one_based:
+                        offset = 0 if is_zero_based else 1
+                        for (region_text, value), idx_raw in zip(unmatched_payload, idx_values):
+                            atlas_idx = idx_raw - offset
+                            if atlas_idx < 0 or atlas_idx >= n_labels:
+                                raise ValueError(
+                                    f"Index-based MEG region mapping out of range for '{region_text}'. "
+                                    f"Expected {'0..' + str(n_labels - 1) if offset == 0 else '1..' + str(n_labels)}."
+                                )
+                            matched_label = label_order[atlas_idx]
+                            label_to_values.setdefault(matched_label, []).append(float(value))
+                        unmatched_regions = []
+
+                if unmatched_regions:
+                    preview = ", ".join(unmatched_regions[:8])
+                    if len(unmatched_regions) > 8:
+                        preview += ", ..."
+                    raise ValueError(
+                        "Could not match some MEG region names to atlas labels. "
+                        f"Examples: {preview}"
+                    )
+
+            missing_labels = [atlas_label for atlas_label in label_order if atlas_label not in label_to_values]
+            if missing_labels:
+                preview = ", ".join(missing_labels[:8])
+                if len(missing_labels) > 8:
+                    preview += ", ..."
+                raise ValueError(
+                    f"Atlas '{parc}' requires {len(label_order)} regions, but {len(missing_labels)} are missing. "
+                    f"Examples: {preview}"
+                )
+
+            # If multiple inputs resolve to the same atlas label, average them.
+            arr = np.asarray(
+                [float(np.mean(label_to_values[atlas_label])) for atlas_label in label_order],
+                dtype=float,
             )
 
         if vmin is None:
@@ -1265,7 +1525,67 @@ class Analysis:
 
         fmid = center if center is not None else (vmin + vmax) / 2.0
 
-        Brain = mne.viz.get_brain_class()
+        def _get_brain_class_with_headless_fallback():
+            if backend in {None, "", "auto"}:
+                backend_candidates = ["notebook", "pyvistaqt"] if not show else ["pyvistaqt", "notebook"]
+            else:
+                backend_candidates = [str(backend).strip()]
+
+            backend_errors = []
+            for candidate in backend_candidates:
+                try:
+                    mne.viz.set_3d_backend(candidate)
+                    break
+                except Exception as exc:
+                    backend_errors.append((candidate, str(exc)))
+            else:
+                formatted = "; ".join([f"{name}: {msg}" for name, msg in backend_errors]) or "unknown error"
+                raise RuntimeError(f"Could not configure any MNE 3D backend ({formatted}).")
+
+            try:
+                return mne.viz.get_brain_class()
+            except Exception as first_exc:
+                msg = str(first_exc).lower()
+                display_tokens = (
+                    "cannot connect to a valid display",
+                    "could not connect to display",
+                    "qt.qpa.xcb",
+                )
+                if not any(tok in msg for tok in display_tokens):
+                    raise
+
+                # Best-effort headless fallback for server environments.
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+                try:
+                    pyvista = tools.dynamic_import("pyvista")
+                    try:
+                        pyvista.OFF_SCREEN = True
+                    except Exception:
+                        pass
+                    try:
+                        pyvista.start_xvfb()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    # Retry with notebook first, then pyvistaqt.
+                    for candidate in ("notebook", "pyvistaqt"):
+                        try:
+                            mne.viz.set_3d_backend(candidate)
+                            break
+                        except Exception:
+                            continue
+                    return mne.viz.get_brain_class()
+                except Exception as second_exc:
+                    raise RuntimeError(
+                        "Could not initialize a headless 3D backend for MEG surface plotting. "
+                        "Install/configure an offscreen backend (e.g., PYVISTA_OFF_SCREEN=true "
+                        "and Xvfb or Mesa/EGL) and retry."
+                    ) from second_exc
+
+        Brain = _get_brain_class_with_headless_fallback()
         brain_sig = inspect.signature(Brain)
         accepted_brain_kwargs = set(brain_sig.parameters)
         brain_args_common: Dict[str, Any] = dict(
@@ -1274,13 +1594,49 @@ class Analysis:
             background=background,
             subjects_dir=str(subjects_dir_resolved),
             views=views,
+            offscreen=True,
             show=False,
         )
         brain_args_common.update(brain_kwargs)
         brain_args_common = {k: v for k, v in brain_args_common.items() if k in accepted_brain_kwargs}
 
         def _render_hemi(hemi_render: str, data_hemi: np.ndarray) -> np.ndarray:
-            brain = Brain(subject, hemi_render, surface, **brain_args_common)
+            def _make_brain():
+                return Brain(subject, hemi_render, surface, **brain_args_common)
+
+            try:
+                brain = _make_brain()
+            except Exception as first_exc:
+                msg = str(first_exc).lower()
+                display_tokens = (
+                    "cannot connect to a valid display",
+                    "could not connect to display",
+                    "qt.qpa.xcb",
+                )
+                if not any(tok in msg for tok in display_tokens):
+                    raise
+                os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+                os.environ.setdefault("PYVISTA_OFF_SCREEN", "true")
+                os.environ.setdefault("MNE_3D_BACKEND", "pyvistaqt")
+                try:
+                    pyvista = tools.dynamic_import("pyvista")
+                    try:
+                        pyvista.OFF_SCREEN = True
+                    except Exception:
+                        pass
+                    try:
+                        pyvista.start_xvfb()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    brain = _make_brain()
+                except Exception as second_exc:
+                    raise RuntimeError(
+                        "Cannot initialize an MNE Brain display backend in headless mode. "
+                        "Run the WebUI under Xvfb or provide a valid DISPLAY."
+                    ) from second_exc
             add_sig = inspect.signature(brain.add_data)
             accepted_add_kwargs = set(add_sig.parameters)
             add_kwargs: Dict[str, Any] = dict(
@@ -1292,10 +1648,16 @@ class Analysis:
                 alpha=alpha,
                 smoothing_steps=smoothing_steps,
                 colorbar=False,
+                time_label=None,
                 verbose=verbose,
             )
             add_kwargs = {k: v for k, v in add_kwargs.items() if k in accepted_add_kwargs}
             brain.add_data(data_hemi, hemi=hemi_render, **add_kwargs)
+            if hasattr(brain, "remove_text"):
+                try:
+                    brain.remove_text()
+                except Exception:
+                    pass
             # Some MNE/pyvista versions need an explicit render before screenshot.
             if hasattr(brain, "_renderer") and hasattr(brain._renderer, "plotter"):
                 try:

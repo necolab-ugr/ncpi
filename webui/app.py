@@ -13368,79 +13368,6 @@ def _boxplot_colormap_options():
     ]
 
 
-def _normalize_meg_atlas_name(atlas):
-    atlas_norm = str(atlas or "").strip().lower()
-    alias_to_parc = {
-        "dk": "aparc",
-        "desikan": "aparc",
-        "desikan-killiany": "aparc",
-        "aparc": "aparc",
-        "destrieux": "aparc.a2009s",
-        "aparc.a2009s": "aparc.a2009s",
-        "hcp-mmp": "HCPMMP1",
-        "hcp": "HCPMMP1",
-        "glasser": "HCPMMP1",
-        "hcpmmp1": "HCPMMP1",
-        "hcp-mmp-combined": "HCPMMP1_combined",
-        "glasser-combined": "HCPMMP1_combined",
-        "hcpmmp1_combined": "HCPMMP1_combined",
-        "aparc-sub": "aparc_sub",
-        "khan": "aparc_sub",
-        "aparc_sub": "aparc_sub",
-    }
-    return alias_to_parc.get(atlas_norm, str(atlas or "").strip())
-
-
-def _meg_expected_region_count(atlas, *, subject="fsaverage", subjects_dir=None):
-    try:
-        import mne
-    except Exception as exc:
-        raise ImportError(f"mne is required for MEG topographic plotting: {exc}") from exc
-    try:
-        import nibabel  # noqa: F401
-    except Exception as exc:
-        raise ImportError(f"nibabel is required for MEG topographic plotting: {exc}") from exc
-    parc = _normalize_meg_atlas_name(atlas)
-
-    subjects_dir_path = Path(subjects_dir).expanduser() if subjects_dir else None
-    if subjects_dir_path is not None:
-        subjects_dir_path.mkdir(parents=True, exist_ok=True)
-
-    fsaverage_dir = Path(mne.datasets.fetch_fsaverage(subjects_dir=subjects_dir_path, verbose=False))
-    subjects_dir_resolved = fsaverage_dir.parent
-    subject_dir = subjects_dir_resolved / subject
-    if not subject_dir.exists():
-        raise ValueError(f"Subject directory not found: {subject_dir}")
-
-    label_dir = subject_dir / "label"
-    if parc in {"HCPMMP1", "HCPMMP1_combined"} and subject == "fsaverage":
-        lh_annot = label_dir / f"lh.{parc}.annot"
-        rh_annot = label_dir / f"rh.{parc}.annot"
-        if not (lh_annot.exists() and rh_annot.exists()):
-            mne.datasets.fetch_hcp_mmp_parcellation(
-                subjects_dir=subjects_dir_resolved,
-                combine=True,
-                accept=True,
-                verbose=False,
-            )
-    elif parc == "aparc_sub" and subject == "fsaverage":
-        mne.datasets.fetch_aparc_sub_parcellation(subjects_dir=subjects_dir_resolved, verbose=False)
-
-    labels = mne.read_labels_from_annot(
-        subject=subject,
-        parc=parc,
-        hemi="both",
-        subjects_dir=subjects_dir_resolved,
-        sort=True,
-        verbose=False,
-    )
-    labels = [
-        lb for lb in labels
-        if not any(token in lb.name.lower() for token in ("unknown", "corpuscallosum", "medialwall"))
-    ]
-    return len(labels)
-
-
 @app.route("/analysis/columns", methods=["POST"])
 def analysis_columns():
     _remember_path_history_from_form(request.form, "analysis_columns")
@@ -14129,7 +14056,7 @@ def analysis_plot_topomap():
         sensor_col = _find_column(df, ["sensor", "Sensor", "channel", "Channel", "ch", "Ch", "electrode", "Electrode"])
         if sensor_col is None:
             return _plot_error(
-                "Sensor/channel column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
+                "Sensor/region column not found. Expected a column like 'sensor', 'channel', or 'electrode'.",
                 popup_redirect_url=url_for("analysis"),
             )
 
@@ -14272,13 +14199,8 @@ def analysis_plot_topomap():
     eeg_colorbar_label = _parse_optional_text("topomap_colorbar_label")
     eeg_colorbar_label_fontsize = _parse_float(request.form.get("topomap_colorbar_label_fontsize"))
     eeg_colorbar_tick_fontsize = _parse_float_default("topomap_colorbar_tick_fontsize", 8.0)
-    meg_expected_count = None
     if topomap_signal_type == "meg":
-        try:
-            meg_expected_count = _meg_expected_region_count(meg_atlas, subject="fsaverage", subjects_dir=None)
-        except Exception as exc:
-            return _plot_error(f"Unable to prepare MEG atlas '{meg_atlas}': {exc}")
-        _log(f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions.")
+        _log(f"MEG topographic plotting selected with atlas={meg_atlas}.")
 
     analysis = ncpi.Analysis(df_use)
 
@@ -14521,20 +14443,13 @@ def analysis_plot_topomap():
                     if use_diverging:
                         plot_vmin, plot_vmax = _symmetric_limits(plot_vmin, plot_vmax)
                 if topomap_signal_type == "meg":
-                    values = series.to_numpy(dtype=float)
-                    if meg_expected_count is not None and values.size != int(meg_expected_count):
-                        plt.close(fig)
-                        return _plot_error(
-                            f"MEG atlas '{meg_atlas}' expects {meg_expected_count} regions, "
-                            f"but plot '{label}' has {values.size}. "
-                            "Ensure the selected sensor/region set matches the atlas size."
-                        )
                     analysis.meg_surface(
-                        values=values,
+                        values=series,
                         atlas=meg_atlas,
                         subject="fsaverage",
                         hemisphere="both",
                         views="lat",
+                        backend="notebook",
                         cmap=compare_cmap or "coolwarm",
                         vmin=plot_vmin,
                         vmax=plot_vmax,
@@ -14580,6 +14495,7 @@ def analysis_plot_topomap():
                     token in lower
                     for token in (
                         "sensor",
+                        "region",
                         "electrode",
                         "channel",
                         "montage",
@@ -14588,11 +14504,27 @@ def analysis_plot_topomap():
                         "ch_names",
                     )
                 )
+                display_backend_issue = any(
+                    token in lower
+                    for token in (
+                        "cannot connect to a valid display",
+                        "could not connect to display",
+                        "headless",
+                        "badwindow",
+                        "mne brain display backend",
+                    )
+                )
+                if display_backend_issue:
+                    message += (
+                        " Headless server hint: launch Flask with Xvfb, e.g. "
+                        "`xvfb-run -a -s \"-screen 0 1920x1080x24\" flask run --port 8888 --no-reload --without-threads`."
+                    )
                 return _plot_error(
                     message,
                     popup_redirect_url=url_for("analysis") if sensor_info_missing else None,
                 )
-            ax.set_title(label)
+            if not (topomap_signal_type == "meg" and str(label).strip().lower() == "meg"):
+                ax.set_title(label)
         row_cursor += rows_needed
 
     fig.tight_layout(rect=[0, 0.02, 1, 0.98])
