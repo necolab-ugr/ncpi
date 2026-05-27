@@ -8,7 +8,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: Test on ${{ matrix.os }} 
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
     env:
       LFPYKERNELS_EXAMPLES: ${{ github.workspace }}/tests/data/LFPykernels/examples
     steps:
@@ -38,12 +43,12 @@ jobs:
       - name: Download files (if they are not cached)
         if: steps.file-cache.outputs.cache-hit != 'true'
         run: |
-          # Download partial zenodo simulation test data (~196 MB) and extract files
+          # Download partial zenodo simulation test data (~196 MB) and extract files (it works in Linux & macOS)
           wget -O tests/data/zenodo_test_files_LFP/zenodo_sim_test_files_LFP.7z https://zenodo.org/records/17427470/files/zenodo_sim_test_files_LFP.7z
           7z x tests/data/zenodo_test_files_LFP/zenodo_sim_test_files_LFP.7z -otests/data/zenodo_test_files_LFP/
           rm tests/data/zenodo_test_files_LFP/zenodo_sim_test_files_LFP.7z  # Free space immediately
 
-          # Download partial zenodo empirical test data (~490 MB) and extract files
+          # Download partial zenodo empirical test data (~490 MB) and extract files (it works in Linux & macOS)
           wget -O tests/data/zenodo_test_files_LFP/zenodo_emp_test_files_LFP.7z https://zenodo.org/records/17427470/files/zenodo_emp_test_files_LFP.7z
           7z x tests/data/zenodo_test_files_LFP/zenodo_emp_test_files_LFP.7z -otests/data/zenodo_test_files_LFP/
           rm tests/data/zenodo_test_files_LFP/zenodo_emp_test_files_LFP.7z  # Free space immediately
