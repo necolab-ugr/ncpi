@@ -359,6 +359,21 @@
                         ></textarea>
                         <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Auto-filled per SBI algorithm. You can add extra SBI sampling kwargs as needed.</p>
                     </div>
+                    <div class="md:col-span-2 space-y-2">
+                        <input id="training-sbi-prior-low" name="training_sbi_prior_low" type="hidden" value="" />
+                        <input id="training-sbi-prior-high" name="training_sbi_prior_high" type="hidden" value="" />
+                        <div class="flex items-center justify-between gap-3">
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">BoxUniform Prior Bounds (per theta parameter)</label>
+                            <button
+                                type="button"
+                                id="training-sbi-prior-add-row"
+                                class="inline-flex items-center gap-1 rounded-md border border-slate-300 dark:border-slate-600 px-2.5 py-1.5 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                            >
+                                Add parameter
+                            </button>
+                        </div>
+                        <div id="training-sbi-prior-rows" class="space-y-2 rounded-md border border-slate-200 dark:border-slate-700 p-3"></div>
+                    </div>
                 </div>
 
                 <div id="training-param-grid-cv-settings" x-show="trainingMode === 'param_grid'" class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -447,80 +462,6 @@
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Randomly samples this percentage of rows before training.</p>
                 </div>
 
-            </div>
-        </section>
-
-        <section class="bg-white dark:bg-slate-800/50 rounded-lg p-6 shadow-sm border border-slate-200 dark:border-slate-700" x-show="isSbiModel()" x-cloak>
-            <h2 class="text-lg font-semibold text-slate-900 dark:text-white mb-4 flex items-center">
-                <span class="flex items-center justify-center w-6 h-6 rounded-full bg-slate-100 dark:bg-slate-700 text-sm mr-3 font-bold text-slate-600 dark:text-slate-300">D</span>
-                SBI Prior & Advanced Settings
-            </h2>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-prior-low">Prior Low</label>
-                    <input
-                        id="training-sbi-prior-low"
-                        name="training_sbi_prior_low"
-                        type="text"
-                        placeholder="0 or [0, 0, 0]"
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-prior-high">Prior High</label>
-                    <input
-                        id="training-sbi-prior-high"
-                        name="training_sbi_prior_high"
-                        type="text"
-                        placeholder="1 or [1, 1, 1]"
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    />
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" for="training-sbi-estimator">Estimator (overrides hyperparams when provided)</label>
-                    <select
-                        id="training-sbi-estimator"
-                        name="training_sbi_estimator"
-                        class="mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                    >
-                        <option value="">(use hyperparams default)</option>
-                        <option value="nsf">nsf</option>
-                        <option value="maf">maf</option>
-                        <option value="mdn">mdn</option>
-                        <option value="mlp">mlp</option>
-                    </select>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-estimator-kwargs">Estimator kwargs override (JSON object/dict)</label>
-                    <textarea
-                        id="training-sbi-estimator-kwargs"
-                        name="training_sbi_estimator_kwargs_json"
-                        rows="2"
-                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                    >{}</textarea>
-                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-inference-kwargs">Inference kwargs override (JSON object/dict)</label>
-                    <textarea
-                        id="training-sbi-inference-kwargs"
-                        name="training_sbi_inference_kwargs_json"
-                        rows="2"
-                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                    >{}</textarea>
-                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
-                </div>
-                <div class="md:col-span-2">
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" for="training-sbi-build-posterior-kwargs">build_posterior kwargs override (JSON object/dict)</label>
-                    <textarea
-                        id="training-sbi-build-posterior-kwargs"
-                        name="training_sbi_build_posterior_kwargs_json"
-                        rows="2"
-                        class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                    >{}</textarea>
-                    <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
-                </div>
             </div>
         </section>
 
@@ -1001,7 +942,14 @@
     const paramGridBox = document.getElementById("training-param-grid-json");
     const sbiTrainParamsBox = document.getElementById("training-sbi-train-params");
     const sbiEvalSamplingBox = document.getElementById("training-sbi-eval-sampling-kwargs");
-    if (!modelSelect || !hyperparamsBox || !paramGridBox || !sbiTrainParamsBox || !sbiEvalSamplingBox) {
+    const priorLowHidden = document.getElementById("training-sbi-prior-low");
+    const priorHighHidden = document.getElementById("training-sbi-prior-high");
+    const priorRows = document.getElementById("training-sbi-prior-rows");
+    const priorAddRowBtn = document.getElementById("training-sbi-prior-add-row");
+    if (
+        !modelSelect || !hyperparamsBox || !paramGridBox || !sbiTrainParamsBox || !sbiEvalSamplingBox
+        || !priorLowHidden || !priorHighHidden || !priorRows || !priorAddRowBtn
+    ) {
         return;
     }
 
@@ -1045,6 +993,97 @@
         el.dispatchEvent(new Event("input", {bubbles: true}));
     };
 
+    const syncPriorHiddenValues = () => {
+        const lows = [];
+        const highs = [];
+        const rows = Array.from(priorRows.querySelectorAll('[data-role="prior-row"]'));
+        rows.forEach((row) => {
+            const lowInput = row.querySelector('input[data-role="prior-low"]');
+            const highInput = row.querySelector('input[data-role="prior-high"]');
+            if (!lowInput || !highInput) {
+                return;
+            }
+            let lowValue = Number(lowInput.value);
+            let highValue = Number(highInput.value);
+            if (!Number.isFinite(lowValue)) {
+                lowValue = 0;
+                lowInput.value = "0";
+            }
+            if (!Number.isFinite(highValue)) {
+                highValue = 1;
+                highInput.value = "1";
+            }
+            if (lowValue >= highValue) {
+                highInput.setCustomValidity("Upper bound must be greater than lower bound.");
+            } else {
+                highInput.setCustomValidity("");
+            }
+            lows.push(lowValue);
+            highs.push(highValue);
+        });
+        priorLowHidden.value = JSON.stringify(lows);
+        priorHighHidden.value = JSON.stringify(highs);
+    };
+
+    const addPriorRow = (name = "", low = "0", high = "1") => {
+        const row = document.createElement("div");
+        row.dataset.role = "prior-row";
+        row.className = "grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-2 items-end";
+
+        const nameWrapper = document.createElement("label");
+        nameWrapper.className = "text-xs text-slate-600 dark:text-slate-300";
+        nameWrapper.textContent = "Parameter";
+        const nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = name || `theta_${priorRows.querySelectorAll('[data-role=\"prior-row\"]').length + 1}`;
+        nameInput.className = "mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white";
+        nameWrapper.appendChild(nameInput);
+
+        const lowWrapper = document.createElement("label");
+        lowWrapper.className = "text-xs text-slate-600 dark:text-slate-300";
+        lowWrapper.textContent = "Lower";
+        const lowInput = document.createElement("input");
+        lowInput.type = "number";
+        lowInput.step = "any";
+        lowInput.dataset.role = "prior-low";
+        lowInput.value = String(low);
+        lowInput.className = "mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white";
+        lowWrapper.appendChild(lowInput);
+
+        const highWrapper = document.createElement("label");
+        highWrapper.className = "text-xs text-slate-600 dark:text-slate-300";
+        highWrapper.textContent = "Upper";
+        const highInput = document.createElement("input");
+        highInput.type = "number";
+        highInput.step = "any";
+        highInput.dataset.role = "prior-high";
+        highInput.value = String(high);
+        highInput.className = "mt-1 block w-full rounded-md border-slate-300 dark:border-slate-600 shadow-sm focus:border-primary focus:ring-primary sm:text-sm bg-white dark:bg-slate-800 text-slate-900 dark:text-white";
+        highWrapper.appendChild(highInput);
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "h-9 px-2 rounded-md border border-slate-300 dark:border-slate-600 text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800";
+        removeBtn.textContent = "Remove";
+
+        removeBtn.addEventListener("click", () => {
+            row.remove();
+            if (priorRows.querySelectorAll('[data-role="prior-row"]').length === 0) {
+                addPriorRow();
+            }
+            syncPriorHiddenValues();
+        });
+        lowInput.addEventListener("input", syncPriorHiddenValues);
+        highInput.addEventListener("input", syncPriorHiddenValues);
+
+        row.appendChild(nameWrapper);
+        row.appendChild(lowWrapper);
+        row.appendChild(highWrapper);
+        row.appendChild(removeBtn);
+        priorRows.appendChild(row);
+        syncPriorHiddenValues();
+    };
+
     const applyDefaults = () => {
         const model = selectedModelName();
         if (!model) return;
@@ -1080,6 +1119,7 @@
 
     modelSelect.addEventListener("change", applyDefaults);
     modelSelect.addEventListener("change", updateTrainingModeVisibility);
+    priorAddRowBtn.addEventListener("click", () => addPriorRow());
     if (trainingModeSingle) {
         trainingModeSingle.addEventListener("change", updateTrainingModeVisibility);
     }
@@ -1088,6 +1128,7 @@
     }
     updateTrainingModeVisibility();
     applyDefaults();
+    addPriorRow();
 })();
 </script>
 {% endblock %}

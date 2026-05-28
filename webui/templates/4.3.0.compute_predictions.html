@@ -66,7 +66,7 @@
         hasScalerArtifact: false,
         assetsUploadMode: 'individual',
         modelName: '__auto__',
-        sbiEvalSamplingKwargsJson: '{\"sample_shape\": [2000], \"max_sampling_batch_size\": 10000, \"show_progress_bars\": false}',
+        sbiEvalSamplingKwargsJson: '{\"sample_shape\": [500], \"max_sampling_batch_size\": 10000, \"show_progress_bars\": false}',
         lastSbiDefaultsAlgorithm: '',
         autoDetectedBackend: '',
         autoDetectedType: '',
@@ -99,16 +99,34 @@
         },
         defaultSbiEvalSamplingKwargsFor(model) {
             const defaults = {
-                NPE: {'sample_shape': [2000], 'max_sampling_batch_size': 10000, 'show_progress_bars': false},
-                NLE: {'sample_shape': [2000], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false},
-                NRE: {'sample_shape': [2000], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false}
+                NPE: {'sample_shape': [500], 'max_sampling_batch_size': 10000, 'show_progress_bars': false},
+                NLE: {'sample_shape': [500], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false},
+                NRE: {'sample_shape': [500], 'method': null, 'thin': null, 'num_chains': null, 'num_workers': null, 'show_progress_bars': false}
             };
-            return defaults[model] || {'sample_shape': [2000], 'show_progress_bars': false};
+            return defaults[model] || {'sample_shape': [500], 'show_progress_bars': false};
         },
         syncSbiEvalSamplingDefaults(force = false) {
             const algo = this.detectedSbiAlgorithm();
-            if (!force && this.lastSbiDefaultsAlgorithm === algo && String(this.sbiEvalSamplingKwargsJson || '').trim()) {
-                return;
+            if (!force) {
+                const raw = String(this.sbiEvalSamplingKwargsJson || '').trim();
+                if (raw) {
+                    if (!this.lastSbiDefaultsAlgorithm) {
+                        return;
+                    }
+                    let parsed = null;
+                    try {
+                        parsed = JSON.parse(raw);
+                    } catch (error) {
+                        return;
+                    }
+                    const previousDefault = this.defaultSbiEvalSamplingKwargsFor(this.lastSbiDefaultsAlgorithm);
+                    if (JSON.stringify(parsed) !== JSON.stringify(previousDefault)) {
+                        return;
+                    }
+                    if (this.lastSbiDefaultsAlgorithm === algo) {
+                        return;
+                    }
+                }
             }
             this.sbiEvalSamplingKwargsJson = JSON.stringify(this.defaultSbiEvalSamplingKwargsFor(algo), null, 2);
             this.lastSbiDefaultsAlgorithm = algo;
@@ -931,11 +949,11 @@
     function _defaultSbiEvalSamplingKwargsForModel(modelName) {
         const key = String(modelName || "").trim().toUpperCase();
         if (key === "NPE") {
-            return { sample_shape: [2000], max_sampling_batch_size: 10000, show_progress_bars: false };
+            return { sample_shape: [500], max_sampling_batch_size: 10000, show_progress_bars: false };
         }
         if (key === "NLE" || key === "NRE") {
             return {
-                sample_shape: [2000],
+                sample_shape: [500],
                 method: null,
                 thin: null,
                 num_chains: null,
@@ -943,7 +961,7 @@
                 show_progress_bars: false,
             };
         }
-        return { sample_shape: [2000], show_progress_bars: false };
+        return { sample_shape: [500], show_progress_bars: false };
     }
 
     function _resolveSbiAlgorithmForDefaults() {
@@ -1005,7 +1023,9 @@
         }
         sbiInputs.forEach((el) => {
             if (!el) return;
-            el.disabled = !sbiEnabled;
+            // Keep SBI sampling fields submittable so backend uses/logs exactly what user entered,
+            // including auto-detected backend flows.
+            el.disabled = false;
         });
         sklearnInputs.forEach((el) => {
             if (!el) return;
