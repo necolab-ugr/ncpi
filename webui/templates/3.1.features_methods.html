@@ -51,6 +51,7 @@
             pipelineFiles: window.__featuresPipelineFiles || [],
             runtime,
             allowServerSource,
+            isLocalRuntime: !runtime.is_server_runtime,
             defaultEmpiricalSourceMode,
             defaultSimulationSourceMode,
             selectedPipelinePath: '',
@@ -483,7 +484,7 @@ def custom_feature(sample, params):
                 this.simulationLocalFiles = [];
             },
             setSimulationSourceMode(mode) {
-                const nextMode = (this.allowServerSource && mode === 'server-path') ? 'server-path' : 'upload';
+                const nextMode = ((this.allowServerSource || this.isLocalRuntime) && mode === 'server-path') ? 'server-path' : 'upload';
                 if (this.simulationSourceMode === nextMode) {
                     if (nextMode === 'server-path') {
                         this.syncAdditionalFileSourceModeWithDataSource();
@@ -515,6 +516,11 @@ def custom_feature(sample, params):
             },
             openSimulationFolderPicker(append = false) {
                 this.appendSimulationSelection = !!append;
+                if (this.isLocalRuntime) {
+                    // In local: use the browser dir for the server instead of the input file
+                    this.pickSimulationFolder();
+                    return;
+                }
                 const input = document.getElementById('data-file');
                 if (input) input.click();
             },
@@ -625,7 +631,7 @@ def custom_feature(sample, params):
                 this.onSimulationUploadSelected({ target: { files: dataTransfer.files } });
             },
             setEmpiricalSourceMode(mode) {
-                const nextMode = (this.allowServerSource && mode === 'server-path') ? 'server-path' : 'upload';
+                const nextMode = ((this.allowServerSource || this.isLocalRuntime) && mode === 'server-path') ? 'server-path' : 'upload';
                 if (this.empiricalSourceMode === nextMode) return;
                 this.empiricalSourceMode = nextMode;
                 this.parserFilenameFormat = '';
@@ -703,14 +709,14 @@ def custom_feature(sample, params):
                 }
             },
             async openServerDirectoryBrowser() {
-                if (!this.allowServerSource) return;
+                if (!this.allowServerSource && !this.isLocalRuntime) return; 
                 this.serverDirBrowserTarget = 'empirical';
                 this.serverDirBrowserOpen = true;
                 const startPath = String(this.empiricalFolderPath || '').trim() || '';
                 await this.loadServerDirectory(startPath);
             },
             async openServerDirectoryBrowserFor(target) {
-                if (!this.allowServerSource) return;
+                if (!this.allowServerSource && !this.isLocalRuntime) return;
                 this.serverDirBrowserTarget = target === 'simulation' ? 'simulation' : 'empirical';
                 this.serverDirBrowserOpen = true;
                 const preferredPath = this.serverDirBrowserTarget === 'simulation'
@@ -722,7 +728,7 @@ def custom_feature(sample, params):
                 await this.loadServerDirectory(startPath);
             },
             async addSimulationFolderPath(path) {
-                if (!this.allowServerSource) return;
+                if (!this.allowServerSource && !this.isLocalRuntime) return;
                 const selectedPath = String(path || '').trim();
                 if (!selectedPath) return;
                 const current = Array.isArray(this.simulationFolderPaths) ? [...this.simulationFolderPaths] : [];
@@ -903,7 +909,7 @@ def custom_feature(sample, params):
                 await this.inspectSimulationFolderPath();
             },
             isServerDataFolderMode() {
-                return this.allowServerSource && this.computeFlowChoice === 'new-data' && this.simulationSourceMode === 'server-path';
+                return (this.allowServerSource || this.isLocalRuntime) && this.computeFlowChoice === 'new-data' && this.simulationSourceMode === 'server-path';
             },
             selectedServerDataFolderPath() {
                 if (!this.isServerDataFolderMode()) return '';
@@ -952,7 +958,7 @@ def custom_feature(sample, params):
                 return String(Math.max(1, Math.round(Number(fsHz))));
             },
             async chooseServerDirectory() {
-                if (!this.allowServerSource) return;
+                if (!this.allowServerSource && !this.isLocalRuntime) return;
                 const selectedPath = String(this.serverDirBrowserPath || '').trim();
                 if (!selectedPath) {
                     this.serverDirBrowserError = 'No server directory selected.';
@@ -1038,7 +1044,7 @@ def custom_feature(sample, params):
                 await this.inspectAllAdditionalFiles();
             },
             async openServerFileBrowser() {
-                if (!this.allowServerSource) return;
+                if (!this.allowServerSource && !this.isLocalRuntime) return;
                 this.syncAdditionalFileSourceModeWithDataSource({ clearLocalFiles: true });
                 this.serverFileBrowserError = '';
                 this.serverFileBrowserOpen = true;
@@ -2250,7 +2256,7 @@ def custom_feature(sample, params):
                 await this.openServerDirectoryBrowserFor('simulation');
             },
             async inspectSimulationFolderPath() {
-                if (!this.allowServerSource) {
+                if (!this.allowServerSource && !this.isLocalRuntime) {
                     this.parserError = 'Server folder selection is unavailable in local runtime.';
                     return;
                 }
@@ -2409,13 +2415,13 @@ def custom_feature(sample, params):
                 }
             },
             async pickEmpiricalFolder() {
-                if (!this.allowServerSource) return;
+                if (!this.allowServerSource && !this.isLocalRuntime) return;
                 this.submitError = '';
                 this.parserError = '';
                 await this.openServerDirectoryBrowser();
             },
             async inspectEmpiricalFolderPath() {
-                if (!this.allowServerSource) {
+                if (!this.allowServerSource && !this.isLocalRuntime) {
                     this.parserError = 'Server folder selection is unavailable in local runtime.';
                     return;
                 }
@@ -3914,7 +3920,8 @@ def custom_feature(sample, params):
                                 Select an existing local folder
                             </p>
                             <p class="text-sm font-medium text-gray-600 dark:text-gray-300 text-center" x-show="simulationSourceMode === 'server-path'" x-cloak>
-                                Select an existing server folder
+                                <span x-show="!isLocalRuntime">Select an existing server folder</span>
+                                <span x-show="isLocalRuntime">Select a local folder</span>
                             </p>
                             <div class="mt-3 flex flex-wrap items-center justify-center gap-2">
                                 <button type="button" x-show="simulationSourceMode === 'upload'" x-cloak @click.stop="openSimulationFolderPicker(false)"
@@ -3927,7 +3934,8 @@ def custom_feature(sample, params):
                                 </button>
                                 <button type="button" x-show="simulationSourceMode === 'server-path'" x-cloak @click.stop="pickSimulationFolder()"
                                     class="h-9 px-3 rounded-lg border border-gray-300 dark:border-[#323b67] text-xs font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33]">
-                                    Add server folder
+                                    <span x-show="!isLocalRuntime">Add server folder</span>
+                                    <span x-show="isLocalRuntime">Browse local folder</span>
                                 </button>
                             </div>
                             <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
