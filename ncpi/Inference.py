@@ -849,6 +849,7 @@ class Inference:
             with open(os.path.join(result_dir, "density_estimator.pkl"), "wb") as f:
                 pickle.dump(density_estimator_artifact, f)
             print(f"Density estimator saved at '{result_dir}/density_estimator.pkl'")
+
             with open(os.path.join(result_dir, "posterior.pkl"), "wb") as f:
                 pickle.dump(posterior_artifact, f)
             print(f"Posterior saved at '{result_dir}/posterior.pkl'")
@@ -868,29 +869,79 @@ class Inference:
             sbi_eval_sampling_kwargs: dict | None = None,
     ):
         """
-        Predict parameters.
+        Predict parameters from input features using the active backend.
 
-        Ensemble behavior:
-          - sklearn: if loaded model.pkl is a list, average predictions across members.
-          - sbi: if loaded posterior.pkl is a list of posteriors, draw samples from each member and
-            concatenate a sample set with counts distributed as evenly as possible across members.
+        The method loads trained artifacts from ``result_dir``:
+        - sklearn backend: ``model.pkl`` (single regressor or CV ensemble list).
+        - sbi backend: ``posterior.pkl`` (single posterior or CV ensemble list).
+        - optionally ``scaler.pkl`` when ``scaler=True``.
+
+        Parameters
+        ----------
+        features : array-like
+            Input observations. Accepted shapes:
+            - scalar: interpreted as one sample with one feature, ``(1, 1)``.
+            - 1D: interpreted using inferred feature dimension:
+              ``(N, 1)`` when expected feature count is 1, otherwise ``(1, D)``.
+            - 2D: interpreted as ``(n_samples, n_features)``.
+            Ragged/object inputs that cannot be converted to a rectangular numeric
+            array raise ``ValueError``.
+        result_dir : str, default="data"
+            Directory containing serialized training artifacts
+            (``model.pkl``/``posterior.pkl`` and optionally ``scaler.pkl``).
+        scaler : bool, default=False
+            If ``True``, load and apply ``scaler.pkl`` before prediction/sampling.
+            If ``False``, no scaling is applied.
+        n_jobs : int | None, default=None
+            sklearn only. Number of worker processes used for multiprocessing
+            prediction. ``None`` uses all available CPUs.
+        chunksize : int | None, default=None
+            sklearn only. Chunk size passed to ``Pool.imap``. ``None`` selects an
+            automatic value based on ``n_jobs`` and batch size.
+        start_method : {"spawn", "fork", "forkserver"}, default="spawn"
+            sklearn only. Multiprocessing context start method.
+        sbi_eval_sampling_kwargs : dict | None, default=None
+            SBI only. Extra keyword arguments forwarded to posterior sampling via
+            ``_sample_posterior(...)``. The ``x`` argument is managed internally
+            and must not be provided here. ``sample_shape`` may be an ``int``,
+            tuple/list, or ``torch.Size`` and must define at least one sample.
 
         Returns
         -------
-        sklearn:
-            list where each element is float (scalar) or list[float] (multi-output), invalid rows -> nan_row
-        sbi:
-            np.ndarray of posterior samples:
-            - shape (S, B, theta_dim) for B valid rows (batch sampling), where
-              S = torch.Size(sbi_eval_sampling_kwargs.get("sample_shape", ())).numel()
-              (for posterior ensembles, S total samples are split across members and concatenated),
-            - invalid rows are NOT included (fast path). If you need alignment to original indices,
-                handle it outside this function.
+        sklearn backend
+            list
+                Per-input predictions. Each element is:
+                - ``float`` for scalar output, or
+                - ``list[float]`` for multi-output regression.
+                Non-finite input rows are returned as NaN placeholders
+                (shape follows inferred parameter dimensionality).
+        sbi backend
+            np.ndarray
+                Posterior samples as float array.
+                - For multiple input rows: shape ``(S, B, theta_dim)``.
+                - For one finite input row: shape ``(S, theta_dim)``.
 
-        sbi_eval_sampling_kwargs:
-            Extra kwargs forwarded to `_sample_posterior(...)`.
-            Any keyword arguments supported by the underlying SBI posterior sampling
-            API are accepted. `x` is managed internally and must not be provided.
+                ``S`` is the requested number of samples computed from
+                ``sample_shape`` (product of dimensions; default is 1).
+                ``B`` is the number of finite input rows.
+
+                If ``posterior.pkl`` contains an ensemble (list of posteriors),
+                the total requested ``S`` samples are distributed as evenly as
+                possible across members and concatenated along the sample axis.
+
+                Non-finite rows are excluded from SBI output (no NaN row
+                placeholders are inserted).
+
+        Raises
+        ------
+        FileNotFoundError
+            If required artifacts are missing from ``result_dir``.
+        TypeError
+            If argument types are invalid (e.g., non-bool ``scaler``,
+            non-dict ``sbi_eval_sampling_kwargs``).
+        ValueError
+            For invalid shapes/values (e.g., unsupported feature rank, invalid
+            ``sample_shape``, or forbidden ``x`` in SBI kwargs).
         """
 
         scaler_path = os.path.join(result_dir, "scaler.pkl")
@@ -972,7 +1023,7 @@ class Inference:
             elif Xtrain.ndim == 1:
                 expected_n_features = 1
 
-        # -------- Normalize input shape (this is what changes vs your current version) --------
+        # -------- Normalize input shape  --------
         X = np.asarray(features)
 
         # Disallow ragged/object arrays (usually means inconsistent row lengths).
