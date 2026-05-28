@@ -154,7 +154,22 @@ FILE_TOKEN_VIRTUAL_FIELD_PREFIX = "__file_token_"
 FILE_TOKEN_VIRTUAL_FIELD_SUFFIX = "__"
 FILE_ID_METADATA_LITERAL = "file_ID"
 PICKLE_EXTENSIONS = {".pkl", ".pickle"}
-MAX_EMPIRICAL_UPLOAD_BYTES = int(os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(1024 * 1024 * 1024)))
+
+
+def _default_empirical_upload_bytes():
+    """Default to 50% of physical RAM when no explicit env override is set."""
+    try:
+        total_ram_bytes = int(os.sysconf("SC_PAGE_SIZE")) * int(os.sysconf("SC_PHYS_PAGES"))
+        if total_ram_bytes > 0:
+            return total_ram_bytes // 2
+    except (AttributeError, OSError, ValueError):
+        pass
+    return 1024 * 1024 * 1024
+
+
+MAX_EMPIRICAL_UPLOAD_BYTES = int(
+    os.environ.get("NCPI_MAX_EMPIRICAL_UPLOAD_BYTES", str(_default_empirical_upload_bytes()))
+)
 MAX_SIMULATION_GRID_COMBINATIONS = 256
 GRID_PREFIX = "grid="
 SIMULATION_JOINT_GROUPS_FIELD = "sim_joint_groups"
