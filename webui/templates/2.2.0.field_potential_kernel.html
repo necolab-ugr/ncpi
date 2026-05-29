@@ -5,6 +5,7 @@
 {{ super() }}
 <script>
     window.__webuiRuntime = {{ webui_runtime | tojson }};
+    window.isLocalRuntime = !(window.__webuiRuntime?.is_server_runtime);
 </script>
 <script id="tailwind-config">
     tailwind.config = {
@@ -57,7 +58,7 @@
 
 {% block content %}
 <div class="bg-container-light dark:bg-[#111422] rounded-xl border border-border-light dark:border-[#323b67]/50 p-6"
-    x-data="{ activeTab: '{{ initial_tab }}' }">
+    x-data="{ activeTab: '{{ initial_tab }}', isLocalRuntime: window.isLocalRuntime }">
 
     <!-- Menu tabs -->
     <div class="mb-6 border-b border-border-light dark:border-[#323b67]/50">
@@ -127,13 +128,12 @@
                                     class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                     <input id="mcFolderDisplayInput" class="hidden" type="text" value="{{ mc_models_default }}" />
                                     <input id="mcFolderHiddenInput" type="hidden" name="mc_folder" value="{{ mc_models_default }}" />
-                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'local-upload' }}" />
+                                    <input id="mcFolderSourceInput" type="hidden" name="mc_folder_source_mode" value="server-path" />
                                     <input id="kernelMcFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple />
                                     <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
-                                        <button type="button" data-path-action="true" class="kernel-path-upload-local px-2.5 py-1 text-[10px] rounded border">Local folder</button>
-                                        {% if webui_runtime.is_server_runtime %}
-                                        <button type="button" data-path-action="true" class="kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border">Server folder</button>
-                                        {% endif %}
+                                        <button type="button" data-path-action="true" class="kernel-path-upload-local kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border"
+                                            x-text="isLocalRuntime ? 'Local folder' : 'Server folder'">
+                                        </button>
                                     </div>
                                     <span class="material-symbols-outlined text-slate-400">folder_open</span>
                                     <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Multicompartment neuron model folder</span>
@@ -194,13 +194,11 @@
                                     class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                     <input id="outputSimDisplayInput" class="hidden" type="text" value="{{ mc_outputs_default }}" />
                                     <input id="outputSimHiddenInput" type="hidden" name="output_sim_path" value="{{ mc_outputs_default }}" />
-                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'local-upload' }}" />
+                                    <input id="outputSimSourceInput" type="hidden" name="output_sim_path_source_mode" value="server-path" />
                                     <input id="kernelOutputFolderLocalInput" type="file" class="hidden" webkitdirectory directory multiple />
                                     <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
-                                        <button type="button" data-path-action="true" class="kernel-path-upload-local px-2.5 py-1 text-[10px] rounded border">Local folder</button>
-                                        {% if webui_runtime.is_server_runtime %}
-                                        <button type="button" data-path-action="true" class="kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border">Server folder</button>
-                                        {% endif %}
+                                        <button type="button" data-path-action="true" class="kernel-path-upload-local kernel-path-upload-server px-2.5 py-1 text-[10px] rounded border"
+                                            x-text="isLocalRuntime ? 'Local folder' : 'Server folder'"></button>
                                     </div>
                                     <span class="material-symbols-outlined text-slate-400">folder_open</span>
                                     <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Multicompartment network simulation outputs</span>
@@ -310,14 +308,12 @@
                             <div id="kernelParamsModuleUpload"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelParamsModuleFile" name="kernel_params_file" accept=".py" />
-                                <input type="hidden" id="kernelParamsModuleSourceMode" name="kernel_params_module_source_mode" value="{{ 'server-path' if webui_runtime.is_server_runtime else 'upload' }}" />
+                                <input type="hidden" id="kernelParamsModuleSourceMode" name="kernel_params_module_source_mode" value="server-path" />
                                 <input type="hidden" id="kernelParamsModuleServerPath" name="kernel_params_module" value="{{ kernel_params_default }}" />
                                 <input type="hidden" id="kernelParamsPredefinedModel" name="kernel_params_predefined_model" value="" />
                                 <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
-                                    <button type="button" data-kernel-params-action="true" class="kernel-params-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
-                                    {% if webui_runtime.is_server_runtime %}
-                                    <button type="button" data-kernel-params-action="true" class="kernel-params-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
-                                    {% endif %}
+                                    <button type="button" data-kernel-params-action="true" class="kernel-params-upload-local kernel-params-upload-server px-2.5 py-1 text-[10px] rounded border"
+                                        x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></button>
                                 </div>
                                 <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
                                     {% for model_key in ["hagen", "cavallari", "four_area"] %}
@@ -437,7 +433,7 @@
                                 data-source-mode-input="kernel_spike_times_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelSpikeTimesFile" name="kernel_spike_times_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="{{ 'auto-detected' if default_sim.times else ('server-path' if webui_runtime.is_server_runtime else 'upload') }}" />
+                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="server-path" />
                                 <input type="hidden" name="kernel_spike_times_file_server_path" value="{{ default_sim_paths.times if default_sim.times else '' }}" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times in simulation.pkl or times.pkl)</span>
@@ -584,7 +580,7 @@
                             data-source-mode-input="meeg_cdm_file_source_mode"
                             class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                             <input class="hidden" type="file" id="meegCdmFile" name="meeg_cdm_file" accept=".pkl" />
-                            <input type="hidden" name="meeg_cdm_file_source_mode" value="{{ 'auto-detected' if default_meeg.cdm_exists else 'upload' }}" />
+                            <input type="hidden" name="meeg_cdm_file_source_mode" value="server-path" />
                             <input type="hidden" name="meeg_cdm_file_server_path" value="{{ default_meeg.cdm if default_meeg.cdm_exists else '' }}" />
                             <span class="material-symbols-outlined text-slate-400">upload_file</span>
                             <span class="text-xs font-bold lowercase tracking-wider text-slate-500">CDM (.pkl)</span>
@@ -1099,7 +1095,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingFileExtensions = '.pkl';
     let pendingFolderHistoryKey = KERNEL_SERVER_FOLDER_HISTORY_KEY;
     let pendingFileHistoryKey = KERNEL_SERVER_FILE_HISTORY_KEY;
-    const kernelServerModeEnabled = Boolean((window.__webuiRuntime || {}).is_server_runtime);
+    const kernelServerModeEnabled = true; // Always use server-side browsing
     const KERNEL_TOP_LEVEL_PREVIEW_ITEMS_MAX = 24;
 
     const normalizeKernelBrowseSourceMode = (value) => {
@@ -2425,17 +2421,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasDetectedDefault = Boolean(defaultLoadedName);
         controls.innerHTML = `
             <button type="button" data-kernel-upload-action="true" class="kernel-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
-            <button type="button" data-kernel-upload-action="true" class="kernel-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
-            <button type="button" data-kernel-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
+            <button type="button" data-kernel-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border"></button>
         `;
+        // Set dynamic label
+        const serverBtn = controls.querySelector('.kernel-upload-server');
+        if (serverBtn) {
+            serverBtn.textContent = window.isLocalRuntime ? 'Local upload' : 'Server file';
+        }
         zone.insertBefore(controls, zone.firstChild);
 
         const autoBtn = controls.querySelector('.kernel-upload-auto');
-        const localBtn = controls.querySelector('.kernel-upload-local');
-        const serverBtn = controls.querySelector('.kernel-upload-server');
-        if (!kernelServerModeEnabled && serverBtn) {
-            serverBtn.classList.add('hidden');
-        }
         const hintEl = zone.querySelector('[data-role="hint"]') || zone.querySelector('p.text-\\[10px\\]');
 
         const localSummary = document.createElement('div');
@@ -2476,7 +2471,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const applyModeVisuals = (mode) => {
             const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
             const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-            [autoBtn, localBtn, serverBtn].forEach((btn) => {
+            [autoBtn, serverBtn].forEach((btn) => {
                 if (!btn) return;
                 btn.classList.remove(...activeClasses);
                 btn.classList.add(...inactiveClasses);
@@ -2487,10 +2482,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (mode === 'server-path') {
                 serverBtn.classList.add(...activeClasses);
                 serverBtn.classList.remove(...inactiveClasses);
-            } else {
-                localBtn.classList.add(...activeClasses);
-                localBtn.classList.remove(...inactiveClasses);
-            }
+            } 
         };
 
         if (hintEl) {
@@ -2572,11 +2564,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 setMode('auto-detected');
             });
         }
-        localBtn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            setMode('upload');
-        });
         serverBtn.addEventListener('click', (event) => {
             event.preventDefault();
             event.stopPropagation();

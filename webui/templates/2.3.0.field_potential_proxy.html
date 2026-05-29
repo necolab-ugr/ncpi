@@ -7,6 +7,7 @@
     window.__webuiRuntime = {{ webui_runtime | tojson }};
     window.__proxyBrowseDirsUrl = "{{ url_for('features_browse_dirs') }}";
     window.__proxyInferTrialsUrl = "{{ url_for('field_potential_proxy_infer_trials') }}";
+    window.isLocalRuntime = !(window.__webuiRuntime?.is_server_runtime);
 </script>
 <style type="text/tailwindcss">
     .material-symbols-outlined {
@@ -22,6 +23,7 @@
 <!-- Main content of the field potential proxy page -->
 {% block content %}
 <div class="px-4 md:px-8 lg:px-20 flex justify-center">
+    <div x-data="{ isLocalRuntime: window.isLocalRuntime }">
     <div class="layout-content-container flex flex-col max-w-[900px]">
         <div class="mb-10">
             <h1 class="text-3xl font-black leading-tight tracking-[-0.033em] mb-2">Field Potential Configuration: Proxy</h1>
@@ -91,10 +93,16 @@
                         data-ignore-default-input="times_file_ignore_default"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="timesFile" name="times_file" accept=".pkl" />
-                        <input type="hidden" name="times_file_source_mode" value="upload" />
+                        <input type="hidden" name="times_file_source_mode" value="server-path" />
                         <input type="hidden" name="times_file_server_path" value="" />
                         <input type="hidden" name="times_file_ignore_default" value="0" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
+                        <div class="mb-2">
+                            <button type="button" class="proxy-browse-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                data-field="times_file">
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
+                        </div>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times.pkl)</span>
                         <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.times %}hidden{% endif %}"
@@ -114,10 +122,16 @@
                         data-ignore-default-input="gids_file_ignore_default"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="gidsFile" name="gids_file" accept=".pkl" />
-                        <input type="hidden" name="gids_file_source_mode" value="upload" />
+                        <input type="hidden" name="gids_file_source_mode" value="server-path" />
                         <input type="hidden" name="gids_file_server_path" value="" />
                         <input type="hidden" name="gids_file_ignore_default" value="0" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
+                        <div class="mb-2">
+                            <button type="button" class="proxy-browse-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                data-field="gids_file">
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
+                        </div>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike gids (gids.pkl)</span>
                         <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.gids %}hidden{% endif %}"
@@ -137,10 +151,16 @@
                         data-ignore-default-input="vm_file_ignore_default"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="vmFile" name="vm_file" accept=".pkl" />
-                        <input type="hidden" name="vm_file_source_mode" value="upload" />
+                        <input type="hidden" name="vm_file_source_mode" value="server-path" />
                         <input type="hidden" name="vm_file_server_path" value="" />
                         <input type="hidden" name="vm_file_ignore_default" value="0" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
+                        <div class="mb-2">
+                            <button type="button" class="proxy-browse-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                data-field="vm_file">
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
+                        </div>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Membrane Potential (Vm)</span>
                         <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.vm %}hidden{% endif %}"
@@ -160,10 +180,16 @@
                         data-ignore-default-input="ampa_file_ignore_default"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="ampaFile" name="ampa_file" accept=".pkl" />
-                        <input type="hidden" name="ampa_file_source_mode" value="upload" />
+                        <input type="hidden" name="ampa_file_source_mode" value="server-path" />
                         <input type="hidden" name="ampa_file_server_path" value="" />
                         <input type="hidden" name="ampa_file_ignore_default" value="0" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
+                        <div class="mb-2">
+                            <button type="button" class="proxy-browse-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                data-field="ampa_file">
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
+                        </div>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">AMPA Currents Data</span>
                         <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.ampa %}hidden{% endif %}"
@@ -183,10 +209,16 @@
                         data-ignore-default-input="gaba_file_ignore_default"
                         class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-white dark:bg-slate-900/50">
                         <input class="hidden" type="file" id="gabaFile" name="gaba_file" accept=".pkl" />
-                        <input type="hidden" name="gaba_file_source_mode" value="upload" />
+                        <input type="hidden" name="gaba_file_source_mode" value="server-path" />
                         <input type="hidden" name="gaba_file_server_path" value="" />
                         <input type="hidden" name="gaba_file_ignore_default" value="0" />
                         <span class="material-symbols-outlined text-slate-400">upload_file</span>
+                        <div class="mb-2">
+                            <button type="button" class="proxy-browse-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                data-field="gaba_file">
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
+                        </div>
                         <span class="text-xs font-bold lowercase tracking-wider text-slate-500">GABA Currents Data</span>
                         <p class="text-[10px] text-slate-400">Drag and drop pkl files or click to browse</p>
                         <div class="mt-2 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-[10px] font-semibold px-2 py-1 {% if not default_sim.gaba %}hidden{% endif %}"
@@ -307,8 +339,10 @@
         </div>
     </div>
 </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script defer="" src="{{ url_for('static', filename='js/field_potential_proxy.js') }}"></script>
 {% endblock %}

@@ -436,7 +436,7 @@ function createNuExtManager() {
 
 function setupUploadZones() {
     const runtime = window.__webuiRuntime || {};
-    const allowServerSource = runtime.is_server_runtime !== false;
+    const allowServerSource = true;
     const defaultMode = (allowServerSource && String(runtime.default_simulation_source_mode || '').trim().toLowerCase() === 'server-path')
         ? 'server-path'
         : 'upload';
@@ -462,6 +462,7 @@ function setupUploadZones() {
         const input = document.getElementById(inputId);
         const sourceModeInputName = zone.getAttribute('data-source-mode-input');
         const serverPathInputName = zone.getAttribute('data-server-path-input');
+        const customBrowseBtn = zone.querySelector('.proxy-browse-btn');
         const ignoreDefaultInputName = zone.getAttribute('data-ignore-default-input');
         const sourceModeInput = sourceModeInputName ? document.querySelector(`input[name="${sourceModeInputName}"]`) : null;
         const serverPathInput = serverPathInputName ? document.querySelector(`input[name="${serverPathInputName}"]`) : null;
@@ -533,21 +534,30 @@ function setupUploadZones() {
             return;
         }
 
-        const controls = document.createElement('div');
-        controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
-        const hasDetectedDefault = Boolean(defaultName);
-        controls.innerHTML = `
-            <button type="button" data-upload-action="true" class="proxy-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
-            <button type="button" data-upload-action="true" class="proxy-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
-            <button type="button" data-upload-action="true" class="proxy-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
-        `;
-        zone.insertBefore(controls, zone.firstChild);
+        let autoBtn = null;
+        let localBtn = null;
+        let serverBtn = null;
+        let hasDetectedDefault = false;
 
-        const autoBtn = controls.querySelector('.proxy-upload-auto');
-        const localBtn = controls.querySelector('.proxy-upload-local');
-        const serverBtn = controls.querySelector('.proxy-upload-server');
-        if (!allowServerSource && serverBtn) {
-            serverBtn.classList.add('hidden');
+        if (!customBrowseBtn) {
+            const controls = document.createElement('div');
+            controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
+            hasDetectedDefault = Boolean(defaultName);
+            controls.innerHTML = `
+                <button type="button" data-upload-action="true" class="proxy-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
+                <button type="button" data-upload-action="true" class="proxy-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
+                <button type="button" data-upload-action="true" class="proxy-upload-server px-2.5 py-1 text-[10px] rounded border">Server file</button>
+            `;
+            zone.insertBefore(controls, zone.firstChild);
+
+            autoBtn = controls.querySelector('.proxy-upload-auto');
+            localBtn = controls.querySelector('.proxy-upload-local');
+            serverBtn = controls.querySelector('.proxy-upload-server');
+            if (!allowServerSource && serverBtn) {
+                serverBtn.classList.add('hidden');
+            }
+        } else {
+            if (sourceModeInput) sourceModeInput.value = 'server-path';
         }
 
         const applyModeVisuals = (mode) => {
@@ -562,11 +572,15 @@ function setupUploadZones() {
                 autoBtn.classList.add(...activeClasses);
                 autoBtn.classList.remove(...inactiveClasses);
             } else if (mode === 'server-path') {
-                serverBtn.classList.add(...activeClasses);
-                serverBtn.classList.remove(...inactiveClasses);
+                if (serverBtn) {
+                    serverBtn.classList.add(...activeClasses);
+                    serverBtn.classList.remove(...inactiveClasses);
+                }
             } else {
-                localBtn.classList.add(...activeClasses);
-                localBtn.classList.remove(...inactiveClasses);
+                if (localBtn) {
+                    localBtn.classList.add(...activeClasses);
+                    localBtn.classList.remove(...inactiveClasses);
+                }
             }
         };
 
@@ -706,6 +720,11 @@ function setupUploadZones() {
         }
 
         zone.addEventListener('click', (event) => {
+            if (customBrowseBtn) {
+                if (event.target && event.target.closest('[data-upload-action]')) return;
+                openServerPicker();
+                return;
+            }
             if (event.target && event.target.closest('[data-upload-action]')) {
                 return;
             }
@@ -719,38 +738,44 @@ function setupUploadZones() {
             }
             input.click();
         });
-        zone.addEventListener('dragover', (event) => {
-            event.preventDefault();
-            if (isServerPathMode() || isAutoDetectedMode()) {
-                return;
-            }
-            zone.classList.add('border-primary', 'bg-primary/5');
-        });
-        zone.addEventListener('dragleave', () => {
-            zone.classList.remove('border-primary', 'bg-primary/5');
-        });
-        zone.addEventListener('drop', (event) => {
-            event.preventDefault();
-            if (isServerPathMode() || isAutoDetectedMode()) {
-                return;
-            }
-            zone.classList.remove('border-primary', 'bg-primary/5');
-            if (event.dataTransfer.files && event.dataTransfer.files[0]) {
-                input.files = event.dataTransfer.files;
-                serverPathInput.value = '';
-                syncLocalSelectionUi();
-                notifyNuExtTrialDetection();
-            }
-        });
+
+        // Drag & drop disabled when custom button exists
+        if (!customBrowseBtn) {
+            zone.addEventListener('dragover', (event) => {
+                event.preventDefault();
+                if (isServerPathMode() || isAutoDetectedMode()) return;
+                zone.classList.add('border-primary', 'bg-primary/5');
+            });
+            zone.addEventListener('dragleave', () => {
+                zone.classList.remove('border-primary', 'bg-primary/5');
+            });
+            zone.addEventListener('drop', (event) => {
+                event.preventDefault();
+                if (isServerPathMode() || isAutoDetectedMode()) return;
+                zone.classList.remove('border-primary', 'bg-primary/5');
+                if (event.dataTransfer.files && event.dataTransfer.files[0]) {
+                    input.files = event.dataTransfer.files;
+                    serverPathInput.value = '';
+                    syncLocalSelectionUi();
+                    notifyNuExtTrialDetection();
+                }
+            });
+        }
 
         input.addEventListener('change', () => {
-            if (isServerPathMode()) {
-                return;
-            }
+            if (customBrowseBtn) return;
+            if (isServerPathMode()) return;
             serverPathInput.value = '';
             syncLocalSelectionUi();
             notifyNuExtTrialDetection();
         });
+
+        if (customBrowseBtn) {
+            customBrowseBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openServerPicker();
+            });
+        }
 
         zoneCandidateGetters.push(() => {
             const selectedFile = input.files && input.files[0] ? input.files[0] : null;
@@ -768,16 +793,22 @@ function setupUploadZones() {
             return null;
         });
 
-        const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
-        if (!allowServerSource) {
-            serverPathInput.value = '';
-            setMode('upload');
-        } else if (initialMode === 'server-path') {
-            setMode('server-path');
-        } else if (initialMode === 'auto-detected' || (hasDetectedDefault && !isDefaultIgnored())) {
-            setMode('auto-detected');
+        if (customBrowseBtn) {
+            // Always server-path, no visual buttons to update
+            sourceModeInput.value = 'server-path';
+            syncServerSelectionUi();
         } else {
-            setMode(defaultMode);
+            const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
+            if (!allowServerSource) {
+                serverPathInput.value = '';
+                setMode('upload');
+            } else if (initialMode === 'server-path') {
+                setMode('server-path');
+            } else if (initialMode === 'auto-detected' || (hasDetectedDefault && !isDefaultIgnored())) {
+                setMode('auto-detected');
+            } else {
+                setMode(defaultMode);
+            }
         }
     });
 

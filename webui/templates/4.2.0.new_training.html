@@ -5,6 +5,7 @@
 {{ super() }}
 <script>
     window.__webuiRuntime = {{ webui_runtime | tojson }};
+    window.isLocalRuntime = !(window.__webuiRuntime?.is_server_runtime);
 </script>
 <style>
     [x-cloak] {
@@ -42,6 +43,7 @@
     id="inference-training-root"
     x-data="{
         runtime: (window.__webuiRuntime || {}),
+        isLocalRuntime: window.isLocalRuntime,
         modelName: 'MLPRegressor',
         lastDefaultsModel: null,
         trainingMode: 'single_trial',
@@ -182,11 +184,13 @@
                         data-label="Features Data"
                     >
                         <input id="training_features_file_input" name="training_features_file" type="file" class="hidden" />
-                        <input id="training_features_file_source_mode" name="training_features_source_mode" type="hidden" value="upload" />
+                        <input id="training_features_file_source_mode" name="training_features_source_mode" type="hidden" value="server-path" />
                         <input id="training_features_file_server_path" name="training_features_server_file_path" type="hidden" value="" />
                         <div class="flex flex-wrap justify-center gap-2">
-                            <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
-                            <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                            <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                @click.stop>
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
                         </div>
                         <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
                         <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Features Data</p>
@@ -201,7 +205,7 @@
                             </div>
                         </div>
                         <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="server-summary">
-                            <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
                             <div class="mt-1 flex items-start justify-between gap-2">
                                 <span class="block flex-1 font-mono break-all" data-role="server-path"></span>
                                 <button type="button" data-role="server-clear" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
@@ -223,11 +227,13 @@
                         data-label="Parameters Data"
                     >
                         <input id="training_parameters_file_input" name="training_parameters_file" type="file" class="hidden" />
-                        <input id="training_parameters_file_source_mode" name="training_parameters_source_mode" type="hidden" value="upload" />
+                        <input id="training_parameters_file_source_mode" name="training_parameters_source_mode" type="hidden" value="server-path" />
                         <input id="training_parameters_file_server_path" name="training_parameters_server_file_path" type="hidden" value="" />
                         <div class="flex flex-wrap justify-center gap-2">
-                            <button type="button" class="custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border">Local upload</button>
-                            <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border">Server file</button>
+                            <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
+                                @click.stop>
+                                <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                            </button>
                         </div>
                         <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
                         <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Parameters Data</p>
@@ -482,7 +488,9 @@
     <div id="inferenceTrainingServerFileBrowserModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
         <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
             <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+                <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    <span x-text="isLocalRuntime ? 'Browse local files' : 'Browse server files'"></span>
+                </h3>
                 <button type="button" id="inferenceTrainingServerFileBrowserClose"
                     class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
             </div>
@@ -516,12 +524,13 @@
 
 {% block scripts %}
 {{ super() }}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
 (() => {
     const runtime = window.__webuiRuntime || {};
-    const allowServerSource = runtime.is_server_runtime !== false;
+    const allowServerSource = true; // Always enable server-side file browsing
     const runtimeDefaultMode = String(runtime.default_simulation_source_mode || "upload").toLowerCase();
-    const defaultMode = (allowServerSource && runtimeDefaultMode === "server-path") ? "server-path" : "upload";
+    const defaultMode = "server-path";
 
     const SERVER_BROWSER_HISTORY_KEYS = {
         training_features_file: "inference_new_training:features_file_browser",
@@ -788,7 +797,7 @@
         const serverBtn = card.querySelector(".custom-mode-server-btn");
         const localClearBtn = card.querySelector('[data-role="local-clear"]');
         const serverClearBtn = card.querySelector('[data-role="server-clear"]');
-        if (!fileInput || !modeInput || !uploadBtn || !serverBtn) return;
+        if (!fileInput || !modeInput || !serverBtn) return;
 
         const hasServer = Boolean(String(getServerInput(field)?.value || "").trim());
         const hasLocal = Boolean(fileInput.files && fileInput.files[0]);
@@ -802,11 +811,12 @@
             setMode(field, defaultMode);
         }
 
-        uploadBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            setMode(field, "upload");
-        });
-
+        if (uploadBtn) {
+            uploadBtn.addEventListener("click", (event) => {
+                event.stopPropagation();
+                setMode(field, "upload");
+            });
+        }
         serverBtn.addEventListener("click", (event) => {
             event.stopPropagation();
             if (!allowServerSource) return;

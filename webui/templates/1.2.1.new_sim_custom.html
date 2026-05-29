@@ -107,6 +107,9 @@
                     <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
                     <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Network parameters (.py)</p>
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop pkl files or click to browse</p>
+                    <p class="mt-1 text-xs text-slate-400 dark:text-slate-500 text-center">
+                        Max. file size: <span class="font-semibold" data-max-size-text></span>
+                    </p>
                     <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="local-summary">
                         <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
                         <div class="mt-1 flex items-start justify-between gap-2">
@@ -138,6 +141,9 @@
                     <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
                     <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Network implementation (.py)</p>
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop pkl files or click to browse</p>
+                    <p class="mt-1 text-xs text-slate-400 dark:text-slate-500 text-center">
+                        Max. file size: <span class="font-semibold" data-max-size-text></span>
+                    </p>
                     <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="local-summary">
                         <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
                         <div class="mt-1 flex items-start justify-between gap-2">
@@ -169,6 +175,9 @@
                     <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
                     <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Simulation parameters (.py)</p>
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop pkl files or click to browse</p>
+                    <p class="mt-1 text-xs text-slate-400 dark:text-slate-500 text-center">
+                        Max. file size: <span class="font-semibold" data-max-size-text></span>
+                    </p>
                     <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="local-summary">
                         <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
                         <div class="mt-1 flex items-start justify-between gap-2">
@@ -200,6 +209,9 @@
                     <span class="mt-3 material-symbols-outlined text-4xl text-slate-400 text-center block">upload_file</span>
                     <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center" data-role="title">Simulation implementation (.py)</p>
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center" data-role="hint">Drag and drop pkl files or click to browse</p>
+                    <p class="mt-1 text-xs text-slate-400 dark:text-slate-500 text-center">
+                        Max. file size: <span class="font-semibold" data-max-size-text></span>
+                    </p>
                     <div class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300" data-role="local-summary">
                         <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
                         <div class="mt-1 flex items-start justify-between gap-2">
@@ -275,6 +287,20 @@
 {% block scripts %}
 <script>
 (() => {
+    const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB limit for Python scripts
+    const isFileTooLarge = (file) => file && file.size > MAX_FILE_SIZE_BYTES;
+
+    const formatFileSizeLimit = () => {
+        if (MAX_FILE_SIZE_BYTES >= 1024 * 1024) {
+            return (MAX_FILE_SIZE_BYTES / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+        return (MAX_FILE_SIZE_BYTES / 1024).toFixed(0) + ' KB';
+    };
+
+    document.querySelectorAll('[data-max-size-text]').forEach(el => {
+        el.textContent = formatFileSizeLimit();
+    });
+
     const runtime = window.__webuiRuntime || {};
     const SERVER_BROWSER_HISTORY_KEY = "simulation_custom:file_browser";
     const allowServerSource = runtime.is_server_runtime !== false;
@@ -582,6 +608,12 @@
 
         fileInput.addEventListener("change", () => {
             const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+            if (file && isFileTooLarge(file)) {
+                showError(`File "${file.name}" exceeds the maximum allowed size of ${formatFileSizeLimit()}.`);
+                fileInput.value = ""; // clear selection
+                setLocalSelection(field, "");
+                return;
+            }
             setLocalSelection(field, file ? file.name : "");
             showError("");
         });
@@ -606,6 +638,10 @@
             if (modeInput.value !== "upload") return;
             const files = event.dataTransfer.files;
             if (!files || files.length === 0) return;
+            if (isFileTooLarge(files[0])) {
+                showError(`File "${files[0].name}" exceeds the maximum allowed size of ${formatFileSizeLimit()}.`);
+                return;
+            }
             const dt = new DataTransfer();
             dt.items.add(files[0]);
             fileInput.files = dt.files;
@@ -646,6 +682,24 @@
 
     form.addEventListener("submit", (event) => {
         const missing = [];
+
+        // Check file size for local uploads first
+        for (const card of cards) {
+            const field = card.dataset.field;
+            const label = card.dataset.label || field;
+            const modeInput = getModeInput(field);
+            const rawMode = String(modeInput?.value || "upload").trim().toLowerCase();
+            const mode = (!allowServerSource || rawMode !== "server-path") ? "upload" : "server-path";
+            if (mode === "upload") {
+                const fileInput = getFileInput(field);
+                const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+                if (file && isFileTooLarge(file)) {
+                    event.preventDefault();
+                    showError(`File "${file.name}" in ${label} exceeds the maximum allowed size of ${formatFileSizeLimit()}.`);
+                    return;
+                }
+            }
+        }
 
         cards.forEach((card) => {
             const field = card.dataset.field;
