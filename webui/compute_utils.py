@@ -2427,24 +2427,20 @@ def _parse_dict_param(params, key):
 
 def _default_sbi_eval_sampling_kwargs(model_name):
     model_key = str(model_name or "").strip().upper()
-    if model_key == "NPE":
+    if model_key in {"NPE", "NLE", "NRE"}:
         return {
-            "sample_shape": [500],
-            "max_sampling_batch_size": 10000,
+            "sample_shape": [256],
+            "max_sampling_batch_size": 512,
             "show_progress_bars": False,
-        }
-    if model_key in {"NLE", "NRE"}:
-        return {
-            "sample_shape": [500],
-            "method": None,
-            "thin": None,
-            "num_chains": None,
-            "num_workers": None,
-            "show_progress_bars": False,
+            "reject_outside_prior": False,
+            "ncpi_nan_outside_prior": True,
         }
     return {
-        "sample_shape": [500],
+        "sample_shape": [256],
+        "max_sampling_batch_size": 512,
         "show_progress_bars": False,
+        "reject_outside_prior": False,
+        "ncpi_nan_outside_prior": True,
     }
 
 

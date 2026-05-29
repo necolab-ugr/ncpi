@@ -229,6 +229,9 @@ class Inference:
         `sample_batched(...)` when `x` is a batch (batch size > 1).
         """
         kwargs = dict(sbi_eval_sampling_kwargs or {})
+        reject_outside_prior = kwargs.pop("reject_outside_prior", None)
+        nan_outside_prior = kwargs.pop("ncpi_nan_outside_prior", True)
+        force_direct_sampler = kwargs.pop("ncpi_force_direct_sampler", False)
         kwargs["x"] = x
         if "sample_shape" in kwargs:
             kwargs["sample_shape"] = self._coerce_sample_shape(kwargs["sample_shape"])
@@ -249,6 +252,17 @@ class Inference:
                 batch_size = 1
 
         use_batched = bool(batch_size is not None and batch_size > 1)
+        use_direct_sampler = bool(force_direct_sampler) or (reject_outside_prior is False)
+
+        if use_direct_sampler:
+            samples = self._sample_posterior_without_rejection(
+                posterior_obj,
+                kwargs,
+                nan_outside_prior=bool(nan_outside_prior),
+            )
+            if samples.ndim == 2:
+                samples = samples.unsqueeze(1)
+            return samples
 
         if use_batched:
             sample_batched = getattr(posterior_obj, "sample_batched", None)
@@ -257,13 +271,277 @@ class Inference:
                     f"Posterior object of type {type(posterior_obj)} does not expose "
                     "'sample_batched', required for batched observations."
                 )
-            samples = sample_batched(**kwargs)
+            try:
+                samples = sample_batched(**kwargs)
+            except AssertionError as exc:
+                # Some NPE/flow combinations can hit numeric assertions in batched
+                # spline inversion. Retry robustly row-by-row.
+                samples = self._sample_posterior_rowwise(posterior_obj, kwargs, exc)
         else:
             samples = posterior_obj.sample(**kwargs)
 
         if samples.ndim == 2:
             samples = samples.unsqueeze(1)
         return samples
+
+    def _sample_posterior_without_rejection(self, posterior_obj, kwargs, *, nan_outside_prior=True):
+        """
+        Draw directly from posterior_estimator.sample(condition=x), bypassing
+        rejection sampling loops. Optionally mask out-of-prior samples as NaN.
+        """
+        estimator = getattr(posterior_obj, "posterior_estimator", None)
+        proposal_sample = getattr(estimator, "sample", None)
+        if not callable(proposal_sample):
+            raise RuntimeError(
+                "Direct proposal sampling requested, but posterior object does not expose "
+                "posterior_estimator.sample(...)."
+            )
+
+        sample_shape = kwargs.get("sample_shape", self.torch.Size(()))
+        x_arg = kwargs.get("x", None)
+        if x_arg is None:
+            raise ValueError("Direct proposal sampling requires a conditioning observation 'x'.")
+
+        def _normalize_direct_shape(t):
+            if t.ndim == 2:
+                t = t.unsqueeze(1)
+            elif t.ndim > 3:
+                t = t.reshape(-1, t.shape[-2], t.shape[-1])
+            if t.ndim != 3:
+                raise RuntimeError(
+                    f"Unexpected direct-proposal sample shape: {tuple(t.shape)}. "
+                    "Expected (S, B, theta_dim) or (S, theta_dim)."
+                )
+            return t
+
+        x_shape = getattr(x_arg, "shape", None)
+        batch_size = int(x_shape[0]) if (x_shape is not None and len(x_shape) >= 2) else 1
+
+        try:
+            samples = proposal_sample(sample_shape, condition=x_arg)
+            samples = _normalize_direct_shape(samples)
+        except AssertionError as exc:
+            # Fall back to row-wise direct proposal sampling.
+            if batch_size <= 1:
+                theta_dim = self._infer_theta_dim_for_sbi_samples(posterior_obj)
+                if theta_dim is None:
+                    raise RuntimeError(
+                        "Direct SBI proposal sampling failed for a single row and "
+                        "could not infer output dimensionality for NaN placeholder."
+                    ) from exc
+                samples = self.torch.full(
+                    (int(self._coerce_sample_shape(sample_shape).numel()), 1, int(theta_dim)),
+                    float("nan"),
+                    dtype=self.torch.float32,
+                    device=x_arg.device,
+                )
+                print("Warning: direct SBI proposal sampling failed for one row; returning NaN samples.")
+            else:
+                n_samples = int(self._coerce_sample_shape(sample_shape).numel())
+                theta_dim = self._infer_theta_dim_for_sbi_samples(posterior_obj)
+                row_samples = [None] * batch_size
+                first_valid = None
+                failed_rows = []
+
+                for row_idx in range(batch_size):
+                    x_row = x_arg[row_idx:row_idx + 1]
+                    try:
+                        one = proposal_sample(sample_shape, condition=x_row)
+                        one = _normalize_direct_shape(one)
+                    except AssertionError as row_exc:
+                        failed_rows.append((row_idx, row_exc))
+                        continue
+
+                    if one.shape[0] != n_samples:
+                        raise RuntimeError(
+                            f"Direct SBI row-wise sample count mismatch: expected {n_samples}, got {int(one.shape[0])}."
+                        )
+                    if int(one.shape[1]) != 1:
+                        raise RuntimeError(
+                            f"Direct SBI row-wise sample batch mismatch: expected 1, got {int(one.shape[1])}."
+                        )
+
+                    if theta_dim is None:
+                        theta_dim = int(one.shape[-1])
+                    elif int(one.shape[-1]) != int(theta_dim):
+                        raise RuntimeError(
+                            f"Inconsistent theta dimension in direct SBI fallback: expected {theta_dim}, got {int(one.shape[-1])}."
+                        )
+
+                    row_samples[row_idx] = one
+                    if first_valid is None:
+                        first_valid = one
+
+                if theta_dim is None:
+                    first_row_exc = failed_rows[0][1] if failed_rows else exc
+                    raise RuntimeError(
+                        "Direct SBI proposal sampling failed for all rows and could not infer output dimensionality."
+                    ) from first_row_exc
+
+                if first_valid is not None:
+                    dtype = first_valid.dtype
+                    device = first_valid.device
+                else:
+                    dtype = self.torch.float32
+                    device = x_arg.device
+
+                for row_idx, entry in enumerate(row_samples):
+                    if entry is not None:
+                        continue
+                    row_samples[row_idx] = self.torch.full(
+                        (n_samples, 1, int(theta_dim)),
+                        float("nan"),
+                        dtype=dtype,
+                        device=device,
+                    )
+
+                if failed_rows:
+                    preview = ",".join(str(idx) for idx, _ in failed_rows[:10])
+                    suffix = "..." if len(failed_rows) > 10 else ""
+                    print(
+                        f"Warning: direct SBI row-wise fallback produced NaN samples for "
+                        f"{len(failed_rows)}/{batch_size} rows (indices: {preview}{suffix})."
+                    )
+
+                samples = self.torch.cat(row_samples, dim=1)
+
+        if nan_outside_prior:
+            prior = getattr(posterior_obj, "prior", None)
+            prior_log_prob = getattr(prior, "log_prob", None)
+            if callable(prior_log_prob):
+                try:
+                    flat = samples.reshape(-1, samples.shape[-1])
+                    logp = prior_log_prob(flat)
+                    if hasattr(logp, "ndim") and int(logp.ndim) > 1:
+                        logp = logp.reshape(logp.shape[0], -1).sum(dim=1)
+                    finite = self.torch.isfinite(logp).reshape(samples.shape[0], samples.shape[1])
+                    invalid = ~finite
+                    if bool(invalid.any()):
+                        samples = samples.clone()
+                        samples[invalid] = float("nan")
+                        bad = int(invalid.sum().item())
+                        total = int(invalid.numel())
+                        print(
+                            f"Warning: direct SBI proposal sampling generated out-of-prior draws "
+                            f"for {bad}/{total} sample-row entries; replaced with NaN."
+                        )
+                except Exception:
+                    # Best-effort masking only; do not fail prediction because prior
+                    # support checking is unavailable for a specific prior type.
+                    pass
+
+        return samples
+
+    def _infer_theta_dim_for_sbi_samples(self, posterior_obj):
+        """Best-effort theta dimensionality inference for SBI fallback outputs."""
+        if self.theta is not None:
+            y = np.asarray(self.theta)
+            if y.ndim == 1:
+                return 1
+            if y.ndim >= 2 and y.shape[1] > 0:
+                return int(y.shape[1])
+
+        prior = getattr(posterior_obj, "prior", None)
+        event_shape = getattr(prior, "event_shape", None)
+        if event_shape is not None:
+            try:
+                n = int(np.prod(tuple(event_shape))) if len(tuple(event_shape)) > 0 else 1
+                if n > 0:
+                    return n
+            except Exception:
+                pass
+
+        return None
+
+    def _sample_posterior_rowwise(self, posterior_obj, kwargs, original_exc):
+        """Fallback path when batched SBI sampling fails numerically."""
+        x_arg = kwargs.get("x", None)
+        x_shape = getattr(x_arg, "shape", None)
+        if x_arg is None or x_shape is None or len(x_shape) < 2 or int(x_shape[0]) <= 1:
+            raise original_exc
+
+        base_kwargs = dict(kwargs)
+        base_kwargs.pop("x", None)
+
+        sample_shape = kwargs.get("sample_shape", self.torch.Size(()))
+        n_samples = int(self._coerce_sample_shape(sample_shape).numel())
+        if n_samples <= 0:
+            raise ValueError("SBI fallback received non-positive sample count.")
+
+        n_rows = int(x_shape[0])
+        row_samples = [None] * n_rows
+        theta_dim = self._infer_theta_dim_for_sbi_samples(posterior_obj)
+        first_valid = None
+        failed_rows = []
+
+        for row_idx in range(n_rows):
+            x_row = x_arg[row_idx:row_idx + 1]
+            try:
+                one = posterior_obj.sample(x=x_row, **base_kwargs)
+            except AssertionError as row_exc:
+                failed_rows.append((row_idx, row_exc))
+                continue
+
+            if one.ndim == 2:
+                one = one.unsqueeze(1)
+            elif one.ndim > 3:
+                one = one.reshape(-1, one.shape[-2], one.shape[-1])
+
+            if one.ndim != 3:
+                raise RuntimeError(
+                    f"Unexpected SBI single-row sample shape: {tuple(one.shape)}. "
+                    "Expected (S, 1, theta_dim)."
+                )
+
+            if one.shape[0] != n_samples:
+                raise RuntimeError(
+                    f"SBI single-row sample count mismatch: expected {n_samples}, got {int(one.shape[0])}."
+                )
+
+            if theta_dim is None:
+                theta_dim = int(one.shape[-1])
+            elif int(one.shape[-1]) != int(theta_dim):
+                raise RuntimeError(
+                    f"Inconsistent theta dimension during SBI fallback: expected {theta_dim}, got {int(one.shape[-1])}."
+                )
+
+            row_samples[row_idx] = one
+            if first_valid is None:
+                first_valid = one
+
+        if theta_dim is None:
+            first_row_exc = failed_rows[0][1] if failed_rows else original_exc
+            raise RuntimeError(
+                "SBI posterior sampling failed in both batched and single-row modes. "
+                "Could not infer output dimensionality to continue with NaN placeholders."
+            ) from first_row_exc
+
+        if first_valid is not None:
+            sample_dtype = first_valid.dtype
+            sample_device = first_valid.device
+        else:
+            sample_dtype = self.torch.float32
+            sample_device = x_arg.device
+
+        for row_idx, entry in enumerate(row_samples):
+            if entry is not None:
+                continue
+            row_samples[row_idx] = self.torch.full(
+                (n_samples, 1, int(theta_dim)),
+                float("nan"),
+                dtype=sample_dtype,
+                device=sample_device,
+            )
+
+        if failed_rows:
+            preview = ",".join(str(idx) for idx, _ in failed_rows[:10])
+            suffix = "..." if len(failed_rows) > 10 else ""
+            print(
+                f"Warning: SBI row-wise fallback produced NaN samples for "
+                f"{len(failed_rows)}/{n_rows} rows (indices: {preview}{suffix})."
+            )
+
+        return self.torch.cat(row_samples, dim=1)
 
 
     # -----------------------------
