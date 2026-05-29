@@ -24,6 +24,7 @@
 </script>
 <script>
     window.__webuiRuntime = {{ webui_runtime | tojson }};
+    window.isLocalRuntime = !(window.__webuiRuntime?.is_server_runtime);
 </script>
 <style type="text/tailwindcss">
     .material-symbols-outlined {
@@ -46,6 +47,7 @@
     
 <!-- Main content of the loading data page for simulation -->
 {% block content %}
+<div x-data="{ isLocalRuntime: window.isLocalRuntime }">
 <div class="flex h-full">
     <main class="w-full lg:w-3/5 xl:w-2/3 h-full flex flex-col overflow-y-auto hide-scrollbar">
         <div class="max-w-4xl w-full mx-auto flex flex-col h-full">
@@ -67,23 +69,25 @@
 
                     <form id="simulationUploadForm" action="{{ url_for('upload_sim_files') }}" method="POST" enctype="multipart/form-data">
                         <input type="file" id="spikeFileInput" name="simulation_files" class="hidden" accept=".pkl,.pickle" multiple />
+                        <!-- Hidden elements required by handleFileUpload.js -->
+                        <button type="button" id="simulationModeUploadBtn" class="hidden"></button>
+                        <div id="selectedFiles" class="hidden">
+                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local files</span>
+                            <div id="selectedFilesList" class="mt-2"></div>
+                        </div>
                         <input type="hidden" id="simulationSourceModeInput" name="simulation_source_mode" value="upload" />
                         <input type="hidden" id="simulationServerFilePathInput" name="simulation_server_file_path" value="" />
                         <div id="spikeDropZone"
                             class="drop-zone flex-1 flex flex-col items-center justify-center py-10 px-6 border-2 border-slate-200 dark:border-slate-800 rounded-xl hover:border-primary/50 hover:bg-primary/5 dark:hover:bg-primary/5 transition-all cursor-pointer group">
                             <div class="mb-4 flex flex-wrap items-center justify-center gap-2">
-                                <button type="button" id="simulationModeUploadBtn"
-                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
-                                    Local upload
-                                </button>
                                 <button type="button" id="simulationModeServerBtn"
-                                    class="px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300">
-                                    Server file
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
+                                    <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
                                 </button>
                             </div>
                             <span class="material-symbols-outlined text-4xl text-slate-300 group-hover:text-primary mb-3">upload_file</span>
                             <p id="simulationDropZoneHint" class="text-sm font-medium text-slate-600 dark:text-slate-400 text-center">
-                                Drag and drop pkl files or click to browse
+                                <span x-text="isLocalRuntime ? 'Click to browse local files' : 'Click to browse server files'"></span>
                             </p>
                             <p id="simulationUploadValidationError" class="mt-2 hidden whitespace-pre-line break-words text-sm font-semibold text-red-600 dark:text-red-400 text-center">
                                 Only .pkl or .pickle files are supported.
@@ -250,7 +254,9 @@
 <div id="simulationServerFileModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/50 p-4">
     <div class="w-full max-w-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl overflow-hidden">
         <div class="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">Browse server files</h3>
+            <h3 class="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                <span x-text="isLocalRuntime ? 'Browse local files' : 'Browse server files'"></span>
+            </h3>
             <button type="button" id="simulationServerBrowserClose"
                 class="text-sm text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200">Close</button>
         </div>
@@ -279,10 +285,11 @@
         </div>
     </div>
 </div>
-
+</div>
 {% endblock %}
 
 {% block scripts %}
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script src="{{ url_for('static', filename='js/handleFileUpload.js') }}"></script>
 <script>
     (() => {
@@ -350,6 +357,8 @@
 
         window.initUnifiedUploadFlow({
             runtime,
+            allowServerSource: true,
+            defaultMode: 'server-path',
             historyKey: 'simulation_upload:file_browser',
             localPickerId: 'simulation_load_data_local',
             browseDirsUrl: '{{ url_for("features_browse_dirs") }}',
