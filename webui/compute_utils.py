@@ -2427,24 +2427,20 @@ def _parse_dict_param(params, key):
 
 def _default_sbi_eval_sampling_kwargs(model_name):
     model_key = str(model_name or "").strip().upper()
-    if model_key == "NPE":
+    if model_key in {"NPE", "NLE", "NRE"}:
         return {
-            "sample_shape": [2000],
-            "max_sampling_batch_size": 10000,
+            "sample_shape": [256],
+            "max_sampling_batch_size": 512,
             "show_progress_bars": False,
-        }
-    if model_key in {"NLE", "NRE"}:
-        return {
-            "sample_shape": [2000],
-            "method": None,
-            "thin": None,
-            "num_chains": None,
-            "num_workers": None,
-            "show_progress_bars": False,
+            "reject_outside_prior": False,
+            "ncpi_nan_outside_prior": True,
         }
     return {
-        "sample_shape": [2000],
+        "sample_shape": [256],
+        "max_sampling_batch_size": 512,
         "show_progress_bars": False,
+        "reject_outside_prior": False,
+        "ncpi_nan_outside_prior": True,
     }
 
 
@@ -4626,7 +4622,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             if "sample_shape" not in sbi_eval_sampling_kwargs:
                 sbi_eval_sampling_kwargs["sample_shape"] = _default_sbi_eval_sampling_kwargs(
                     inference_obj.model_name
-                ).get("sample_shape", [2000])
+                ).get("sample_shape", [500])
             _append_job_output(
                 job_status,
                 job_id,
@@ -4883,7 +4879,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 if "sample_shape" not in sbi_eval_sampling_kwargs:
                     sbi_eval_sampling_kwargs["sample_shape"] = _default_sbi_eval_sampling_kwargs(
                         inference_obj.model_name
-                    ).get("sample_shape", [2000])
+                    ).get("sample_shape", [500])
                 _append_job_output(
                     job_status,
                     job_id,

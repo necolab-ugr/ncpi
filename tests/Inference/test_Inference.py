@@ -7,6 +7,114 @@ os.environ.setdefault("NEURON_MODULE_OPTIONS", "-nogui")
 from ncpi.Inference import Inference
 
 
+class _FailBatchedPosterior:
+    """Test double: fail in sample_batched(), succeed in single-row sample()."""
+
+    sample_calls = 0
+    sample_batched_calls = 0
+
+    def sample_batched(self, *args, **kwargs):
+        type(self).sample_batched_calls += 1
+        raise AssertionError("simulated batched spline discriminant failure")
+
+    def sample(self, sample_shape=(), x=None, **kwargs):
+        import torch
+
+        type(self).sample_calls += 1
+        size = int(torch.Size(sample_shape).numel())
+        theta_dim = 2
+        return torch.zeros((size, theta_dim), dtype=torch.float32)
+
+
+class _PartiallyFailingPosterior:
+    """Test double: row-wise sampling fails for selected rows only."""
+
+    sample_calls = 0
+    sample_batched_calls = 0
+
+    def sample_batched(self, *args, **kwargs):
+        type(self).sample_batched_calls += 1
+        raise AssertionError("simulated batched spline discriminant failure")
+
+    def sample(self, sample_shape=(), x=None, **kwargs):
+        import torch
+
+        type(self).sample_calls += 1
+        if float(x[0, 0].item()) < 0.0:
+            raise AssertionError("simulated single-row spline discriminant failure")
+
+        size = int(torch.Size(sample_shape).numel())
+        theta_dim = 2
+        return torch.ones((size, theta_dim), dtype=torch.float32)
+
+
+class _DirectSamplerPosterior:
+    """Test double: supports direct proposal sampling without rejection loop."""
+
+    sample_batched_calls = 0
+
+    class _Estimator:
+        @staticmethod
+        def sample(sample_shape, condition):
+            import torch
+
+            n = int(torch.Size(sample_shape).numel())
+            b = int(condition.shape[0])
+            base = condition[:, :2].to(torch.float32)
+            return base.unsqueeze(0).repeat(n, 1, 1)
+
+    class _Prior:
+        @staticmethod
+        def log_prob(theta):
+            import torch
+
+            return torch.where(theta[:, 0] >= 0.0, torch.zeros_like(theta[:, 0]), -torch.inf)
+
+    def __init__(self):
+        self.posterior_estimator = self._Estimator()
+        self.prior = self._Prior()
+
+    def sample_batched(self, *args, **kwargs):
+        type(self).sample_batched_calls += 1
+        raise AssertionError("should not call sample_batched in direct-sampler mode")
+
+    def sample(self, *args, **kwargs):
+        raise AssertionError("should not call sample() in direct-sampler mode")
+
+
+class _DirectSamplerBatchAssertionPosterior:
+    """Test double: direct batched sampling asserts, row-wise partially succeeds."""
+
+    class _Estimator:
+        @staticmethod
+        def sample(sample_shape, condition):
+            import torch
+
+            if int(condition.shape[0]) > 1:
+                raise AssertionError("simulated direct batched spline discriminant failure")
+            if float(condition[0, 0].item()) < 0.0:
+                raise AssertionError("simulated direct single-row spline discriminant failure")
+            n = int(torch.Size(sample_shape).numel())
+            return torch.ones((n, 2), dtype=torch.float32)
+
+    class _Prior:
+        @staticmethod
+        def log_prob(theta):
+            import torch
+
+            return torch.zeros(theta.shape[0], dtype=torch.float32, device=theta.device)
+
+    def __init__(self):
+        self.posterior_estimator = self._Estimator()
+        self.prior = self._Prior()
+
+    def sample(self, *args, **kwargs):
+        raise AssertionError("should not call posterior.sample() in direct-sampler mode")
+
+    def sample_batched(self, *args, **kwargs):
+        raise AssertionError("should not call posterior.sample_batched() in direct-sampler mode")
+
+
 @pytest.fixture(scope="function")
 def tmp_result_dir(tmp_path):
     d = tmp_path / "data"
@@ -413,6 +521,138 @@ def test_sbi_train_predict_allow_missing_sample_shape_sampling_kwargs(tmp_result
     assert isinstance(preds, np.ndarray)
     assert preds.shape == (1, 3, 2)
     assert np.all(np.isfinite(preds))
+
+
+def test_sbi_predict_fallbacks_to_rowwise_after_batched_assertion(tmp_result_dir):
+    _require_sbi()
+    import torch
+    from sbi.utils import BoxUniform
+
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=2, seed=31)
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    inf = Inference("NPE", hyperparams={"prior": prior})
+    inf.theta = Y
+
+    _FailBatchedPosterior.sample_calls = 0
+    _FailBatchedPosterior.sample_batched_calls = 0
+
+    posterior_path = os.path.join(tmp_result_dir, "posterior.pkl")
+    with open(posterior_path, "wb") as f:
+        pickle.dump(_FailBatchedPosterior(), f)
+
+    out = inf.predict(
+        X[:4],
+        result_dir=tmp_result_dir,
+        scaler=False,
+        sbi_eval_sampling_kwargs={"sample_shape": (6,), "show_progress_bars": False},
+    )
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (6, 4, 2)
+    assert np.all(np.isfinite(out))
+    assert _FailBatchedPosterior.sample_batched_calls == 1
+    assert _FailBatchedPosterior.sample_calls == 4
+
+
+def test_sbi_predict_rowwise_fallback_keeps_partial_rows_as_nan(tmp_result_dir):
+    _require_sbi()
+    import torch
+    from sbi.utils import BoxUniform
+
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    inf = Inference("NPE", hyperparams={"prior": prior})
+    inf.theta = np.zeros((5, 2), dtype=float)
+
+    _PartiallyFailingPosterior.sample_calls = 0
+    _PartiallyFailingPosterior.sample_batched_calls = 0
+
+    posterior_path = os.path.join(tmp_result_dir, "posterior.pkl")
+    with open(posterior_path, "wb") as f:
+        pickle.dump(_PartiallyFailingPosterior(), f)
+
+    x_query = np.array([[1.0, 0.0], [-1.0, 0.0], [2.0, 0.0]], dtype=float)
+    out = inf.predict(
+        x_query,
+        result_dir=tmp_result_dir,
+        scaler=False,
+        sbi_eval_sampling_kwargs={"sample_shape": (4,), "show_progress_bars": False},
+    )
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (4, 3, 2)
+    assert np.all(np.isfinite(out[:, 0, :]))
+    assert np.all(np.isnan(out[:, 1, :]))
+    assert np.all(np.isfinite(out[:, 2, :]))
+    assert _PartiallyFailingPosterior.sample_batched_calls == 1
+    assert _PartiallyFailingPosterior.sample_calls == 3
+
+
+def test_sbi_predict_reject_outside_prior_false_bypasses_rejection_sampler(tmp_result_dir):
+    _require_sbi()
+    import torch
+    from sbi.utils import BoxUniform
+
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    inf = Inference("NPE", hyperparams={"prior": prior})
+    inf.theta = np.zeros((5, 2), dtype=float)
+
+    _DirectSamplerPosterior.sample_batched_calls = 0
+    posterior_path = os.path.join(tmp_result_dir, "posterior.pkl")
+    with open(posterior_path, "wb") as f:
+        pickle.dump(_DirectSamplerPosterior(), f)
+
+    x_query = np.array([[1.0, 0.0], [-1.0, 0.0], [2.0, 0.0]], dtype=float)
+    out = inf.predict(
+        x_query,
+        result_dir=tmp_result_dir,
+        scaler=False,
+        sbi_eval_sampling_kwargs={
+            "sample_shape": (4,),
+            "show_progress_bars": False,
+            "reject_outside_prior": False,
+            "ncpi_nan_outside_prior": True,
+        },
+    )
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (4, 3, 2)
+    assert np.all(np.isfinite(out[:, 0, :]))
+    assert np.all(np.isnan(out[:, 1, :]))
+    assert np.all(np.isfinite(out[:, 2, :]))
+    assert _DirectSamplerPosterior.sample_batched_calls == 0
+
+
+def test_sbi_predict_direct_sampler_batch_assertion_falls_back_rowwise(tmp_result_dir):
+    _require_sbi()
+    import torch
+    from sbi.utils import BoxUniform
+
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    inf = Inference("NPE", hyperparams={"prior": prior})
+    inf.theta = np.zeros((5, 2), dtype=float)
+
+    posterior_path = os.path.join(tmp_result_dir, "posterior.pkl")
+    with open(posterior_path, "wb") as f:
+        pickle.dump(_DirectSamplerBatchAssertionPosterior(), f)
+
+    x_query = np.array([[1.0, 0.0], [-1.0, 0.0], [2.0, 0.0]], dtype=float)
+    out = inf.predict(
+        x_query,
+        result_dir=tmp_result_dir,
+        scaler=False,
+        sbi_eval_sampling_kwargs={
+            "sample_shape": (4,),
+            "show_progress_bars": False,
+            "reject_outside_prior": False,
+            "ncpi_nan_outside_prior": True,
+        },
+    )
+
+    assert isinstance(out, np.ndarray)
+    assert out.shape == (4, 3, 2)
+    assert np.all(np.isfinite(out[:, 0, :]))
+    assert np.all(np.isnan(out[:, 1, :]))
+    assert np.all(np.isfinite(out[:, 2, :]))
 
 
 def test_sbi_param_grid_stores_posterior_ensemble_and_predicts(tmp_result_dir):

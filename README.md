@@ -120,6 +120,9 @@ Then open:
 http://127.0.0.1:5000
 ```
 
+For best results, we recommend running the WebUI in Chrome, as our tests are most stable there and we have observed a
+couple of issues in other browsers.
+
 ### Windows note
 You can run the same command from Anaconda Prompt or PowerShell.
 If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.

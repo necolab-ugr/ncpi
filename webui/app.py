@@ -10487,6 +10487,7 @@ def remove_inference_file():
 def new_training():
     return render_template("4.2.0.new_training.html")
 
+
 # Compute predictions for inference configuration page
 @app.route("/inference/compute_predictions")
 def compute_predictions():
