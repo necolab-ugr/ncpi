@@ -46,108 +46,9 @@
 
 
 {% block content %}
-{% set inference_default_source_mode = 'server-path' if (webui_runtime.default_analysis_source_mode|default('upload')) == 'server-path' else 'upload' %}
-<script>
-    window.__initialFeaturesSourceMode = {{ ('auto-detected' if default_feature_file else inference_default_source_mode) | tojson }};
-    window.__initialAssetsSourceMode = {{ inference_default_source_mode | tojson }};
-</script>
 <div
     id="compute-predictions-root"
-    x-data="{
-        runtime: (window.__webuiRuntime || {}),
-        allowServerSource: ((window.__webuiRuntime || {}).is_server_runtime !== false),
-        isLocalRuntime: window.isLocalRuntime,
-        featuresSourceMode: window.__initialFeaturesSourceMode,
-        featuresServerFilePath: '',
-        assetsSourceMode: window.__initialAssetsSourceMode,
-        assetsServerFolderPath: '',
-        assetsModelServerFilePath: '',
-        assetsScalerServerFilePath: '',
-        assetsServerDetectedModel: '',
-        assetsServerDetectedScaler: '',
-        assetsServerInspectError: '',
-        assetsServerFolderFilesPreview: [],
-        assetsServerFolderFilesTotal: 0,
-        assetsServerFolderFilesMore: 0,
-        hasScalerArtifact: false,
-        assetsUploadMode: 'individual',
-        modelName: '__auto__',
-        sbiEvalSamplingKwargsJson: '{\"sample_shape\": [256], \"max_sampling_batch_size\": 512, \"show_progress_bars\": false, \"reject_outside_prior\": false, \"ncpi_nan_outside_prior\": true}',
-        lastSbiDefaultsAlgorithm: '',
-        autoDetectedBackend: '',
-        autoDetectedType: '',
-        autoDetectError: '',
-        autoDetectPending: false,
-        autoDetectReady: false,
-        setAutoDetection(payload) {
-            const detail = payload || {};
-            this.autoDetectPending = Boolean(detail.pending);
-            this.autoDetectedBackend = (detail.backend || '').toLowerCase();
-            this.autoDetectedType = detail.inferred_type || '';
-            this.autoDetectError = detail.error || '';
-            this.autoDetectReady = Boolean(this.autoDetectedBackend) || Boolean(this.autoDetectError);
-        },
-        shortName(path) {
-            const value = String(path || '').trim();
-            if (!value) return '';
-            const normalized = value.replace(/\\/g, '/');
-            const parts = normalized.split('/').filter(Boolean);
-            return parts.length ? parts[parts.length - 1] : value;
-        },
-        detectedSbiAlgorithm() {
-            const selected = String(this.modelName || '').trim().toUpperCase();
-            if (['NPE', 'NLE', 'NRE'].includes(selected)) return selected;
-            const inferred = String(this.autoDetectedType || '').trim().toUpperCase();
-            if (inferred.includes('NPE')) return 'NPE';
-            if (inferred.includes('NLE')) return 'NLE';
-            if (inferred.includes('NRE')) return 'NRE';
-            return 'NPE';
-        },
-        defaultSbiEvalSamplingKwargsFor(model) {
-            const defaults = {
-                NPE: {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true},
-                NLE: {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true},
-                NRE: {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true}
-            };
-            return defaults[model] || {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true};
-        },
-        syncSbiEvalSamplingDefaults(force = false) {
-            const algo = this.detectedSbiAlgorithm();
-            if (!force) {
-                const raw = String(this.sbiEvalSamplingKwargsJson || '').trim();
-                if (raw) {
-                    if (!this.lastSbiDefaultsAlgorithm) {
-                        return;
-                    }
-                    let parsed = null;
-                    try {
-                        parsed = JSON.parse(raw);
-                    } catch (error) {
-                        return;
-                    }
-                    const previousDefault = this.defaultSbiEvalSamplingKwargsFor(this.lastSbiDefaultsAlgorithm);
-                    if (JSON.stringify(parsed) !== JSON.stringify(previousDefault)) {
-                        return;
-                    }
-                    if (this.lastSbiDefaultsAlgorithm === algo) {
-                        return;
-                    }
-                }
-            }
-            this.sbiEvalSamplingKwargsJson = JSON.stringify(this.defaultSbiEvalSamplingKwargsFor(algo), null, 2);
-            this.lastSbiDefaultsAlgorithm = algo;
-        },
-        isSbiModel() {
-            const selected = this.modelName;
-            if (['NPE', 'NLE', 'NRE'].includes(selected)) {
-                return true;
-            }
-            if (selected === '__auto__') {
-                return this.autoDetectedBackend === 'sbi';
-            }
-            return false;
-        }
-    }"
+    x-data="inferencePredictionsData()"
     @auto-model-detection.window="setAutoDetection($event.detail || null)"
     class="max-w-5xl mx-auto"
 >
@@ -213,7 +114,7 @@
                                 Pipeline detection
                             </button>
                             <button id="features-source-upload-btn" type="button" class="hidden custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border"></button>
-                            <button id="features-source-server-btn" type="button"
+                            <button id="features-source-server-btn" type="button" @click.stop
                                 class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
                                 <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
                             </button>
@@ -259,7 +160,7 @@
                 Load Prediction Assets
             </h2>
             <div class="grid grid-cols-1 gap-6">
-                <input id="model-assets-source" type="hidden" name="model_assets_source" value="{{ inference_default_source_mode }}">
+                <input id="model-assets-source" type="hidden" name="model_assets_source" value="server-path">
                 <input type="hidden" id="assets-upload-mode-hidden" name="assets_upload_mode" value="server-path">
                 <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" value="">
                 <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" value="">
@@ -346,7 +247,7 @@
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
                                 <button id="assets-model-source-upload-btn" type="button" class="hidden custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border"></button>
-                                <button id="assets-model-source-server-btn" type="button"
+                                <button id="assets-model-source-server-btn" type="button" @click.stop
                                     class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
                                     <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
                                 </button>
@@ -384,7 +285,7 @@
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
                                 <button id="assets-scaler-source-upload-btn" type="button" class="hidden custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'upload' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Local upload</button>
-                                <button id="assets-model-source-server-btn" type="button"
+                                <button id="assets-scaler-source-server-btn" type="button" @click.stop
                                     class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
                                     <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
                                 </button>
@@ -703,9 +604,124 @@
 {% endblock %}
 
 {% block scripts %}
+{% set inference_default_source_mode = 'server-path' if (webui_runtime.default_analysis_source_mode|default('upload')) == 'server-path' else 'upload' %}
 {{ super() }}
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
+window.__inferenceInitialData = {
+    featuresSourceMode: {{ ('auto-detected' if default_feature_file else inference_default_source_mode) | tojson }},
+    assetsSourceMode: {{ inference_default_source_mode | tojson }},
+    isLocalRuntime: !(window.__webuiRuntime || {}).is_server_runtime,
+    hasDefaultFeature: {{ 'true' if default_feature_file else 'false' }},
+    defaultFeatureFile: {{ (default_feature_file | default('')) | tojson }}
+};
+
+function inferencePredictionsData() {
+    return {
+        runtime: (window.__webuiRuntime || {}),
+        allowServerSource: true,
+        isLocalRuntime: window.__inferenceInitialData.isLocalRuntime,
+        featuresSourceMode: window.__inferenceInitialData.featuresSourceMode,
+        featuresServerFilePath: '',
+        assetsSourceMode: window.__inferenceInitialData.assetsSourceMode,
+        assetsServerFolderPath: '',
+        assetsModelServerFilePath: '',
+        assetsScalerServerFilePath: '',
+        assetsServerDetectedModel: '',
+        assetsServerDetectedScaler: '',
+        assetsServerInspectError: '',
+        assetsServerFolderFilesPreview: [],
+        assetsServerFolderFilesTotal: 0,
+        assetsServerFolderFilesMore: 0,
+        hasScalerArtifact: false,
+        assetsUploadMode: 'individual',
+        modelName: '__auto__',
+
+        sbiEvalSamplingKwargsJson: JSON.stringify({
+            sample_shape: [256], 
+            max_sampling_batch_size: 512, 
+            show_progress_bars: false, 
+            reject_outside_prior: false, 
+            ncpi_nan_outside_prior: true
+        }),
+        lastSbiDefaultsAlgorithm: '',
+
+        autoDetectedBackend: '',
+        autoDetectedType: '',
+        autoDetectError: '',
+        autoDetectPending: false,
+        autoDetectReady: false,
+        setAutoDetection(payload) {
+            const detail = payload || {};
+            this.autoDetectPending = Boolean(detail.pending);
+            this.autoDetectedBackend = (detail.backend || '').toLowerCase();
+            this.autoDetectedType = detail.inferred_type || '';
+            this.autoDetectError = detail.error || '';
+            this.autoDetectReady = Boolean(this.autoDetectedBackend) || Boolean(this.autoDetectError);
+        },
+        shortName(path) {
+            const value = String(path || '').trim();
+            if (!value) return '';
+            const normalized = value.replace(/\\/g, '/');
+            const parts = normalized.split('/').filter(Boolean);
+            return parts.length ? parts[parts.length - 1] : value;
+        },
+        detectedSbiAlgorithm() {
+            const selected = String(this.modelName || '').trim().toUpperCase();
+            if (['NPE', 'NLE', 'NRE'].includes(selected)) return selected;
+            const inferred = String(this.autoDetectedType || '').trim().toUpperCase();
+            if (inferred.includes('NPE')) return 'NPE';
+            if (inferred.includes('NLE')) return 'NLE';
+            if (inferred.includes('NRE')) return 'NRE';
+            return 'NPE';
+        },
+        defaultSbiEvalSamplingKwargsFor(model) {
+            const defaults = {
+                NPE: {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true},
+                NLE: {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true},
+                NRE: {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true}
+            };
+            return defaults[model] || {'sample_shape': [256], 'max_sampling_batch_size': 512, 'show_progress_bars': false, 'reject_outside_prior': false, 'ncpi_nan_outside_prior': true};
+        },
+        syncSbiEvalSamplingDefaults(force = false) {
+            const algo = this.detectedSbiAlgorithm();
+            if (!force) {
+                const raw = String(this.sbiEvalSamplingKwargsJson || '').trim();
+                if (raw) {
+                    if (!this.lastSbiDefaultsAlgorithm) {
+                        return;
+                    }
+                    let parsed = null;
+                    try {
+                        parsed = JSON.parse(raw);
+                    } catch (error) {
+                        return;
+                    }
+                    const previousDefault = this.defaultSbiEvalSamplingKwargsFor(this.lastSbiDefaultsAlgorithm);
+                    if (JSON.stringify(parsed) !== JSON.stringify(previousDefault)) {
+                        return;
+                    }
+                    if (this.lastSbiDefaultsAlgorithm === algo) {
+                        return;
+                    }
+                }
+            }
+            this.sbiEvalSamplingKwargsJson = JSON.stringify(this.defaultSbiEvalSamplingKwargsFor(algo), null, 2);
+            this.lastSbiDefaultsAlgorithm = algo;
+        },
+        isSbiModel() {
+            const selected = this.modelName;
+            if (['NPE', 'NLE', 'NRE'].includes(selected)) {
+                return true;
+            }
+            if (selected === '__auto__') {
+                return this.autoDetectedBackend === 'sbi';
+            }
+            return false;
+        }
+    };
+}
+
 (() => {
     let lastAutoDetection = {
         pending: false,
