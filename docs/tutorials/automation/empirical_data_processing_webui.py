@@ -543,24 +543,33 @@ def _click_features_toolbar_button(
     *,
     after_ms: int = 320,
     timeout_ms: int = 8_000,
+    wait_idle: bool = True,
 ) -> None:
     buttons = modal.locator("div.p-4.space-y-3 > div.flex.flex-wrap.gap-2 > button")
     deadline = time.time() + (timeout_ms / 1000.0)
     wanted = str(label or "").strip().lower()
     while time.time() < deadline:
-        _wait_features_folder_modal_idle(page, modal)
+        if wait_idle:
+            _wait_features_folder_modal_idle(page, modal)
         count = buttons.count()
         for idx in range(count):
             btn = buttons.nth(idx)
             name = btn.inner_text().strip().lower()
             if name == wanted:
-                smooth_mouse_click(page, btn, after_ms=after_ms)
+                _fast_features_modal_click(page, btn, after_ms=after_ms)
                 return
         page.wait_for_timeout(80)
     raise RuntimeError(f"Could not find toolbar button '{label}' in features folder browser.")
 
 
-def _click_features_folder_entry(page: Page, modal: Locator, segment: str, timeout_ms: int = 15_000) -> None:
+def _click_features_folder_entry(
+    page: Page,
+    modal: Locator,
+    segment: str,
+    timeout_ms: int = 15_000,
+    *,
+    wait_for_path_change: bool = True,
+) -> None:
     entries = modal.locator("div.max-h-80 button")
     labels = modal.locator("div.max-h-80 button span.font-mono")
     wanted = str(segment or "").strip().rstrip("/").lower()
@@ -575,8 +584,14 @@ def _click_features_folder_entry(page: Page, modal: Locator, segment: str, timeo
             if name != wanted:
                 continue
             btn = entries.nth(idx)
-            before = _read_features_folder_current_path(page, modal)
-            smooth_mouse_click(page, btn, after_ms=320)
+            before = _read_features_folder_current_path(page, modal) if wait_for_path_change else ""
+            _fast_features_modal_click(page, btn, after_ms=0)
+            if not wait_for_path_change:
+                print(
+                    f"[automation] features-folder final step '{segment}' selected.",
+                    flush=True,
+                )
+                return
             end_deadline = time.time() + 10.0
             while time.time() < end_deadline:
                 after = _read_features_folder_current_path(page, modal)
@@ -601,7 +616,6 @@ def select_server_folder_in_features_modal(page: Page, target_path: str) -> None
         raise RuntimeError("Target data folder path is empty.")
     modal = _features_folder_modal(page)
     modal.wait_for(state="visible", timeout=15_000)
-    _wait_features_folder_modal_idle(page, modal)
 
     normalized_target = _normalize_abs_path(target_path)
     current_path = _read_features_folder_current_path(page, modal)
@@ -623,11 +637,16 @@ def select_server_folder_in_features_modal(page: Page, target_path: str) -> None
     nav_segments = segments[common:]
     for idx, segment in enumerate(nav_segments):
         print(f"[automation] navigating to folder segment: {segment}", flush=True)
-        _click_features_folder_entry(page, modal, segment, timeout_ms=18_000)
-        if idx < (len(nav_segments) - 1):
-            page.wait_for_timeout(2_000)
+        is_final_segment = idx == (len(nav_segments) - 1)
+        _click_features_folder_entry(
+            page,
+            modal,
+            segment,
+            timeout_ms=18_000,
+            wait_for_path_change=not is_final_segment,
+        )
 
-    _click_features_toolbar_button(page, modal, "Add this folder", after_ms=140)
+    _click_features_toolbar_button(page, modal, "Add this folder", after_ms=0, wait_idle=False)
     modal.wait_for(state="hidden", timeout=15_000)
 
 
@@ -683,9 +702,10 @@ def scroll_to_parser_metadata_sources(page: Page) -> None:
 
 
 def open_dropdown_menu(page: Page, select: Locator) -> None:
-    move_to_locator(page, select, click=False, pause_ms=120)
-    move_to_locator(page, select, click=True, pause_ms=70)
-    select.click(delay=80)
+    move_to_locator(page, select, click=False, pause_ms=0)
+    page.wait_for_timeout(1000)
+    move_demo_cursor(page, click=True)
+    select.click(delay=0)
     page.wait_for_timeout(260)
 
 
@@ -734,6 +754,19 @@ def choose_select_option_with_menu_cursor(
     global _DEMO_CURSOR_POS
 
     wanted = str(value)
+    fallback_token = str(label_fallback_contains or "").strip().lower()
+    smooth_select_option_match(
+        page=page,
+        locator=select,
+        matcher=lambda option_value, option_label: (
+            option_value == wanted
+            or (bool(fallback_token) and fallback_token in option_label.lower())
+        ),
+        description=wanted,
+        after_ms=after_ms,
+    )
+    return
+
     move_to_locator(page, select, click=False, pause_ms=120)
     move_to_locator(page, select, click=True, pause_ms=60)
 
@@ -878,9 +911,10 @@ def choose_select_option_with_menu_cursor(
     if overlay_target:
         menu_x = float(overlay_target.get("x"))
         menu_y = float(overlay_target.get("y"))
-        move_cursor_to_point(page, menu_x, menu_y, click=True, extra_pause_ms=40)
-        page.mouse.click(menu_x, menu_y, delay=80)
-        page.wait_for_timeout(120)
+        move_cursor_to_point(page, menu_x, menu_y)
+        page.wait_for_timeout(1000)
+        move_demo_cursor(page, click=True)
+        page.mouse.click(menu_x, menu_y, delay=0)
         page.evaluate(
             """
             () => {
@@ -952,7 +986,9 @@ def set_aggregate_over_sensor(page: Page) -> None:
     move_to_locator(page, select, click=False, pause_ms=150)
     option = select.locator("option", has_text="sensor").first
     option.wait_for(state="visible", timeout=10_000)
-    move_to_locator(page, option, click=True, pause_ms=120)
+    move_to_locator(page, option, click=False, pause_ms=0)
+    page.wait_for_timeout(1000)
+    move_demo_cursor(page, click=True)
     option.click()
     select.evaluate(
         """
@@ -1161,6 +1197,45 @@ def scroll_to_prediction_assets(page: Page) -> None:
     page.wait_for_timeout(900)
 
 
+from tutorial_cursor import (  # noqa: E402
+    ensure_demo_cursor,
+    move_cursor_to_point,
+    move_demo_cursor,
+    move_to_locator,
+    reset_demo_cursor_position,
+    show_cursor_transition,
+    smooth_check,
+    smooth_click,
+    smooth_fill,
+    smooth_mouse_click,
+    smooth_scroll_locator_into_view,
+    smooth_select_option,
+    smooth_select_option_match,
+)
+
+
+def _fast_features_modal_click(page: Page, locator: Locator, after_ms: int = 0) -> None:
+    """Click inside the server-folder modal without the global tutorial pause."""
+    ensure_demo_cursor(page, start_x=_DEMO_CURSOR_POS["x"], start_y=_DEMO_CURSOR_POS["y"])
+    locator.wait_for(state="visible", timeout=5_000)
+    handle = locator.element_handle(timeout=5_000)
+    if handle is None:
+        raise RuntimeError("Could not resolve element handle for folder-browser click.")
+    handle.evaluate(
+        "el => el.scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' })"
+    )
+    box = handle.bounding_box()
+    if box is None:
+        raise RuntimeError("Could not resolve element box for folder-browser click.")
+    x = box["x"] + (box["width"] / 2.0)
+    y = box["y"] + (box["height"] / 2.0)
+    move_cursor_to_point(page, x, y)
+    move_demo_cursor(page, click=True)
+    page.mouse.click(x, y, delay=0)
+    if after_ms > 0:
+        page.wait_for_timeout(after_ms)
+
+
 def run_tutorial_recording(
     base_url: str,
     headless: bool,
@@ -1177,6 +1252,7 @@ def run_tutorial_recording(
 ) -> Path:
     global _DEMO_CURSOR_POS
     _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
+    reset_demo_cursor_position()
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     tmp_video_dir = VIDEO_DIR / ".tmp"
     if tmp_video_dir.exists():
@@ -1230,7 +1306,7 @@ def run_tutorial_recording(
             smooth_mouse_click(
                 page,
                 data_folder_card.get_by_role("button", name="Add server folder").first,
-                after_ms=120,
+                after_ms=0,
             )
 
             print(f"[automation] selecting feature-extraction folder: {data_folder}", flush=True)

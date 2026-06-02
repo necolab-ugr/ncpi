@@ -4,7 +4,7 @@ This folder contains example scripts used to generate results for the publicatio
 (e.g., Cavallari and four-area cortical models) that were added later and are not part of the original publication:
 
 **[1] Alejandro Orozco Valero, Victor Rodriguez-Gonzalez, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie,**
-**Francisco Pelayo, Christian Morillas, Jesus Poza, Carlos Gomez & Pablo Martinez-Canada**
+**Francisco Pelayo, Christian Morillas, Jesus Poza, Carlos Gomez & Pablo Martinez-Cañada**
 *A Python toolbox for neural circuit parameter inference.*
 npj Syst Biol Appl 11, 45 (2025).
 https://doi.org/10.1038/s41540-025-00527-9
@@ -54,7 +54,9 @@ conda install -c conda-forge nest-simulator=3.8
 `examples/EEG_AD/figures/EEG_predictions.py` can run LME analysis through `Analysis.lmer_tests`, which requires R,
 `rpy2`, and specific R packages.
 
-Install R first (for Conda environments):
+The `analysis` extra includes `rpy2` (R-backed dependency). Before installing `ncpi[analysis]`, make sure R is installed
+on your system (e.g. from https://cran.r-project.org/ or your package manager). Installing `rpy2` via pip or conda can
+fail if a suitable R installation is not present. If you use Conda, you can install R with:
 
 ```bash
 conda install -c conda-forge r-base
@@ -66,16 +68,23 @@ Install Python-side analysis dependencies (includes `rpy2`):
 pip install "ncpi[analysis]"
 ```
 
-Then install the required R packages:
+R packages required by `Analysis` class methods:
+
+- `lmer_tests(...)`: `lme4`, `emmeans`
+- `lmer_selection(...)`: `lme4`, `buildmer`
+
+Install options for the R backend:
+
+In R:
 
 ```r
-install.packages(c("lme4", "emmeans"), repos="https://cloud.r-project.org")
+install.packages(c("lme4", "emmeans", "buildmer"), repos="https://cloud.r-project.org")
 ```
 
-Alternative (conda-forge):
+With conda-forge:
 
 ```bash
-conda install -c conda-forge r-lme4 r-emmeans
+conda install -c conda-forge r-base rpy2 r-lme4 r-emmeans r-buildmer
 ```
 
 If you do not want to use R for these figure scripts, set their statistical mode to Cohen's d.

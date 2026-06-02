@@ -469,6 +469,39 @@ def scroll_simulation_outputs_controls_into_view(page: Page) -> None:
     page.wait_for_timeout(900)
 
 
+def smooth_scroll_to_locator(page: Page, locator: Locator, wait_ms: int = 1100) -> None:
+    locator.wait_for(state="attached")
+    handle = locator.element_handle()
+    if handle is None:
+        return
+    page.evaluate(
+        """
+        (el) => {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        """,
+        handle,
+    )
+    page.wait_for_timeout(wait_ms)
+
+
+from tutorial_cursor import (  # noqa: E402
+    ensure_demo_cursor,
+    move_cursor_to_point,
+    move_demo_cursor,
+    move_to_locator,
+    reset_demo_cursor_position,
+    show_cursor_transition,
+    smooth_check,
+    smooth_click,
+    smooth_fill,
+    smooth_mouse_click,
+    smooth_scroll_locator_into_view,
+    smooth_select_option,
+    smooth_select_option_match,
+)
+
+
 def run_tutorial_recording(
     base_url: str,
     headless: bool,
@@ -481,6 +514,7 @@ def run_tutorial_recording(
 ) -> Path:
     global _DEMO_CURSOR_POS
     _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
+    reset_demo_cursor_position()
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     tmp_video_dir = VIDEO_DIR / ".tmp"
     if tmp_video_dir.exists():
@@ -515,16 +549,25 @@ def run_tutorial_recording(
             page.wait_for_url("**/simulation/new_sim/hagen**")
 
             smooth_fill(page, page.locator("input[data-param='local_num_threads']"), "32")
+            run_trial_button = page.get_by_role("button", name="Run trial simulation")
+            smooth_scroll_to_locator(page, run_trial_button)
             print("[automation] submitting simulation...", flush=True)
-            smooth_click(page, page.get_by_role("button", name="Run trial simulation"))
+            smooth_click(page, run_trial_button)
             page.wait_for_url("**/job_status/**", timeout=ui_timeout_sec * 1000)
             job_id = _extract_job_id_from_url(page.url)
             print(f"[automation] waiting for simulation job {job_id}...", flush=True)
             wait_for_simulation_job_finished(page, base_url, job_id, timeout_sec=job_timeout_sec)
             print(f"[automation] simulation job {job_id} finished.", flush=True)
 
-            page.goto(base_url, wait_until="domcontentloaded")
-            page.wait_for_url("**/")
+            print("[automation] returning to dashboard...", flush=True)
+            dashboard_link = page.locator("a[href='/']").first
+            try:
+                smooth_click(page, dashboard_link, after_ms=700)
+                page.wait_for_load_state("domcontentloaded", timeout=90_000)
+                page.wait_for_timeout(900)
+            except PlaywrightTimeoutError:
+                page.goto(base_url, wait_until="domcontentloaded")
+                page.wait_for_url("**/")
             smooth_click(page, page.locator("a[href='/analysis']").first)
             page.wait_for_url("**/analysis**")
 

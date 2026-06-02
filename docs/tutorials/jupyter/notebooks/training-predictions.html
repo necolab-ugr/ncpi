@@ -7843,7 +7843,10 @@ a.anchor-link {
 <div class="jp-InputPrompt jp-InputArea-prompt">In [1]:</div>
 <div class="jp-CodeMirrorEditor jp-Editor jp-InputArea-editor" data-type="inline">
 <div class="cm-editor cm-s-jupyter">
-<div class="highlight hl-ipython3"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+<div class="highlight hl-ipython3"><pre><span></span><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">shutil</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">matplotlib.pyplot</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">plt</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">sklearn.metrics</span><span class="w"> </span><span class="kn">import</span> <span class="n">mean_squared_error</span>
 
@@ -7856,6 +7859,10 @@ a.anchor-link {
 <span class="n">DURATION_S</span> <span class="o">=</span> <span class="mf">12.0</span>  <span class="c1"># s</span>
 <span class="n">N_SAMPLES_SIGNAL</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">FS</span> <span class="o">*</span> <span class="n">DURATION_S</span><span class="p">)</span>
 <span class="n">N_SAMPLES_DATASET</span> <span class="o">=</span> <span class="mi">10000</span>  <span class="c1"># number of synthetic LFP samples</span>
+<span class="n">ARTIFACT_ROOT</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="s2">"training_predictions_artifacts"</span><span class="p">)</span>
+<span class="k">if</span> <span class="n">ARTIFACT_ROOT</span><span class="o">.</span><span class="n">exists</span><span class="p">():</span>
+    <span class="n">shutil</span><span class="o">.</span><span class="n">rmtree</span><span class="p">(</span><span class="n">ARTIFACT_ROOT</span><span class="p">)</span>
+<span class="n">ARTIFACT_ROOT</span><span class="o">.</span><span class="n">mkdir</span><span class="p">(</span><span class="n">parents</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">exist_ok</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
 <span class="c1"># Gao et al. (2017) Table 1 parameters</span>
 <span class="n">RATE_E_HZ</span> <span class="o">=</span> <span class="mf">2.0</span>
@@ -8085,7 +8092,7 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:   0%|          | 1/10000 [00:08&lt;23:03:25,  8.30s/it]</pre>
+<pre>Computing catch22 features:   0%|          | 1/10000 [00:14&lt;39:37:59, 14.27s/it]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8098,13 +8105,19 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:   2%|▏         | 235/10000 [00:08&lt;04:18, 37.80it/s] </pre>
+<pre>Computing catch22 features:   0%|          | 40/10000 [00:15&lt;45:58,  3.61it/s]  </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:   3%|▎         | 274/10000 [00:08&lt;03:40, 44.03it/s]</pre>
+<pre>Computing catch22 features:   2%|▏         | 196/10000 [00:16&lt;07:53, 20.69it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:   8%|▊         | 820/10000 [00:16&lt;01:20, 114.39it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8117,55 +8130,61 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  11%|█▏        | 1132/10000 [00:09&lt;00:31, 277.72it/s]</pre>
+<pre>Computing catch22 features:  12%|█▏        | 1249/10000 [00:24&lt;01:50, 79.13it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  12%|█▏        | 1249/10000 [00:11&lt;00:53, 164.46it/s]</pre>
+<pre>Computing catch22 features:  13%|█▎        | 1327/10000 [00:25&lt;01:46, 81.09it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  13%|█▎        | 1320/10000 [00:13&lt;01:04, 134.00it/s]</pre>
+<pre>Computing catch22 features:  14%|█▍        | 1405/10000 [00:26&lt;01:51, 77.35it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  16%|█▌        | 1561/10000 [00:13&lt;00:47, 178.26it/s]</pre>
+<pre>Computing catch22 features:  15%|█▍        | 1483/10000 [00:26&lt;01:39, 85.43it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  17%|█▋        | 1678/10000 [00:15&lt;00:57, 145.62it/s]</pre>
+<pre>Computing catch22 features:  16%|█▌        | 1561/10000 [00:26&lt;01:24, 99.37it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  18%|█▊        | 1756/10000 [00:15&lt;00:52, 155.57it/s]</pre>
+<pre>Computing catch22 features:  16%|█▋        | 1639/10000 [00:27&lt;01:09, 119.77it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  18%|█▊        | 1834/10000 [00:15&lt;00:47, 170.66it/s]</pre>
+<pre>Computing catch22 features:  17%|█▋        | 1678/10000 [00:27&lt;01:16, 108.14it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  20%|█▉        | 1951/10000 [00:15&lt;00:39, 202.30it/s]</pre>
+<pre>Computing catch22 features:  18%|█▊        | 1795/10000 [00:28&lt;01:03, 129.09it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  21%|██▏       | 2146/10000 [00:16&lt;00:26, 296.79it/s]</pre>
+<pre>Computing catch22 features:  20%|█▉        | 1951/10000 [00:28&lt;00:49, 164.21it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  20%|█▉        | 1990/10000 [00:29&lt;00:55, 143.53it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8178,61 +8197,49 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  22%|██▏       | 2200/10000 [00:16&lt;00:27, 286.59it/s]</pre>
+<pre>Computing catch22 features:  23%|██▎       | 2263/10000 [00:29&lt;00:27, 285.44it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  23%|██▎       | 2341/10000 [00:16&lt;00:20, 374.57it/s]</pre>
+<pre>Computing catch22 features:  25%|██▍       | 2497/10000 [00:34&lt;01:24, 88.84it/s] </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  25%|██▍       | 2458/10000 [00:16&lt;00:17, 440.07it/s]</pre>
+<pre>Computing catch22 features:  25%|██▌       | 2537/10000 [00:35&lt;01:20, 93.05it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  25%|██▌       | 2523/10000 [00:17&lt;00:22, 339.22it/s]</pre>
+<pre>Computing catch22 features:  26%|██▌       | 2575/10000 [00:35&lt;01:20, 91.68it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  26%|██▌       | 2574/10000 [00:17&lt;00:21, 350.33it/s]</pre>
+<pre>Computing catch22 features:  26%|██▌       | 2614/10000 [00:36&lt;01:45, 69.91it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  26%|██▌       | 2622/10000 [00:17&lt;00:22, 330.54it/s]</pre>
+<pre>Computing catch22 features:  27%|██▋       | 2731/10000 [00:38&lt;01:43, 70.07it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  27%|██▋       | 2692/10000 [00:18&lt;00:56, 129.87it/s]</pre>
+<pre>Computing catch22 features:  28%|██▊       | 2848/10000 [00:39&lt;01:24, 84.59it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  28%|██▊       | 2770/10000 [00:20&lt;01:17, 93.50it/s] </pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  28%|██▊       | 2848/10000 [00:20&lt;01:16, 93.44it/s]</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  29%|██▉       | 2926/10000 [00:21&lt;01:19, 88.58it/s]</pre>
+<pre>Computing catch22 features:  30%|██▉       | 2965/10000 [00:40&lt;01:23, 84.25it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8245,55 +8252,31 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  31%|███       | 3082/10000 [00:22&lt;00:47, 144.21it/s]</pre>
+<pre>Computing catch22 features:  33%|███▎      | 3316/10000 [00:41&lt;00:43, 153.01it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  32%|███▏      | 3199/10000 [00:22&lt;00:33, 201.20it/s]</pre>
+<pre>Computing catch22 features:  34%|███▍      | 3394/10000 [00:42&lt;00:40, 163.90it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  32%|███▏      | 3247/10000 [00:23&lt;00:58, 115.88it/s]</pre>
+<pre>Computing catch22 features:  35%|███▌      | 3511/10000 [00:42&lt;00:39, 162.60it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  33%|███▎      | 3316/10000 [00:23&lt;00:47, 140.86it/s]</pre>
+<pre>Computing catch22 features:  37%|███▋      | 3745/10000 [00:47&lt;01:09, 89.97it/s] </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  35%|███▌      | 3511/10000 [00:24&lt;00:35, 180.49it/s]</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  36%|███▌      | 3550/10000 [00:24&lt;00:36, 179.02it/s]</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  36%|███▌      | 3589/10000 [00:25&lt;00:45, 140.65it/s]</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  37%|███▋      | 3745/10000 [00:25&lt;00:34, 183.44it/s]</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  40%|███▉      | 3979/10000 [00:26&lt;00:18, 323.44it/s]</pre>
+<pre>Computing catch22 features:  40%|███▉      | 3979/10000 [00:49&lt;01:04, 94.06it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8306,49 +8289,43 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  41%|████▏     | 4135/10000 [00:28&lt;00:36, 160.35it/s]</pre>
+<pre>Computing catch22 features:  40%|████      | 4018/10000 [00:50&lt;01:14, 80.47it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  42%|████▏     | 4213/10000 [00:29&lt;00:44, 130.15it/s]</pre>
+<pre>Computing catch22 features:  41%|████      | 4096/10000 [00:51&lt;01:10, 83.45it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  43%|████▎     | 4252/10000 [00:29&lt;00:48, 117.49it/s]</pre>
+<pre>Computing catch22 features:  42%|████▏     | 4174/10000 [00:52&lt;01:16, 76.10it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  43%|████▎     | 4330/10000 [00:30&lt;00:48, 116.34it/s]</pre>
+<pre>Computing catch22 features:  44%|████▎     | 4369/10000 [00:53&lt;00:51, 109.63it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  45%|████▍     | 4486/10000 [00:31&lt;00:45, 121.69it/s]</pre>
+<pre>Computing catch22 features:  46%|████▌     | 4564/10000 [00:54&lt;00:38, 139.50it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  45%|████▌     | 4525/10000 [00:31&lt;00:43, 127.04it/s]</pre>
+<pre>Computing catch22 features:  48%|████▊     | 4759/10000 [00:56&lt;00:40, 130.14it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  48%|████▊     | 4759/10000 [00:32&lt;00:21, 241.02it/s]</pre>
-</div>
-</div>
-<div class="jp-OutputArea-child">
-<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
-<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  48%|████▊     | 4837/10000 [00:33&lt;00:31, 165.01it/s]</pre>
+<pre>Computing catch22 features:  50%|████▉     | 4993/10000 [00:57&lt;00:37, 134.94it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8361,43 +8338,61 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  51%|█████     | 5071/10000 [00:34&lt;00:29, 164.62it/s]</pre>
+<pre>Computing catch22 features:  50%|█████     | 5032/10000 [00:58&lt;00:41, 120.67it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  51%|█████     | 5110/10000 [00:34&lt;00:31, 154.40it/s]</pre>
+<pre>Computing catch22 features:  51%|█████     | 5110/10000 [00:58&lt;00:34, 142.89it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  53%|█████▎    | 5266/10000 [00:35&lt;00:23, 198.47it/s]</pre>
+<pre>Computing catch22 features:  51%|█████▏    | 5149/10000 [00:59&lt;00:41, 116.82it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  53%|█████▎    | 5344/10000 [00:35&lt;00:22, 207.41it/s]</pre>
+<pre>Computing catch22 features:  52%|█████▏    | 5188/10000 [00:59&lt;00:47, 100.77it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  55%|█████▌    | 5539/10000 [00:37&lt;00:32, 139.23it/s]</pre>
+<pre>Computing catch22 features:  52%|█████▏    | 5227/10000 [01:02&lt;01:36, 49.72it/s] </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  57%|█████▋    | 5695/10000 [00:39&lt;00:33, 126.62it/s]</pre>
+<pre>Computing catch22 features:  53%|█████▎    | 5344/10000 [01:03&lt;01:09, 67.03it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  59%|█████▉    | 5890/10000 [00:40&lt;00:27, 147.29it/s]</pre>
+<pre>Computing catch22 features:  54%|█████▍    | 5422/10000 [01:04&lt;01:03, 71.78it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  55%|█████▌    | 5539/10000 [01:05&lt;00:51, 87.20it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  57%|█████▋    | 5656/10000 [01:06&lt;00:42, 101.26it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  59%|█████▉    | 5890/10000 [01:06&lt;00:23, 175.17it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8410,49 +8405,61 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  61%|██████    | 6124/10000 [00:42&lt;00:28, 136.99it/s]</pre>
+<pre>Computing catch22 features:  60%|██████    | 6046/10000 [01:07&lt;00:22, 176.41it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  63%|██████▎   | 6280/10000 [00:42&lt;00:22, 162.22it/s]</pre>
+<pre>Computing catch22 features:  61%|██████    | 6085/10000 [01:07&lt;00:26, 149.09it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  63%|██████▎   | 6319/10000 [00:42&lt;00:21, 169.32it/s]</pre>
+<pre>Computing catch22 features:  62%|██████▏   | 6202/10000 [01:09&lt;00:29, 127.08it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  65%|██████▌   | 6514/10000 [00:44&lt;00:22, 156.49it/s]</pre>
+<pre>Computing catch22 features:  63%|██████▎   | 6319/10000 [01:11&lt;00:39, 92.30it/s] </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  66%|██████▌   | 6553/10000 [00:44&lt;00:25, 135.03it/s]</pre>
+<pre>Computing catch22 features:  64%|██████▍   | 6397/10000 [01:12&lt;00:38, 92.46it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  66%|██████▋   | 6631/10000 [00:45&lt;00:24, 139.29it/s]</pre>
+<pre>Computing catch22 features:  64%|██████▍   | 6436/10000 [01:13&lt;00:50, 70.35it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  69%|██████▉   | 6943/10000 [00:45&lt;00:11, 270.17it/s]</pre>
+<pre>Computing catch22 features:  65%|██████▌   | 6514/10000 [01:14&lt;00:50, 69.41it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  70%|██████▉   | 6987/10000 [00:46&lt;00:14, 207.99it/s]</pre>
+<pre>Computing catch22 features:  66%|██████▌   | 6592/10000 [01:15&lt;00:39, 85.78it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  66%|██████▋   | 6631/10000 [01:15&lt;00:46, 72.40it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  69%|██████▊   | 6865/10000 [01:17&lt;00:31, 100.78it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8465,49 +8472,79 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  70%|███████   | 7021/10000 [00:48&lt;00:31, 94.15it/s] </pre>
+<pre>Computing catch22 features:  70%|███████   | 7021/10000 [01:17&lt;00:20, 146.48it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  73%|███████▎  | 7294/10000 [00:49&lt;00:20, 134.05it/s]</pre>
+<pre>Computing catch22 features:  71%|███████   | 7060/10000 [01:18&lt;00:24, 118.56it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  74%|███████▎  | 7372/10000 [00:49&lt;00:17, 148.47it/s]</pre>
+<pre>Computing catch22 features:  72%|███████▏  | 7216/10000 [01:18&lt;00:15, 177.46it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  75%|███████▌  | 7528/10000 [00:50&lt;00:12, 193.58it/s]</pre>
+<pre>Computing catch22 features:  73%|███████▎  | 7294/10000 [01:20&lt;00:20, 129.22it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  76%|███████▋  | 7645/10000 [00:51&lt;00:14, 157.51it/s]</pre>
+<pre>Computing catch22 features:  73%|███████▎  | 7333/10000 [01:20&lt;00:25, 105.48it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  77%|███████▋  | 7723/10000 [00:52&lt;00:19, 117.63it/s]</pre>
+<pre>Computing catch22 features:  75%|███████▍  | 7489/10000 [01:21&lt;00:16, 154.39it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  80%|███████▉  | 7957/10000 [00:52&lt;00:10, 198.49it/s]</pre>
+<pre>Computing catch22 features:  75%|███████▌  | 7528/10000 [01:23&lt;00:28, 85.27it/s] </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  80%|████████  | 8000/10000 [00:53&lt;00:11, 176.51it/s]</pre>
+<pre>Computing catch22 features:  76%|███████▋  | 7645/10000 [01:24&lt;00:24, 96.66it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  77%|███████▋  | 7723/10000 [01:24&lt;00:21, 105.98it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  78%|███████▊  | 7762/10000 [01:25&lt;00:27, 80.83it/s] </pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  78%|███████▊  | 7801/10000 [01:27&lt;00:46, 47.76it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  80%|███████▉  | 7957/10000 [01:28&lt;00:22, 91.91it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  80%|███████▉  | 7996/10000 [01:29&lt;00:25, 78.01it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8520,43 +8557,67 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  82%|████████▏ | 8152/10000 [00:54&lt;00:13, 134.90it/s]</pre>
+<pre>Computing catch22 features:  81%|████████  | 8074/10000 [01:29&lt;00:19, 99.64it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  82%|████████▏ | 8191/10000 [00:55&lt;00:12, 145.86it/s]</pre>
+<pre>Computing catch22 features:  81%|████████  | 8113/10000 [01:29&lt;00:17, 106.43it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  83%|████████▎ | 8269/10000 [00:55&lt;00:10, 169.40it/s]</pre>
+<pre>Computing catch22 features:  82%|████████▏ | 8230/10000 [01:30&lt;00:14, 124.17it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  83%|████████▎ | 8308/10000 [00:55&lt;00:12, 131.65it/s]</pre>
+<pre>Computing catch22 features:  83%|████████▎ | 8269/10000 [01:30&lt;00:12, 136.51it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  84%|████████▍ | 8425/10000 [00:57&lt;00:13, 113.36it/s]</pre>
+<pre>Computing catch22 features:  84%|████████▍ | 8386/10000 [01:31&lt;00:12, 124.41it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  86%|████████▌ | 8620/10000 [00:58&lt;00:10, 128.70it/s]</pre>
+<pre>Computing catch22 features:  85%|████████▌ | 8503/10000 [01:31&lt;00:09, 156.83it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  88%|████████▊ | 8815/10000 [00:59&lt;00:07, 157.61it/s]</pre>
+<pre>Computing catch22 features:  86%|████████▌ | 8581/10000 [01:33&lt;00:12, 110.69it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  87%|████████▋ | 8698/10000 [01:33&lt;00:09, 138.13it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  88%|████████▊ | 8776/10000 [01:34&lt;00:09, 125.70it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  89%|████████▉ | 8893/10000 [01:36&lt;00:11, 100.39it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  90%|████████▉ | 8971/10000 [01:36&lt;00:09, 112.42it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8569,37 +8630,61 @@ a.anchor-link {
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  90%|█████████ | 9010/10000 [01:00&lt;00:05, 172.15it/s]</pre>
+<pre>Computing catch22 features:  90%|█████████ | 9010/10000 [01:38&lt;00:16, 58.95it/s] </pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  92%|█████████▏| 9244/10000 [01:01&lt;00:04, 176.83it/s]</pre>
+<pre>Computing catch22 features:  91%|█████████▏| 9127/10000 [01:40&lt;00:14, 60.76it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  95%|█████████▌| 9517/10000 [01:02&lt;00:02, 238.72it/s]</pre>
+<pre>Computing catch22 features:  92%|█████████▏| 9166/10000 [01:41&lt;00:12, 67.88it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  96%|█████████▋| 9634/10000 [01:02&lt;00:01, 225.17it/s]</pre>
+<pre>Computing catch22 features:  92%|█████████▏| 9244/10000 [01:41&lt;00:09, 79.74it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features:  98%|█████████▊| 9829/10000 [01:03&lt;00:00, 278.40it/s]</pre>
+<pre>Computing catch22 features:  93%|█████████▎| 9283/10000 [01:41&lt;00:07, 90.66it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing catch22 features: 100%|██████████| 10000/10000 [01:03&lt;00:00, 158.67it/s]</pre>
+<pre>Computing catch22 features:  94%|█████████▎| 9361/10000 [01:42&lt;00:05, 118.53it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  96%|█████████▌| 9556/10000 [01:42&lt;00:01, 226.39it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  99%|█████████▊| 9868/10000 [01:42&lt;00:00, 323.88it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features:  99%|█████████▉| 9912/10000 [01:43&lt;00:00, 286.96it/s]</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>Computing catch22 features: 100%|██████████| 10000/10000 [01:43&lt;00:00, 96.88it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8720,8 +8805,12 @@ X_train: (8000, 22) X_test: (2000, 22)
     <span class="n">model</span> <span class="o">=</span> <span class="n">ncpi</span><span class="o">.</span><span class="n">Inference</span><span class="p">(</span><span class="n">model</span><span class="o">=</span><span class="n">model_name</span><span class="p">,</span> <span class="n">hyperparams</span><span class="o">=</span><span class="n">hyperparams</span><span class="p">)</span>
     <span class="n">model</span><span class="o">.</span><span class="n">add_simulation_data</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
 
-    <span class="n">model</span><span class="o">.</span><span class="n">train</span><span class="p">(</span><span class="n">param_grid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scaler</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
-    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X_test</span><span class="p">,</span> <span class="n">scaler</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=</span><span class="mi">1</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">result_dir</span> <span class="o">=</span> <span class="n">ARTIFACT_ROOT</span> <span class="o">/</span> <span class="n">model_name</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">train</span><span class="p">(</span><span class="n">param_grid</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">scaler</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">seed</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span> <span class="n">result_dir</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">result_dir</span><span class="p">))</span>
+    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X_test</span><span class="p">,</span> <span class="n">scaler</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=</span><span class="mi">1</span><span class="p">,</span> <span class="n">result_dir</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">result_dir</span><span class="p">)),</span>
+        <span class="n">dtype</span><span class="o">=</span><span class="nb">float</span><span class="p">,</span>
+    <span class="p">)</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
 
     <span class="n">mse</span> <span class="o">=</span> <span class="n">mean_squared_error</span><span class="p">(</span><span class="n">y_test</span><span class="p">,</span> <span class="n">y_pred</span><span class="p">)</span>
     <span class="n">results</span><span class="p">[</span><span class="n">model_name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
@@ -8758,8 +8847,8 @@ X_train: (8000, 22) X_test: (2000, 22)
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Scaler saved at 'data/scaler.pkl'
-Model saved at 'data/model.pkl'
+<pre>Scaler saved at 'training_predictions_artifacts/RandomForestRegressor/scaler.pkl'
+Model saved at 'training_predictions_artifacts/RandomForestRegressor/model.pkl'
 </pre>
 </div>
 </div>
@@ -8772,55 +8861,55 @@ Model saved at 'data/model.pkl'
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:   0%|          | 1/2000 [00:01&lt;41:30,  1.25s/it]</pre>
+<pre>Computing predictions:   0%|          | 1/2000 [00:01&lt;48:16,  1.45s/it]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  13%|█▎        | 251/2000 [00:02&lt;00:14, 118.93it/s]</pre>
+<pre>Computing predictions:  13%|█▎        | 251/2000 [00:02&lt;00:17, 102.25it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  25%|██▌       | 501/2000 [00:03&lt;00:09, 156.39it/s]</pre>
+<pre>Computing predictions:  25%|██▌       | 501/2000 [00:04&lt;00:11, 134.78it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  38%|███▊      | 751/2000 [00:04&lt;00:07, 173.78it/s]</pre>
+<pre>Computing predictions:  38%|███▊      | 751/2000 [00:05&lt;00:08, 150.28it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  50%|█████     | 1001/2000 [00:06&lt;00:05, 183.18it/s]</pre>
+<pre>Computing predictions:  50%|█████     | 1001/2000 [00:07&lt;00:06, 159.10it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  63%|██████▎   | 1251/2000 [00:07&lt;00:03, 189.28it/s]</pre>
+<pre>Computing predictions:  63%|██████▎   | 1251/2000 [00:08&lt;00:04, 164.29it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  75%|███████▌  | 1501/2000 [00:08&lt;00:02, 193.21it/s]</pre>
+<pre>Computing predictions:  75%|███████▌  | 1501/2000 [00:10&lt;00:02, 167.62it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  88%|████████▊ | 1751/2000 [00:09&lt;00:01, 195.58it/s]</pre>
+<pre>Computing predictions:  88%|████████▊ | 1751/2000 [00:11&lt;00:01, 170.24it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions: 100%|██████████| 2000/2000 [00:09&lt;00:00, 200.85it/s]</pre>
+<pre>Computing predictions: 100%|██████████| 2000/2000 [00:11&lt;00:00, 174.20it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8830,8 +8919,8 @@ Model saved at 'data/model.pkl'
 
 --- Model: Ridge
 Training single sklearn model on full data...
-Scaler saved at 'data/scaler.pkl'
-Model saved at 'data/model.pkl'
+Scaler saved at 'training_predictions_artifacts/Ridge/scaler.pkl'
+Model saved at 'training_predictions_artifacts/Ridge/model.pkl'
 </pre>
 </div>
 </div>
@@ -8851,19 +8940,19 @@ Model saved at 'data/model.pkl'
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:   0%|          | 1/2000 [00:00&lt;27:10,  1.23it/s]</pre>
+<pre>Computing predictions:   0%|          | 1/2000 [00:00&lt;30:50,  1.08it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  88%|████████▊ | 1751/2000 [00:00&lt;00:00, 2545.95it/s]</pre>
+<pre>Computing predictions:  63%|██████▎   | 1251/2000 [00:01&lt;00:00, 1656.88it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions: 100%|██████████| 2000/2000 [00:00&lt;00:00, 2143.07it/s]</pre>
+<pre>Computing predictions: 100%|██████████| 2000/2000 [00:01&lt;00:00, 1864.89it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
@@ -8886,8 +8975,8 @@ Training single sklearn model on full data...
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
-<pre>Scaler saved at 'data/scaler.pkl'
-Model saved at 'data/model.pkl'
+<pre>Scaler saved at 'training_predictions_artifacts/MLPRegressor/scaler.pkl'
+Model saved at 'training_predictions_artifacts/MLPRegressor/model.pkl'
 </pre>
 </div>
 </div>
@@ -8900,26 +8989,32 @@ Model saved at 'data/model.pkl'
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions:  50%|█████     | 1001/2000 [00:00&lt;00:00, 8425.39it/s]</pre>
+<pre>Computing predictions:  38%|███▊      | 751/2000 [00:00&lt;00:00, 6777.71it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>Computing predictions: 100%|██████████| 2000/2000 [00:00&lt;00:00, 10805.91it/s]</pre>
+<pre>Computing predictions:  88%|████████▊ | 1751/2000 [00:00&lt;00:00, 7825.15it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
-<pre>
-</pre>
+<pre>Computing predictions: 100%|██████████| 2000/2000 [00:00&lt;00:00, 8693.53it/s]</pre>
 </div>
 </div>
 <div class="jp-OutputArea-child">
 <div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
 <div class="jp-RenderedText jp-OutputArea-output" data-mime-type="text/plain" tabindex="0">
 <pre>Test MSE (MLPRegressor): 0.00033
+</pre>
+</div>
+</div>
+<div class="jp-OutputArea-child">
+<div class="jp-OutputPrompt jp-OutputArea-prompt"></div>
+<div class="jp-RenderedText jp-OutputArea-output" data-mime-type="application/vnd.jupyter.stderr" tabindex="0">
+<pre>
 </pre>
 </div>
 </div>

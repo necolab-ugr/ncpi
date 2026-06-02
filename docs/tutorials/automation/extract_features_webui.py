@@ -494,6 +494,86 @@ def select_catch22_method(page: Page) -> None:
     smooth_check(page, catch22_radio)
 
 
+from tutorial_cursor import (  # noqa: E402
+    animate_demo_cursor_to_locator,
+    ensure_demo_cursor,
+    move_cursor_to_point,
+    move_demo_cursor,
+    move_to_locator,
+    reset_demo_cursor_position,
+    show_cursor_transition,
+    smooth_check,
+    smooth_click,
+    smooth_fill,
+    smooth_mouse_click,
+    smooth_scroll_locator_into_view,
+    smooth_select_option,
+    smooth_select_option_match,
+)
+
+
+def _align_if_offscreen(page: Page, locator: Locator, *, smooth: bool = False, always: bool = False) -> None:
+    locator.wait_for(state="visible")
+    locator.evaluate(
+        """
+        (el, { smoothScroll, alwaysScroll }) => {
+          const rect = el.getBoundingClientRect();
+          const visible = rect.top >= 80 && rect.bottom <= (window.innerHeight - 80);
+          if (alwaysScroll || !visible) {
+            el.scrollIntoView({
+              behavior: smoothScroll ? 'smooth' : 'auto',
+              block: 'center',
+              inline: 'nearest',
+            });
+          }
+        }
+        """,
+        {"smoothScroll": bool(smooth), "alwaysScroll": bool(always)},
+    )
+    page.wait_for_timeout(420 if smooth else 80)
+
+
+def _small_scroll_towards_locator(page: Page, locator: Locator, max_pixels: int = 180) -> None:
+    locator.wait_for(state="visible")
+    locator.evaluate(
+        """
+        (el, maxPixels) => {
+          const rect = el.getBoundingClientRect();
+          const lowerLimit = window.innerHeight - 170;
+          const upperLimit = 130;
+          let dy = 0;
+          if (rect.bottom > lowerLimit) {
+            dy = Math.min(Number(maxPixels) || 180, rect.bottom - lowerLimit);
+          } else if (rect.top < upperLimit) {
+            dy = -Math.min(Number(maxPixels) || 180, upperLimit - rect.top);
+          }
+          if (dy !== 0) {
+            window.scrollBy({ top: dy, left: 0, behavior: 'smooth' });
+          }
+        }
+        """,
+        int(max_pixels),
+    )
+    page.wait_for_timeout(360)
+
+
+def direct_visible_click(
+    page: Page,
+    locator: Locator,
+    after_ms: int = 450,
+    align_if_needed: bool = False,
+    smooth_align: bool = False,
+    always_align: bool = False,
+) -> None:
+    if align_if_needed:
+        _align_if_offscreen(page, locator, smooth=smooth_align, always=always_align)
+    animate_demo_cursor_to_locator(page, locator, duration_ms=650, scroll=False)
+    page.wait_for_timeout(1000)
+    move_demo_cursor(page, click=True)
+    locator.click(delay=0)
+    page.wait_for_timeout(after_ms)
+
+
 def run_tutorial_recording(
     base_url: str,
     headless: bool,
@@ -507,6 +587,7 @@ def run_tutorial_recording(
 ) -> Path:
     global _DEMO_CURSOR_POS
     _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
+    reset_demo_cursor_position()
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     tmp_video_dir = VIDEO_DIR / ".tmp"
     if tmp_video_dir.exists():
@@ -580,7 +661,7 @@ def run_tutorial_recording(
 
             compute_button = page.get_by_role("button", name="Compute features").first
             wait_for_enabled(page, compute_button, timeout_sec=60)
-            smooth_click(page, compute_button, after_ms=600)
+            direct_visible_click(page, compute_button, after_ms=600, align_if_needed=True)
 
             page.wait_for_url("**/job_status/**", timeout=ui_timeout_sec * 1000)
             job_id = _extract_job_id_from_url(page.url)

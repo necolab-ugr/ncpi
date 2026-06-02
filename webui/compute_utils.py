@@ -306,10 +306,17 @@ def _is_simulation_bundle_path(path):
 
 def _load_simulation_component_from_path(path, default_file_name):
     payload = read_file(path)
+    field = SIMULATION_BUNDLE_FIELD_BY_FILE.get(str(default_file_name or "").lower())
+    if field:
+        bundle = _coerce_simulation_bundle_payload(payload)
+        if bundle is not None:
+            if field not in bundle:
+                raise ValueError(f"Simulation bundle {path} does not contain '{field}'.")
+            return bundle[field]
+
     if not _is_simulation_bundle_path(path):
         return payload
 
-    field = SIMULATION_BUNDLE_FIELD_BY_FILE.get(str(default_file_name or "").lower())
     if not field:
         return payload
 
@@ -5859,8 +5866,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                     )
                 except ValueError as exc:
                     if (
-                        _is_simulation_bundle_path(pop_sizes_path)
-                        and "does not contain 'population_sizes'" in str(exc)
+                        "does not contain 'population_sizes'" in str(exc)
                     ):
                         population_sizes_raw = None
                         _append_job_output(

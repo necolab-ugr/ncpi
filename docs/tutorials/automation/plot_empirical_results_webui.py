@@ -679,6 +679,23 @@ def slow_scroll_to_bottom(page: Page, step_px: int = 220, pause_ms: int = 260) -
     page.wait_for_timeout(700)
 
 
+from tutorial_cursor import (  # noqa: E402
+    ensure_demo_cursor,
+    move_cursor_to_point,
+    move_demo_cursor,
+    move_to_locator,
+    reset_demo_cursor_position,
+    show_cursor_transition,
+    smooth_check,
+    smooth_click,
+    smooth_fill,
+    smooth_mouse_click,
+    smooth_scroll_locator_into_view,
+    smooth_select_option,
+    smooth_select_option_match,
+)
+
+
 def run_tutorial_recording(
     base_url: str,
     headless: bool,
@@ -707,6 +724,7 @@ def run_tutorial_recording(
             print("[automation] opening dashboard...", flush=True)
             page.goto(base_url, wait_until="domcontentloaded")
             page.wait_for_timeout(900)
+            reset_demo_cursor_position()
             ensure_demo_cursor(page)
 
             load_requested_session(page, session_root=session_root, session_label=session_label)
@@ -774,16 +792,12 @@ def run_tutorial_recording(
             plot_img = page.locator("#plot-image").first
             plot_img.wait_for(state="visible", timeout=180_000)
             plot_img.scroll_into_view_if_needed()
-            
-            # Exactly 1 second after rendering/visibility
-            page.wait_for_timeout(1000)
+            page.wait_for_timeout(450)
+            page.evaluate("window.scrollBy({ top: 180, behavior: 'smooth' })")
+            page.wait_for_timeout(900)
 
             print("[automation] capturing poster...", flush=True)
             page.screenshot(path=str(OUTPUT_POSTER), full_page=False, timeout=10_000)
-
-            print("[automation] slow scroll to bottom...", flush=True)
-            slow_scroll_to_bottom(page, step_px=220, pause_ms=280)
-            page.wait_for_timeout(1_100)
 
         except PlaywrightTimeoutError as exc:
             raise RuntimeError(f"Playwright timeout: {exc}") from exc

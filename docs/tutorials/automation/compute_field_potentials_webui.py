@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import pickle
 import shutil
 import socket
 import subprocess
@@ -246,11 +247,27 @@ def move_demo_cursor(page: Page, click: bool = False) -> None:
         raise
 
 
+def smooth_scroll_locator_into_view(page: Page, locator: Locator, wait_ms: int = 220) -> None:
+    locator.wait_for(state="attached")
+    handle = locator.element_handle()
+    if handle is None:
+        return
+    page.evaluate(
+        """
+        (el) => {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+        }
+        """,
+        handle,
+    )
+    page.wait_for_timeout(wait_ms)
+
+
 def move_to_locator(page: Page, locator: Locator, click: bool = False, pause_ms: int = 180) -> None:
     global _DEMO_CURSOR_POS
     ensure_demo_cursor(page, start_x=_DEMO_CURSOR_POS["x"], start_y=_DEMO_CURSOR_POS["y"])
     locator.wait_for(state="visible")
-    locator.scroll_into_view_if_needed()
+    smooth_scroll_locator_into_view(page, locator, wait_ms=220)
     box = locator.bounding_box()
     if box is None:
         move_demo_cursor(page, click=click)
@@ -268,37 +285,38 @@ def move_to_locator(page: Page, locator: Locator, click: bool = False, pause_ms:
     move_demo_cursor(page, click=click)
     _DEMO_CURSOR_POS = {"x": x, "y": y}
     if pause_ms > 0:
-        page.wait_for_timeout(max(pause_ms, int(travel_ms * 0.72)))
+        settle_ms = min(320, max(pause_ms, int(travel_ms * 0.38)))
+        page.wait_for_timeout(settle_ms)
 
 
-def smooth_click(page: Page, locator: Locator, after_ms: int = 450) -> None:
-    move_to_locator(page, locator, click=False, pause_ms=180)
-    move_to_locator(page, locator, click=True, pause_ms=80)
-    locator.click(delay=80)
+def smooth_click(page: Page, locator: Locator, after_ms: int = 220) -> None:
+    move_to_locator(page, locator, click=False, pause_ms=110)
+    move_to_locator(page, locator, click=True, pause_ms=30)
+    locator.click(delay=45)
     page.wait_for_timeout(after_ms)
 
 
-def smooth_fill(page: Page, locator: Locator, value: str, type_delay_ms: int = 120, after_ms: int = 450) -> None:
-    move_to_locator(page, locator, click=False, pause_ms=180)
-    move_to_locator(page, locator, click=True, pause_ms=80)
-    locator.click(delay=80)
+def smooth_fill(page: Page, locator: Locator, value: str, type_delay_ms: int = 120, after_ms: int = 240) -> None:
+    move_to_locator(page, locator, click=False, pause_ms=110)
+    move_to_locator(page, locator, click=True, pause_ms=30)
+    locator.click(delay=45)
     locator.press("Control+A")
     locator.press("Backspace")
     locator.type(value, delay=max(0, int(type_delay_ms)))
     page.wait_for_timeout(after_ms)
 
 
-def smooth_check(page: Page, locator: Locator, after_ms: int = 450) -> None:
-    move_to_locator(page, locator, click=False, pause_ms=180)
-    move_to_locator(page, locator, click=True, pause_ms=80)
+def smooth_check(page: Page, locator: Locator, after_ms: int = 220) -> None:
+    move_to_locator(page, locator, click=False, pause_ms=110)
+    move_to_locator(page, locator, click=True, pause_ms=30)
     if not locator.is_checked():
         locator.check()
     page.wait_for_timeout(after_ms)
 
 
-def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int = 450) -> None:
-    move_to_locator(page, locator, click=False, pause_ms=180)
-    locator.scroll_into_view_if_needed()
+def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int = 220) -> None:
+    move_to_locator(page, locator, click=False, pause_ms=110)
+    move_to_locator(page, locator, click=True, pause_ms=40)
     locator.wait_for(state="visible")
     state = locator.evaluate(
         """
@@ -340,6 +358,10 @@ def smooth_select_option(page: Page, locator: Locator, value: str, after_ms: int
     raise RuntimeError(f"Failed to select dropdown option {value!r}. Current value: {current!r}")
 
 
+def show_cursor_transition(page: Page, locator: Locator, pause_ms: int = 280) -> None:
+    move_to_locator(page, locator, click=False, pause_ms=max(140, int(pause_ms)))
+
+
 def _extract_job_id_from_url(url: str) -> str:
     path = urlparse(url).path.strip("/")
     parts = path.split("/")
@@ -364,7 +386,19 @@ def wait_for_job_finished(page: Page, base_url: str, job_id: str, timeout_sec: i
         if status == "finished":
             return
         if status in {"failed", "cancelled"}:
-            raise RuntimeError(f"Job {job_id} ended with status '{status}'.")
+            error_text = str((payload or {}).get("error") or "").strip()
+            output_text = str((payload or {}).get("output") or "").strip()
+            output_tail = ""
+            if output_text:
+                lines = [line for line in output_text.splitlines() if line.strip()]
+                if lines:
+                    output_tail = "\n".join(lines[-12:])
+            detail_parts = [f"Job {job_id} ended with status '{status}'."]
+            if error_text:
+                detail_parts.append(f"Error: {error_text}")
+            if output_tail:
+                detail_parts.append("Recent job output:\n" + output_tail)
+            raise RuntimeError("\n".join(detail_parts))
         time.sleep(1.0)
     raise RuntimeError(
         f"Timed out waiting for job {job_id} to finish. Last status: {last_status or 'unknown'}"
@@ -417,6 +451,18 @@ def scroll_plot_into_view(page: Page) -> None:
         """
     )
     page.wait_for_timeout(1200)
+
+
+def smooth_scroll_down(page: Page, pixels: int = 260, wait_ms: int = 420) -> None:
+    page.evaluate(
+        """
+        (dy) => {
+          window.scrollBy({ top: dy, left: 0, behavior: 'smooth' });
+        }
+        """,
+        int(pixels),
+    )
+    page.wait_for_timeout(wait_ms)
 
 
 def _split_abs_path(path_value: str) -> list[str]:
@@ -558,10 +604,39 @@ def _session_has_simulation_artifacts(session_root: str) -> bool:
     return _has_any_file(data_dir, suffixes={".pkl"})
 
 
-def load_requested_session(page: Page, session_root: str, session_label: str) -> None:
+def _contains_population_key(value, population: str) -> bool:
+    if isinstance(value, dict):
+        if population in value:
+            return True
+        for nested in value.values():
+            if _contains_population_key(nested, population):
+                return True
+        return False
+    if isinstance(value, (list, tuple)):
+        return any(_contains_population_key(item, population) for item in value)
+    return False
+
+
+def _session_has_required_spike_populations(session_root: str) -> bool:
+    sim_bundle = Path(session_root) / "simulation" / "data" / "simulation.pkl"
+    if not sim_bundle.is_file():
+        return False
+    try:
+        with sim_bundle.open("rb") as f:
+            payload = pickle.load(f)
+    except Exception:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    times_payload = payload.get("times")
+    if times_payload is None:
+        return False
+    return _contains_population_key(times_payload, "E") and _contains_population_key(times_payload, "I")
+
+
+def load_requested_session(page: Page, session_root: str, session_label: str) -> str:
     smooth_click(page, page.get_by_role("link", name="Previous Sessions"))
     page.wait_for_url("**/sessions**")
-    page.wait_for_timeout(500)
     entries = page.evaluate(
         """
         () => {
@@ -638,25 +713,39 @@ def load_requested_session(page: Page, session_root: str, session_label: str) ->
         raise RuntimeError("No saved sessions found in /sessions page.")
 
     required_modules = {"simulation"}
+    requested_norm = str(Path(str(session_root)).resolve()) if str(session_root or "").strip() else ""
     eligible = []
     for entry in entries:
         if bool(entry.get("isActive")):
             continue
+        entry_path = str(entry.get("path") or "").strip()
+        if not entry_path:
+            continue
         modules = {str(item).strip().lower() for item in (entry.get("modules") or [])}
         if not required_modules.issubset(modules):
             continue
-        if not _session_has_simulation_artifacts(str(entry.get("path") or "")):
+        if not _session_has_simulation_artifacts(entry_path):
             continue
+        if not _session_has_required_spike_populations(entry_path):
+            continue
+        entry["path_norm"] = str(Path(entry_path).resolve())
         eligible.append(entry)
     if not eligible:
         raise RuntimeError(
-            "No previous session contains simulation artifacts required for field potential "
-            "tutorial (expected .pkl files under simulation/data)."
+            "No previous session contains compatible simulation artifacts for this tutorial "
+            "(expected simulation/data/simulation.pkl with spike-time populations E and I)."
         )
-    target = eligible[0]
+    target = None
+    if requested_norm:
+        for candidate in eligible:
+            if str(candidate.get("path_norm") or "") == requested_norm:
+                target = candidate
+                break
+    if target is None:
+        target = eligible[0]
     target_path = str(target["path"])
     print(
-        f"[automation] loading most recent session with simulation artifacts "
+        f"[automation] loading session with compatible simulation artifacts "
         f"(label={session_label!r}, requested={session_root!r}) -> "
         f"{target_path} (updated={target.get('updated', '')}, modules={target.get('modules', [])})",
         flush=True,
@@ -664,16 +753,103 @@ def load_requested_session(page: Page, session_root: str, session_label: str) ->
     target_form = page.locator(f"form:has(input[name='session_root'][value='{target_path}'])").first
     if target_form.count() == 0:
         raise RuntimeError(f"Target saved session form not found in UI: {target_path}")
-    target_card = page.locator(f"article:has(input[name='session_root'][value='{target_path}'])").first
-    if target_card.count() > 0:
-        target_card.evaluate(
-            "el => el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })"
-        )
-        page.wait_for_timeout(900)
-        move_to_locator(page, target_card, click=False, pause_ms=220)
+    smooth_scroll_down(page, pixels=220, wait_ms=800)
     smooth_click(page, target_form.get_by_role("button"))
     page.wait_for_url("**/sessions**")
-    page.wait_for_timeout(1200)
+    page.wait_for_timeout(500)
+    return target_path
+
+
+def bind_kernel_inputs_to_selected_session(page: Page, selected_session_root: str) -> None:
+    simulation_bundle_path = str(Path(selected_session_root) / "simulation" / "data" / "simulation.pkl")
+    page.evaluate(
+        """
+        ({ simulationBundlePath }) => {
+          const setSourceField = (baseName, pathValue) => {
+            const mode = document.querySelector(`[name="${baseName}_source_mode"]`);
+            const input = document.querySelector(`[name="${baseName}_server_path"]`);
+            if (!mode || !input) return;
+            mode.value = "server-path";
+            mode.dispatchEvent(new Event("change", { bubbles: true }));
+            input.value = pathValue;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          };
+          setSourceField("kernel_spike_times_file", simulationBundlePath);
+          setSourceField("kernel_population_sizes_file", simulationBundlePath);
+        }
+        """,
+        {"simulationBundlePath": simulation_bundle_path},
+    )
+    page.wait_for_timeout(420)
+
+
+def upload_kernel_spike_times_from_selected_session(page: Page, selected_session_root: str) -> str:
+    simulation_bundle_path = str(Path(selected_session_root) / "simulation" / "data" / "simulation.pkl")
+    if not Path(simulation_bundle_path).is_file():
+        raise FileNotFoundError(
+            f"Selected session does not provide simulation bundle for spike times: {simulation_bundle_path}"
+        )
+    spike_input = page.locator("#kernelSpikeTimesFile")
+    spike_input.set_input_files(simulation_bundle_path)
+    page.wait_for_timeout(320)
+    return simulation_bundle_path
+
+
+def _read_kernel_spike_binding(page: Page) -> tuple[str, str]:
+    payload = page.evaluate(
+        """
+        () => {
+          const mode = document.querySelector("input[name='kernel_spike_times_file_source_mode']");
+          const path = document.querySelector("input[name='kernel_spike_times_file_server_path']");
+          return {
+            mode: mode ? String(mode.value || "").trim() : "",
+            path: path ? String(path.value || "").trim() : "",
+          };
+        }
+        """
+    )
+    mode = str((payload or {}).get("mode") or "").strip()
+    path = str((payload or {}).get("path") or "").strip()
+    return mode, path
+
+
+def log_kernel_spike_binding(page: Page) -> None:
+    mode, path = _read_kernel_spike_binding(page)
+    print(f"[automation] kernel_spike_times binding mode={mode!r} path={path!r}", flush=True)
+    if not path:
+        return
+    try:
+        with open(path, "rb") as f:
+            obj = pickle.load(f)
+        if isinstance(obj, dict):
+            times_payload = obj.get("times")
+            if isinstance(times_payload, list) and times_payload and isinstance(times_payload[0], dict):
+                keys = list(times_payload[0].keys())
+                print(f"[automation] spike-time payload trial[0] keys: {keys}", flush=True)
+            elif isinstance(times_payload, dict):
+                keys = list(times_payload.keys())
+                print(f"[automation] spike-time payload keys: {keys}", flush=True)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[automation] warning: failed to inspect spike-time binding payload ({exc})", flush=True)
+
+
+from tutorial_cursor import (  # noqa: E402
+    animate_demo_cursor_to_locator,
+    ensure_demo_cursor,
+    move_cursor_to_point,
+    move_demo_cursor,
+    move_to_locator,
+    reset_demo_cursor_position,
+    show_cursor_transition,
+    smooth_check,
+    smooth_click,
+    smooth_fill,
+    smooth_mouse_click,
+    smooth_scroll_locator_into_view,
+    smooth_select_option,
+    smooth_select_option_match,
+)
 
 
 def run_tutorial_recording(
@@ -692,6 +868,7 @@ def run_tutorial_recording(
 ) -> Path:
     global _DEMO_CURSOR_POS
     _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
+    reset_demo_cursor_position()
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     tmp_video_dir = VIDEO_DIR / ".tmp"
     if tmp_video_dir.exists():
@@ -719,7 +896,11 @@ def run_tutorial_recording(
             print("[automation] opening dashboard...", flush=True)
             page.goto(base_url, wait_until="domcontentloaded")
 
-            load_requested_session(page, session_root=session_root, session_label=session_label)
+            selected_session_root = load_requested_session(
+                page,
+                session_root=session_root,
+                session_label=session_label,
+            )
 
             smooth_click(page, page.get_by_role("link", name="Dashboard"))
             page.wait_for_url("**/")
@@ -733,35 +914,54 @@ def run_tutorial_recording(
             print("[automation] opening MC server-folder modal...", flush=True)
             smooth_click(page, mc_card)
             select_server_folder_in_kernel_modal(page, mc_folder)
-            page.wait_for_timeout(900)
 
             print("[automation] selecting multicompartment output folder in kernel browser...", flush=True)
             output_card = page.locator("#kernelOutputSimUploadCard")
+            smooth_scroll_down(page, pixels=220, wait_ms=300)
             print("[automation] opening output server-folder modal...", flush=True)
             smooth_click(page, output_card)
             select_server_folder_in_kernel_modal(page, output_sim_folder)
-            page.wait_for_timeout(900)
 
             print("[automation] applying kernel params fallback (if needed)...", flush=True)
             set_kernel_params_fallback(
                 page,
                 fallback_analysis_params=analysis_params_path,
             )
-            page.wait_for_timeout(700)
 
-            smooth_click(page, page.get_by_role("button", name="Current dipole moment/LFP"))
-            smooth_check(page, page.locator("input[name='probe_gauss_cylinder']"))
-            smooth_fill(page, page.locator("#cdm-decimation-factor"), "10")
+            cdm_lfp_button = page.get_by_role("button", name="Current dipole moment/LFP")
+            gauss_probe_check = page.locator("input[name='probe_gauss_cylinder']")
+            decimation_input = page.locator("#cdm-decimation-factor")
+            compute_button = page.get_by_role("button", name="Compute CDM/LFP")
+
+            smooth_click(page, cdm_lfp_button)
+            print("[automation] binding kernel spike-time inputs to selected session bundle...", flush=True)
+            bind_kernel_inputs_to_selected_session(page, selected_session_root)
+            uploaded_spike_bundle = upload_kernel_spike_times_from_selected_session(
+                page,
+                selected_session_root,
+            )
+            print(
+                f"[automation] uploaded kernel spike-times file from selected session: {uploaded_spike_bundle}",
+                flush=True,
+            )
+            log_kernel_spike_binding(page)
+            smooth_check(page, gauss_probe_check)
+            smooth_fill(page, decimation_input, "10")
+            smooth_scroll_down(page, pixels=240, wait_ms=300)
+            # Re-assert before submit in case any client-side handlers rewired source fields.
+            bind_kernel_inputs_to_selected_session(page, selected_session_root)
+            upload_kernel_spike_times_from_selected_session(page, selected_session_root)
+            log_kernel_spike_binding(page)
 
             print("[automation] submitting CDM/LFP computation...", flush=True)
-            smooth_click(page, page.get_by_role("button", name="Compute CDM/LFP"))
+            smooth_click(page, compute_button)
             page.wait_for_url("**/job_status/**", timeout=ui_timeout_sec * 1000)
             job_id = _extract_job_id_from_url(page.url)
             print(f"[automation] waiting for field-potential job {job_id}...", flush=True)
             wait_for_job_finished(page, base_url, job_id, timeout_sec=job_timeout_sec)
             print(f"[automation] field-potential job {job_id} finished.", flush=True)
 
-            page.goto(base_url, wait_until="domcontentloaded")
+            smooth_click(page, page.get_by_role("link", name="Dashboard"))
             page.wait_for_url("**/")
             smooth_click(page, page.locator("a[href='/analysis']").first)
             page.wait_for_url("**/analysis**")
@@ -772,19 +972,30 @@ def run_tutorial_recording(
             smooth_click(page, load_all)
 
             smooth_click(page, page.get_by_role("button", name="Simulation outputs"))
-            smooth_select_option(page, page.locator("#sim-plot-type"), "lfp")
-            print("[automation] plotting LFP...", flush=True)
-            smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
-            wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
-            scroll_plot_into_view(page)
-            page.wait_for_timeout(2200)
-
-            smooth_click(page, page.get_by_role("link", name="Back to analysis"))
-            page.wait_for_url("**/analysis**")
-            smooth_click(page, page.get_by_role("button", name="Simulation outputs"))
             smooth_select_option(page, page.locator("#sim-plot-type"), "cdm")
             print("[automation] plotting CDM...", flush=True)
             smooth_click(page, page.get_by_role("button", name="Plot simulation outputs"))
+            wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
+            scroll_plot_into_view(page)
+            move_to_locator(page, page.locator("#plot-image").first)
+            page.wait_for_timeout(1200)
+
+            back_to_analysis = page.get_by_role("link", name="Back to analysis")
+            page.evaluate("window.scrollTo({ top: 0, behavior: 'smooth' })")
+            page.wait_for_timeout(620)
+            animate_demo_cursor_to_locator(page, back_to_analysis, duration_ms=950)
+            page.wait_for_timeout(1000)
+            move_demo_cursor(page, click=True)
+            back_to_analysis.click(delay=0)
+            page.wait_for_url("**/analysis**")
+            page.wait_for_timeout(220)
+
+            simulation_outputs_button = page.get_by_role("button", name="Simulation outputs")
+            smooth_click(page, simulation_outputs_button)
+            smooth_select_option(page, page.locator("#sim-plot-type"), "lfp")
+            print("[automation] plotting LFP...", flush=True)
+            plot_simulation_outputs_button = page.get_by_role("button", name="Plot simulation outputs")
+            smooth_click(page, plot_simulation_outputs_button)
             wait_for_plot_rendered(page, timeout_sec=ui_timeout_sec)
             scroll_plot_into_view(page)
             page.wait_for_timeout(2600)

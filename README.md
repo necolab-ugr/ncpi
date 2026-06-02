@@ -90,7 +90,7 @@ pip install "ncpi[parser]"          # extended parser backends
 pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
 pip install "ncpi[webui]"           # WebUI runtime backends
 pip install "ncpi[examples]"        # dependencies for example scripts
-# Note: see Section 6 (Optional backends notes) for prerequisites/conflicts.
+# Note: the dependencies listed below refer to Section 6 (Optional backends notes).
 pip install "ncpi[tests]"           # test stack dependencies
 pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[hctsa]"           # hctsa backend support
@@ -148,6 +148,13 @@ Install options for the R backend:
 
 If you want to run tests without setting up R, avoid `ncpi[tests]` and install only the specific test dependencies you
 need. R-dependent tests (e.g. `tests/Analysis/test_lmer.py`) are skipped automatically when `rpy2`/R is unavailable.
+
+### tests/playwright note
+After installing test dependencies, install Playwright browsers with:
+
+```bash
+python -m playwright install
+```
 
 ### hctsa note
 For hctsa-based features, install hctsa first: https://github.com/benfulcher/hctsa
@@ -373,11 +380,10 @@ if __name__ == "__main__":
 If you use `ncpi` in your research, please consider citing our work:
 
 **[1] Alejandro Orozco Valero, Victor Rodriguez-Gonzalez, Noemi Montobbio, Miguel A. Casal, Alejandro Tlaie,
-Francisco Pelayo, Christian Morillas, Jesus Poza, Carlos Gomez & Pablo Martinez-Canada**  
+Francisco Pelayo, Christian Morillas, Jesus Poza, Carlos Gomez & Pablo Martinez-Cañada**  
 *A Python toolbox for neural circuit parameter inference.*  
 npj Syst Biol Appl 11, 45 (2025).  
 https://doi.org/10.1038/s41540-025-00527-9
 
 # Acknowledgements
-This work was supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31, funded by MCIN/AEI/10.13039/501100011033
-and by ERDF "A way of making Europe"; and by Junta de Andalucia - Postdoctoral Fellowship Programme PAIDI 2021.
+Supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31 (MCIN/AEI/10.13039/501100011033, ERDF), by grant RYC2024-049595-I (MCIN/AEI/10.13039/501100011033,  FSE+) and by Junta de Andalucia Postdoctoral Fellowship Programme PAIDI 2021.

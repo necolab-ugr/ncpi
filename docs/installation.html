@@ -10,11 +10,12 @@
   <div class="layout">
     <aside class="sidebar-left">
       <div class="brand">
-        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
-        <div class="title">Documentation</div>
+        <a class="brand-home" href="./index.html"><img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo"></a>
+        <div class="title"><a href="./index.html">Documentation</a></div>
       </div>
       <ul class="left-nav">
-        <li><a href="./index.html">Home</a></li>
+                <li><a class="github-link" href="https://github.com/necolab-ugr/ncpi"><img class="github-mark" src="https://github.githubassets.com/favicons/favicon.svg" alt=""/>GitHub Repository</a></li>
+<li><a href="./index.html">Home</a></li>
         <li><a class="active" href="./installation.html">Installation</a></li>
         <li><a href="./tutorials.html">Tutorials</a></li>
         <li>
@@ -52,7 +53,7 @@
         <li><a href="./contributing.html">Contributing</a></li>
         <li><a href="./citation.html">Citation</a></li>
         <li><a href="./credits.html">Credits</a></li>
-      </ul>
+        </ul>
     </aside>
 
     <main class="content">
@@ -120,7 +121,7 @@ conda install -c conda-forge nest-simulator=3.8</code></pre>
 pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
 pip install "ncpi[webui]"           # WebUI runtime backends
 pip install "ncpi[examples]"        # dependencies for example scripts
-# Note: see Section 6 (Optional backends notes) for prerequisites/conflicts.
+# Note: the dependencies listed below refer to Section 6 (Optional backends notes).
 pip install "ncpi[tests]"           # test stack dependencies
 pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
@@ -178,6 +179,10 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
             If you want to run tests without setting up R, avoid <code>ncpi[tests]</code> and install only the specific test dependencies you need.
             R-dependent tests (e.g. <code>tests/Analysis/test_lmer.py</code>) are skipped automatically when <code>rpy2</code>/R is unavailable.
           </p>
+
+          <h3>tests/playwright note</h3>
+          <p>After installing test dependencies, install Playwright browsers with:</p>
+          <pre><code>python -m playwright install</code></pre>
 
           <h3>hctsa note</h3>
           <p>For hctsa-based features, install hctsa first: <a class="link" href="https://github.com/benfulcher/hctsa">https://github.com/benfulcher/hctsa</a></p>

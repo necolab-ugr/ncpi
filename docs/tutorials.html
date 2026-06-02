@@ -10,11 +10,12 @@
   <div class="layout">
     <aside class="sidebar-left">
       <div class="brand">
-        <img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo">
-        <div class="title">Documentation</div>
+        <a class="brand-home" href="./index.html"><img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo"></a>
+        <div class="title"><a href="./index.html">Documentation</a></div>
       </div>
       <ul class="left-nav">
-        <li><a href="./index.html">Home</a></li>
+                <li><a class="github-link" href="https://github.com/necolab-ugr/ncpi"><img class="github-mark" src="https://github.githubassets.com/favicons/favicon.svg" alt=""/>GitHub Repository</a></li>
+<li><a href="./index.html">Home</a></li>
         <li><a href="./installation.html">Installation</a></li>
         <li><a class="active" href="./tutorials.html">Tutorials</a></li>
         <li>
@@ -52,7 +53,7 @@
         <li><a href="./contributing.html">Contributing</a></li>
         <li><a href="./citation.html">Citation</a></li>
         <li><a href="./credits.html">Credits</a></li>
-      </ul>
+        </ul>
     </aside>
 
     <main class="content">
@@ -64,6 +65,23 @@
             Select one of the tutorial tracks below. You can follow guided workflows through the WebUI
             or work directly in Python using Jupyter notebooks.
           </p>
+        </section>
+
+        <section id="setup">
+          <div class="card">
+            <h2>Recommended Setup</h2>
+            <p>
+              We recommend installing <code>ncpi</code> in a dedicated conda environment before running tutorials:
+            </p>
+            <pre><code>conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi</code></pre>
+            <p>
+              Some tutorial examples require additional dependencies. For example, simulation tutorials may require
+              installing NEST.
+              See the <a class="link" href="./installation.html">Installation</a> page for full setup details.
+            </p>
+          </div>
         </section>
 
         <section id="tracks">
@@ -88,6 +106,7 @@
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
         <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#setup">Setup</a></li>
         <li><a href="#tracks">Tracks</a></li>
       </ul>
     </aside>

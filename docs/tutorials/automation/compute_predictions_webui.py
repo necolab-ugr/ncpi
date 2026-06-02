@@ -662,6 +662,23 @@ def load_requested_session(page: Page, session_root: str, session_label: str) ->
     page.wait_for_timeout(1200)
 
 
+from tutorial_cursor import (  # noqa: E402
+    ensure_demo_cursor,
+    move_cursor_to_point,
+    move_demo_cursor,
+    move_to_locator,
+    reset_demo_cursor_position,
+    show_cursor_transition,
+    smooth_check,
+    smooth_click,
+    smooth_fill,
+    smooth_mouse_click,
+    smooth_scroll_locator_into_view,
+    smooth_select_option,
+    smooth_select_option_match,
+)
+
+
 def run_tutorial_recording(
     base_url: str,
     headless: bool,
@@ -676,6 +693,7 @@ def run_tutorial_recording(
 ) -> Path:
     global _DEMO_CURSOR_POS
     _DEMO_CURSOR_POS = {"x": 24.0, "y": 24.0}
+    reset_demo_cursor_position()
     VIDEO_DIR.mkdir(parents=True, exist_ok=True)
     tmp_video_dir = VIDEO_DIR / ".tmp"
     if tmp_video_dir.exists():
