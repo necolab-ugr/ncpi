@@ -30,7 +30,7 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("Condition source None Custom").select_option("__value__")
     page.get_by_role("textbox", name="Condition value").click()
     page.get_by_role("textbox", name="Condition value").fill("resting-state")
-    page.get_by_label("Recording type source * Value").first.select_option("__value__")
+    page.get_by_label("Recording type source * Custom (Select Recording type value)").first.select_option("__value__")
     page.get_by_label("Recording type value LFP CDM").first.select_option("EEG")
     page.get_by_role("checkbox", name="Enable epoching").check()
     page.get_by_role("checkbox", name="Apply z-score before epoching").check()
@@ -63,4 +63,3 @@ def run(playwright: Playwright) -> None:
 def test_features_subsample_POCTEP_SENSORS():
     with sync_playwright() as playwright:
         run(playwright)
-
