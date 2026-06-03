@@ -937,107 +937,107 @@ def _load_mat_with_fallback(source, *, in_memory=False, source_name="mat file"):
         raise
 
 
-def _load_uploaded_source_bytes(name, ext, content):
-    safe_name = str(name or "uploaded_file")
-    ext = str(ext or os.path.splitext(safe_name)[1]).lower()
-    raw = content
-    if raw is None:
-        raise ValueError(f"Uploaded file '{safe_name}' is empty.")
-    if isinstance(raw, memoryview):
-        raw = raw.tobytes()
-    if isinstance(raw, bytearray):
-        raw = bytes(raw)
-    if not isinstance(raw, (bytes,)):
-        raise ValueError(f"Invalid uploaded content type for '{safe_name}'.")
+# def _load_uploaded_source_bytes(name, ext, content):
+#     safe_name = str(name or "uploaded_file")
+#     ext = str(ext or os.path.splitext(safe_name)[1]).lower()
+#     raw = content
+#     if raw is None:
+#         raise ValueError(f"Uploaded file '{safe_name}' is empty.")
+#     if isinstance(raw, memoryview):
+#         raw = raw.tobytes()
+#     if isinstance(raw, bytearray):
+#         raw = bytes(raw)
+#     if not isinstance(raw, (bytes,)):
+#         raise ValueError(f"Invalid uploaded content type for '{safe_name}'.")
 
-    if ext in {".pkl", ".pickle"}:
-        bio = io.BytesIO(raw)
-        try:
-            return pd.read_pickle(bio)
-        except Exception:
-            bio.seek(0)
-            return pickle.load(bio)
+#     if ext in {".pkl", ".pickle"}:
+#         bio = io.BytesIO(raw)
+#         try:
+#             return pd.read_pickle(bio)
+#         except Exception:
+#             bio.seek(0)
+#             return pickle.load(bio)
 
-    if ext == ".json":
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except Exception as exc:
-            raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
+#     if ext == ".json":
+#         try:
+#             return json.loads(raw.decode("utf-8"))
+#         except Exception as exc:
+#             raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
 
-    if ext == ".npy":
-        return np.load(io.BytesIO(raw), allow_pickle=True)
+#     if ext == ".npy":
+#         return np.load(io.BytesIO(raw), allow_pickle=True)
 
-    if ext == ".csv":
-        return pd.read_csv(io.BytesIO(raw))
-    if ext == ".tsv":
-        return pd.read_csv(io.BytesIO(raw), sep="\t")
+#     if ext == ".csv":
+#         return pd.read_csv(io.BytesIO(raw))
+#     if ext == ".tsv":
+#         return pd.read_csv(io.BytesIO(raw), sep="\t")
 
-    if ext == ".parquet":
-        return pd.read_parquet(io.BytesIO(raw))
+#     if ext == ".parquet":
+#         return pd.read_parquet(io.BytesIO(raw))
 
-    if ext == ".feather":
-        return pd.read_feather(io.BytesIO(raw))
+#     if ext == ".feather":
+#         return pd.read_feather(io.BytesIO(raw))
 
-    if ext in {".xlsx", ".xls"}:
-        return pd.read_excel(io.BytesIO(raw))
+#     if ext in {".xlsx", ".xls"}:
+#         return pd.read_excel(io.BytesIO(raw))
 
-    if ext == ".mat":
-        return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
+#     if ext == ".mat":
+#         return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
-    if ext == ".nwb":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".nwb")
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".nwb":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             return _load_uploaded_source_path(temp_path, name=safe_name, ext=".nwb")
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    if ext == ".edf":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_edf_", suffix=".edf", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".edf")
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".edf":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_edf_", suffix=".edf", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             return _load_uploaded_source_path(temp_path, name=safe_name, ext=".edf")
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    if ext == ".fif":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_fif_", suffix=".fif", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".fif")
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".fif":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_fif_", suffix=".fif", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             return _load_uploaded_source_path(temp_path, name=safe_name, ext=".fif")
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    if ext == ".ds":
-        raise ValueError(
-            "CTF .ds datasets are directories and cannot be parsed from a single uploaded file. "
-            "Use Server upload/path selection and select the folder that contains the .ds dataset."
-        )
+#     if ext == ".ds":
+#         raise ValueError(
+#             "CTF .ds datasets are directories and cannot be parsed from a single uploaded file. "
+#             "Use Server upload/path selection and select the folder that contains the .ds dataset."
+#         )
 
-    if ext in {".vhdr", ".dat"}:
-        raise ValueError(
-            f"BrainVision {ext} requires companion files (.vhdr, .eeg/.dat, .vmrk) in the same folder. "
-            "Use server-path selection (folder on disk), not single-file upload."
-        )
-    raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
+#     if ext in {".vhdr", ".dat"}:
+#         raise ValueError(
+#             f"BrainVision {ext} requires companion files (.vhdr, .eeg/.dat, .vmrk) in the same folder. "
+#             "Use server-path selection (folder on disk), not single-file upload."
+#         )
+#     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
 def _load_edf_with_parser(path):
@@ -2279,19 +2279,19 @@ def _signal_time_length(value):
     return int(arr.shape[-1])
 
 
-def _clip_signal_time_length(value, length):
-    if isinstance(value, MappingABC):
-        return {key: _clip_signal_time_length(item, length) for key, item in value.items()}
-    try:
-        arr = np.asarray(value)
-    except Exception:
-        return value
-    if arr.ndim == 0:
-        return value
-    slicer = [slice(None)] * arr.ndim
-    slicer[-1] = slice(0, int(length))
-    clipped = arr[tuple(slicer)]
-    return np.array(clipped, copy=True)
+# def _clip_signal_time_length(value, length):
+#     if isinstance(value, MappingABC):
+#         return {key: _clip_signal_time_length(item, length) for key, item in value.items()}
+#     try:
+#         arr = np.asarray(value)
+#     except Exception:
+#         return value
+#     if arr.ndim == 0:
+#         return value
+#     slicer = [slice(None)] * arr.ndim
+#     slicer[-1] = slice(0, int(length))
+#     clipped = arr[tuple(slicer)]
+#     return np.array(clipped, copy=True)
 
 
 def _decimate_signal_time(value, factor):
@@ -2312,31 +2312,31 @@ def _decimate_signal_time(value, factor):
     return np.array(decimated, copy=True)
 
 
-def _clip_trial_dataframe_payloads(payloads, signal_columns=("data",)):
-    payload_list = [frame.copy() for frame in list(payloads or []) if isinstance(frame, pd.DataFrame)]
-    if not payload_list:
-        return payload_list, None
+# def _clip_trial_dataframe_payloads(payloads, signal_columns=("data",)):
+#     payload_list = [frame.copy() for frame in list(payloads or []) if isinstance(frame, pd.DataFrame)]
+#     if not payload_list:
+#         return payload_list, None
 
-    min_length = None
-    for frame in payload_list:
-        for col in signal_columns:
-            if col not in frame.columns:
-                continue
-            for value in frame[col].tolist():
-                length = _signal_time_length(value)
-                if length is None:
-                    continue
-                min_length = length if min_length is None else min(min_length, length)
+#     min_length = None
+#     for frame in payload_list:
+#         for col in signal_columns:
+#             if col not in frame.columns:
+#                 continue
+#             for value in frame[col].tolist():
+#                 length = _signal_time_length(value)
+#                 if length is None:
+#                     continue
+#                 min_length = length if min_length is None else min(min_length, length)
 
-    if min_length is None:
-        return payload_list, None
+#     if min_length is None:
+#         return payload_list, None
 
-    for frame in payload_list:
-        for col in signal_columns:
-            if col not in frame.columns:
-                continue
-            frame[col] = frame[col].map(lambda value: _clip_signal_time_length(value, min_length))
-    return payload_list, int(min_length)
+#     for frame in payload_list:
+#         for col in signal_columns:
+#             if col not in frame.columns:
+#                 continue
+#             frame[col] = frame[col].map(lambda value: _clip_signal_time_length(value, min_length))
+#     return payload_list, int(min_length)
 
 
 def _sum_signal_dict(signal_dict):
@@ -2524,7 +2524,7 @@ def _compile_custom_feature_callable(script_source):
     )
 
 
-def _compute_custom_features(method_params, samples, exec_opts, progress_callback=None, log_callback=None):
+def _compute_custom_features(method_params, samples, exec_opts, progress_callback=None, log_callback=None, job_id=None, job_status=None):
     script_source = method_params.get("custom_feature_script", "")
     feature_fn, fn_name = _compile_custom_feature_callable(script_source)
     normalize = bool(method_params.get("normalize", False))
@@ -2582,6 +2582,8 @@ def _compute_custom_features(method_params, samples, exec_opts, progress_callbac
     user_params = {k: v for k, v in dict(method_params).items() if k != "custom_feature_script"}
     expected_vector_len = None
     for idx, sample in enumerate(samples, start=1):
+        if job_id and job_status and (idx % 10 == 0):
+            _check_cancellation(job_id, job_status)
         x = np.asarray(sample).squeeze()
         if x.ndim == 0:
             x = np.asarray([x], dtype=float)
@@ -3236,6 +3238,18 @@ def _postprocess_features_output(method, output_df, params, job_status=None, job
 ##########        COMPUTATION FUNCTIONS           ###########
 #############################################################
 
+class ComputationCancelled(Exception):
+    """Signal to stop cooperatively a computation process still running."""
+    pass
+
+def _check_cancellation(job_id, job_status):
+    """Runs ComputationCancelled if the job has been cancelled."""
+    if not isinstance(job_status, dict):
+        return
+    status = job_status.get(job_id, {})
+    if status.get("cancel_requested"):
+        raise ComputationCancelled("Computation cancelled by user")
+
 
 def _apply_additional_file_metadata(
     df,
@@ -3420,6 +3434,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
     output_df_path = None
     try:
         _append_job_output(job_status, job_id, "Starting features computation.")
+        _check_cancellation(job_id, job_status)
         if job_id in job_status:
             # Keep progress at 0 during data loading/preparation.
             job_status[job_id]["progress"] = 0
@@ -3432,6 +3447,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         prepared_df = params.get("prepared_features_df")
         if isinstance(prepared_df, pd.DataFrame):
             df = prepared_df
+            _check_cancellation(job_id, job_status)
             _append_job_output(job_status, job_id, "Using in-memory parsed empirical dataframe (no additional load).")
         elif params.get("empirical_upload_paths"):
             parse_cfg = params.get("parser_config_obj")
@@ -3524,6 +3540,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             variable_channel_warning_keys = set()
             log_every = max(1, total_uploads // 20)
             for idx, payload in enumerate(empirical_uploads, start=1):
+                _check_cancellation(job_id, job_status)
                 name = payload.get("name") or f"file_{idx}"
                 source_path = payload.get("path")
                 ext = str(payload.get("ext") or os.path.splitext(str(name))[1]).lower()
@@ -3739,6 +3756,8 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 if idx == 1 or idx == total_uploads or (idx % log_every == 0):
                     _append_job_output(job_status, job_id, f"Parsed input file {idx}/{total_uploads}.")
 
+            _check_cancellation(job_id, job_status)
+
             df = pd.concat(parsed_frames, ignore_index=True)
             _append_job_output(job_status, job_id, f"Merged empirical parsed dataframe shape: {df.shape}.")
 
@@ -3779,6 +3798,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
             raise ValueError("Prepared parser output is not a pandas dataframe.")
         _append_job_output(job_status, job_id, f"Loaded parsed dataframe with shape {df.shape}.")
 
+        _check_cancellation(job_id, job_status)
         samples = _extract_feature_samples(df)
         _append_job_output(job_status, job_id, f"Extracted {len(samples)} signal sample(s) from dataframe.")
 
@@ -3875,6 +3895,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         heartbeat_thread = threading.Thread(target=_feature_progress_heartbeat, daemon=True)
         heartbeat_thread.start()
         try:
+            _check_cancellation(job_id, job_status)
             if method == "custom":
                 _append_job_output(job_status, job_id, "Starting custom feature extraction...")
                 computed = _compute_custom_features(
@@ -3883,6 +3904,8 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     exec_opts=exec_opts,
                     progress_callback=_on_feature_progress,
                     log_callback=_on_feature_log,
+                    job_id=job_id,
+                    job_status=job_status,
                 )
             else:
                 features = ncpi.Features(method=method, params=method_params)
@@ -3902,6 +3925,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                     progress_callback=_on_feature_progress,
                     log_callback=_on_feature_log,
                 )
+            _check_cancellation(job_id, job_status)
         finally:
             progress_state["running"] = False
             heartbeat_thread.join(timeout=0.2)
@@ -3936,12 +3960,13 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
                 "dashboard_features_path": persisted_dashboard_path,
                 "error": False
             })
-
+    except ComputationCancelled:
+        _append_job_output(job_status, job_id, "Computation stopped by user request.")
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
-
-    # Remove temporary inputs but keep result file available for download.
-    cleanup_temp_files(params['file_paths'], keep_paths=[output_df_path])
+    finally:
+        # Remove temporary inputs but keep result file available for download.
+        cleanup_temp_files(params['file_paths'], keep_paths=[output_df_path])
 
 
 
@@ -4257,43 +4282,43 @@ def _declared_artifact_backend(obj):
     return None
 
 
-def _sample_sbi_posterior(posterior, torch_mod, x_valid, num_samples, batch_size, show_progress=False):
-    x_local = np.asarray(x_valid, dtype=np.float32)
-    x_t = torch_mod.from_numpy(x_local)
-    total = int(x_t.shape[0])
-    if total == 0:
-        return np.empty((num_samples, 0, 0), dtype=float)
+# def _sample_sbi_posterior(posterior, torch_mod, x_valid, num_samples, batch_size, show_progress=False):
+#     x_local = np.asarray(x_valid, dtype=np.float32)
+#     x_t = torch_mod.from_numpy(x_local)
+#     total = int(x_t.shape[0])
+#     if total == 0:
+#         return np.empty((num_samples, 0, 0), dtype=float)
 
-    chunks = []
-    for start in range(0, total, batch_size):
-        xb = x_t[start:start + batch_size]
-        b = int(xb.shape[0])
-        if b == 1:
-            sb = posterior.sample((num_samples,), x=xb, show_progress_bars=bool(show_progress))
-            if sb.ndim == 2:
-                sb = sb.unsqueeze(1)
-        else:
-            if hasattr(posterior, "sample_batched"):
-                sb = posterior.sample_batched((num_samples,), x=xb, show_progress_bars=bool(show_progress))
-            else:
-                single_chunks = []
-                for one_idx in range(b):
-                    one = posterior.sample(
-                        (num_samples,),
-                        x=xb[one_idx:one_idx + 1],
-                        show_progress_bars=bool(show_progress),
-                    )
-                    if one.ndim == 2:
-                        one = one.unsqueeze(1)
-                    single_chunks.append(one)
-                sb = torch_mod.cat(single_chunks, dim=1)
-        chunks.append(sb)
+#     chunks = []
+#     for start in range(0, total, batch_size):
+#         xb = x_t[start:start + batch_size]
+#         b = int(xb.shape[0])
+#         if b == 1:
+#             sb = posterior.sample((num_samples,), x=xb, show_progress_bars=bool(show_progress))
+#             if sb.ndim == 2:
+#                 sb = sb.unsqueeze(1)
+#         else:
+#             if hasattr(posterior, "sample_batched"):
+#                 sb = posterior.sample_batched((num_samples,), x=xb, show_progress_bars=bool(show_progress))
+#             else:
+#                 single_chunks = []
+#                 for one_idx in range(b):
+#                     one = posterior.sample(
+#                         (num_samples,),
+#                         x=xb[one_idx:one_idx + 1],
+#                         show_progress_bars=bool(show_progress),
+#                     )
+#                     if one.ndim == 2:
+#                         one = one.unsqueeze(1)
+#                     single_chunks.append(one)
+#                 sb = torch_mod.cat(single_chunks, dim=1)
+#         chunks.append(sb)
 
-    sample_tensor = torch_mod.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]
-    samples = sample_tensor.detach().cpu().numpy()
-    if samples.ndim == 2:
-        samples = samples[:, np.newaxis, :]
-    return samples
+#     sample_tensor = torch_mod.cat(chunks, dim=1) if len(chunks) > 1 else chunks[0]
+#     samples = sample_tensor.detach().cpu().numpy()
+#     if samples.ndim == 2:
+#         samples = samples[:, np.newaxis, :]
+#     return samples
 
 
 def _summarize_sbi_samples(samples, mode):
@@ -4457,6 +4482,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
 
     try:
         _append_job_output(job_status, job_id, "Starting predictions computation.")
+        _check_cancellation(job_id, job_status)
 
         features_predict_path = file_paths.get("features_predict")
         if not features_predict_path:
@@ -4570,6 +4596,7 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             job_id,
             f"Input subsample percent={inference_subsample_percent:.4g}.",
         )
+        _check_cancellation(job_id, job_status)
 
         if inference_obj.backend == "sklearn":
             if not model_present:
@@ -4709,6 +4736,8 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             _append_job_output(job_status, job_id, f"Warning: could not persist dashboard predictions file: {persist_exc}")
         _append_job_output(job_status, job_id, f"Saved predictions dataframe: {output_df_path}")
         _announce_saved_output_folders(job_status, job_id, "inference", output_df_path, persisted_predictions_path)
+
+        _check_cancellation(job_id, job_status)
         job_status[job_id].update({
             "status": "finished",
             "progress": 100,
@@ -4717,13 +4746,15 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
             "error": False,
             "dashboard_predictions_path": persisted_predictions_path,
         })
-
+    except ComputationCancelled: 
+        _append_job_output(job_status, job_id, "Computation stopped by user request.")
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
     finally:
         cleanup_temp_files(file_paths)
         if os.path.isdir(artifacts_dir):
             shutil.rmtree(artifacts_dir, ignore_errors=True)
+
 def inference_training_computation(job_id, job_status, params, temp_uploaded_files):
     file_paths = params.get("file_paths", {})
     artifacts_dir = os.path.join(temp_uploaded_files, f"inference_training_artifacts_{job_id}")
@@ -4731,6 +4762,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
 
     try:
         _append_job_output(job_status, job_id, "Starting inference model training.")
+        _check_cancellation(job_id, job_status)
 
         features_path = _first_existing_file([
             file_paths.get("training_features_file"),
@@ -5043,6 +5075,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                     job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 94)
                 return
 
+        _check_cancellation(job_id, job_status)
         capture = _JobOutputCapture(
             job_status,
             job_id,
@@ -5063,6 +5096,8 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 sbi_eval_sampling_kwargs=sbi_eval_sampling_kwargs,
             )
         capture.flush()
+
+        _check_cancellation(job_id, job_status)
         if job_id in job_status:
             job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), 95)
 
@@ -5127,6 +5162,8 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             "error": False,
         })
 
+    except ComputationCancelled:
+        _append_job_output(job_status, job_id, "Computation stopped by user request.")
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
     finally:
@@ -5135,30 +5172,31 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             shutil.rmtree(artifacts_dir, ignore_errors=True)
 
 
-def analysis_computation(job_id, job_status, params, temp_uploaded_files):
-    try:
-        results_path = os.path.join(temp_uploaded_files, "LFP_predictions.png")
-        # Save the image in the module upload folder.
-        # LFP_predictions_webversion.run_full_pipeline([params['method-plot']], params['method'])
+# def analysis_computation(job_id, job_status, params, temp_uploaded_files):
+#     try:
+#         results_path = os.path.join(temp_uploaded_files, "LFP_predictions.png")
+#         # Save the image in the module upload folder.
+#         # LFP_predictions_webversion.run_full_pipeline([params['method-plot']], params['method'])
         
-        job_status[job_id].update({
-                "status": "finished",
-                "progress": 100,
-                "estimated_time_remaining": 0,
-                "results": results_path, # Return to the client the output filepath
-                "error": False
-            })
+#         job_status[job_id].update({
+#                 "status": "finished",
+#                 "progress": 100,
+#                 "estimated_time_remaining": 0,
+#                 "results": results_path, # Return to the client the output filepath
+#                 "error": False
+#             })
 
-    except Exception as e:
-        _mark_job_failed(job_status, job_id, e)
+#     except Exception as e:
+#         _mark_job_failed(job_status, job_id, e)
 
-    # Remove the file after using it
-    cleanup_temp_files(params['file_paths'])
+#     # Remove the file after using it
+#     cleanup_temp_files(params['file_paths'])
 
 
 def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_files):
     try:
         _append_job_output(job_status, job_id, "Starting field potential proxy computation.")
+        _check_cancellation(job_id, job_status)
         method = params.get('proxy_method', 'FR')
         _append_job_output(job_status, job_id, f"Proxy method: {method}")
         sim_step_value = params.get('sim_step')
@@ -5418,8 +5456,10 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 
         _append_job_output(job_status, job_id, "Computing proxy with ncpi.FieldPotential.compute_proxy...")
         potential = ncpi.FieldPotential()
+        _check_cancellation(job_id, job_status)
         trial_proxy_payloads = []
         for trial_idx in range(trial_count):
+            _check_cancellation(job_id, job_status)
             area_proxy_signals = {}
             if method == "FR":
                 trial_times = _pick_trial_item(fr_times, trial_idx)
@@ -5607,7 +5647,8 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
                 "results": proxy_path,
                 "error": False
             })
-
+    except ComputationCancelled:
+        _append_job_output(job_status, job_id, "Computation stopped by user request.")
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
 
@@ -5617,6 +5658,7 @@ def field_potential_proxy_computation(job_id, job_status, params, temp_uploaded_
 def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded_files):
     try:
         _append_job_output(job_status, job_id, "Starting kernel computation.")
+        _check_cancellation(job_id, job_status)
         mc_folder = str(params.get("mc_folder") or "").strip()
         output_sim_path = str(params.get("output_sim_path") or "").strip()
         params_path = str(params.get("kernel_params_module") or "").strip()
@@ -5920,6 +5962,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
         if trial_count > 1:
             _append_job_output(job_status, job_id, f"Detected {trial_count} trial(s); computing CDM/LFP for each trial.")
 
+        _check_cancellation(job_id, job_status)
         cdm_dt = params.get("cdm_dt")
         cdm_dt = float(cdm_dt) if cdm_dt not in (None, "") else dt
         cdm_tstop = params.get("cdm_tstop")
@@ -6017,6 +6060,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 f"Applying CDM/LFP decimation factor x{cdm_decimation_factor} after convolution.",
             )
         for trial_idx in range(trial_count):
+            _check_cancellation(job_id, job_status) 
             spike_times_trial_raw = _pick_trial_item(spike_times_raw, trial_idx)
             spike_times_input, area_names, area_populations, _ = _extract_area_population_layout_from_spike_times(
                 spike_times_trial_raw
@@ -6275,6 +6319,8 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
                 "results": results_path,
                 "error": False
             })
+    except ComputationCancelled:
+        _append_job_output(job_status, job_id, "Computation stopped by user request.")
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
     cleanup_temp_files(params.get('file_paths', {}))
@@ -6283,6 +6329,7 @@ def field_potential_kernel_computation(job_id, job_status, params, temp_uploaded
 def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_files):
     try:
         _append_job_output(job_status, job_id, "Starting M/EEG computation.")
+        _check_cancellation(job_id, job_status) 
         if job_id in job_status:
             job_status[job_id]["progress"] = 0
         file_paths = params.get("file_paths", {})
@@ -6549,7 +6596,9 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 return _from_mapping(payload)
             return base
 
+        _check_cancellation(job_id, job_status)
         for trial_idx, cdm_trial_raw in enumerate(cdm_trials_raw):
+            _check_cancellation(job_id, job_status)
             trial_meta = _extract_trial_metadata_from_cdm_payload(cdm_trial_raw, trial_idx)
             CDM, cdm_meta = _extract_signal_and_meta_from_source(cdm_trial_raw)
             component_mode = _normalize_cdm_component_axis(cdm_meta.get("component_axis"))
@@ -6933,6 +6982,7 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
             )
             log_every = 1 if n_sensors <= 300 else max(1, n_sensors // 100)
             for idx in range(n_sensors):
+                _check_cancellation(job_id, job_status)
                 if model == "NYHeadModel":
                     if is_meg:
                         acc = np.zeros((3, n_times))
@@ -7040,6 +7090,8 @@ def field_potential_meeg_computation(job_id, job_status, params, temp_uploaded_f
                 "results": meeg_path,
                 "error": False
             })
+    except ComputationCancelled:
+        _append_job_output(job_status, job_id, "Computation stopped by user request.")
     except Exception as e:
         _mark_job_failed(job_status, job_id, e)
     cleanup_temp_files(params.get('file_paths', {}), keep_paths=[cdm_path])
