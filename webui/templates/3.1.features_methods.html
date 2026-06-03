@@ -4055,17 +4055,17 @@ def custom_feature(sample, params):
                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                             >
                         </label>
-                        <div class="flex flex-wrap gap-2">
+                        <div class="flex flex-wrap gap-2 pt-1">
                             <button
                                 type="button"
                                 @click="applyFilenameFormatAndReinspect()"
-                                class="px-2 py-1 rounded border border-primary/40 bg-white dark:bg-[#191e33] text-primary text-[11px] font-semibold hover:bg-primary/10">
+                                class="w-[8.0rem] px-2 py-0.1 rounded-lg border border-green-700 bg-green-600 text-white text-sm font-semibold shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-[#111422]">
                                 Inspect
                             </button>
                             <button
                                 type="button"
                                 @click="clearFilenameFormatAndReinspect()"
-                                class="px-2 py-1 rounded border border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-gray-700 dark:text-gray-300 text-[11px] font-semibold hover:bg-gray-50 dark:hover:bg-[#222a45]">
+                                class="w-[8.0rem] px-2 py-0.1 rounded-lg border border-gray-900 bg-white dark:bg-[#191e33] text-gray-900 dark:text-gray-100 text-sm font-semibold shadow-sm hover:bg-gray-50 dark:hover:bg-[#222a45] focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-[#111422]">
                                 Use automatic detection
                             </button>
                         </div>
@@ -4115,16 +4115,18 @@ def custom_feature(sample, params):
                                         x-text="token">
                                     </button>
                                 </template>
+                            </div>
+                            <div class="flex flex-wrap gap-2 pt-1">
                                 <button
                                     type="button"
                                     @click="applyFilenameFormatAndReinspect()"
-                                    class="px-2 py-1 rounded border border-primary/40 bg-white dark:bg-[#191e33] text-primary text-[11px] font-semibold hover:bg-primary/10">
+                                    class="w-[8.0rem] px-2 py-0.1 rounded-lg border border-green-700 bg-green-600 text-white text-sm font-semibold shadow-sm hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 dark:focus:ring-offset-[#191e33]">
                                     Inspect
                                 </button>
                                 <button
                                     type="button"
                                     @click="clearFilenameFormatAndReinspect()"
-                                    class="px-2 py-1 rounded border border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-gray-700 dark:text-gray-300 text-[11px] font-semibold hover:bg-gray-50 dark:hover:bg-[#222a45]">
+                                    class="w-[8.0rem] px-2 py-0.1 rounded-lg border border-gray-900 bg-white dark:bg-[#191e33] text-gray-900 dark:text-gray-100 text-sm font-semibold shadow-sm hover:bg-gray-50 dark:hover:bg-[#222a45] focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 dark:focus:ring-offset-[#191e33]">
                                     Use automatic detection
                                 </button>
                             </div>
@@ -4629,7 +4631,7 @@ def custom_feature(sample, params):
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type source *</span>
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                                <option value="__value__" :style="parserManualOptionStyle()">Value</option>
+                                                <option value="__value__" :style="parserManualOptionStyle()">Custom (Select Recording type value)</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-rec-type-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
@@ -4955,7 +4957,7 @@ def custom_feature(sample, params):
                                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type source *</span>
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                                <option value="__value__" :style="parserManualOptionStyle()">Value</option>
+                                                <option value="__value__" :style="parserManualOptionStyle()">Custom (Select Recording type value)</option>
                                                 <template x-for="field in parserInfo.candidate_fields || []" :key="'rec-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>

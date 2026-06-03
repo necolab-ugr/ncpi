@@ -22,7 +22,7 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("Samples axis Dim 0 Dim 1 Dim").first.select_option("1")
     page.get_by_label("IDs axis None Dim 0 Dim 1 Dim").first.select_option("-1")
     page.get_by_label("Trials/Epochs axis None Dim 0").first.select_option("0")
-    page.get_by_label("Recording type source * Value").first.select_option("__value__")
+    page.get_by_label("Recording type source * Custom (Select Recording type value)").first.select_option("__value__")
     page.get_by_label("Recording type value LFP CDM").first.select_option("EEG")
     page.get_by_label("Subject ID source None Custom").select_option("__file_id__")
     page.get_by_label("Group source None Custom").select_option("__file_extracted_sep__underscore__0")
@@ -58,4 +58,3 @@ def run(playwright: Playwright) -> None:
 def test_features_subsample_Krukow_ShortBlock():
     with sync_playwright() as playwright:
         run(playwright)
-
