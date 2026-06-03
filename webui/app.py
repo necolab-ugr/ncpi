@@ -1704,13 +1704,13 @@ def _rewrite_pickle_as_single_scenario_list(path):
         pickle.dump([payload], handle)
 
 
-def _normalize_simulation_output_files_as_lists(output_dir, file_names):
-    normalized = []
-    for name in file_names or []:
-        path = os.path.join(output_dir, name)
-        _rewrite_pickle_as_single_scenario_list(path)
-        normalized.append(path)
-    return normalized
+# def _normalize_simulation_output_files_as_lists(output_dir, file_names):
+#     normalized = []
+#     for name in file_names or []:
+#         path = os.path.join(output_dir, name)
+#         _rewrite_pickle_as_single_scenario_list(path)
+#         normalized.append(path)
+#     return normalized
 
 
 def _ensure_sequence(value, name):
@@ -2556,54 +2556,54 @@ def _bootstrap_predictions_data_from_previous_steps():
     return True
 
 
-def _collect_empirical_folder_files(folder_path):
-    root = os.path.realpath((folder_path or "").strip())
-    if not root:
-        raise ValueError("Provide a folder path for empirical recordings.")
-    if not os.path.isdir(root):
-        raise ValueError(f"Empirical folder does not exist: {root}")
+# def _collect_empirical_folder_files(folder_path):
+#     root = os.path.realpath((folder_path or "").strip())
+#     if not root:
+#         raise ValueError("Provide a folder path for empirical recordings.")
+#     if not os.path.isdir(root):
+#         raise ValueError(f"Empirical folder does not exist: {root}")
 
-    matches = []
-    if _is_supported_ctf_dataset_path(root):
-        return [root]
-    for current_root, dirs, files in os.walk(root):
-        ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
-        dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
-        for name in ctf_dirs:
-            matches.append(os.path.join(current_root, name))
-        for name in files:
-            ext = Path(name).suffix.lower()
-            if ext in FEATURES_PARSER_FILE_EXTENSIONS:
-                matches.append(os.path.join(current_root, name))
-    matches.sort()
-    if not matches:
-        raise ValueError(f"No supported empirical files found in folder: {root}")
-    return matches
+#     matches = []
+#     if _is_supported_ctf_dataset_path(root):
+#         return [root]
+#     for current_root, dirs, files in os.walk(root):
+#         ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
+#         dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
+#         for name in ctf_dirs:
+#             matches.append(os.path.join(current_root, name))
+#         for name in files:
+#             ext = Path(name).suffix.lower()
+#             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
+#                 matches.append(os.path.join(current_root, name))
+#     matches.sort()
+#     if not matches:
+#         raise ValueError(f"No supported empirical files found in folder: {root}")
+#     return matches
 
 
-def _collect_simulation_folder_files(folder_path):
-    root = os.path.realpath((folder_path or "").strip())
-    if not root:
-        raise ValueError("Provide a folder path for simulation outputs.")
-    if not os.path.isdir(root):
-        raise ValueError(f"Simulation outputs folder does not exist: {root}")
+# def _collect_simulation_folder_files(folder_path):
+#     root = os.path.realpath((folder_path or "").strip())
+#     if not root:
+#         raise ValueError("Provide a folder path for simulation outputs.")
+#     if not os.path.isdir(root):
+#         raise ValueError(f"Simulation outputs folder does not exist: {root}")
 
-    matches = []
-    if _is_supported_ctf_dataset_path(root):
-        return [root]
-    for current_root, dirs, files in os.walk(root):
-        ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
-        dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
-        for name in ctf_dirs:
-            matches.append(os.path.join(current_root, name))
-        for name in files:
-            ext = Path(name).suffix.lower()
-            if ext in FEATURES_PARSER_FILE_EXTENSIONS:
-                matches.append(os.path.join(current_root, name))
-    matches.sort()
-    if not matches:
-        raise ValueError(f"No supported simulation output files found in folder: {root}")
-    return matches
+#     matches = []
+#     if _is_supported_ctf_dataset_path(root):
+#         return [root]
+#     for current_root, dirs, files in os.walk(root):
+#         ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
+#         dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
+#         for name in ctf_dirs:
+#             matches.append(os.path.join(current_root, name))
+#         for name in files:
+#             ext = Path(name).suffix.lower()
+#             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
+#                 matches.append(os.path.join(current_root, name))
+#     matches.sort()
+#     if not matches:
+#         raise ValueError(f"No supported simulation output files found in folder: {root}")
+#     return matches
 
 
 def _parse_folder_paths_payload(raw_value):
@@ -2727,11 +2727,11 @@ def _to_posix_relpath(path):
     return token or "."
 
 
-def _format_extension_count_map(ext_map):
-    items = []
-    for ext, count in sorted((ext_map or {}).items(), key=lambda item: str(item[0])):
-        items.append(f"{ext}:{int(count)}")
-    return ", ".join(items) if items else "(no files)"
+# def _format_extension_count_map(ext_map):
+#     items = []
+#     for ext, count in sorted((ext_map or {}).items(), key=lambda item: str(item[0])):
+#         items.append(f"{ext}:{int(count)}")
+#     return ", ".join(items) if items else "(no files)"
 
 
 def _numeric_wildcard_stem(stem):
@@ -2794,25 +2794,25 @@ def _resolve_selected_analysis_folder_paths(form, folder_summaries):
     return [selected_path]
 
 
-def _validate_uniform_supported_extension_per_folder(entries, label):
-    ext_by_folder = defaultdict(set)
-    folder_labels = {}
-    for row in entries or []:
-        folder_key = str(row.get("folder_path") or row.get("folder_name") or "selected_folder").strip() or "selected_folder"
-        folder_labels[folder_key] = str(row.get("folder_name") or row.get("folder_path") or folder_key).strip() or folder_key
-        ext = str(row.get("extension") or "").strip().lower()
-        if ext:
-            ext_by_folder[folder_key].add(ext)
+# def _validate_uniform_supported_extension_per_folder(entries, label):
+#     ext_by_folder = defaultdict(set)
+#     folder_labels = {}
+#     for row in entries or []:
+#         folder_key = str(row.get("folder_path") or row.get("folder_name") or "selected_folder").strip() or "selected_folder"
+#         folder_labels[folder_key] = str(row.get("folder_name") or row.get("folder_path") or folder_key).strip() or folder_key
+#         ext = str(row.get("extension") or "").strip().lower()
+#         if ext:
+#             ext_by_folder[folder_key].add(ext)
 
-    for folder_key, ext_set in sorted(ext_by_folder.items(), key=lambda item: str(item[0])):
-        if len(ext_set) <= 1:
-            continue
-        folder_label = folder_labels.get(folder_key, folder_key)
-        ext_list = ", ".join(sorted(ext_set))
-        raise ValueError(
-            f"{label} folder '{folder_label}' contains multiple supported file extensions: {ext_list}. "
-            "Use one file extension per folder."
-        )
+#     for folder_key, ext_set in sorted(ext_by_folder.items(), key=lambda item: str(item[0])):
+#         if len(ext_set) <= 1:
+#             continue
+#         folder_label = folder_labels.get(folder_key, folder_key)
+#         ext_list = ", ".join(sorted(ext_set))
+#         raise ValueError(
+#             f"{label} folder '{folder_label}' contains multiple supported file extensions: {ext_list}. "
+#             "Use one file extension per folder."
+#         )
 
 
 def _folder_display_name(folder_path, fallback_index=1):
@@ -4741,15 +4741,15 @@ def _filter_selected_entries_by_filename_format(selected_entries, filename_forma
     return filtered, skipped_names, "file", len(rows)
 
 
-def _filter_empirical_upload_payloads_by_filename_format(payloads, filename_format_spec):
-    if not filename_format_spec:
-        return list(payloads or []), []
-    filtered, skipped = _filter_named_items_by_filename_format(
-        payloads,
-        lambda item: str(item.get("name") or ""),
-        filename_format_spec,
-    )
-    return filtered, skipped
+# def _filter_empirical_upload_payloads_by_filename_format(payloads, filename_format_spec):
+#     if not filename_format_spec:
+#         return list(payloads or []), []
+#     filtered, skipped = _filter_named_items_by_filename_format(
+#         payloads,
+#         lambda item: str(item.get("name") or ""),
+#         filename_format_spec,
+#     )
+#     return filtered, skipped
 
 
 def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Selected"):
@@ -5641,72 +5641,72 @@ def _load_features_source(path):
     return _stack_array_like_source(loaded)
 
 
-def _load_uploaded_source_in_memory(upload):
-    safe_name = secure_filename(upload.filename or "")
-    if not safe_name:
-        raise ValueError("Invalid uploaded file name.")
-    ext = Path(safe_name).suffix.lower()
+# def _load_uploaded_source_in_memory(upload):
+#     safe_name = secure_filename(upload.filename or "")
+#     if not safe_name:
+#         raise ValueError("Invalid uploaded file name.")
+#     ext = Path(safe_name).suffix.lower()
 
-    raw = upload.read()
-    if not raw:
-        raise ValueError(f"Uploaded file '{safe_name}' is empty.")
+#     raw = upload.read()
+#     if not raw:
+#         raise ValueError(f"Uploaded file '{safe_name}' is empty.")
 
-    if ext in {".pkl", ".pickle"}:
-        bio = io.BytesIO(raw)
-        try:
-            loaded = _coerce_trial_dataframe_sequence(pd.read_pickle(bio))
-            loaded = _coerce_trial_mapping_sequence(loaded)
-            return _stack_array_like_source(loaded)
-        except Exception:
-            bio.seek(0)
-            loaded = _coerce_trial_dataframe_sequence(pickle.load(bio))
-            loaded = _coerce_trial_mapping_sequence(loaded)
-            return _stack_array_like_source(loaded)
+#     if ext in {".pkl", ".pickle"}:
+#         bio = io.BytesIO(raw)
+#         try:
+#             loaded = _coerce_trial_dataframe_sequence(pd.read_pickle(bio))
+#             loaded = _coerce_trial_mapping_sequence(loaded)
+#             return _stack_array_like_source(loaded)
+#         except Exception:
+#             bio.seek(0)
+#             loaded = _coerce_trial_dataframe_sequence(pickle.load(bio))
+#             loaded = _coerce_trial_mapping_sequence(loaded)
+#             return _stack_array_like_source(loaded)
 
-    if ext == ".json":
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except Exception as exc:
-            raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
+#     if ext == ".json":
+#         try:
+#             return json.loads(raw.decode("utf-8"))
+#         except Exception as exc:
+#             raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
 
-    if ext == ".npy":
-        bio = io.BytesIO(raw)
-        return _stack_array_like_source(np.load(bio, allow_pickle=True))
+#     if ext == ".npy":
+#         bio = io.BytesIO(raw)
+#         return _stack_array_like_source(np.load(bio, allow_pickle=True))
 
-    if ext == ".csv":
-        return pd.read_csv(io.BytesIO(raw))
-    if ext == ".tsv":
-        return pd.read_csv(io.BytesIO(raw), sep="\t")
+#     if ext == ".csv":
+#         return pd.read_csv(io.BytesIO(raw))
+#     if ext == ".tsv":
+#         return pd.read_csv(io.BytesIO(raw), sep="\t")
 
-    if ext == ".parquet":
-        return pd.read_parquet(io.BytesIO(raw))
+#     if ext == ".parquet":
+#         return pd.read_parquet(io.BytesIO(raw))
 
-    if ext == ".feather":
-        return pd.read_feather(io.BytesIO(raw))
+#     if ext == ".feather":
+#         return pd.read_feather(io.BytesIO(raw))
 
-    if ext in {".xlsx", ".xls"}:
-        return pd.read_excel(io.BytesIO(raw))
+#     if ext in {".xlsx", ".xls"}:
+#         return pd.read_excel(io.BytesIO(raw))
 
-    if ext == ".mat":
-        return compute_utils._load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
+#     if ext == ".mat":
+#         return compute_utils._load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
-    if ext == ".nwb":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            parser = EphysDatasetParser(ParseConfig())
-            loaded, _ = parser._load_source(temp_path)
-            return loaded
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".nwb":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             parser = EphysDatasetParser(ParseConfig())
+#             loaded, _ = parser._load_source(temp_path)
+#             return loaded
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    raise ValueError(f"Unsupported file type for in-memory parsing: {ext}")
+#     raise ValueError(f"Unsupported file type for in-memory parsing: {ext}")
 
 
 def _copy_parse_config(base_cfg, *, fields):
@@ -11472,38 +11472,38 @@ def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
     return ", ".join(parts)
 
 
-def _simulation_trial_changed_param_names_text(sim_data, trial_idx, max_params=2):
-    meta = sim_data.get("grid_metadata")
-    if not isinstance(meta, dict):
-        return ""
-    changed_keys = meta.get("changed_keys")
-    trials = meta.get("trials")
-    if not isinstance(changed_keys, list) or not changed_keys:
-        return ""
-    if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
-        return ""
-    trial_entry = trials[trial_idx]
-    if not isinstance(trial_entry, dict):
-        return ""
-    changed = trial_entry.get("changed")
-    if not isinstance(changed, dict):
-        return ""
+# def _simulation_trial_changed_param_names_text(sim_data, trial_idx, max_params=2):
+#     meta = sim_data.get("grid_metadata")
+#     if not isinstance(meta, dict):
+#         return ""
+#     changed_keys = meta.get("changed_keys")
+#     trials = meta.get("trials")
+#     if not isinstance(changed_keys, list) or not changed_keys:
+#         return ""
+#     if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
+#         return ""
+#     trial_entry = trials[trial_idx]
+#     if not isinstance(trial_entry, dict):
+#         return ""
+#     changed = trial_entry.get("changed")
+#     if not isinstance(changed, dict):
+#         return ""
 
-    names = []
-    for key in changed_keys:
-        if key not in changed:
-            continue
-        key_text = str(key)
-        if key_text.startswith("inter_area."):
-            key_text = key_text.split(".", 1)[1]
-        names.append(key_text)
+#     names = []
+#     for key in changed_keys:
+#         if key not in changed:
+#             continue
+#         key_text = str(key)
+#         if key_text.startswith("inter_area."):
+#             key_text = key_text.split(".", 1)[1]
+#         names.append(key_text)
 
-    if not names:
-        return ""
-    if len(names) > max_params:
-        remaining = len(names) - max_params
-        names = names[:max_params] + [f"+{remaining} more"]
-    return ", ".join(names)
+#     if not names:
+#         return ""
+#     if len(names) > max_params:
+#         remaining = len(names) - max_params
+#         names = names[:max_params] + [f"+{remaining} more"]
+#     return ", ".join(names)
 
 
 def _wrap_plot_title_text(text, width=88):
@@ -11989,30 +11989,30 @@ def _spike_rate(times, dt, tstop):
     return bins[:-1], hist.astype(float)
 
 
-def _compute_trial_cdm_proxy(trial):
-    dt = float(trial["dt"])
-    tstop = float(trial["tstop"])
-    times = trial["times"]
-    model = _simulation_model_type({"network": trial["network"]})
-    bins = np.arange(0.0, tstop + dt, dt)
-    centers = bins[:-1]
+# def _compute_trial_cdm_proxy(trial):
+#     dt = float(trial["dt"])
+#     tstop = float(trial["tstop"])
+#     times = trial["times"]
+#     model = _simulation_model_type({"network": trial["network"]})
+#     bins = np.arange(0.0, tstop + dt, dt)
+#     centers = bins[:-1]
 
-    if model in {"hagen", "cavallari"}:
-        cdm = np.zeros_like(centers, dtype=float)
-        for pop_name, pop_times in times.items():
-            hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
-            sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
-            cdm += sign * hist.astype(float)
-        return centers, cdm
+#     if model in {"hagen", "cavallari"}:
+#         cdm = np.zeros_like(centers, dtype=float)
+#         for pop_name, pop_times in times.items():
+#             hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
+#             sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
+#             cdm += sign * hist.astype(float)
+#         return centers, cdm
 
-    # four_area
-    cdm = np.zeros_like(centers, dtype=float)
-    for area_data in times.values():
-        for pop_name, pop_times in area_data.items():
-            hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
-            sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
-            cdm += sign * hist.astype(float)
-    return centers, cdm
+#     # four_area
+#     cdm = np.zeros_like(centers, dtype=float)
+#     for area_data in times.values():
+#         for pop_name, pop_times in area_data.items():
+#             hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
+#             sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
+#             cdm += sign * hist.astype(float)
+#     return centers, cdm
 
 
 def _normalize_field_potential_selection_path(path):
@@ -13221,15 +13221,15 @@ def _find_column(df, candidates):
     return None
 
 
-def _pick_value_column(df, exclude):
-    preferred = ["Predictions", "prediction", "predictions", "Y", "y", "value", "Value", "Values", "data", "Data"]
-    for cand in preferred:
-        if cand in df.columns and cand not in exclude:
-            return cand
-    numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c not in exclude]
-    if numeric_cols:
-        return numeric_cols[0]
-    return None
+# def _pick_value_column(df, exclude):
+#     preferred = ["Predictions", "prediction", "predictions", "Y", "y", "value", "Value", "Values", "data", "Data"]
+#     for cand in preferred:
+#         if cand in df.columns and cand not in exclude:
+#             return cand
+#     numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c not in exclude]
+#     if numeric_cols:
+#         return numeric_cols[0]
+#     return None
 
 
 MEG_TOPO_ATLAS_OPTIONS = [

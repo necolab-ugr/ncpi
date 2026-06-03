@@ -930,107 +930,107 @@ def _load_mat_with_fallback(source, *, in_memory=False, source_name="mat file"):
         raise
 
 
-def _load_uploaded_source_bytes(name, ext, content):
-    safe_name = str(name or "uploaded_file")
-    ext = str(ext or os.path.splitext(safe_name)[1]).lower()
-    raw = content
-    if raw is None:
-        raise ValueError(f"Uploaded file '{safe_name}' is empty.")
-    if isinstance(raw, memoryview):
-        raw = raw.tobytes()
-    if isinstance(raw, bytearray):
-        raw = bytes(raw)
-    if not isinstance(raw, (bytes,)):
-        raise ValueError(f"Invalid uploaded content type for '{safe_name}'.")
+# def _load_uploaded_source_bytes(name, ext, content):
+#     safe_name = str(name or "uploaded_file")
+#     ext = str(ext or os.path.splitext(safe_name)[1]).lower()
+#     raw = content
+#     if raw is None:
+#         raise ValueError(f"Uploaded file '{safe_name}' is empty.")
+#     if isinstance(raw, memoryview):
+#         raw = raw.tobytes()
+#     if isinstance(raw, bytearray):
+#         raw = bytes(raw)
+#     if not isinstance(raw, (bytes,)):
+#         raise ValueError(f"Invalid uploaded content type for '{safe_name}'.")
 
-    if ext in {".pkl", ".pickle"}:
-        bio = io.BytesIO(raw)
-        try:
-            return pd.read_pickle(bio)
-        except Exception:
-            bio.seek(0)
-            return pickle.load(bio)
+#     if ext in {".pkl", ".pickle"}:
+#         bio = io.BytesIO(raw)
+#         try:
+#             return pd.read_pickle(bio)
+#         except Exception:
+#             bio.seek(0)
+#             return pickle.load(bio)
 
-    if ext == ".json":
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except Exception as exc:
-            raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
+#     if ext == ".json":
+#         try:
+#             return json.loads(raw.decode("utf-8"))
+#         except Exception as exc:
+#             raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
 
-    if ext == ".npy":
-        return np.load(io.BytesIO(raw), allow_pickle=True)
+#     if ext == ".npy":
+#         return np.load(io.BytesIO(raw), allow_pickle=True)
 
-    if ext == ".csv":
-        return pd.read_csv(io.BytesIO(raw))
-    if ext == ".tsv":
-        return pd.read_csv(io.BytesIO(raw), sep="\t")
+#     if ext == ".csv":
+#         return pd.read_csv(io.BytesIO(raw))
+#     if ext == ".tsv":
+#         return pd.read_csv(io.BytesIO(raw), sep="\t")
 
-    if ext == ".parquet":
-        return pd.read_parquet(io.BytesIO(raw))
+#     if ext == ".parquet":
+#         return pd.read_parquet(io.BytesIO(raw))
 
-    if ext == ".feather":
-        return pd.read_feather(io.BytesIO(raw))
+#     if ext == ".feather":
+#         return pd.read_feather(io.BytesIO(raw))
 
-    if ext in {".xlsx", ".xls"}:
-        return pd.read_excel(io.BytesIO(raw))
+#     if ext in {".xlsx", ".xls"}:
+#         return pd.read_excel(io.BytesIO(raw))
 
-    if ext == ".mat":
-        return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
+#     if ext == ".mat":
+#         return _load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
 
-    if ext == ".nwb":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".nwb")
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".nwb":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             return _load_uploaded_source_path(temp_path, name=safe_name, ext=".nwb")
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    if ext == ".edf":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_edf_", suffix=".edf", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".edf")
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".edf":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_edf_", suffix=".edf", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             return _load_uploaded_source_path(temp_path, name=safe_name, ext=".edf")
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    if ext == ".fif":
-        temp_path = ""
-        try:
-            with tempfile.NamedTemporaryFile(prefix="ncpi_fif_", suffix=".fif", delete=False) as handle:
-                handle.write(raw)
-                temp_path = handle.name
-            return _load_uploaded_source_path(temp_path, name=safe_name, ext=".fif")
-        finally:
-            if temp_path and os.path.isfile(temp_path):
-                try:
-                    os.remove(temp_path)
-                except OSError:
-                    pass
+#     if ext == ".fif":
+#         temp_path = ""
+#         try:
+#             with tempfile.NamedTemporaryFile(prefix="ncpi_fif_", suffix=".fif", delete=False) as handle:
+#                 handle.write(raw)
+#                 temp_path = handle.name
+#             return _load_uploaded_source_path(temp_path, name=safe_name, ext=".fif")
+#         finally:
+#             if temp_path and os.path.isfile(temp_path):
+#                 try:
+#                     os.remove(temp_path)
+#                 except OSError:
+#                     pass
 
-    if ext == ".ds":
-        raise ValueError(
-            "CTF .ds datasets are directories and cannot be parsed from a single uploaded file. "
-            "Use Server upload/path selection and select the folder that contains the .ds dataset."
-        )
+#     if ext == ".ds":
+#         raise ValueError(
+#             "CTF .ds datasets are directories and cannot be parsed from a single uploaded file. "
+#             "Use Server upload/path selection and select the folder that contains the .ds dataset."
+#         )
 
-    if ext in {".vhdr", ".dat"}:
-        raise ValueError(
-            f"BrainVision {ext} requires companion files (.vhdr, .eeg/.dat, .vmrk) in the same folder. "
-            "Use server-path selection (folder on disk), not single-file upload."
-        )
-    raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
+#     if ext in {".vhdr", ".dat"}:
+#         raise ValueError(
+#             f"BrainVision {ext} requires companion files (.vhdr, .eeg/.dat, .vmrk) in the same folder. "
+#             "Use server-path selection (folder on disk), not single-file upload."
+#         )
+#     raise ValueError(f"Unsupported empirical file extension '{ext}' for '{safe_name}'.")
 
 
 def _load_edf_with_parser(path):
@@ -2272,19 +2272,19 @@ def _signal_time_length(value):
     return int(arr.shape[-1])
 
 
-def _clip_signal_time_length(value, length):
-    if isinstance(value, MappingABC):
-        return {key: _clip_signal_time_length(item, length) for key, item in value.items()}
-    try:
-        arr = np.asarray(value)
-    except Exception:
-        return value
-    if arr.ndim == 0:
-        return value
-    slicer = [slice(None)] * arr.ndim
-    slicer[-1] = slice(0, int(length))
-    clipped = arr[tuple(slicer)]
-    return np.array(clipped, copy=True)
+# def _clip_signal_time_length(value, length):
+#     if isinstance(value, MappingABC):
+#         return {key: _clip_signal_time_length(item, length) for key, item in value.items()}
+#     try:
+#         arr = np.asarray(value)
+#     except Exception:
+#         return value
+#     if arr.ndim == 0:
+#         return value
+#     slicer = [slice(None)] * arr.ndim
+#     slicer[-1] = slice(0, int(length))
+#     clipped = arr[tuple(slicer)]
+#     return np.array(clipped, copy=True)
 
 
 def _decimate_signal_time(value, factor):
@@ -2305,31 +2305,31 @@ def _decimate_signal_time(value, factor):
     return np.array(decimated, copy=True)
 
 
-def _clip_trial_dataframe_payloads(payloads, signal_columns=("data",)):
-    payload_list = [frame.copy() for frame in list(payloads or []) if isinstance(frame, pd.DataFrame)]
-    if not payload_list:
-        return payload_list, None
+# def _clip_trial_dataframe_payloads(payloads, signal_columns=("data",)):
+#     payload_list = [frame.copy() for frame in list(payloads or []) if isinstance(frame, pd.DataFrame)]
+#     if not payload_list:
+#         return payload_list, None
 
-    min_length = None
-    for frame in payload_list:
-        for col in signal_columns:
-            if col not in frame.columns:
-                continue
-            for value in frame[col].tolist():
-                length = _signal_time_length(value)
-                if length is None:
-                    continue
-                min_length = length if min_length is None else min(min_length, length)
+#     min_length = None
+#     for frame in payload_list:
+#         for col in signal_columns:
+#             if col not in frame.columns:
+#                 continue
+#             for value in frame[col].tolist():
+#                 length = _signal_time_length(value)
+#                 if length is None:
+#                     continue
+#                 min_length = length if min_length is None else min(min_length, length)
 
-    if min_length is None:
-        return payload_list, None
+#     if min_length is None:
+#         return payload_list, None
 
-    for frame in payload_list:
-        for col in signal_columns:
-            if col not in frame.columns:
-                continue
-            frame[col] = frame[col].map(lambda value: _clip_signal_time_length(value, min_length))
-    return payload_list, int(min_length)
+#     for frame in payload_list:
+#         for col in signal_columns:
+#             if col not in frame.columns:
+#                 continue
+#             frame[col] = frame[col].map(lambda value: _clip_signal_time_length(value, min_length))
+#     return payload_list, int(min_length)
 
 
 def _sum_signal_dict(signal_dict):
