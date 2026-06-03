@@ -1026,7 +1026,7 @@ class EphysDatasetParser:
         # 1) Parse raw rows (one row per sensor / epoch)
         rows = self._parse_object(obj, source_file=source_file)
 
-        # 1b) Optional temporal segmentation BEFORE z-score/aggregation/epoching
+        # 1b) Optional temporal segmentation BEFORE z-score/epoching/aggregation
         rows = self._apply_time_segment_rows(rows)
 
         df = self._rows_to_df(rows)
@@ -1035,17 +1035,13 @@ class EphysDatasetParser:
         if self.config.zscore and not self.config.zscore_after_epoch:
             df = self._apply_zscore(df)
 
-        # 3) Aggregate FIRST (e.g. collapse sensors)
-        if self.config.aggregate_over:
-            df = self._apply_aggregation(df)
-
-        # 4) Epoch LAST (temporal operation)
+        # 3) Epoch continuous rows before any aggregation.
         if self.config.epoch_length_s is not None:
             rows = df.to_dict("records")
             rows = self._apply_epoching_rows(rows)
             df = self._rows_to_df(rows)
 
-        # 4b) Keep all parsed series aligned when parser-driven epoching produces
+        # 3b) Keep all parsed series aligned when parser-driven epoching produces
         # different counts. Do not alter pre-labeled epochs parsed from source data.
         if (
             self.config.epoch_length_s is not None
@@ -1053,15 +1049,19 @@ class EphysDatasetParser:
         ):
             df = self._limit_epoch_count_to_minimum(df)
 
-        # 4c) Exclude final epochs explicitly or when an incomplete final epoch is detected.
+        # 3c) Exclude final epochs explicitly or when an incomplete final epoch is detected.
         if self.config.exclude_last_epoch:
             df = self._exclude_last_epoch(df)
         else:
             df = self._exclude_incomplete_final_epoch(df)
 
-        # 5) Optional z-scoring AFTER epoching (per-epoch normalization)
+        # 4) Optional z-scoring AFTER epoching (per-epoch normalization)
         if self.config.zscore and self.config.zscore_after_epoch:
             df = self._apply_zscore(df)
+
+        # 5) Aggregation is applied last so it can collapse parser-created epochs.
+        if self.config.aggregate_over:
+            df = self._apply_aggregation(df)
 
         return df
 
@@ -3653,15 +3653,19 @@ class EphysDatasetParser:
 
         if not over:
             return df
+        if df.empty:
+            return df
 
-        # Grouping keys: preserve epoch explicitly
+        # Grouping keys: preserve all non-aggregated metadata. When epoch is
+        # aggregated, drop epoch-specific bounds so epochs can actually combine.
+        excluded = set(over)
+        if "epoch" in excluded:
+            excluded.update({"t0", "t1"})
+
         group_keys = [
             c for c in df.columns
-            if c != "data" and c not in over
+            if c != "data" and c not in excluded
         ]
-
-        if "epoch" in df.columns and "epoch" not in group_keys:
-            group_keys.append("epoch")
 
         def reduce_arrays(arrs):
             stack = np.stack([np.asarray(a) for a in arrs], axis=0)
@@ -3673,11 +3677,23 @@ class EphysDatasetParser:
                 return np.median(stack, axis=0)
             raise ValueError(f"Unknown aggregate_method: {method}")
 
-        g = df.groupby(group_keys, dropna=False, sort=False)
-        out = g["data"].apply(lambda s: reduce_arrays(list(s))).reset_index()
+        if group_keys:
+            grouped_df, group_keys = self._with_hashable_group_columns(df, group_keys)
+            grouped = (
+                df.loc[frame.index]
+                for _, frame in grouped_df.groupby(group_keys, dropna=False, sort=False)
+            )
+        else:
+            grouped = [df]
 
-        for dim in over:
-            label = self.config.aggregate_labels.get(dim, "aggregate")
-            out[dim] = label
+        records = []
+        for frame in grouped:
+            record = {key: frame.iloc[0][key] for key in group_keys}
+            record["data"] = reduce_arrays(frame["data"].tolist())
+            for dim in over:
+                label = self.config.aggregate_labels.get(dim, "aggregate")
+                record[dim] = label
+            records.append(record)
 
-        return out
+        import pandas as pd  # type: ignore
+        return pd.DataFrame(records)
