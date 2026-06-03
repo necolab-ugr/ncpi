@@ -17810,6 +17810,8 @@ def cancel_job(job_id):
         job_futures.pop(job_id, None)
         _mark_job_cancelled(job_id, "Computation cancelled before execution.")
     else:
+        # We need that _has_running_jobs() no longer considers this job as "running"
+        job_futures.pop(job_id, None)
         for cancel_msg in _cancel_job_python_processes(job_id):
             _append_job_output(job_status, job_id, cancel_msg)
         _mark_job_cancelled(job_id, "Computation cancelled by user.")
