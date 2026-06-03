@@ -230,6 +230,7 @@
 
 
 <form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='four_area') }}">
+    <script id="simulation-restore-form" type="application/json">{{ simulation_restore_form | default({}) | tojson }}</script>
     <section class="flex flex-col gap-3 px-4 pb-2">
         <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Local area editor</h2>
         <div class="grid grid-cols-1 md:grid-cols-[minmax(14rem,20rem)_1fr] gap-3 items-end">

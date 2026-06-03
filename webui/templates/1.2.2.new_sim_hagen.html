@@ -187,6 +187,7 @@
 
 
 <form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='hagen') }}">
+    <script id="simulation-restore-form" type="application/json">{{ simulation_restore_form | default({}) | tojson }}</script>
     <section class="flex flex-col gap-4 px-4 pb-2">
         <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Simulation mode</h2>
         <div class="flex flex-col md:flex-row gap-4">

@@ -1111,11 +1111,48 @@ def _coerce_grid_candidate(value, default, key):
     return value
 
 
+SIMULATION_FIELD_LABELS = {
+    "tstop": "Simulation time tstop",
+    "dt": "Time step dt",
+    "local_num_threads": "Number of threads",
+    "N_X": "Population sizes Nₓ",
+    "C_YX": "Connection probability matrix C_YX",
+    "P": "Connection probability P",
+    "tau_m_X": "Membrane time constant tau_m_X",
+    "delay_YX": "Synaptic delay matrix delay_YX",
+    "tau_syn_YX": "Synaptic time constants tau_syn_YX",
+    "inter_area.C_YX": "Inter-area C_YX",
+    "inter_area.delay_YX": "Inter-area delay_YX",
+    "OU_tau": "Ornstein-Uhlenbeck tau",
+    "t_ref_X": "Refractory period t_ref_X",
+    "tau_rise_AMPA_X": "AMPA rise time tau_rise_AMPA_X",
+    "tau_decay_AMPA_X": "AMPA decay time tau_decay_AMPA_X",
+    "tau_rise_GABA_A_X": "GABA rise time tau_rise_GABA_A_X",
+    "tau_decay_GABA_A_X": "GABA decay time tau_decay_GABA_A_X",
+    "J_ext": "External weight J_ext",
+    "nu_ext": "External rate nu_ext",
+}
+
+
+def _simulation_field_display_name(name):
+    raw_name = str(name or "").strip()
+    area_match = re.match(r"^area_(\d+)\.(.+)$", raw_name)
+    if area_match:
+        area_number = int(area_match.group(1)) + 1
+        base_name = area_match.group(2)
+        base_label = SIMULATION_FIELD_LABELS.get(base_name, base_name)
+        if base_label:
+            base_label = base_label[0].lower() + base_label[1:]
+        return f"Area {area_number} {base_label}"
+    return SIMULATION_FIELD_LABELS.get(raw_name, raw_name)
+
+
 def _expand_numeric_range(spec, key):
+    field_label = _simulation_field_display_name(key)
     parts = [p.strip() for p in spec.split(":")]
     if len(parts) != 3:
         raise ValueError(
-            f"Invalid grid range for '{key}'. Use 'grid=start:stop:step'."
+            f"Invalid grid range for {field_label}. Use 'grid=start:stop:step'."
         )
     try:
         start = float(parts[0])
@@ -1123,10 +1160,18 @@ def _expand_numeric_range(spec, key):
         step = float(parts[2])
     except ValueError as exc:
         raise ValueError(
-            f"Invalid grid range for '{key}'. Use numeric values in 'start:stop:step'."
+            f"Invalid grid range for {field_label}. Use numeric values in 'start:stop:step'."
         ) from exc
     if step == 0:
-        raise ValueError(f"Invalid grid range for '{key}': step cannot be 0.")
+        raise ValueError(f"Invalid grid range for {field_label}: step cannot be 0.")
+    if step > 0 and stop <= start:
+        raise ValueError(
+            f"Invalid grid range for {field_label}: end must be greater than start when step is positive."
+        )
+    if step < 0 and stop >= start:
+        raise ValueError(
+            f"Invalid grid range for {field_label}: end must be less than start when step is negative."
+        )
 
     values = []
     current = start
@@ -6702,6 +6747,143 @@ def _ensure_matrix(value, name, rows, cols):
             raise ValueError(f"'{name}' row {idx} must have length {cols}.")
 
 
+def _iter_simulation_numeric_values(value, name):
+    if isinstance(value, np.ndarray):
+        value = value.tolist()
+    if isinstance(value, (list, tuple)):
+        for idx, item in enumerate(value):
+            yield from _iter_simulation_numeric_values(item, f"{name}[{idx}]")
+        return
+    if isinstance(value, bool) or not _is_number_like(value):
+        raise ValueError(f"'{name}' must contain numeric values.")
+    yield name, float(value)
+
+
+def _validate_simulation_numeric_values(value, name, predicate, requirement, display_name=None):
+    field_label = display_name or _simulation_field_display_name(name)
+    for _, numeric_value in _iter_simulation_numeric_values(value, name):
+        if not predicate(numeric_value):
+            raise ValueError(f"Invalid simulation configuration: {field_label} must be {requirement}.")
+
+
+def _validate_simulation_time_values(form, defaults, keys):
+    for key in keys:
+        if key not in defaults:
+            continue
+        default = defaults[key]
+        if isinstance(default, float):
+            value = _parse_float(form, key, default)
+        elif isinstance(default, int) and not isinstance(default, bool):
+            value = _parse_int(form, key, default)
+        else:
+            value = _parse_literal(form, key, default)
+        _validate_simulation_numeric_values(value, key, lambda item: item > 0, "> 0")
+
+
+def _validate_simulation_population_sizes(form, defaults, keys):
+    for key in keys:
+        if key not in defaults:
+            continue
+        value = _parse_literal(form, key, defaults[key])
+        _validate_simulation_numeric_values(value, key, lambda item: item >= 0, ">= 0")
+
+
+def _validate_simulation_connection_probabilities(form, defaults, keys):
+    for key in keys:
+        if key not in defaults:
+            continue
+        default = defaults[key]
+        if isinstance(default, float):
+            value = _parse_float(form, key, default)
+        elif isinstance(default, int) and not isinstance(default, bool):
+            value = _parse_int(form, key, default)
+        else:
+            value = _parse_literal(form, key, default)
+        _validate_simulation_numeric_values(value, key, lambda item: item >= 0, ">= 0")
+
+
+def _validate_predefined_simulation_configuration(model_type, form):
+    model_defaults = _simulation_grid_defaults(model_type)
+    _validate_simulation_time_values(
+        form,
+        model_defaults,
+        ["tstop", "dt"],
+    )
+
+    if model_type == "hagen":
+        _validate_simulation_time_values(
+            form,
+            HAGEN_DEFAULTS,
+            ["tau_m_X", "delay_YX", "tau_syn_YX"],
+        )
+        _validate_simulation_population_sizes(form, HAGEN_DEFAULTS, ["N_X"])
+        _validate_simulation_connection_probabilities(form, HAGEN_DEFAULTS, ["C_YX"])
+        return
+
+    if model_type == "cavallari":
+        _validate_simulation_time_values(
+            form,
+            CAVALLARI_DEFAULTS,
+            [
+                "OU_tau",
+                "t_ref_X",
+                "tau_rise_AMPA_X",
+                "tau_decay_AMPA_X",
+                "tau_rise_GABA_A_X",
+                "tau_decay_GABA_A_X",
+                "tau_m_X",
+            ],
+        )
+        _validate_simulation_population_sizes(form, CAVALLARI_DEFAULTS, ["N_X"])
+        _validate_simulation_connection_probabilities(form, CAVALLARI_DEFAULTS, ["P"])
+        return
+
+    if model_type == "four_area":
+        defaults = _simulation_grid_defaults("four_area")
+        _validate_simulation_time_values(
+            form,
+            defaults,
+            ["tau_m_X", "delay_YX", "tau_syn_YX"],
+        )
+        inter_area_delay = _parse_literal(
+            form,
+            "inter_area.delay_YX",
+            defaults["inter_area.delay_YX"],
+        )
+        _validate_simulation_numeric_values(
+            inter_area_delay,
+            "inter_area.delay_YX",
+            lambda item: item >= 0,
+            ">= 0",
+        )
+        _validate_simulation_population_sizes(form, defaults, ["N_X"])
+        _validate_simulation_connection_probabilities(form, defaults, ["C_YX"])
+        _validate_simulation_connection_probabilities(
+            form,
+            defaults,
+            ["inter_area.C_YX"],
+        )
+        for area_index in range(len(FOUR_AREA_DEFAULTS["areas"])):
+            area_defaults = {
+                f"area_{area_index}.N_X": FOUR_AREA_DEFAULTS["N_X"],
+                f"area_{area_index}.tau_m_X": FOUR_AREA_DEFAULTS["tau_m_X"],
+                f"area_{area_index}.delay_YX": FOUR_AREA_DEFAULTS["delay_YX"],
+                f"area_{area_index}.tau_syn_YX": FOUR_AREA_DEFAULTS["tau_syn_YX"],
+                f"area_{area_index}.C_YX": FOUR_AREA_DEFAULTS["C_YX"],
+            }
+            _validate_simulation_time_values(
+                form,
+                area_defaults,
+                [
+                    f"area_{area_index}.tau_m_X",
+                    f"area_{area_index}.delay_YX",
+                    f"area_{area_index}.tau_syn_YX",
+                ],
+            )
+            _validate_simulation_population_sizes(form, area_defaults, [f"area_{area_index}.N_X"])
+            _validate_simulation_connection_probabilities(form, area_defaults, [f"area_{area_index}.C_YX"])
+
+
 def _estimate_duration_seconds(form, defaults, model_type):
     tstop = _parse_float(form, "tstop", defaults["tstop"])
     dt = _parse_float(form, "dt", defaults["dt"])
@@ -7847,23 +8029,53 @@ def _run_job_with_post_success_cleanup(job_id, module_key, func, *func_args):
 def new_sim():
     return render_template("1.2.0.new_sim.html")
 
+
+def _remember_simulation_restore_form(model_type, form):
+    session["simulation_restore_form"] = {
+        "model_type": str(model_type or "").strip().lower(),
+        "form": dict(form or {}),
+    }
+
+
+def _pop_simulation_restore_form(model_type):
+    payload = session.pop("simulation_restore_form", None)
+    if not isinstance(payload, dict):
+        return {}
+    expected_model = str(model_type or "").strip().lower()
+    payload_model = str(payload.get("model_type") or "").strip().lower()
+    if payload_model != expected_model:
+        return {}
+    form = payload.get("form")
+    return form if isinstance(form, dict) else {}
+
+
 @app.route("/simulation/new_sim/hagen")
 def new_sim_hagen():
-    return render_template("1.2.2.new_sim_hagen.html")
+    restore_form = _pop_simulation_restore_form("hagen")
+    return render_template(
+        "1.2.2.new_sim_hagen.html",
+        simulation_restore_form=restore_form,
+    )
 
 @app.route("/simulation/new_sim/cavallari")
 def new_sim_cavallari():
     neuron_model_dir = os.path.join(
         _repo_root, "examples", "simulation", "Cavallari_model", "neuron_model"
     )
+    restore_form = _pop_simulation_restore_form("cavallari")
     return render_template(
         "1.2.4.new_sim_cavallari.html",
         cavallari_neuron_model_dir=neuron_model_dir,
+        simulation_restore_form=restore_form,
     )
 
 @app.route("/simulation/new_sim/four_area")
 def new_sim_four_area():
-    return render_template("1.2.3.new_sim_four_area.html")
+    restore_form = _pop_simulation_restore_form("four_area")
+    return render_template(
+        "1.2.3.new_sim_four_area.html",
+        simulation_restore_form=restore_form,
+    )
 
 @app.route("/simulation/new_sim/custom")
 def new_sim_custom():
@@ -8253,7 +8465,10 @@ def run_trial_simulation(model_type):
 
     try:
         run_mode, run_forms = _expand_simulation_forms(model_type, form)
+        for run_form in run_forms:
+            _validate_predefined_simulation_configuration(model_type, run_form)
     except ValueError as exc:
+        _remember_simulation_restore_form(model_type, form)
         flash(str(exc), "error")
         return redirect(url_for(ref_page))
 
@@ -8270,8 +8485,10 @@ def run_trial_simulation(model_type):
             for run_form in run_forms
         )
     except Exception as exc:
+        _remember_simulation_restore_form(model_type, form)
         flash(f"Invalid simulation parameters: {exc}", "error")
         return redirect(url_for(ref_page))
+
     estimated_duration = max(60.0, min(24 * 3600.0, float(estimated_duration)))
 
     job_id = str(uuid.uuid4())
