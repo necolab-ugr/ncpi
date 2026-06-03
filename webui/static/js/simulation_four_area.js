@@ -68,6 +68,47 @@ document.addEventListener('DOMContentLoaded', function() {
         areaEditorStatus: document.getElementById('four-area-editor-status'),
         interAreaModeStatus: document.getElementById('inter-area-mode-status'),
     };
+    const restoreForm = readSimulationRestoreForm();
+
+    function readSimulationRestoreForm() {
+        const node = document.getElementById('simulation-restore-form');
+        if (!node) {
+            return {};
+        }
+        try {
+            const parsed = JSON.parse(node.textContent || '{}');
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        } catch (_err) {
+            return {};
+        }
+    }
+
+    function hasRestoredValue(name) {
+        return Object.prototype.hasOwnProperty.call(restoreForm, name);
+    }
+
+    function restoredValueOrPreset(name, preset) {
+        return hasRestoredValue(name) ? restoreForm[name] : preset;
+    }
+
+    function parseSimpleGridRangeSpec(value) {
+        const text = String(value ?? '').trim();
+        if (!text.toLowerCase().startsWith('grid=')) {
+            return null;
+        }
+        const spec = text.slice(5).trim();
+        if (!spec || /[\[\]{}(),]/.test(spec)) {
+            return null;
+        }
+        const parts = spec.split(':').map(part => part.trim());
+        if (parts.length !== 3) {
+            return null;
+        }
+        if (!parts.every(part => Number.isFinite(Number(part)))) {
+            return null;
+        }
+        return { start: parts[0], stop: parts[1], step: parts[2] };
+    }
     let areaLocalState = [];
     let activeAreaIndex = 0;
 
@@ -81,7 +122,8 @@ document.addEventListener('DOMContentLoaded', function() {
         const originalType = input.dataset.originalType;
         const textValue = String(value ?? '');
         const wantsGridSpec = textValue.toLowerCase().startsWith('grid=');
-        if (wantsGridSpec && originalType === 'number') {
+        const wantsInvalidNumericText = originalType === 'number' && textValue !== '' && !Number.isFinite(Number(textValue));
+        if ((wantsGridSpec || wantsInvalidNumericText) && originalType === 'number') {
             input.type = 'text';
             input.inputMode = 'decimal';
             return;
@@ -342,6 +384,54 @@ document.addEventListener('DOMContentLoaded', function() {
         });
         areaLocalState = Array.from({ length: totalAreas }, () => cloneLocalAreaState(baseSnapshot));
         activeAreaIndex = 0;
+    }
+
+    function localStateFromRawParamValue(paramName, rawValue) {
+        const state = cloneLocalAreaState(localParamState(paramName) || {});
+        state.inputValue = String(rawValue ?? '');
+
+        const parsed = parseStructured(rawValue);
+        if (Array.isArray(parsed)) {
+            state.singleRows = collectLeaves(parsed).map(leaf => String(leaf.value ?? ''));
+        }
+
+        const simpleGridRange = parseSimpleGridRangeSpec(rawValue);
+        if (simpleGridRange && Array.isArray(state.gridRows) && state.gridRows.length > 0) {
+            state.gridRows = state.gridRows.map((row, index) => {
+                if (index !== 0) {
+                    return row;
+                }
+                return {
+                    start: simpleGridRange.start,
+                    step: simpleGridRange.step,
+                    end: simpleGridRange.stop,
+                };
+            });
+        }
+
+        return state;
+    }
+
+    function restoreAreaLocalStateFromForm() {
+        if (!Array.isArray(areaLocalState) || areaLocalState.length === 0) {
+            return;
+        }
+        let restoredAny = false;
+        for (let areaIndex = 0; areaIndex < areaLocalState.length; areaIndex += 1) {
+            const snapshot = cloneLocalAreaState(areaLocalState[areaIndex] || {});
+            areaSpecificLocalParams.forEach(paramName => {
+                const formKey = `area_${areaIndex}.${paramName}`;
+                if (!hasRestoredValue(formKey)) {
+                    return;
+                }
+                snapshot[paramName] = localStateFromRawParamValue(paramName, restoreForm[formKey]);
+                restoredAny = true;
+            });
+            areaLocalState[areaIndex] = snapshot;
+        }
+        if (restoredAny) {
+            applyAreaLocalState(activeAreaIndex);
+        }
     }
 
     function indexedName(names, index, fallbackPrefix) {
@@ -1034,7 +1124,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function addGridControls(input, preset) {
         const initial = (preset !== undefined && preset !== null) ? preset : (input.value || '');
-        const parsed = parseStructured(initial);
+        const simpleGridRange = parseSimpleGridRangeSpec(initial);
+        const parsed = simpleGridRange ? Number(simpleGridRange.start) : parseStructured(initial);
         const controls = document.createElement('div');
         controls.className = 'grid-parameter-controls hidden mt-2 flex flex-col gap-2';
         const paramName = input.dataset.param || input.name || '';
@@ -1051,6 +1142,8 @@ document.addEventListener('DOMContentLoaded', function() {
             }
             const label = describeLeafLabel(paramName, leaf.path, index, controls.dataset.gridKind === 'array');
             const startValue = String(leaf.value ?? '');
+            const stepValue = simpleGridRange && leaves.length === 1 ? simpleGridRange.step : '0';
+            const endValue = simpleGridRange && leaves.length === 1 ? simpleGridRange.stop : startValue;
             controls.insertAdjacentHTML('beforeend', `
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-2" data-grid-row="1" data-path="${escapeHtml(JSON.stringify(leaf.path))}" data-param-name="${escapeHtml(paramName)}" data-template-type="${typeof leaf.value}">
                     <div class="text-xs text-slate-600 dark:text-slate-300 md:pt-2" data-param-leaf-label="1">${escapeHtml(label)}</div>
@@ -1060,11 +1153,11 @@ document.addEventListener('DOMContentLoaded', function() {
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs text-slate-600 dark:text-slate-300">Step</span>
-                        <input type="text" data-grid-role="step" class="${baseClass}" value="0" />
+                        <input type="text" data-grid-role="step" class="${baseClass}" value="${escapeHtml(stepValue)}" />
                     </label>
                     <label class="flex flex-col gap-1">
                         <span class="text-xs text-slate-600 dark:text-slate-300">End</span>
-                        <input type="text" data-grid-role="end" class="${baseClass}" value="${escapeHtml(startValue)}" />
+                        <input type="text" data-grid-role="end" class="${baseClass}" value="${escapeHtml(endValue)}" />
                     </label>
                 </div>
             `);
@@ -1470,7 +1563,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const inputs = section.querySelectorAll('.param-input');
         inputs.forEach(input => {
             const paramName = input.dataset.param;
-            const preset = ncpiPresets[paramName];
+            const preset = restoredValueOrPreset(paramName, ncpiPresets[paramName]);
             if (!input.name) {
                 input.name = paramName;
             }
@@ -1484,6 +1577,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (!input.dataset.originalType) {
                     input.dataset.originalType = input.type || 'text';
                 }
+                ensureInputCanCarryValue(input, preset);
                 input.value = preset;
             }
 
@@ -1500,11 +1594,49 @@ document.addEventListener('DOMContentLoaded', function() {
         return section;
     }
 
+    function restoreSimulationFormControls() {
+        const restoredMode = hasRestoredValue('sim_run_mode') ? String(restoreForm.sim_run_mode || '') : '';
+        if (restoredMode) {
+            const modeInput = Array.from(elements.runModeInputs).find(input => input.value === restoredMode);
+            if (modeInput) {
+                modeInput.checked = true;
+            }
+        }
+        if (elements.repetitionsInput && hasRestoredValue('sim_repetitions')) {
+            elements.repetitionsInput.value = String(restoreForm.sim_repetitions ?? '');
+        }
+        if (elements.useNumpySeedInput && Object.keys(restoreForm).length > 0) {
+            elements.useNumpySeedInput.checked = hasRestoredValue('sim_use_numpy_seed');
+        }
+        if (elements.numpySeedInput && hasRestoredValue('sim_numpy_seed')) {
+            elements.numpySeedInput.value = String(restoreForm.sim_numpy_seed ?? '');
+        }
+        if (elements.jointGroupsContainer && hasRestoredValue('sim_joint_groups')) {
+            let groups = [];
+            try {
+                const rawGroups = restoreForm.sim_joint_groups;
+                groups = Array.isArray(rawGroups) ? rawGroups : JSON.parse(String(rawGroups || '[]'));
+            } catch (_err) {
+                groups = [];
+            }
+            if (Array.isArray(groups)) {
+                elements.jointGroupsContainer.replaceChildren();
+                groups.forEach(group => {
+                    if (Array.isArray(group) && group.length > 0) {
+                        addJointGroupCard(group.map(value => String(value)));
+                    }
+                });
+            }
+        }
+    }
+
     // Initialize UI
     createParameterSection();
+    restoreSimulationFormControls();
     setupInterAreaMatrixUi();
     refreshLeafLabels();
     initializeAreaLocalState();
+    restoreAreaLocalStateFromForm();
     refreshAreaSelectorOptions();
     refreshJointGroupsUi();
 

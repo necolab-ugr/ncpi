@@ -239,6 +239,7 @@
 </template>
 
 <form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='cavallari') }}">
+    <script id="simulation-restore-form" type="application/json">{{ simulation_restore_form | default({}) | tojson }}</script>
     <section class="flex flex-col gap-4 px-4 pb-2">
         <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Simulation mode</h2>
         <div class="rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-left dark:border-amber-500/30 dark:bg-amber-500/10">
