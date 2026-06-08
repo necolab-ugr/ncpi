@@ -74,9 +74,6 @@ wsl --install
 
 Then, inside the Ubuntu/WSL shell:
 ```bash
-conda create -n ncpi-env python=3.10 -y
-conda activate ncpi-env
-pip install ncpi
 conda install -c conda-forge nest-simulator=3.8
 ```
 
