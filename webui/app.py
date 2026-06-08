@@ -10705,6 +10705,66 @@ def new_training():
     return render_template("4.2.0.new_training.html")
 
 
+@app.route("/inference/training/compare_inputs", methods=["POST"])
+def compare_inference_training_inputs():
+    """Compare selected training inputs without blocking or starting a job."""
+    temporary_paths = []
+
+    def _resolve_input(prefix, label):
+        mode = (request.form.get(f"{prefix}_source_mode") or "upload").strip().lower()
+        if mode == "server-path":
+            return _validate_existing_file_path(
+                request.form.get(f"{prefix}_server_file_path"),
+                f"{label} server file",
+            )
+
+        upload = request.files.get(f"{prefix}_file")
+        if upload is None or not upload.filename:
+            raise ValueError(f"Provide {label}.")
+        suffix = os.path.splitext(secure_filename(upload.filename))[1]
+        fd, staged_path = tempfile.mkstemp(
+            prefix=f"ncpi_training_compare_{prefix}_",
+            suffix=suffix,
+            dir=tmp_paths.TMP_ROOT,
+        )
+        os.close(fd)
+        upload.save(staged_path)
+        temporary_paths.append(staged_path)
+        return staged_path
+
+    try:
+        features_path = _resolve_input("features", "Features Data")
+        parameters_path = _resolve_input("parameters", "Parameters Data")
+        comparison = compute_utils.compare_training_inputs(features_path, parameters_path)
+
+        if comparison.get("same_file"):
+            comparison["warning"] = (
+                "Features Data and Parameters Data point to exactly the same file. "
+                "Training would use the selected features as its own target."
+            )
+        elif comparison.get("identical_content"):
+            comparison["warning"] = (
+                "Features Data and Parameters Data files are byte-for-byte identical. "
+                "Training would use the selected features as its own target."
+            )
+        elif comparison.get("same_data"):
+            comparison["warning"] = (
+                "Features Data and Parameters Data contain the same normalized numeric data. "
+                "Training would use the selected features as its own target."
+            )
+        else:
+            comparison["warning"] = ""
+        return jsonify(comparison)
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
+    finally:
+        for path in temporary_paths:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
 # Compute predictions for inference configuration page
 @app.route("/inference/compute_predictions")
 def compute_predictions():

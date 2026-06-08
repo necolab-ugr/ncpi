@@ -567,11 +567,79 @@
     let parentPath = "";
     let selectedPath = "";
     let activeHistoryKey = SERVER_BROWSER_HISTORY_KEYS.training_features_file;
+    let comparisonTimer = null;
+    let comparisonRequestId = 0;
+    let lastWarningSignature = "";
 
     const getCard = (field) => cards.find((card) => card.dataset.field === field);
     const getModeInput = (field) => document.getElementById(`${field}_source_mode`);
     const getServerInput = (field) => document.getElementById(`${field}_server_path`);
     const getFileInput = (field) => document.getElementById(`${field}_input`);
+
+    const selectedInput = (field) => {
+        const mode = String(getModeInput(field)?.value || "upload").trim().toLowerCase();
+        if (mode === "server-path") {
+            const path = String(getServerInput(field)?.value || "").trim();
+            return path ? {mode, path, signature: `server:${path}`} : null;
+        }
+        const fileInput = getFileInput(field);
+        const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
+        return file
+            ? {mode: "upload", file, signature: `upload:${file.name}:${file.size}:${file.lastModified}`}
+            : null;
+    };
+
+    const compareSelectedInputs = async () => {
+        const requestId = ++comparisonRequestId;
+        const features = selectedInput("training_features_file");
+        const parameters = selectedInput("training_parameters_file");
+        if (!features || !parameters) {
+            lastWarningSignature = "";
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("features_source_mode", features.mode);
+        formData.append("parameters_source_mode", parameters.mode);
+        if (features.mode === "server-path") {
+            formData.append("features_server_file_path", features.path);
+        } else {
+            formData.append("features_file", features.file, features.file.name);
+        }
+        if (parameters.mode === "server-path") {
+            formData.append("parameters_server_file_path", parameters.path);
+        } else {
+            formData.append("parameters_file", parameters.file, parameters.file.name);
+        }
+
+        try {
+            const response = await fetch("{{ url_for('compare_inference_training_inputs') }}", {
+                method: "POST",
+                body: formData,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (requestId !== comparisonRequestId || !response.ok) {
+                return;
+            }
+            const warning = String(payload.warning || "").trim();
+            const warningSignature = `${features.signature}|${parameters.signature}|${warning}`;
+            if (warning && warningSignature !== lastWarningSignature) {
+                lastWarningSignature = warningSignature;
+                window.alert(`Warning: ${warning}\n\nYou may continue, but the resulting model is unlikely to be useful for parameter inference.`);
+            } else if (!warning) {
+                lastWarningSignature = "";
+            }
+        } catch (_error) {
+            // This is an advisory background check; normal form validation still runs on submit.
+        }
+    };
+
+    const scheduleInputComparison = () => {
+        if (comparisonTimer) {
+            window.clearTimeout(comparisonTimer);
+        }
+        comparisonTimer = window.setTimeout(compareSelectedInputs, 350);
+    };
 
     const setModalLoading = (loading) => {
         modalLoading.classList.toggle("hidden", !loading);
@@ -654,6 +722,7 @@
             if (serverSummary) serverSummary.classList.add("hidden");
         }
         setModeVisuals(field, normalized);
+        scheduleInputComparison();
     };
 
     const setLocalSelection = (field, fileName) => {
@@ -667,6 +736,7 @@
         if (localSummary) localSummary.classList.toggle("hidden", !fileName);
         if (serverSummary) serverSummary.classList.add("hidden");
         if (serverInput) serverInput.value = "";
+        scheduleInputComparison();
     };
 
     const setServerSelection = (field, pathValue) => {
@@ -686,6 +756,7 @@
         if (localSummary) localSummary.classList.add("hidden");
         if (localName) localName.textContent = "";
         if (fileInput) fileInput.value = "";
+        scheduleInputComparison();
     };
 
     const renderModalEntries = (dirs, files) => {

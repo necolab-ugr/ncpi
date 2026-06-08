@@ -1,5 +1,6 @@
 import os
 import glob
+import hashlib
 import pandas as pd
 import pickle
 import numpy as np
@@ -4217,6 +4218,70 @@ def _load_training_with_example_loader(features_path, parameters_path):
     return X_arr, Y_arr
 
 
+def _load_training_matrices(features_path, parameters_path):
+    """Load and normalize a features/parameters pair exactly as training does."""
+    try:
+        X, Y = _load_training_with_example_loader(features_path, parameters_path)
+        return X, Y, True, None
+    except Exception as loader_exc:
+        features_obj = _read_training_input_any(features_path)
+        parameters_obj = _read_training_input_any(parameters_path)
+        X = _coerce_training_matrix(features_obj, "Features")
+        Y = _coerce_training_matrix(parameters_obj, "Parameters")
+        return X, Y, False, loader_exc
+
+
+def _files_have_identical_content(first_path, second_path, chunk_size=1024 * 1024):
+    try:
+        if os.path.getsize(first_path) != os.path.getsize(second_path):
+            return False
+    except OSError:
+        return False
+
+    first_hash = hashlib.sha256()
+    second_hash = hashlib.sha256()
+    with open(first_path, "rb") as first_handle, open(second_path, "rb") as second_handle:
+        while True:
+            first_chunk = first_handle.read(chunk_size)
+            second_chunk = second_handle.read(chunk_size)
+            if not first_chunk and not second_chunk:
+                break
+            first_hash.update(first_chunk)
+            second_hash.update(second_chunk)
+    return first_hash.digest() == second_hash.digest()
+
+
+def compare_training_inputs(features_path, parameters_path):
+    """Compare selected training inputs by identity, bytes, and normalized data."""
+    same_file = False
+    try:
+        same_file = os.path.samefile(features_path, parameters_path)
+    except OSError:
+        same_file = os.path.realpath(features_path) == os.path.realpath(parameters_path)
+
+    identical_content = same_file or _files_have_identical_content(features_path, parameters_path)
+    result = {
+        "same_file": bool(same_file),
+        "identical_content": bool(identical_content),
+        "same_data": False,
+        "features_shape": None,
+        "parameters_shape": None,
+    }
+
+    try:
+        X, Y, _, _ = _load_training_matrices(features_path, parameters_path)
+        result["features_shape"] = list(X.shape)
+        result["parameters_shape"] = list(Y.shape)
+        result["same_data"] = bool(
+            X.shape == Y.shape
+            and np.array_equal(np.asarray(X), np.asarray(Y), equal_nan=True)
+        )
+    except Exception as exc:
+        result["comparison_error"] = str(exc)
+
+    return result
+
+
 def _parse_param_grid(raw_value):
     parsed = _parse_literal_value(raw_value, None)
     if parsed is None:
@@ -4777,19 +4842,15 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
         if not features_path or not parameters_path:
             raise ValueError("Both features and parameters training files are required.")
 
-        try:
-            X, Y = _load_training_with_example_loader(features_path, parameters_path)
+        X, Y, used_example_loader, loader_exc = _load_training_matrices(features_path, parameters_path)
+        if used_example_loader:
             _append_job_output(job_status, job_id, "Loaded X/theta using examples.tools.load_model_features.")
-        except Exception as loader_exc:
+        else:
             _append_job_output(
                 job_status,
                 job_id,
                 f"examples.tools.load_model_features unavailable for these files ({loader_exc}); using generic loaders.",
             )
-            features_obj = _read_training_input_any(features_path)
-            parameters_obj = _read_training_input_any(parameters_path)
-            X = _coerce_training_matrix(features_obj, "Features")
-            Y = _coerce_training_matrix(parameters_obj, "Parameters")
         if X.shape[0] == 0 or Y.shape[0] == 0:
             raise ValueError("Training inputs are empty.")
         if X.shape[0] != Y.shape[0]:
