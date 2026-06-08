@@ -9082,6 +9082,19 @@ def field_potential_proxy_infer_trials():
             except OSError:
                 pass
 
+def _is_wsl():
+    """Return True if running inside Windows Subsystem for Linux."""
+    if sys.platform != "linux":
+        return False
+    try:
+        with open("/proc/version", "r") as f:
+            return "microsoft" in f.read().lower()
+    except Exception:
+        try:
+            return "microsoft" in os.uname().release.lower()
+        except Exception:
+            return False
+
 
 def _is_loopback_identifier(value):
     candidate = (value or "").strip().lower()
@@ -9124,7 +9137,11 @@ def _detect_webui_runtime_context(req):
         if loopback_request and ssh_session:
             is_server_runtime = True
         elif loopback_request:
-            is_server_runtime = not has_display
+            # On Windows or WSL, treat loopback requests as local even if DISPLAY is not set.
+            if sys.platform == "win32" or _is_wsl():
+                is_server_runtime = False
+            else:
+                is_server_runtime = not has_display
         else:
             is_server_runtime = True
 
