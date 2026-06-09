@@ -11,6 +11,7 @@ import glob
 import base64
 import pickle
 import sys
+import string
 import inspect
 import re
 import traceback
@@ -9360,11 +9361,41 @@ def features_load_data():
         has_features_data=bool(features_data_files),
     )
 
+def _list_windows_drives():
+    """Detects and returns a list of the disk units of Windows."""
+    drives = []
+    for letter in string.ascii_uppercase:
+        root = f"{letter}:\\"
+        if os.path.exists(root):
+            drives.append({"name": root, "path": root})
+    return drives
+    
 
 @app.route("/features/browse_dirs", methods=["GET"])
 def features_browse_dirs():
     requested = (request.args.get("path") or "").strip()
     requested_history_key = (request.args.get("history_key") or "").strip()
+    is_windows = sys.platform == "win32"
+
+    # --- Special case: virtual selector of disks in Windows ---
+    if is_windows and requested == "/":
+        dirs = _list_windows_drives()
+        files = []
+        parent = ""
+        current_path = "/"
+        include_files = False
+        # No history is saved for the virtual root
+        if requested_history_key:
+            _remember_path_history_for_key(requested_history_key, current_path)
+        _remember_path_history("features_browse_dirs:path", current_path)
+        return jsonify({
+            "path": current_path,
+            "parent": parent,
+            "dirs": dirs[:1000],
+            "files": files[:1000] if include_files else [],
+        })
+
+    # --- Path resolution for not-windows systems
     try:
         if requested:
             current = os.path.realpath(os.path.expanduser(requested))
@@ -9420,9 +9451,12 @@ def features_browse_dirs():
     dirs.sort(key=lambda item: item["name"].lower())
     if include_files:
         files.sort(key=lambda item: item["name"].lower())
+
     parent = os.path.dirname(current)
     if parent == current:
-        parent = ""
+        # We are in the root of the virtual unit; in Windows, we offer the unit selector
+        parent = "/" if is_windows else ""
+
     payload = {
         "path": current,
         "parent": parent,
@@ -9430,9 +9464,11 @@ def features_browse_dirs():
     }
     if include_files:
         payload["files"] = files[:1000]
+
     if requested_history_key:
         _remember_path_history_for_key(requested_history_key, current)
     _remember_path_history("features_browse_dirs:path", current)
+
     return jsonify(payload)
 
 
