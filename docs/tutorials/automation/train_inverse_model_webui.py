@@ -405,23 +405,65 @@ def _click_training_modal_dir(page: Page, segment: str, timeout_ms: int = 15_000
 
 
 def _select_training_modal_file(page: Page, target_name: str) -> None:
+    # Ensure the entries list is scrolled to the top so that all items are reachable
+    try:
+        entries_container = page.locator("#inferenceTrainingServerFileBrowserEntries")
+        entries_container.evaluate("el => { el.scrollTop = 0; }")
+    except PlaywrightError:
+        pass
+
     labels = page.locator("#inferenceTrainingServerFileBrowserEntries label")
     selected = None
+
+    # First pass: exact match
     for idx in range(labels.count()):
         label = labels.nth(idx)
+        try:
+            label.scroll_into_view_if_needed()
+        except PlaywrightError:
+            pass
         name = label.locator("span.font-mono").first.inner_text().strip()
         if name == target_name:
             selected = label
             break
+
+    # Second pass: case-insensitive match
     if selected is None:
         for idx in range(labels.count()):
             label = labels.nth(idx)
+            try:
+                label.scroll_into_view_if_needed()
+            except PlaywrightError:
+                pass
             name = label.locator("span.font-mono").first.inner_text().strip()
             if name.lower() == target_name.lower():
                 selected = label
                 break
+
+    if selected is None:
+        # As a last resort, try scrolling the container from top to bottom and re-scan
+        try:
+            entries_container.evaluate("el => { el.scrollTop = 0; }")
+            page.wait_for_timeout(120)
+            entries_container.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+            page.wait_for_timeout(120)
+        except PlaywrightError:
+            pass
+
+        for idx in range(labels.count()):
+            label = labels.nth(idx)
+            try:
+                label.scroll_into_view_if_needed()
+            except PlaywrightError:
+                pass
+            name = label.locator("span.font-mono").first.inner_text().strip()
+            if name.lower() == target_name.lower() or name == target_name:
+                selected = label
+                break
+
     if selected is None:
         raise RuntimeError(f"Could not find file '{target_name}' in training server browser.")
+
     smooth_click(page, selected, after_ms=300)
     smooth_click(page, page.locator("#inferenceTrainingServerFileBrowserSelect"), after_ms=620)
 
