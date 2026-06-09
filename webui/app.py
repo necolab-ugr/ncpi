@@ -310,7 +310,6 @@ CAVALLARI_GRID_KEYS = [
     "N_X",
     "model",
     "P",
-    "extent",
     "exc_exc_recurrent",
     "exc_inh_recurrent",
     "inh_exc_recurrent",
@@ -6311,7 +6310,7 @@ def _build_parse_config_from_form(form):
     segment_t0_s = _optional_float(form.get("parser_segment_t0_s"))
     segment_t1_s = _optional_float(form.get("parser_segment_t1_s"))
     if epoching_enabled and (epoch_length_s is None or epoch_step_s is None):
-        raise ValueError("Epoching is enabled. Provide both epoch length and epoch step in seconds.")
+        raise ValueError("Epoching is enabled. Provide both epoch length and epoch step in s.")
     if segment_t0_s is not None and float(segment_t0_s) < 0:
         raise ValueError("Temporal segmentation start time must be non-negative.")
     if segment_t1_s is not None and float(segment_t1_s) < 0:
@@ -7120,7 +7119,7 @@ def _build_cavallari_lif_params(form):
     N_X = _parse_literal(form, "N_X", CAVALLARI_DEFAULTS["N_X"])
     model = _parse_str(form, "model", CAVALLARI_DEFAULTS["model"])
     P = _parse_float(form, "P", CAVALLARI_DEFAULTS["P"])
-    extent = _parse_float(form, "extent", CAVALLARI_DEFAULTS["extent"])
+    extent = CAVALLARI_DEFAULTS["extent"]
     exc_exc_recurrent = _parse_float(
         form, "exc_exc_recurrent", CAVALLARI_DEFAULTS["exc_exc_recurrent"]
     )
@@ -7687,11 +7686,13 @@ def simulation():
         {
             "url": url_for('upload_sim'),
             "title": "Load data",
+            "description": "Load existing simulation outputs, such as spike times, spike gids, timing information, and network data.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('new_sim'),
             "title": "New simulation",
+            "description": "Configure and run a new neural circuit simulation using a predefined or custom model.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
         },
     ]
@@ -8561,16 +8562,19 @@ def field_potential():
         {
             "url": url_for('field_potential_load'),
             "title": "Load data",
+            "description": "Load existing field-potential outputs, such as current dipole moments, LFPs, M/EEG signals, and proxy signals.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('field_potential_kernel'),
             "title": "Kernel",
+            "description": "Compute current dipole moments and field potentials (LFP, MEG, and EEG) from kernels.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">grain</span>',
         },
         {
             "url": url_for('field_potential_proxy'),
             "title": "Proxy",
+            "description": "Estimate field potentials from simulated neural activity using computationally efficient proxy signals.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">analytics</span>',
         },
     ]
@@ -9271,11 +9275,13 @@ def features():
         {
             "url": url_for('features_load_data'),
             "title": "Load data",
+            "description": "Load precomputed feature datasets for inference or analysis.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('features_methods', entry='compute'),
             "title": "Compute new features",
+            "description": "Compute new features from simulated or empirical data signals.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
         },
     ]
@@ -10581,16 +10587,19 @@ def inference():
         {
             "url": url_for('inference_load_data'),
             "title": "Load data",
+            "description": "Load precomputed parameter predictions.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('new_training'),
             "title": "New training",
+            "description": "Train a new inverse model from paired simulation parameters and features.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
         },
         {
             "url": url_for('compute_predictions'),
             "title": "Compute predictions",
+            "description": "Use a trained inverse model to estimate parameters from feature data.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">query_stats</span>',
         },
     ]
@@ -16606,10 +16615,10 @@ def start_computation_redirect(computation_type):
         if epoching_enabled:
             epoch_length_value = _optional_float(request.form.get("parser_epoch_length_s"))
             if epoch_length_value is None:
-                flash('Set an epoch length in seconds.', 'error')
+                flash('Set an epoch length in s.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
             if _optional_float(request.form.get("parser_epoch_step_s")) is None:
-                flash('Set an epoch step in seconds.', 'error')
+                flash('Set an epoch step in s.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
         seg_t0 = _optional_float(request.form.get("parser_segment_t0_s"))
         seg_t1 = _optional_float(request.form.get("parser_segment_t1_s"))

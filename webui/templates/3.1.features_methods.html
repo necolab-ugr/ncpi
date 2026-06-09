@@ -194,30 +194,35 @@ def custom_feature(sample, params):
                     key: 'catch22',
                     label: 'Catch22',
                     description: '22 canonical time-series characteristics.',
+                    help: 'Compute the catch22 collection of 22 complementary time-series descriptors for every parsed signal. The features summarize properties such as distribution shape, temporal dependence, periodicity, scaling, and nonlinear dynamics, providing a compact general-purpose representation for statistical analysis or machine-learning models.',
                     value: 'catch22'
                 },
                 {
                     key: 'specparam',
                     label: 'Specparam',
                     description: 'Spectral parameterization of neural power spectra.',
+                    help: 'Estimate a power spectrum with Welch’s method and parameterize it into an aperiodic component plus oscillatory peaks. Use this method to quantify features such as aperiodic exponent and offset, peak center frequency, peak power, peak bandwidth, model fit quality, and the number of detected peaks.',
                     value: 'specparam'
                 },
                 {
                     key: 'dfa',
                     label: 'DFA',
                     description: 'Detrended Fluctuation Analysis (criticality-oriented scaling).',
+                    help: 'Compute Detrended Fluctuation Analysis to estimate long-range temporal correlations in a signal or amplitude envelope. DFA measures how detrended fluctuations scale across window sizes; the fitted log-log slope is commonly used as an indicator of scale-free temporal organization.',
                     value: 'dfa'
                 },
                 {
                     key: 'fEI',
                     label: 'fEI',
                     description: 'Functional Excitation/Inhibition index with DFA-based thresholding.',
+                    help: 'Estimate the functional excitation/inhibition index from relationships between windowed oscillation amplitude and detrended fluctuations. The method also computes DFA and uses its threshold to determine whether the fEI estimate is interpretable, while reporting outlier-aware and diagnostic outputs.',
                     value: 'fEI'
                 },
                 {
                     key: 'custom',
                     label: 'Custom Script',
                     description: 'Provide a Python feature extractor function executed for this run.',
+                    help: 'Run a user-defined Python function once for every parsed signal. Implement custom_feature(sample, params) and return a numeric scalar or fixed-length numeric array. Use this method for project-specific biomarkers that are not provided by the built-in methods.',
                     value: 'custom'
                 }
             ],
@@ -1821,7 +1826,7 @@ def custom_feature(sample, params):
                 }
                 const windowSize = this.numericFeatureValue(this.feiWindowSizeSec);
                 if (!Number.isFinite(windowSize) || windowSize <= 0) {
-                    return 'fEI: set Window size to a value greater than 0 seconds.';
+                    return 'fEI: set Window size to a value greater than 0 s.';
                 }
                 const windowOverlap = this.numericFeatureValue(this.feiWindowOverlap);
                 if (windowOverlap !== null && (!Number.isFinite(windowOverlap) || windowOverlap < 0 || windowOverlap >= 1)) {
@@ -3248,7 +3253,7 @@ def custom_feature(sample, params):
                         lines.push(`    epoch_step_s=${epochStep},`);
                     }
                     lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
-                    lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                    lines.push(`    zscore_after_epoch=${this.parserZscore && this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
                     if (this.parserEnableAggregate) {
                         const aggDims = (this.parserAggregateOverSelected || [])
                             .map((item) => String(item || '').trim())
@@ -3350,7 +3355,7 @@ def custom_feature(sample, params):
                     lines.push(`    epoch_step_s=${epochStep},`);
                 }
                 lines.push(`    zscore=${zscoreFlag},`);
-                lines.push(`    zscore_after_epoch=${this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                lines.push(`    zscore_after_epoch=${this.parserZscore && this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
                 if (this.parserEnableAggregate) {
                     const aggDims = (this.parserAggregateOverSelected || [])
                         .map((item) => String(item || '').trim())
@@ -3802,10 +3807,10 @@ def custom_feature(sample, params):
                         </div>
                         <div class="flex items-center gap-2 mb-4">
                             <span class="material-symbols-outlined text-primary">add_circle</span>
-                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Data folder for feature extraction</h3>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white" data-field-help-static="1" data-help="Select one or more folders containing the signals from which features will be computed. The folder may contain empirical recordings, simulation outputs, numeric arrays, or tabular datasets in supported formats such as MAT, NWB, NPY, CSV, TSV, Parquet, pickle, Excel, Feather, EEGLAB SET, FIF, EDF, BrainVision, or CTF DS. Nested folders are supported up to six levels. The application inspects representative files to detect candidate signal fields, sampling frequency, channel names, array axes, and metadata, then uses the parser configuration shown below to convert the selected data into a common dataframe before feature extraction. Files processed together within each folder should use the same structure, field names, dimensions, and units; inconsistent files may fail parsing or produce incorrect results.">Data folder for feature extraction</h3>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                            Inspect a data folder for feature extraction from local upload or server storage.
+                            Select folders containing consistently structured supported data files.
                         </p>
 
                         <input id="additional-file-input" type="file" class="hidden" multiple @change="onAdditionalFileInputChange($event)">
@@ -3905,10 +3910,10 @@ def custom_feature(sample, params):
                         </div>
                         <div class="mt-1 flex items-center gap-2 mb-4">
                             <span class="material-symbols-outlined text-primary">attach_file</span>
-                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Additional metadata files</h3>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white" data-field-help-static="1" data-help="Optionally select individual files that describe or annotate the dataset selected in Data folder for feature extraction. These files are inspected together with the main data and can provide fields that are not stored in each recording, such as channel names, subject identifiers, experimental groups, species, conditions, or recording types. Tabular formats such as CSV, TSV, Excel, Parquet, and Feather are recommended: use one row per subject, channel, or other mapping item and clear column names. For subject-level enrichment, the parsed data must contain subject_id and the selected link-field column in the metadata file must contain matching subject identifiers. Metadata columns can then be mapped to canonical parser fields; a selected channel-name column can also supply channel labels. Additional metadata files complement the signal data and are not themselves treated as the primary signals for feature extraction.">Additional metadata files</h3>
                         </div>
                         <p class="text-xs text-gray-500 dark:text-gray-400 mb-4">
-                            Add metadata files (e.g., subject, group, or channel annotations) that complement the dataset loaded in the Data folder for feature extraction section and support field mapping during feature extraction.
+                            Optional tabular files containing channel, subject, group, or condition annotations.
                         </p>
 
                         <div
@@ -3963,7 +3968,7 @@ def custom_feature(sample, params):
                         <p class="text-xs text-gray-500 dark:text-gray-400">
                             You can change the format and inspect again, or return to automatic detection.
                         </p>
-                        <label class="text-sm block">
+                        <label class="text-sm block" data-help="Optional pattern used to select files during folder inspection and extract metadata values from their names. Build the format from literal text, which must appear exactly, and variable tokens enclosed between dollar signs, such as $id$, $group$, or $condition$. Token names must start with a letter, may contain letters, numbers, and underscores, and may appear only once in a format. The pattern must contain at least one token. It is matched against each candidate file name rather than its folder path, including files inside nested datasets. Include the extension as literal text, for example .pkl, when only that complete filename form should match; when the format omits an explicit extension, matching can also use the filename stem. Files that do not match are excluded from inspection and feature extraction. Values captured by tokens become available as metadata sources, so a format such as $id$-$group$_$condition$.pkl can extract subject, group, and condition values from matching file names. Select Inspect to apply the current format and reinspect the data source. Select Use automatic detection to clear the format and inspect supported files without filename filtering.">
                             <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
                             <input
                                 type="text"
@@ -4011,7 +4016,7 @@ def custom_feature(sample, params):
                             <span x-text="parserDeepScanError || 'Full-folder inspection failed. Reinspect the selected folder.'"></span>
                         </div>
                         <div class="space-y-2 rounded-lg border border-gray-200 dark:border-[#323b67] bg-gray-50/70 dark:bg-[#191e33]/60 p-3">
-                            <label class="text-sm block">
+                            <label class="text-sm block" data-help="Optional pattern used to select files during folder inspection and extract metadata values from their names. Build the format from literal text, which must appear exactly, and variable tokens enclosed between dollar signs, such as $id$, $group$, or $condition$. Token names must start with a letter, may contain letters, numbers, and underscores, and may appear only once in a format. The pattern must contain at least one token. It is matched against each candidate file name rather than its folder path, including files inside nested datasets. Include the extension as literal text, for example .pkl, when only that complete filename form should match; when the format omits an explicit extension, matching can also use the filename stem. Files that do not match are excluded from inspection and feature extraction. Values captured by tokens become available as metadata sources, so a format such as $id$-$group$_$condition$.pkl can extract subject, group, and condition values from matching file names. Select Inspect to apply the current format and reinspect the data source. Select Use automatic detection to clear the format and inspect supported files without filename filtering.">
                                 <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
                                 <input
                                     type="text"
@@ -4022,7 +4027,7 @@ def custom_feature(sample, params):
                                 >
                             </label>
                             <p class="text-[11px] text-gray-500 dark:text-gray-400">
-                                Use literal text + tokens between <code>$...$</code>. The format is always matched against file names (including extension), also for nested datasets.
+                                Example: <code>$id$-$group$_$condition$.pkl</code>
                             </p>
                             <div class="flex flex-wrap gap-2">
                                 <template x-for="token in parserFilenameFormatTokens()" :key="'filename-format-token-'+token">
@@ -4331,10 +4336,10 @@ def custom_feature(sample, params):
                     </template>
 
                     <div x-show="hasAnyData()" x-cloak class="mt-6 bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
-                        <div class="flex items-center gap-2 mb-3">
-                            <span class="material-symbols-outlined text-primary">tune</span>
-                            <h3 class="font-bold text-base text-[#34495E] dark:text-white">Configure EphysDatasetParser</h3>
-                        </div>
+	                        <div class="flex items-center gap-2 mb-3">
+	                            <span class="material-symbols-outlined text-primary">tune</span>
+                            <h3 class="font-bold text-base text-[#34495E] dark:text-white" data-field-help-static="1" data-help="Configure how heterogeneous electrophysiology files are converted into the canonical dataframe used by feature extraction. Map the signal, sampling frequency, channels, array dimensions, recording modality, and metadata to their source fields; then optionally crop time ranges, normalize signals, create fixed-length epochs, and aggregate rows. Processing is applied in this order: parse source fields, crop the temporal segment, z-score before epoching when selected, create epochs, z-score each epoch when selected, and aggregate last. Review detected defaults carefully, especially array axes and sampling frequency, because incorrect mappings can produce plausible but invalid features.">Configure EphysDatasetParser</h3>
+	                        </div>
                         <div x-show="parserLoading" class="inline-flex items-center gap-2 text-sm text-gray-600 dark:text-gray-100">
                             <span class="h-4 w-4 rounded-full border-2 border-primary/30 border-t-primary animate-spin"></span>
                             <span>Inspecting selected data...</span>
@@ -4379,14 +4384,11 @@ def custom_feature(sample, params):
                                     <!-- Array dimension mapping (pipeline/simulation) -->
                                     <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
                                         <label x-show="resolvedDataSourceKind() === 'pipeline'" class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                            <input type="checkbox" x-model="parserArrayAxesEnabled"
+                                            <input type="checkbox" x-model="parserArrayAxesEnabled" data-param="parser_array_axes_enabled"
                                                 class="rounded border-gray-300 text-primary focus:ring-primary/50">
                                             Specify array dimension mapping
                                         </label>
                                         <div x-show="parserArrayAxesEnabled || resolvedDataSourceKind() === 'new-simulation'" class="space-y-2">
-                                            <p class="text-[11px] text-gray-500 dark:text-gray-100">
-                                                Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
-                                            </p>
                                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channels axis</span>
@@ -4498,9 +4500,6 @@ def custom_feature(sample, params):
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
-                                            <span class="block text-[11px] text-gray-400 mt-1 dark:text-gray-400">
-                                                Autocomplete uses the Channels axis from "Specify array dimension mapping".
-                                            </span>
                                         </label>
                                     </div>
                                     <input type="hidden" name="parser_fs_locator"
@@ -4546,15 +4545,15 @@ def custom_feature(sample, params):
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <fieldset class="text-sm md:col-span-2">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Data origin</span>
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1" data-field-help-static="1" data-help="Choose how canonical metadata is populated for the parsed dataset. Select Empirical when processing measured recordings: this mode lets you map subject ID, group, species, and condition from detected source fields, filename-derived values, filename-format tokens, or constants. Select Simulated when processing generated neural activity: this mode creates metadata for one simulated subject and uses available trial or repetition information to populate conditions. Data origin changes metadata handling only; it does not change the selected signal data or recording type.">Data origin</span>
                                             <div class="flex flex-wrap gap-2">
-                                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer"
+                                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
                                                     :class="parserMetadataMode === 'empirical' ? 'bg-primary/10 border-primary text-primary dark:text-primary' : ''">
                                                     <input type="radio" name="parser_metadata_mode" value="empirical" x-model="parserMetadataMode"
                                                         class="rounded-full border-gray-300 text-primary focus:ring-primary/50">
                                                     <span>Empirical</span>
                                                 </label>
-                                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer"
+                                                <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
                                                     :class="parserMetadataMode === 'simulated' ? 'bg-primary/10 border-primary text-primary dark:text-primary' : ''">
                                                     <input type="radio" name="parser_metadata_mode" value="simulated" x-model="parserMetadataMode"
                                                         class="rounded-full border-gray-300 text-primary focus:ring-primary/50">
@@ -4649,15 +4648,29 @@ def custom_feature(sample, params):
                                         </div>
                                     </div>
                                     <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                        <input type="checkbox" x-model="parserZscore"
+                                        <input type="checkbox" x-model="parserZscore" data-param="parser_zscore"
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                        Apply z-score before epoching
+                                        Apply z-score
                                     </label>
-                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                        <input type="checkbox" x-model="parserZscoreAfterEpoch"
-                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                        Apply z-score after epoching
-                                    </label>
+                                    <fieldset class="space-y-2" :disabled="!parserZscore" :class="{ 'opacity-50': !parserZscore }">
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100" data-field-help-static="1" data-help="Choose when enabled z-score normalization is applied. Before epoching standardizes the selected continuous signal once, so all generated epochs share one normalization reference. After epoching standardizes every generated epoch independently.">Z-score timing</span>
+                                        <div class="flex flex-wrap gap-2">
+                                            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
+                                                :class="!parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
+                                                @click="parserZscoreAfterEpoch = false">
+                                                <input type="radio" :checked="!parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = false"
+                                                    class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
+                                                <span>Before epoching</span>
+                                            </label>
+                                            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
+                                                :class="parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
+                                                @click="parserZscoreAfterEpoch = true">
+                                                <input type="radio" :checked="parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = true"
+                                                    class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
+                                                <span>After epoching</span>
+                                            </label>
+                                        </div>
+                                    </fieldset>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
@@ -4675,10 +4688,6 @@ def custom_feature(sample, params):
                                                 :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                         </label>
                                     </div>
-                                    <p class="text-xs text-gray-500 dark:text-gray-100">
-                                        Optional temporal segmentation applied before epoching. Leave both empty to use the full signal.
-                                        Set only start time (t0) to keep data from t0 to the end, or only end time (t1) to keep data from the beginning to t1.
-                                    </p>
                                     <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400" x-text="segmentValidationError()"></p>
 
                                 </div>
@@ -4714,7 +4723,6 @@ def custom_feature(sample, params):
                                         </label>
                                         <div class="space-y-2">
                                             <p class="text-[11px] text-gray-500 dark:text-gray-100">
-                                                Assign a role to each axis of the data array (e.g. shape <code class="font-mono">(64, 2000, 100)</code>).
                                                 Use this when the parser cannot infer the correct orientation automatically.
                                             </p>
                                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -4824,9 +4832,6 @@ def custom_feature(sample, params):
                                                 </template>
                                                 <option value="__manual__" :style="parserManualOptionStyle()">Manual list</option>
                                             </select>
-                                            <span class="block text-[11px] text-gray-400 mt-1">
-                                                Autocomplete uses the Channels axis from "Specify array dimension mapping".
-                                            </span>
                                         </label>
                                     </div>
                                     <input type="hidden" name="parser_fs_locator"
@@ -4918,15 +4923,29 @@ def custom_feature(sample, params):
                                     </div>
 
                                 <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                    <input type="checkbox" x-model="parserZscore"
+                                    <input type="checkbox" x-model="parserZscore" data-param="parser_zscore"
                                         class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Apply z-score before epoching
+                                    Apply z-score
                                 </label>
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                    <input type="checkbox" x-model="parserZscoreAfterEpoch"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Apply z-score after epoching
-                                </label>
+                                <fieldset class="space-y-2" :disabled="!parserZscore" :class="{ 'opacity-50': !parserZscore }">
+                                    <span class="block text-xs text-gray-500 dark:text-gray-100" data-field-help-static="1" data-help="Choose when enabled z-score normalization is applied. Before epoching standardizes the selected continuous signal once, so all generated epochs share one normalization reference. After epoching standardizes every generated epoch independently.">Z-score timing</span>
+                                    <div class="flex flex-wrap gap-2">
+                                        <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
+                                            :class="!parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
+                                            @click="parserZscoreAfterEpoch = false">
+                                            <input type="radio" :checked="!parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = false"
+                                                class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
+                                            <span>Before epoching</span>
+                                        </label>
+                                        <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
+                                            :class="parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
+                                            @click="parserZscoreAfterEpoch = true">
+                                            <input type="radio" :checked="parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = true"
+                                                class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
+                                            <span>After epoching</span>
+                                        </label>
+                                    </div>
+                                </fieldset>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
@@ -4944,10 +4963,6 @@ def custom_feature(sample, params):
                                             :class="segmentBoundsInvalid() ? 'border-red-400 dark:border-red-500' : ''">
                                     </label>
                                 </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-100">
-                                    Optional temporal segmentation applied before epoching. Leave both empty to use the full signal.
-                                    Set only start time (t0) to keep data from t0 to the end, or only end time (t1) to keep data from the beginning to t1.
-                                </p>
                                 <p x-show="segmentBoundsInvalid()" x-cloak class="text-xs text-red-600 dark:text-red-400" x-text="segmentValidationError()"></p>
 
                                 </div>
@@ -4982,66 +4997,70 @@ def custom_feature(sample, params):
                                         :value="JSON.stringify(metadataInfo ? (metadataInfo.candidate_fields || []) : [])">
                                 </div>
 
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                    <input type="checkbox" x-model="parserEnableEpoching"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Enable epoching
-                                </label>
+                                <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-4 space-y-4">
+                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" x-model="parserEnableEpoching" data-param="parser_enable_epoching"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Enable epoching
+                                    </label>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching" x-cloak>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Epoch length (s)</span>
+                                            <input type="number" step="any" name="parser_epoch_length_s" x-model="parserEpochLengthS"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Epoch step (s)</span>
+                                            <input type="number" step="any" name="parser_epoch_step_s" x-model="parserEpochStepS"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                        </label>
+                                    </div>
+                                    <p x-show="parserEnableEpoching" x-cloak class="text-xs text-gray-500 dark:text-gray-100">
+                                        If any final epoch is shorter than the rest, the final epoch is excluded automatically for every sample.
+                                    </p>
+                                </div>
                                 <input type="hidden" name="parser_enable_epoching" :value="parserEnableEpoching ? '1' : '0'">
 
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                    <input type="checkbox" x-model="parserEnableAggregate"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Enable aggregation
-                                </label>
+                                <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-4 space-y-4">
+                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-[#34495E] dark:text-gray-300">
+                                        <input type="checkbox" x-model="parserEnableAggregate" data-param="parser_enable_aggregate"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Enable aggregation
+                                    </label>
+
+                                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserEnableAggregate" x-cloak>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate over fields</span>
+                                            <select multiple x-model="parserAggregateOverSelected" data-param="parser_aggregate_over"
+                                                class="w-full min-h-32 rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                                <template x-for="field in aggregateOverOptions()" :key="'agg-over-'+field">
+                                                    <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
+                                                </template>
+                                            </select>
+                                            <span class="block text-[11px] text-gray-400 mt-1">Choose one or more fields.</span>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate method</span>
+                                            <select name="parser_aggregate_method" x-model="parserAggregateMethod"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                                <option value="sum">sum</option>
+                                                <option value="mean">mean</option>
+                                                <option value="median">median</option>
+                                            </select>
+                                        </label>
+                                        <label class="text-sm">
+                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate output label</span>
+                                            <input type="text" name="parser_aggregate_label_value" x-model="parserAggregateLabelValue"
+                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
+                                                placeholder="Optional, e.g. all">
+                                        </label>
+                                    </div>
+                                </div>
                                 <input type="hidden" name="parser_enable_aggregate" :value="parserEnableAggregate ? '1' : '0'">
                                 <input type="hidden" name="parser_aggregate_over" :value="(parserAggregateOverSelected || []).join(',')">
-
-                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4" x-show="parserEnableAggregate">
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate over fields</span>
-                                        <select multiple x-model="parserAggregateOverSelected"
-                                            class="w-full min-h-32 rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                            <template x-for="field in aggregateOverOptions()" :key="'agg-over-'+field">
-                                                <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
-                                            </template>
-                                        </select>
-                                        <span class="block text-[11px] text-gray-400 mt-1">Choose one or more fields.</span>
-                                    </label>
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate method</span>
-                                        <select name="parser_aggregate_method" x-model="parserAggregateMethod"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                            <option value="sum">sum</option>
-                                            <option value="mean">mean</option>
-                                            <option value="median">median</option>
-                                        </select>
-                                    </label>
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Aggregate output label</span>
-                                        <input type="text" name="parser_aggregate_label_value" x-model="parserAggregateLabelValue"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional, e.g. all">
-                                    </label>
-                                </div>
-
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" x-show="parserEnableEpoching">
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Epoch length (s)</span>
-                                        <input type="number" step="any" name="parser_epoch_length_s" x-model="parserEpochLengthS"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                    </label>
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Epoch step (s)</span>
-                                        <input type="number" step="any" name="parser_epoch_step_s" x-model="parserEpochStepS"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
-                                    </label>
-                                </div>
-                                <p x-show="parserEnableEpoching" x-cloak class="text-xs text-gray-500 dark:text-gray-100">
-                                    If any final epoch is shorter than the rest, the final epoch is excluded automatically for every sample.
-                                </p>
                                 <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
-                                <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscoreAfterEpoch ? '1' : '0'">
+                                <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscore && parserZscoreAfterEpoch ? '1' : '0'">
                             </div>
                         </template>
                     </div>
@@ -5075,13 +5094,14 @@ def custom_feature(sample, params):
                             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <template :key="method.key" x-for="method in methods">
                                     <label
+                                        data-field-help-skip="1"
                                         class="flex items-start p-4 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors dark:bg-[#111422] dark:border-[#323b67] dark:hover:border-gray-500 dark:hover:bg-white/10"
                                         :class="{ 'border-primary bg-primary/5': selectedMethod === method.value }">
                                         <input :value="method.value" x-model="selectedMethod"
                                             class="form-radio h-4 w-4 mt-0.5 text-primary focus:ring-primary/50 border-gray-300 bg-background-light"
                                             name="select-method" type="radio" />
                                         <span class="ml-3">
-                                            <span class="block text-sm font-semibold text-[#34495E] dark:text-gray-100" x-text="method.label"></span>
+                                            <span class="block text-sm font-semibold text-[#34495E] dark:text-gray-100" data-field-help-static="1" :data-help="method.help" x-text="method.label"></span>
                                             <span class="block text-xs text-gray-500 dark:text-gray-200" x-text="method.description"></span>
                                         </span>
                                     </label>
@@ -5201,7 +5221,7 @@ def custom_feature(sample, params):
                                         <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Use false for raw EEG/MEG/LFP. Use true only when every sample is already a band-limited amplitude envelope.</span>
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim (s)</span>
                                         <input type="number" step="any" min="0" name="dfa_trim_seconds" value="1.0"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Removes edge samples after filtering/envelope extraction to reduce boundary artifacts.</span>
@@ -5401,7 +5421,7 @@ def custom_feature(sample, params):
                                         <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Use false for raw EEG/MEG/LFP. Use true only when every sample is already a band-limited amplitude envelope.</span>
                                     </label>
                                     <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim seconds</span>
+                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Trim (s)</span>
                                         <input type="number" step="any" min="0" name="fei_trim_seconds" value="1.0"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                         <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Removes edge samples after filtering/envelope extraction to reduce boundary artifacts.</span>

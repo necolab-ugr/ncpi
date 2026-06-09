@@ -206,15 +206,15 @@
         <div class="flex flex-col gap-2">
             <h3 class="text-base font-semibold text-slate-900 dark:text-white">Joint sweep groups</h3>
             <p class="text-sm text-slate-600 dark:text-slate-300">
-                Keep the current per-parameter sweep controls below. Add a group only when selected parameters should use the same candidate index together instead of forming a Cartesian product.
+                By default, every swept parameter varies independently, so all candidate combinations are simulated. Create a joint group when parameters should vary together as paired configurations.
             </p>
             <p class="text-xs text-slate-500 dark:text-slate-400">
-                Example: if `J_YX` has 3 candidates and `nu_ext` has 3 candidates in the same group, the sweep runs 3 linked configurations, not 9 combinations.
+                Example: grouping `J_YX (nA)` and `nu_ext (Hz)` with 3 candidates each runs 3 paired configurations instead of all 9 combinations. Every parameter in a group must define the same number of candidates.
             </p>
         </div>
         <div id="joint-groups-container" class="mt-4 flex flex-col gap-3"></div>
         <div class="mt-4 flex items-center justify-between gap-3">
-            <p class="text-xs text-slate-500 dark:text-slate-400">Each grouped parameter must define the same number of candidates.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Parameters outside a joint group continue to vary independently.</p>
             <button
                 id="add-joint-group-button"
                 type="button"

@@ -1,4 +1,4 @@
-> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 1, 2026.**
+> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 16, 2026.**
 
 <div align="center">
 
@@ -15,6 +15,10 @@ ___
 electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provides a rapid, reproducible, and robust
 framework for estimating the most probable neural circuit parameters associated with an empirical observation,
 streamlining traditionally complex workflows into a minimal amount of code.
+
+<div align="center">
+  <img src="docs/tutorials/automation/videos/compute-field-potentials.gif" alt="Field-potential computation workflow in the ncpi WebUI" width="900">
+</div>
 
 # Key Features of `ncpi`
 - **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural

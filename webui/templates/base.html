@@ -79,8 +79,6 @@
 									<a class="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-primary transition-colors"
 										target="_blank" rel="noopener noreferrer" href="https://necolab-ugr.github.io/ncpi/">Documentation</a>
 									<a class="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-primary transition-colors"
-										target="_blank" rel="noopener noreferrer" href="https://github.com/necolab-ugr/ncpi/blob/main/README.md">Help</a>
-									<a class="text-gray-600 hover:text-primary dark:text-gray-300 dark:hover:text-primary transition-colors"
 										href="{{url_for('saved_sessions')}}">Previous Sessions</a>
 								</nav>
 								<a class="flex h-10 w-10 items-center justify-center rounded-lg text-gray-600 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-white/10 transition-colors"
@@ -146,11 +144,9 @@
 						{% block footer %}
 							<div class="flex flex-wrap items-center justify-center gap-x-8 gap-y-4">
 								<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
-									target="_blank" rel="noopener noreferrer" href="https://github.com/necolab-ugr/ncpi/tree/main/webui">About</a>
-								<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
-									target="_blank" rel="noopener noreferrer" href="https://necolab.ugr.es/">necolab</a>
-								<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
 									target="_blank" rel="noopener noreferrer" href="https://github.com/necolab-ugr/ncpi/blob/main/LICENSE">Privacy Policy</a>
+								<a class="text-sm text-gray-500 hover:text-primary dark:text-gray-400 dark:hover:text-primary transition-colors"
+									target="_blank" rel="noopener noreferrer" href="https://necolab.ugr.es/">Necolab</a>
 							</div>
 						{% endblock %}
 					</footer>
@@ -159,6 +155,7 @@
 						<script src="{{ url_for('static', filename='js/darkModeToggle.js') }}"></script>
 						<script src="{{ url_for('static', filename='js/serverErrorBanner.js') }}"></script>
 						<script src="{{ url_for('static', filename='js/nativePickerUX.js') }}"></script>
+						<script src="{{ url_for('static', filename='js/fieldHelpTooltips.js') }}"></script>
 						<!-- Handling of alert messages -->
 						<script src="{{ url_for('static', filename='js/alertMessages.js') }}"></script>
 					<!-- Block for page-specific JavaScript -->

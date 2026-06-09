@@ -562,7 +562,7 @@ def _independent_expected_cavallari_trials(app_module, form_data):
             "N_exc": n_x[0],
             "N_inh": n_x[1],
             "P": float(values["P"]),
-            "extent": float(values["extent"]),
+            "extent": float(defaults["extent"]),
             "exc_exc_recurrent": float(values["exc_exc_recurrent"]),
             "exc_inh_recurrent": float(values["exc_inh_recurrent"]),
             "inh_exc_recurrent": float(values["inh_exc_recurrent"]),

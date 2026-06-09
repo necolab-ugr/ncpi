@@ -66,17 +66,53 @@
           </p>
           <p>
             <code>ncpi</code> is a Python library for model-based inference of neural circuit parameters
-            from population-level electrophysiological signals such as LFP, ECoG, EEG, and MEG.
+            from population-level electrophysiological signals such as LFP, EEG, and MEG.
           </p>
         </section>
 
-        <section id="highlights">
-          <h2>Highlights</h2>
-          <ul>
-            <li>Integrated simulation, forward modelling of field potentials, feature extraction, inference, and analysis pipeline.</li>
-            <li>Modular architecture so you can use only the modules you need.</li>
-            <li>A super nice graphical interface (WebUI) designed for practical end-to-end workflows.</li>
-          </ul>
+        <section id="why-ncpi" class="why-ncpi">
+          <div class="why-ncpi-intro">
+            <span class="section-eyebrow">A unified simulation-inference workflow</span>
+            <h2>One environment, from simulated neural circuits to real data</h2>
+            <p class="why-ncpi-lead">
+              Imagine moving from a mechanistic hypothesis about a neural circuit to simulated population
+              activity, multiscale field potentials, biophysically meaningful biomarkers, and trained
+              inference models without assembling a different software toolchain for every step.
+            </p>
+            <p>
+              <code>ncpi</code> connects simulation, forward modelling, feature extraction, inference,
+              prediction, and analysis in a modular and reproducible end-to-end workflow. Use only the
+              components you need, or combine them into a complete pipeline that links computational
+              models with empirical measurements across recording scales.
+            </p>
+          </div>
+
+          <div class="capability-grid">
+            <div class="capability-card">
+              <h3>Simulate and observe</h3>
+              <p>Generate synthetic neural activity and transform it into CDM, LFP, EEG, or MEG observables.</p>
+            </div>
+            <div class="capability-card">
+              <h3>Extract and infer</h3>
+              <p>Extract interpretable biomarkers, train inverse models, compute predictions, and analyze results.</p>
+            </div>
+            <div class="capability-card">
+              <h3>Choose how you work</h3>
+              <p>Build workflows in pure Python, develop interactively in Jupyter, or use the guided WebUI.</p>
+            </div>
+            <div class="capability-card">
+              <h3>Run wherever research happens</h3>
+              <p>Move reproducible workflows from local workstations to shared server infrastructure.</p>
+            </div>
+          </div>
+
+          <p class="why-ncpi-footer">
+            The intuitive WebUI turns complex modelling and data-processing pipelines into guided
+            configurations while keeping scientifically relevant parameters accessible. Flexible data
+            loading supports different empirical dataset structures, documented installation paths cover
+            Linux, macOS, and Windows environments, and the toolbox and its scientific foundations have
+            been published in peer-reviewed publications.
+          </p>
         </section>
 
         <section id="start-here">
@@ -85,7 +121,8 @@
             <p>
               If this is your first time with <code>ncpi</code>, start with
               <a class="link" href="./installation.html">Installation</a> to get everything set up.
-              Then jump into the <a class="link" href="./tutorials.html">Tutorials</a> to try guided WebUI and Jupyter workflows.
+              Then jump into the <a class="link" href="./tutorials.html">Tutorials</a> to try guided WebUI,
+              Jupyter, and pure Python workflows.
               When you need method-level details, the <a class="link" href="./api.html">API</a> page is ready.
             </p>
           </div>
@@ -97,8 +134,8 @@
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
         <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#why-ncpi">Why ncpi?</a></li>
         <li><a href="#start-here">Start Here</a></li>
-        <li><a href="#highlights">Highlights</a></li>
       </ul>
     </aside>
   </div>
