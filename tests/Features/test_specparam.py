@@ -227,7 +227,6 @@ def test_freq_range_sanity(feat_default):
 
 def test_select_peak_invalid_raises():
     from specparam.sim import sim_power_spectrum
-    from specparam.sim.utils import set_random_seed
 
     set_random_seed(21)
 
