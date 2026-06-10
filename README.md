@@ -99,30 +99,155 @@ pip install "ncpi[hctsa]"           # hctsa backend support
 
 ## 5) WebUI: installation and usage
 
-The WebUI is available from the repository source (`webui/app.py`).
+The WebUI is run from a source checkout of this repository. Clone the repository before using the launcher:
+
+```bash
+git clone https://github.com/necolab-ugr/ncpi.git
+cd ncpi
+```
+
+If the repository is already cloned, update it before continuing:
+
+```bash
+git pull --ff-only
+```
 
 ### Install WebUI dependencies
-After activating your Conda environment:
+
+Activate the Conda environment on the machine that will run Flask, then install the WebUI dependencies:
 
 ```bash
-pip install "ncpi[webui]"
+conda activate ncpi-env
+pip install -e ".[webui]"
 ```
 
-### Start WebUI
-From the repository root:
+The editable installation uses the code in the current, updated repository checkout.
+
+For local execution, this is your local machine. For remote execution, these dependencies must be installed in the
+Conda environment on the server.
+
+### Run locally
+
+From the repository root, with the Conda environment activated:
 
 ```bash
-python webui/app.py
+python webui/launcher.py local
 ```
 
-Then open:
+The launcher starts Flask and opens the default browser at:
 
 ```text
 http://127.0.0.1:5000
 ```
 
-For best results, we recommend running the WebUI in Chrome, as our tests are most stable there and we have observed a
-couple of issues in other browsers.
+The following compatibility command also starts the local WebUI:
+
+```bash
+python webui/app.py
+```
+
+For best results, we recommend Chrome. Our browser tests are most stable there, and some issues have been observed in
+other browsers.
+
+### Run on a remote server over SSH
+
+A process running on an SSH server cannot directly open a browser on the client machine. The launcher therefore runs
+on your **local machine**, creates an SSH tunnel, starts Flask on the server, waits for it to become available, and
+then opens the local browser.
+
+#### Remote prerequisites
+
+1. The NCPI repository must be cloned on both the local machine and the server.
+2. Both checkouts must contain the current launcher implementation. Update both repositories before starting, ideally
+   to the same Git commit:
+
+   An older server checkout that does not contain the current `webui/launcher.py` and the corresponding
+   `webui/app.py` changes is not compatible with this remote workflow.
+
+```bash
+# Run in the NCPI checkout on the local machine and again on the server
+git pull --ff-only
+git rev-parse HEAD
+```
+
+3. The server must have a Python installation with the WebUI dependencies. Conda is recommended, but a virtual
+   environment or system Python can also be used:
+
+```bash
+# Run on the server
+conda activate ncpi-env
+cd /absolute/path/to/ncpi
+pip install -e ".[webui]"
+which python
+```
+
+Use the path printed by `which python` as the value of `--python`. For a system installation, use an executable such as
+`python3` or `/usr/bin/python3`. An explicit path is recommended because non-interactive SSH sessions may not activate
+Conda or virtual environments and may use a different `PATH`.
+
+#### Remote command
+
+Run the following command from the NCPI repository on your **local machine**:
+
+```bash
+python webui/launcher.py remote user@server \
+  --ssh-port 22 \
+  --local-port 5001 \
+  --remote-port 5001 \
+  --remote-dir /absolute/path/to/ncpi \
+  --python /absolute/path/to/conda/env/bin/python
+```
+
+For example:
+
+```bash
+python webui/launcher.py remote username@example.org \
+  --ssh-port 22 \
+  --local-port 5001 \
+  --remote-port 5001 \
+  --remote-dir /home/username/ncpi \
+  --python /home/username/miniconda3/envs/ncpi-env/bin/python
+```
+
+The browser opens `http://127.0.0.1:<local-port>`. Keep the launcher terminal open while using the WebUI. Press
+`Ctrl+C` to close the SSH tunnel and stop the remote Flask process.
+
+#### Remote arguments
+
+| Argument                 |     Required     | Description |
+| :----------------------- | :--------------: | :---------- |
+| `destination`            |       Yes        | SSH destination, such as `user@server`. |
+| `--remote-dir`           |       Yes        | Updated NCPI repository path on the server. |
+| `--python`               |   Recommended    | Server Python executable: Conda, `venv`, or system Python. |
+| `--ssh-port`             |        No        | SSH port. Default: `22`. |
+| `--local-port`           |        No        | Local browser port. Default: `5000`. |
+| `--remote-port`          |        No        | Remote Flask port. Default: `5000`. |
+| `--remote-app`           |        No        | App path under `--remote-dir`. Default: `webui/app.py`. |
+| `--ssh-executable`       |        No        | Local SSH executable. Default: `ssh`. |
+| `--startup-timeout`      |        No        | Startup timeout in seconds. Default: `60`. |
+| `--no-browser`           |        No        | Start without opening the local browser. |
+
+If required fields are missing or a connection fails, the launcher prints the fields to review and an example command.
+
+#### Manual SSH alternative
+
+The launcher is recommended, but the equivalent workflow can be performed manually:
+
+```bash
+ssh -L 5001:127.0.0.1:5001 -p 22 user@server
+```
+
+Then, inside the SSH session:
+
+```bash
+cd /absolute/path/to/ncpi
+/absolute/path/to/conda/env/bin/python webui/app.py \
+  --host 127.0.0.1 \
+  --port 5001 \
+  --no-browser
+```
+
+Finally, open `http://127.0.0.1:5001` on the local machine.
 
 ### Windows note
 You can run the same command from Anaconda Prompt or PowerShell.

@@ -18408,10 +18408,6 @@ def download_results(job_id):
     )
 
 if __name__ == '__main__':
-    import threading
-    import webbrowser
-    host = '127.0.0.1'
-    port = 5000
-    if host in ('127.0.0.1', 'localhost'):
-        threading.Timer(1.0, lambda: webbrowser.open(f'http://{host}:{port}')).start()
-    app.run(debug=True, host=host, port=port)
+    from launcher import run_webui
+
+    run_webui(app)
