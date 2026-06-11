@@ -91,7 +91,7 @@
                     <input id="features-source-mode" type="hidden" name="features_source_mode" value="{{ 'auto-detected' if default_feature_file else 'server-path' }}">
                     <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="">
                     <input id="file-upload-features" class="hidden" name="features_predict_file" type="file" />
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" data-field-help-static="1" data-help="Select the feature dataframe used as prediction input. It must contain a Features column whose rows are numeric feature vectors compatible with the selected trained model: feature count, order, preprocessing, and units must match the data used during training. The resulting Predictions column is attached to the selected or subsampled rows.">
                         Features Data <span class="text-red-500">*</span>
                     </label>
                     <div
@@ -239,7 +239,7 @@
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" data-field-help-static="1" data-help="Select the trained prediction artifact. For a scikit-learn workflow, provide the serialized fitted model. For SBI, provide the serialized posterior object produced during training. Auto model detection inspects this artifact to determine the backend and model type; the artifact must be compatible with the ncpi and dependency versions used for prediction.">
                             Sklearn Model / SBI Posterior <span class="text-red-500">*</span>
                         </label>
                         <input class="hidden" id="file-upload-model" name="model_file" type="file" />
@@ -277,7 +277,7 @@
                         </div>
                     </div>
                     <div>
-                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                        <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" data-field-help-static="1" data-help="Optionally select the fitted feature scaler saved during model training. Supply the exact scaler associated with the selected model whenever training used scaling; a different or newly fitted scaler changes the feature representation and can invalidate predictions.">
                             Scaler (optional)
                         </label>
                         <input class="hidden" id="file-upload-scaler" name="scaler_file" type="file" />
@@ -505,9 +505,6 @@
                         />
                     </label>
                 </div>
-                <p class="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Percentage of input rows used for prediction. Values below 100 randomly subsample rows (deterministic seed) and save predictions for that subsample.
-                </p>
             </div>
         </section>
         <div class="flex justify-center pt-2">

@@ -310,7 +310,6 @@ CAVALLARI_GRID_KEYS = [
     "N_X",
     "model",
     "P",
-    "extent",
     "exc_exc_recurrent",
     "exc_inh_recurrent",
     "inh_exc_recurrent",
@@ -2789,55 +2788,6 @@ def _numeric_wildcard_stem(stem):
         return wildcard, None
     regex_src = "^" + re.escape(wildcard).replace(r"\*", r"\d+") + "$"
     return wildcard, re.compile(regex_src)
-
-
-def _extract_analysis_folder_name_tokens_from_form(form, key="parser_analysis_folder_names"):
-    tokens = []
-    for raw in _extract_text_list_from_form(form, key):
-        safe = secure_filename(str(raw or "")).strip("_")
-        token = safe or "selected_folder"
-        if token and token not in tokens:
-            tokens.append(token)
-    return tokens
-
-
-def _resolve_selected_analysis_folder_paths(form, folder_summaries):
-    available_paths = []
-    seen = set()
-    for item in folder_summaries or []:
-        path = str(item.get("folder_path") or "").strip()
-        if not path or path in seen:
-            continue
-        seen.add(path)
-        available_paths.append(path)
-
-    if not available_paths:
-        return []
-
-    selected_paths = _extract_folder_paths_from_form(
-        form,
-        singular_key=None,
-        plural_key="parser_analysis_folder_paths",
-    )
-    if len(selected_paths) > 1:
-        raise ValueError("Select only one folder for feature extraction.")
-
-    selected_path = selected_paths[0] if selected_paths else ""
-    available_set = set(available_paths)
-    unknown = [selected_path] if selected_path and selected_path not in available_set else []
-    if unknown:
-        raise ValueError(
-            "Unknown folders selected for feature extraction: "
-            + ", ".join(unknown[:4])
-            + (", ..." if len(unknown) > 4 else "")
-        )
-
-    if "parser_analysis_folder_paths" in form and len(available_paths) > 1 and not selected_path:
-        raise ValueError("Select one folder for feature extraction.")
-
-    if not selected_path:
-        return [available_paths[0]]
-    return [selected_path]
 
 
 # def _validate_uniform_supported_extension_per_folder(entries, label):
@@ -6360,7 +6310,7 @@ def _build_parse_config_from_form(form):
     segment_t0_s = _optional_float(form.get("parser_segment_t0_s"))
     segment_t1_s = _optional_float(form.get("parser_segment_t1_s"))
     if epoching_enabled and (epoch_length_s is None or epoch_step_s is None):
-        raise ValueError("Epoching is enabled. Provide both epoch length and epoch step in seconds.")
+        raise ValueError("Epoching is enabled. Provide both epoch length and epoch step in s.")
     if segment_t0_s is not None and float(segment_t0_s) < 0:
         raise ValueError("Temporal segmentation start time must be non-negative.")
     if segment_t1_s is not None and float(segment_t1_s) < 0:
@@ -7169,7 +7119,7 @@ def _build_cavallari_lif_params(form):
     N_X = _parse_literal(form, "N_X", CAVALLARI_DEFAULTS["N_X"])
     model = _parse_str(form, "model", CAVALLARI_DEFAULTS["model"])
     P = _parse_float(form, "P", CAVALLARI_DEFAULTS["P"])
-    extent = _parse_float(form, "extent", CAVALLARI_DEFAULTS["extent"])
+    extent = CAVALLARI_DEFAULTS["extent"]
     exc_exc_recurrent = _parse_float(
         form, "exc_exc_recurrent", CAVALLARI_DEFAULTS["exc_exc_recurrent"]
     )
@@ -7736,11 +7686,13 @@ def simulation():
         {
             "url": url_for('upload_sim'),
             "title": "Load data",
+            "description": "Load existing simulation outputs, such as spike times, spike gids, timing information, and network data.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('new_sim'),
             "title": "New simulation",
+            "description": "Configure and run a new neural circuit simulation using a predefined or custom model.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
         },
     ]
@@ -8610,16 +8562,19 @@ def field_potential():
         {
             "url": url_for('field_potential_load'),
             "title": "Load data",
+            "description": "Load existing field-potential outputs, such as current dipole moments, LFPs, M/EEG signals, and proxy signals.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('field_potential_kernel'),
             "title": "Kernel",
+            "description": "Compute current dipole moments and field potentials (LFP, MEG, and EEG) from kernels.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">grain</span>',
         },
         {
             "url": url_for('field_potential_proxy'),
             "title": "Proxy",
+            "description": "Estimate field potentials from simulated neural activity using computationally efficient proxy signals.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">analytics</span>',
         },
     ]
@@ -9320,11 +9275,13 @@ def features():
         {
             "url": url_for('features_load_data'),
             "title": "Load data",
+            "description": "Load precomputed feature datasets for inference or analysis.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('features_methods', entry='compute'),
             "title": "Compute new features",
+            "description": "Compute new features from simulated or empirical data signals.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
         },
     ]
@@ -10630,16 +10587,19 @@ def inference():
         {
             "url": url_for('inference_load_data'),
             "title": "Load data",
+            "description": "Load precomputed parameter predictions.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">upload_file</span>',
         },
         {
             "url": url_for('new_training'),
             "title": "New training",
+            "description": "Train a new inverse model from paired simulation parameters and features.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">add_circle</span>',
         },
         {
             "url": url_for('compute_predictions'),
             "title": "Compute predictions",
+            "description": "Use a trained inverse model to estimate parameters from feature data.",
             "icon": '<span class="material-symbols-outlined text-4xl text-slate-600 dark:text-slate-300 group-hover:text-primary">query_stats</span>',
         },
     ]
@@ -16655,10 +16615,10 @@ def start_computation_redirect(computation_type):
         if epoching_enabled:
             epoch_length_value = _optional_float(request.form.get("parser_epoch_length_s"))
             if epoch_length_value is None:
-                flash('Set an epoch length in seconds.', 'error')
+                flash('Set an epoch length in s.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
             if _optional_float(request.form.get("parser_epoch_step_s")) is None:
-                flash('Set an epoch step in seconds.', 'error')
+                flash('Set an epoch step in s.', 'error')
                 return redirect(request.referrer or url_for('features_methods'))
         seg_t0 = _optional_float(request.form.get("parser_segment_t0_s"))
         seg_t1 = _optional_float(request.form.get("parser_segment_t1_s"))
@@ -16784,14 +16744,20 @@ def start_computation_redirect(computation_type):
                     simulation_subfolder_filter_map = _extract_subfolder_filter_map_from_form(
                         request.form,
                         "simulation_subfolder_selections",
+                    ) or _extract_subfolder_filter_map_from_form(
+                        request.form,
+                        "empirical_subfolder_selections",
                     )
                     simulation_entries, folder_summaries, _, folder_contexts = _collect_supported_folder_file_entries(
                         simulation_folder_paths,
                         "Simulation outputs",
                         data_file_selection_map=simulation_data_file_selections,
                     )
-                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
-                    selected_set = set(selected_analysis_paths)
+                    selected_set = {
+                        str(item.get("folder_path") or "").strip()
+                        for item in (folder_summaries or [])
+                        if str(item.get("folder_path") or "").strip()
+                    }
                     selected_entries = [
                         entry for entry in simulation_entries
                         if str(entry.get("folder_path") or "") in selected_set
@@ -16822,7 +16788,7 @@ def start_computation_redirect(computation_type):
                         "[compute %s] simulation folder mode folders=%d selected_folders=%d files=%d selected_files=%d",
                         job_id,
                         len(folder_summaries),
-                        len(selected_analysis_paths),
+                        len(selected_set),
                         len(simulation_entries),
                         len(selected_entries),
                     )
@@ -16879,8 +16845,11 @@ def start_computation_redirect(computation_type):
                         "Empirical",
                         data_file_selection_map=empirical_data_file_selections,
                     )
-                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
-                    selected_set = set(selected_analysis_paths)
+                    selected_set = {
+                        str(item.get("folder_path") or "").strip()
+                        for item in (folder_summaries or [])
+                        if str(item.get("folder_path") or "").strip()
+                    }
                     selected_entries = [
                         entry for entry in empirical_entries
                         if str(entry.get("folder_path") or "") in selected_set
@@ -16911,7 +16880,7 @@ def start_computation_redirect(computation_type):
                         "[compute %s] empirical folder mode folders=%d selected_folders=%d files=%d selected_files=%d",
                         job_id,
                         len(folder_summaries),
-                        len(selected_analysis_paths),
+                        len(selected_set),
                         len(empirical_entries),
                         len(selected_entries),
                     )
@@ -17208,8 +17177,11 @@ def start_computation_redirect(computation_type):
                         "Simulation outputs",
                         data_file_selection_map=simulation_data_file_selections,
                     )
-                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
-                    selected_path_set = set(selected_analysis_paths)
+                    selected_path_set = {
+                        str(item.get("folder_path") or "").strip()
+                        for item in (folder_summaries or [])
+                        if str(item.get("folder_path") or "").strip()
+                    }
                     selected_entries = [
                         entry for entry in source_entries
                         if str(entry.get("folder_path") or "") in selected_path_set
@@ -17220,6 +17192,18 @@ def start_computation_redirect(computation_type):
                         if folder_path not in selected_path_set:
                             continue
                         selected_data_entries.extend(list(context.get("selected_entries") or []))
+                    if simulation_subfolder_filter_map and selected_data_entries:
+                        _filtered = []
+                        for _entry in selected_data_entries:
+                            _fp = str(_entry.get("folder_path") or "").strip()
+                            _included = simulation_subfolder_filter_map.get(_fp, [])
+                            if not _included:
+                                _filtered.append(_entry)
+                                continue
+                            _sub = str(_entry.get("level1_subfolder") or "").strip()
+                            if not _sub or _sub in _included:
+                                _filtered.append(_entry)
+                        selected_data_entries = _filtered
                     if selected_data_entries:
                         selected_entries = selected_data_entries
                     if not filename_format_spec:
@@ -17235,6 +17219,7 @@ def start_computation_redirect(computation_type):
                                 source_entries,
                                 selected_path_set,
                                 nested_selected_exts,
+                                simulation_subfolder_filter_map,
                             )
                             if expanded_auto_entries:
                                 selected_entries = expanded_auto_entries
@@ -17249,6 +17234,7 @@ def start_computation_redirect(computation_type):
                             source_entries,
                             selected_path_set,
                             folder_contexts,
+                            simulation_subfolder_filter_map,
                         )
                         if expanded_entries:
                             selected_entries = expanded_entries
@@ -17348,20 +17334,6 @@ def start_computation_redirect(computation_type):
                         row for row in upload_items
                         if Path(str(row[1] or "")).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
                     ]
-                    selected_analysis_name_tokens = _extract_analysis_folder_name_tokens_from_form(request.form)
-                    if len(selected_analysis_name_tokens) > 1:
-                        raise ValueError("Select only one folder for feature extraction.")
-                    if "parser_analysis_folder_names" in request.form and len(local_folder_tokens) > 1 and not selected_analysis_name_tokens:
-                        raise ValueError("Select one folder for feature extraction.")
-                    selected_token = selected_analysis_name_tokens[0] if selected_analysis_name_tokens else (
-                        local_folder_tokens[0] if local_folder_tokens else None
-                    )
-                    if selected_token and selected_token not in local_folder_token_set:
-                        raise ValueError(
-                            f"Unknown local folder selected for feature extraction: {selected_token}"
-                        )
-                    if selected_token:
-                        upload_items = [row for row in upload_items if row[3] == selected_token]
                     if filename_format_spec:
                         upload_items, skipped_names = _filter_named_items_by_filename_format(
                             upload_items,
@@ -17500,8 +17472,11 @@ def start_computation_redirect(computation_type):
                         "Empirical",
                         data_file_selection_map=empirical_data_file_selections,
                     )
-                    selected_analysis_paths = _resolve_selected_analysis_folder_paths(request.form, folder_summaries)
-                    selected_path_set = set(selected_analysis_paths)
+                    selected_path_set = {
+                        str(item.get("folder_path") or "").strip()
+                        for item in (folder_summaries or [])
+                        if str(item.get("folder_path") or "").strip()
+                    }
                     selected_entries = [
                         entry for entry in source_entries
                         if str(entry.get("folder_path") or "") in selected_path_set
@@ -17654,19 +17629,6 @@ def start_computation_redirect(computation_type):
                         row for row in upload_items
                         if Path(str(row[1] or "")).suffix.lower() in FEATURES_PARSER_FILE_EXTENSIONS
                     ]
-                    selected_analysis_name_tokens = _extract_analysis_folder_name_tokens_from_form(request.form)
-                    if len(selected_analysis_name_tokens) > 1:
-                        raise ValueError("Select only one folder for feature extraction.")
-                    if "parser_analysis_folder_names" in request.form and len(local_folder_tokens) > 1 and not selected_analysis_name_tokens:
-                        raise ValueError("Select one folder for feature extraction.")
-                    selected_token = selected_analysis_name_tokens[0] if selected_analysis_name_tokens else (
-                        local_folder_tokens[0] if local_folder_tokens else None
-                    )
-                    if selected_token and selected_token not in local_folder_token_set:
-                        raise ValueError(
-                            f"Unknown local folder selected for feature extraction: {selected_token}"
-                        )
-
                     # Before folder filtering, try to resolve companion channel-names file
                     # from any uploaded subfolder (e.g. channels/channels.mat alongside data/).
                     if (
@@ -18446,4 +18408,6 @@ def download_results(job_id):
     )
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    from launcher import run_webui
+
+    run_webui(app)

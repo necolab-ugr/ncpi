@@ -24,6 +24,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const areaSpecificLocalParamSet = new Set(areaSpecificLocalParams);
     const interAreaParamNames = ['inter_area.C_YX', 'inter_area.J_YX', 'inter_area.delay_YX'];
     const interAreaSourceAreaColors = ['#dc2626', '#2563eb', '#16a34a', '#a855f7'];
+    const jointParamUnits = {
+        C_m_X: 'pF',
+        tau_m_X: 'ms',
+        E_L_X: 'mV',
+        J_YX: 'nA',
+        delay_YX: 'ms',
+        tau_syn_YX: 'ms',
+        nu_ext: 'Hz',
+        J_ext: 'nA',
+        'inter_area.J_YX': 'nA',
+        'inter_area.delay_YX': 'ms',
+    };
     // Preset values for four-area cortical model configuration
     const ncpiPresets = {
         tstop: 12000.0,
@@ -65,7 +77,6 @@ document.addEventListener('DOMContentLoaded', function() {
         useNumpySeedInput: document.getElementById('sim-use-numpy-seed'),
         numpySeedInput: document.getElementById('sim-numpy-seed'),
         areaSelector: document.getElementById('four-area-selector'),
-        areaEditorStatus: document.getElementById('four-area-editor-status'),
         interAreaModeStatus: document.getElementById('inter-area-mode-status'),
     };
     const restoreForm = readSimulationRestoreForm();
@@ -369,10 +380,16 @@ document.addEventListener('DOMContentLoaded', function() {
         options.forEach((option, index) => {
             option.textContent = areaNames[index] || `area_${index}`;
         });
-        if (elements.areaEditorStatus) {
-            const currentName = areaNames[Math.max(0, Math.min(activeAreaIndex, areaNames.length - 1))] || areaNames[0];
-            elements.areaEditorStatus.textContent = `Area selector affects Network local parameters and recurrent connectivity for "${currentName}" only. Simulation parameters and inter-area connectivity are common for all areas.`;
-        }
+        const selectedAreaName = areaNames[Math.max(0, Math.min(activeAreaIndex, areaNames.length - 1))]
+            || `area_${activeAreaIndex}`;
+        [
+            document.getElementById('network-selected-area'),
+            document.getElementById('recurrent-selected-area'),
+        ].forEach(indicator => {
+            if (indicator) {
+                indicator.textContent = `Selected area: ${selectedAreaName}`;
+            }
+        });
     }
 
     function initializeAreaLocalState() {
@@ -836,6 +853,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const seen = new Set();
         const options = [];
+        const displayLabel = (paramName) => {
+            const unit = jointParamUnits[paramName];
+            return unit ? `${paramName} (${unit})` : paramName;
+        };
         const inputs = Array.from(elements.form.querySelectorAll('.param-input'))
             .filter(input => {
                 const paramName = input.dataset.param || input.name || '';
@@ -855,7 +876,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!isArrayKind || rows.length <= 1) {
                 if (!seen.has(paramName)) {
                     seen.add(paramName);
-                    options.push({ value: paramName, label: paramName });
+                    options.push({ value: paramName, label: displayLabel(paramName) });
                 }
                 return;
             }
@@ -868,7 +889,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 seen.add(token);
                 const leafLabel = describeLeafLabel(paramName, path, index, true);
-                options.push({ value: token, label: `${paramName} - ${leafLabel}` });
+                options.push({ value: token, label: `${displayLabel(paramName)} - ${leafLabel}` });
             });
         });
 
@@ -995,7 +1016,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     Remove
                 </button>
             </div>
-            <label class="mt-3 flex flex-col gap-2">
+            <label class="mt-3 flex flex-col gap-2" data-field-help-skip="1">
                 <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Grouped parameters</span>
                 <select
                     multiple
@@ -1176,7 +1197,9 @@ document.addEventListener('DOMContentLoaded', function() {
         const paramName = input.dataset.param || input.name || '';
 
         const controls = document.createElement('div');
-        controls.className = 'single-array-controls mt-2 grid grid-cols-1 md:grid-cols-2 gap-2';
+        controls.className = String(paramName).startsWith('inter_area.')
+            ? 'single-array-controls mt-2 grid grid-cols-1 gap-2'
+            : 'single-array-controls mt-2 grid grid-cols-1 md:grid-cols-2 gap-2';
         controls.dataset.baseValue = JSON.stringify(parsed);
         controls.dataset.paramName = paramName;
 
@@ -1257,7 +1280,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!elements.interAreaModeStatus) {
             return;
         }
-        elements.interAreaModeStatus.textContent = 'Inter-area connectivity is always shown as full 8x8 area-population matrices (frontal.E, frontal.I, ..., occipital.I). Same-area entries are ignored by the simulator.';
+        elements.interAreaModeStatus.textContent = 'Inter-area connectivity is always shown as full 8x8 area-population matrices (frontal.E, frontal.I, ..., occipital.I). Same-area entries are ignored by the simulator (these connections are configured in the Recurrent connectivity section).';
     }
 
     function ensureFullInterAreaMatrices() {
@@ -1554,6 +1577,33 @@ document.addEventListener('DOMContentLoaded', function() {
         return { ok: true, candidateCount: totalCombos, candidateCountsByToken };
     }
 
+    function initializeParameterInput(input) {
+        const paramName = input.dataset.param;
+        const preset = restoredValueOrPreset(paramName, ncpiPresets[paramName]);
+        if (!input.name) {
+            input.name = paramName;
+        }
+
+        if (input.type === 'checkbox') {
+            input.checked = Boolean(preset);
+            return;
+        }
+
+        if (preset !== undefined) {
+            if (!input.dataset.originalType) {
+                input.dataset.originalType = input.type || 'text';
+            }
+            ensureInputCanCarryValue(input, preset);
+            input.value = preset;
+        }
+
+        addSingleArrayControls(input, preset);
+
+        if (!simulationOnlyParams.has(paramName) && !fixedGridParams.has(paramName)) {
+            addGridControls(input, preset);
+        }
+    }
+
     // Function to create parameter section
     function createParameterSection() {
         const clone = elements.paramSection.content.cloneNode(true);
@@ -1561,32 +1611,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Configure all parameter inputs
         const inputs = section.querySelectorAll('.param-input');
-        inputs.forEach(input => {
-            const paramName = input.dataset.param;
-            const preset = restoredValueOrPreset(paramName, ncpiPresets[paramName]);
-            if (!input.name) {
-                input.name = paramName;
-            }
-
-            if (input.type === 'checkbox') {
-                input.checked = Boolean(preset);
-                return;
-            }
-
-            if (preset !== undefined) {
-                if (!input.dataset.originalType) {
-                    input.dataset.originalType = input.type || 'text';
-                }
-                ensureInputCanCarryValue(input, preset);
-                input.value = preset;
-            }
-
-            addSingleArrayControls(input, preset);
-
-            if (!simulationOnlyParams.has(paramName) && !fixedGridParams.has(paramName)) {
-                addGridControls(input, preset);
-            }
-        });
+        inputs.forEach(initializeParameterInput);
 
         // Append the cloned section to the container
         elements.container.appendChild(section);
@@ -1631,6 +1656,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // Initialize UI
+    ['areas', 'X'].forEach(paramName => {
+        const sharedInput = document.querySelector(`.param-input[data-param="${paramName}"]`);
+        if (sharedInput) {
+            initializeParameterInput(sharedInput);
+        }
+    });
     createParameterSection();
     restoreSimulationFormControls();
     setupInterAreaMatrixUi();
@@ -1691,7 +1722,24 @@ document.addEventListener('DOMContentLoaded', function() {
             updateInterAreaModeStatus();
         });
     }
-    if (elements.container) {
+    if (elements.form) {
+        const _syncActiveAreaOnLocalEdit = (event) => {
+            const target = event.target;
+            if (!(target instanceof HTMLInputElement)) {
+                return;
+            }
+            const directParam = target.matches('.param-input')
+                ? (target.dataset.param || target.name || '')
+                : '';
+            const dynamicRow = target.closest('[data-param-name]');
+            const dynamicParam = dynamicRow ? (dynamicRow.dataset.paramName || '') : '';
+            if (areaSpecificLocalParamSet.has(directParam) || areaSpecificLocalParamSet.has(dynamicParam)) {
+                captureAreaLocalState(activeAreaIndex);
+            }
+        };
+        elements.form.addEventListener('input', _syncActiveAreaOnLocalEdit);
+        elements.form.addEventListener('change', _syncActiveAreaOnLocalEdit);
+
         const _refreshOnNameControlEdit = (event) => {
             const row = event.target && event.target.closest
                 ? event.target.closest('[data-single-array-row="1"]')
@@ -1709,8 +1757,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 updateInterAreaModeStatus();
             }
         };
-        elements.container.addEventListener('input', _refreshOnNameControlEdit);
-        elements.container.addEventListener('change', _refreshOnNameControlEdit);
+        elements.form.addEventListener('input', _refreshOnNameControlEdit);
+        elements.form.addEventListener('change', _refreshOnNameControlEdit);
     }
     if (elements.areaSelector) {
         elements.areaSelector.addEventListener('change', (event) => {

@@ -1,4 +1,4 @@
-> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 1, 2026.**
+> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 16, 2026.**
 
 <div align="center">
 
@@ -15,6 +15,10 @@ ___
 electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provides a rapid, reproducible, and robust
 framework for estimating the most probable neural circuit parameters associated with an empirical observation,
 streamlining traditionally complex workflows into a minimal amount of code.
+
+<div align="center">
+  <img src="docs/tutorials/automation/videos/compute-field-potentials.gif" alt="Field-potential computation workflow in the ncpi WebUI" width="800">
+</div>
 
 # Key Features of `ncpi`
 - **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural
@@ -34,7 +38,9 @@ We strongly recommend installing `ncpi` in a dedicated **Conda** environment.
 If you need to install Anaconda first, download it from the official page:
 https://www.anaconda.com/download
 
-On Windows, start from **Anaconda Prompt** (recommended).
+On Windows, start from **Anaconda Prompt** (recommended). Some packages, including NEST and NEURON, require a Linux
+environment and should be installed through WSL2. See **Section 3** for the native Windows and WSL2 installation
+options.
 
 ## 2) Install ncpi on Unix (Linux/macOS)
 
@@ -56,7 +62,21 @@ instructions: https://nest-simulator.readthedocs.io/
 
 ## 3) Install ncpi on Windows
 
-In **Anaconda Prompt**, run:
+There are two installation options on Windows. Choose the option based on whether your workflow requires NEST or/and
+NEURON:
+
+1. **Native Windows Anaconda environment**: suitable for core ncpi workflows and optional dependencies that do not
+   require NEST or NEURON.
+2. **Anaconda environment inside WSL2**: required for NEST- and NEURON-based simulations. NEST and the Python
+   `neuron` package cannot be installed in the supported native Windows environment, but they can be installed in
+   WSL because it provides a Linux environment.
+
+The Windows and WSL Conda environments are completely separate. Packages installed in one environment are not
+available in the other.
+
+### Option A: Native Windows installation
+
+In **Anaconda Prompt**, create the environment and install ncpi:
 
 ```powershell
 conda create -n ncpi-env python=3.10 -y
@@ -64,16 +84,25 @@ conda activate ncpi-env
 pip install ncpi
 ```
 
-### NEST on Windows
-NEST-based examples are recommended via **WSL2 (Ubuntu)**, not native Windows.
+Use this option when you do not need NEST, NEURON, or the ncpi extras that depend on them, such as
+`fieldpotential`, `examples`, `tests`, and `all`.
+
+### Option B: WSL2 installation with NEST and NEURON
+
+First, install WSL2 with Ubuntu from an **Administrator PowerShell**:
 
 ```powershell
 # One-time WSL2 setup
 wsl --install
 ```
 
-Then, inside the Ubuntu/WSL shell:
+After restarting Windows if requested, open Ubuntu and install a Linux Conda distribution inside WSL. Then create the
+WSL environment and install ncpi and NEST:
+
 ```bash
+conda create -n ncpi-env python=3.10 -y
+conda activate ncpi-env
+pip install ncpi
 conda install -c conda-forge nest-simulator=3.8
 ```
 
@@ -84,45 +113,76 @@ conda install -c conda-forge nest-simulator=3.8
 ### Extras shortcuts
 ```bash
 pip install "ncpi[parser]"          # extended parser backends
-pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models
+pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models [Windows: WSL required]
 pip install "ncpi[webui]"           # WebUI runtime backends
-pip install "ncpi[examples]"        # dependencies for example scripts
+pip install "ncpi[examples]"        # dependencies for example scripts [Windows: WSL required]
 # Note: the dependencies listed below refer to Section 6 (Optional backends notes).
-pip install "ncpi[tests]"           # test stack dependencies
+pip install "ncpi[tests]"           # test stack dependencies [Windows: WSL required]
 pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
 pip install "ncpi[hctsa]"           # hctsa backend support
+pip install "ncpi[all]"             # all optional dependencies [Windows: WSL required]
 ```
 
 ## 5) WebUI: installation and usage
 
-The WebUI is available from the repository source (`webui/app.py`).
-
-### Install WebUI dependencies
-After activating your Conda environment:
+The WebUI must be run from the ncpi repository source. After activating your Conda environment, install its
+dependencies with:
 
 ```bash
 pip install "ncpi[webui]"
 ```
 
 ### Start WebUI
-From the repository root:
+
+From the repository root, with the Conda environment activated:
 
 ```bash
-python webui/app.py
+python webui/launcher.py local
 ```
 
-Then open:
+The launcher starts Flask and opens the default browser at:
 
 ```text
 http://127.0.0.1:5000
 ```
 
-For best results, we recommend running the WebUI in Chrome, as our tests are most stable there and we have observed a
-couple of issues in other browsers.
+The following compatibility command also starts the local WebUI:
+
+```bash
+python webui/app.py
+```
+
+For best results, we recommend running the WebUI in Chrome, as our tests are most stable there and we have observed a couple of issues in other browsers.
+
+### Run on a remote server over SSH
+
+#### Remote command
+
+Run the following command from the `ncpi` repository on your local machine:
+
+```bash
+python webui/launcher.py remote <user>@<server> \
+  --ssh-port <P> \
+  --local-port <L> \
+  --remote-port <R> \
+  --remote-dir <path/to/ncpi> \
+  --python <path/to/python>
+```
+
+Replace the placeholders:
+- `<user>@<server>`: SSH destination (e.g., `username@example.org`)
+- `<P>`: SSH port (default: 22)
+- `<L>`: Local port on your machine for the browser (default: 5000)
+- `<R>`: Remote port on the server where Flask runs (default: 5000)
+- `<path/to/ncpi>`: Absolute path to the `ncpi` repository on the server
+- `<path/to/python>`: Absolute path to Python executable on the server (from `which python`)
+
+The browser opens `http://127.0.0.1:<L>`. Keep the launcher terminal open while using the WebUI. Press `Ctrl+C` to close the SSH tunnel and stop the remote Flask process.
 
 ### Windows note
-You can run the same command from Anaconda Prompt or PowerShell.
-If your workflow needs NEST, run the WebUI from your WSL environment where NEST is installed.
+
+You can run the same commands from Anaconda Prompt or PowerShell. Run the WebUI from WSL if your workflow requires
+NEST-based simulations or NEURON-dependent field-potential computations.
 
 ## 6) Optional backends notes
 Optional backends are listed in **Section 4 (Optional Dependencies)**. Install only the extras required by your workflow.

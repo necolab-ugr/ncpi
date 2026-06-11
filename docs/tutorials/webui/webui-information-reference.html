@@ -1,0 +1,1830 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Docs | WebUI Configuration Reference</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png">
+  <link rel="stylesheet" href="../../docs_style.css">
+  <style>
+    .reference-overview { background: linear-gradient(135deg, #fff, rgba(0, 137, 199, 0.06)); }
+    .tooltip-search { width: 100%; padding: 0.78rem 0.9rem; border: 1px solid var(--line-strong); border-radius: 10px; font: inherit; background: #fff; }
+    .module-reference-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; margin-top: 1.1rem; }
+    .module-reference-card { display: grid; gap: 0.32rem; padding: 0.9rem; border: 1px solid rgba(0, 137, 199, 0.22); border-radius: 12px; background: #fff; color: var(--ink); }
+    .module-reference-card:hover { border-color: var(--line-strong); box-shadow: var(--shadow-soft); }
+    .module-reference-card span { color: var(--muted); font-size: 0.88rem; }
+    .module-reference-card small { color: var(--accent); font-family: "IBM Plex Mono", monospace; }
+    .tooltip-module { border-top: 4px solid var(--module-accent, var(--accent)); scroll-margin-top: 1rem; }
+    #simulation { --module-accent: #0089c7; }
+    #field-potential { --module-accent: #00a795; }
+    #features { --module-accent: #1f4dbf; }
+    #inference { --module-accent: #d9593b; }
+    #analysis { --module-accent: #7750b8; }
+    .module-heading { display: flex; justify-content: space-between; gap: 1rem; align-items: flex-start; margin-bottom: 1rem; }
+    .module-heading h2 { margin: 0.12rem 0 0.3rem; }
+    .module-heading p { margin: 0; }
+    .module-kicker { color: var(--module-accent, var(--accent)); font-family: "IBM Plex Mono", monospace; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; }
+    .module-count, .entry-count { white-space: nowrap; border-radius: 999px; background: rgba(0, 137, 199, 0.09); color: var(--module-accent, var(--accent)); padding: 0.25rem 0.55rem; font-size: 0.72rem; font-weight: 700; }
+    .config-group { margin: 0.72rem 0; border: 1px solid rgba(0, 137, 199, 0.2); border-radius: 12px; overflow: hidden; background: #fff; }
+    .config-group summary { display: flex; justify-content: space-between; align-items: center; gap: 1rem; cursor: pointer; padding: 0.78rem 0.9rem; color: #0d3f63; font-family: "Sora", sans-serif; font-weight: 700; background: rgba(0, 137, 199, 0.045); }
+    .config-group[open] summary { border-bottom: 1px solid rgba(0, 137, 199, 0.18); }
+    .tooltip-table-wrap { overflow-x: auto; }
+    .tooltip-table { display: table; border-collapse: collapse; }
+    .tooltip-table th, .tooltip-table td { padding: 0.72rem 0.8rem; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .tooltip-table tr:last-child th, .tooltip-table tr:last-child td { border-bottom: 0; }
+    .tooltip-table th:first-child { min-width: 14rem; width: 27%; }
+    .tooltip-table td { min-width: 28rem; }
+    .tooltip-empty { display: none; color: var(--muted); font-style: italic; }
+    @media (max-width: 760px) { .module-reference-grid { grid-template-columns: 1fr; } .module-heading { display: block; } .module-count { display: inline-block; margin-top: 0.65rem; } }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <a class="brand-home" href="../../index.html"><img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo"></a>
+        <div class="title"><a href="../../index.html">Documentation</a></div>
+      </div>
+      <ul class="left-nav">
+        <li><a class="github-link" href="https://github.com/necolab-ugr/ncpi"><img class="github-mark" src="https://github.githubassets.com/favicons/favicon.svg" alt=""/>GitHub Repository</a></li>
+        <li><a href="../../index.html">Home</a></li>
+        <li><a href="../../installation.html">Installation</a></li>
+        <li><a class="active" href="../../tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse" open>
+            <summary class="subnav active">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">WebUI Reference</li>
+              <li><a class="subnav2 active" href="./webui-information-reference.html">Configuration Reference</a></li>
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./compute-predictions.html">5. Compute Predictions</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="../jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="../jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="../jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="../jupyter/training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="../jupyter/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+            </ul>
+          </details>
+        </li>
+        <li><a href="../../api.html">API</a></li>
+        <li><a href="../../faq.html">FAQ</a></li>
+        <li><a href="../../contributing.html">Contributing</a></li>
+        <li><a href="../../citation.html">Citation</a></li>
+        <li><a href="../../credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="overview" class="reference-overview">
+          <h1>WebUI Configuration Reference</h1>
+          <p><span class="pill">Modules and Parameters</span></p>
+          <p>
+            This reference summarizes the purpose, workflows, and configurable parameters of every WebUI
+            module. Information is organized by module, task, feature method, and simulation model so related
+            settings can be reviewed together. Generic fallback messages for controls without explicit help
+            are not repeated here.
+          </p>
+          <label for="tooltip-search"><strong>Search the configuration reference</strong></label>
+          <input id="tooltip-search" class="tooltip-search" type="search" placeholder="Search modules, categories, parameters, and descriptions">
+          <p id="tooltip-empty" class="tooltip-empty">No configuration information matches this search.</p>
+          <div class="module-reference-grid">
+            <a class="module-reference-card" href="#simulation">
+              <strong>Simulation</strong>
+              <span>Simulation setup, neural network models, parameter sweeps, and model-specific controls.</span>
+              <small>5 categories · 83 entries</small>
+            </a>
+            <a class="module-reference-card" href="#field-potential">
+              <strong>Field Potential</strong>
+              <span>Proxy signals, biophysical kernels, CDM/LFP computation, and M/EEG forward models.</span>
+              <small>6 categories · 34 entries</small>
+            </a>
+            <a class="module-reference-card" href="#features">
+              <strong>Features</strong>
+              <span>Feature methods, computation settings, data loading, and electrophysiology parsing.</span>
+              <small>9 categories · 123 entries</small>
+            </a>
+            <a class="module-reference-card" href="#inference">
+              <strong>Inference</strong>
+              <span>Inverse-model training, model assets, prediction settings, and SBI controls.</span>
+              <small>6 categories · 37 entries</small>
+            </a>
+            <a class="module-reference-card" href="#analysis">
+              <strong>Analysis</strong>
+              <span>Boxplots, topographic maps, and simulation-result visualization controls.</span>
+              <small>4 categories · 39 entries</small>
+            </a>
+          </div>
+        </section>
+
+        <section id="simulation" class="tooltip-module">
+          <div class="module-heading">
+            <div>
+              <span class="module-kicker">WebUI module</span>
+              <h2>Simulation</h2>
+              <p>Simulation setup, neural network models, parameter sweeps, and model-specific controls.</p>
+            </div>
+            <span class="module-count">83 entries</span>
+          </div>
+          <details class="config-group" open>
+            <summary><span>Module overview and available workflows</span><span class="entry-count">8 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Simulation module</code></th>
+                  <td>Configure and run neural circuit simulations, or upload existing simulation outputs, to generate synthetic data for downstream processing.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Load data</code></th>
+                  <td>Load existing simulation outputs, such as spike times, spike gids, timing information, and network data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>New simulation</code></th>
+                  <td>Configure and run a new neural circuit simulation using a predefined or custom model.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/simulation/upload_sim</code></th>
+                  <td>Load previously generated simulation pickle outputs, including complete simulation bundles or legacy spike-time, spike-gid, timing, and network files.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/simulation/new_sim/custom</code></th>
+                  <td>Configure a custom simulation by supplying the required model and parameter files. The uploaded code defines available parameters and output behavior.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/simulation/new_sim/hagen</code></th>
+                  <td>Configure the Hagen current-based excitatory/inhibitory LIF network, including population parameters and connectivity matrices.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/simulation/new_sim/four_area</code></th>
+                  <td>Configure four coupled cortical areas. Local parameters apply to the selected area; inter-area matrices configure connections between areas.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/simulation/new_sim/cavallari</code></th>
+                  <td>Configure the Cavallari conductance-based network, including spatial connectivity, external drive, synaptic conductances, and neuron dynamics.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Simulation and parameter-sweep controls</span><span class="entry-count">9 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tstop</code></th>
+                  <td>Total simulated duration in ms. Increase it to observe longer dynamics, at the cost of proportionally longer computation and larger outputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Dt</code></th>
+                  <td>Simulation integration time step in ms. Smaller values improve temporal resolution and numerical accuracy but increase runtime and output size.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Local Num Threads</code></th>
+                  <td>Number of CPU threads used by the simulator. Use a positive integer appropriate for the available CPU cores; excessive values can reduce performance.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Run Mode</code></th>
+                  <td>Single trial runs one simulation using the parameter values shown in the form. Parameter grid sweep runs multiple simulations while exploring selected parameters. In parameter exploration, ungrouped parameters form a Cartesian grid search; joint sweep groups link selected parameters by candidate index so they change together instead. For each swept parameter, Start is the first simulated value, Step is the amount added between values, and End is the target limit. Use a positive Step when End is above Start and a negative Step when End is below Start. End is included only when repeated Step increments reach it exactly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Numpy Seed</code></th>
+                  <td>Seed used for NumPy randomization. Enable Fix seed and enter a non-negative integer to reproduce stochastic parameter generation and repeated runs. Leave Fix seed disabled to use non-fixed randomization.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Grid Start</code></th>
+                  <td>Starting value simulated for this parameter.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Grid Step</code></th>
+                  <td>Amount added to the parameter between simulations. Use a positive step when End is above Start and a negative step when End is below Start.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Grid End</code></th>
+                  <td>Final target value for the parameter exploration. It is included only when repeated Step increments land on it; otherwise the last simulated value is the final stepped value before End.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Repetitions</code></th>
+                  <td>Number of times each simulation configuration is run. Use multiple repetitions to characterize stochastic variability.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Hagen model parameters</span><span class="entry-count">13 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>X</code></th>
+                  <td>Population labels used across all population-indexed parameters. Changing them here updates the labels shown in all other parameters.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>N X</code></th>
+                  <td>Number of neurons in each population. Use positive integers; larger populations increase runtime and memory use.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>C M X</code></th>
+                  <td>Membrane capacitance for each population, in pF. Use positive values; larger values make membrane voltage respond more slowly to current.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau M X</code></th>
+                  <td>Membrane time constant for each population, in ms. Use positive values; larger values make membrane voltage decay more slowly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>E L X</code></th>
+                  <td>Resting or leak reversal potential for each population, in mV. It defines the voltage approached without synaptic or injected input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Model</code></th>
+                  <td>Neuron model fixed by the selected simulation template. Read-only values cannot be changed from this form.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>C Yx</code></th>
+                  <td>Connection-probability matrix from source populations X to target populations Y. Use values from 0 to 1; larger values create denser recurrent connectivity.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>J Yx</code></th>
+                  <td>Synaptic-weight matrix from source populations X to target populations Y, in nA. Sign determines excitatory or inhibitory effect, and larger absolute values strengthen connections.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Delay Yx</code></th>
+                  <td>Synaptic transmission-delay matrix from source populations X to target populations Y, in ms. Use non-negative values; larger values make activity arrive later.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau Syn Yx</code></th>
+                  <td>Synaptic-current decay time constants for each source-target connection type, in ms. Use positive values; larger values produce longer-lasting postsynaptic effects.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>N Ext</code></th>
+                  <td>Effective number of external input connections received by each neuron. Use non-negative integers; larger values increase external input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Nu Ext</code></th>
+                  <td>Rate of each external Poisson input, in Hz. Use a non-negative value; larger values increase external input activity and generally raise network firing.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>J Ext</code></th>
+                  <td>Strength of each external synaptic input, in nA. Sign determines excitatory or inhibitory effect, and larger absolute values strengthen the external input.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Cavallari model parameters</span><span class="entry-count">32 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>X</code></th>
+                  <td>Population labels used across all population-indexed parameters. Changing them here updates the labels shown in all other parameters.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>N X</code></th>
+                  <td>Number of neurons in each population. Use positive integers; larger populations increase runtime and memory use.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>C M X</code></th>
+                  <td>Membrane capacitance for each population, in pF. Use positive values; larger values make membrane voltage respond more slowly to current.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau M X</code></th>
+                  <td>Membrane time constant for each population, in ms. Use positive values; larger values make membrane voltage decay more slowly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>E L X</code></th>
+                  <td>Resting or leak reversal potential for each population, in mV. It defines the voltage approached without synaptic or injected input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Model</code></th>
+                  <td>Neuron model fixed by the selected simulation template. Read-only values cannot be changed from this form.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>P</code></th>
+                  <td>Probability of each recurrent source-target neuron pair being connected. Use a value from 0 to 1; larger values create denser connectivity and increase recurrent input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Extent</code></th>
+                  <td>Spatial size of the modeled network. Configure it using the units expected by the selected simulation model.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>OU Sigma</code></th>
+                  <td>Standard deviation of the Ornstein-Uhlenbeck process that generates cortical external-input fluctuations, in spikes/ms. Use a non-negative value; 0 disables fluctuations and larger values increase their magnitude.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>OU Tau</code></th>
+                  <td>Time constant of the Ornstein-Uhlenbeck process that generates cortical external-input fluctuations, in ms. Use a positive value; larger values produce slower, more persistent fluctuations.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>V Th X</code></th>
+                  <td>Membrane-potential threshold at which each population&#x27;s neurons emit a spike, in mV. It should be above the reset and leak reversal potentials; lower values make neurons easier to activate.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>V Reset X</code></th>
+                  <td>Membrane potential assigned after a spike for each population, in mV. It should be below the spike threshold; lower values generally delay the next spike.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>T Ref X</code></th>
+                  <td>Absolute refractory period after a spike for each population, in ms. Use a non-negative value; larger values reduce the maximum possible firing rate.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>G L X</code></th>
+                  <td>Leak conductance for each population, in nS. Use a positive value; larger values pull membrane voltage toward the leak reversal potential more strongly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>E Ex X</code></th>
+                  <td>Excitatory synaptic reversal potential for each population, in mV. It should normally be above resting and threshold potentials.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>E In X</code></th>
+                  <td>Inhibitory synaptic reversal potential for each population, in mV. It should normally be below resting and threshold potentials.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau Rise Ampa X</code></th>
+                  <td>AMPA conductance rise time for each population, in ms. Use a positive value; larger values make excitatory conductance rise more slowly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau Decay Ampa X</code></th>
+                  <td>AMPA conductance decay time for each population, in ms. Use a positive value greater than the AMPA rise time; larger values prolong excitatory input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau Rise GABA A X</code></th>
+                  <td>GABA-A conductance rise time for each population, in ms. Use a positive value; larger values make inhibitory conductance rise more slowly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau Decay GABA A X</code></th>
+                  <td>GABA-A conductance decay time for each population, in ms. Use a positive value greater than the GABA-A rise time; larger values prolong inhibitory input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>I E X</code></th>
+                  <td>Constant current injected into each population&#x27;s neurons, in pA. Positive values depolarize neurons and negative values hyperpolarize them.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Exc Exc Recurrent</code></th>
+                  <td>Recurrent synaptic conductance from an excitatory source neuron to an excitatory target neuron, in nS. Use a positive value; larger values strengthen recurrent excitation of excitatory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Exc Inh Recurrent</code></th>
+                  <td>Recurrent synaptic conductance from an excitatory source neuron to an inhibitory target neuron, in nS. Use a positive value; larger values strengthen excitation of inhibitory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inh Exc Recurrent</code></th>
+                  <td>Recurrent synaptic conductance from an inhibitory source neuron to an excitatory target neuron, in nS. Use a negative value; larger absolute values strengthen inhibition of excitatory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inh Inh Recurrent</code></th>
+                  <td>Recurrent synaptic conductance from an inhibitory source neuron to an inhibitory target neuron, in nS. Use a negative value; larger absolute values strengthen recurrent inhibition of inhibitory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Th Exc External</code></th>
+                  <td>Synaptic conductance from the thalamic external-input generator to excitatory neurons, in nS. Use a non-negative value; larger values strengthen thalamic drive to excitatory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Th Inh External</code></th>
+                  <td>Synaptic conductance from the thalamic external-input generator to inhibitory neurons, in nS. Use a non-negative value; larger values strengthen thalamic drive to inhibitory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Cc Exc External</code></th>
+                  <td>Synaptic conductance from the cortical external-input generator to excitatory neurons, in nS. Use a non-negative value; larger values strengthen fluctuating cortical input to excitatory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Cc Inh External</code></th>
+                  <td>Synaptic conductance from the cortical external-input generator to inhibitory neurons, in nS. Use a non-negative value; larger values strengthen fluctuating cortical input to inhibitory neurons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>V 0</code></th>
+                  <td>Constant baseline component of the thalamic external-input signal, in spikes/ms. Use a non-negative value; larger values increase the baseline thalamic input rate.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>A Ext</code></th>
+                  <td>Amplitude of the sinusoidal component added to the thalamic external-input signal, in spikes/ms. Use a non-negative value; 0 disables the oscillatory component and larger values increase its modulation depth.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>F Ext</code></th>
+                  <td>Frequency of the sinusoidal component added to the thalamic external-input signal, in Hz. Use a non-negative value; it has no effect when the oscillatory amplitude is 0.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Four-area model parameters</span><span class="entry-count">21 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Areas</code></th>
+                  <td>Area labels used across all area-indexed parameters. Changing them here updates the labels shown in all other parameters and the area selector.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>X</code></th>
+                  <td>Population labels used across all population-indexed parameters. Changing them here updates the labels shown in all other parameters.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>N X</code></th>
+                  <td>Number of neurons in each population. Use positive integers; larger populations increase runtime and memory use.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>C M X</code></th>
+                  <td>Membrane capacitance for each population, in pF. Use positive values; larger values make membrane voltage respond more slowly to current.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau M X</code></th>
+                  <td>Membrane time constant for each population, in ms. Use positive values; larger values make membrane voltage decay more slowly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>E L X</code></th>
+                  <td>Resting or leak reversal potential for each population, in mV. It defines the voltage approached without synaptic or injected input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Model</code></th>
+                  <td>Neuron model fixed by the selected simulation template. Read-only values cannot be changed from this form.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>C Yx</code></th>
+                  <td>Connection-probability matrix from source populations X to target populations Y. Use values from 0 to 1; larger values create denser recurrent connectivity.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>J Yx</code></th>
+                  <td>Synaptic-weight matrix from source populations X to target populations Y, in nA. Sign determines excitatory or inhibitory effect, and larger absolute values strengthen connections.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Delay Yx</code></th>
+                  <td>Synaptic transmission-delay matrix from source populations X to target populations Y, in ms. Use non-negative values; larger values make activity arrive later.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau Syn Yx</code></th>
+                  <td>Synaptic-current decay time constants for each source-target connection type, in ms. Use positive values; larger values produce longer-lasting postsynaptic effects.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>N Ext</code></th>
+                  <td>Effective number of external input connections received by each neuron. Use non-negative integers; larger values increase external input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Nu Ext</code></th>
+                  <td>Rate of each external Poisson input, in Hz. Use a non-negative value; larger values increase external input activity and generally raise network firing.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>J Ext</code></th>
+                  <td>Strength of each external synaptic input, in nA. Sign determines excitatory or inhibitory effect, and larger absolute values strengthen the external input.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Four Area Local Editor</code></th>
+                  <td>Configure the model&#x27;s four brain-area names and the neuronal-population names shared by every area. Then use the Area selector to choose which area&#x27;s local Network and recurrent connectivity parameters are displayed and edited. Simulation parameters and inter-area connectivity remain shared across all areas.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inter Area C Yx</code></th>
+                  <td>Connection-probability matrix from source area-population nodes to target area-population nodes. Use values from 0 to 1; larger values create denser inter-area connectivity. Same-area entries are ignored (these connections are configured in the Recurrent connectivity section).</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inter Area J Yx</code></th>
+                  <td>Synaptic-weight matrix from source area-population nodes to target area-population nodes, in nA. Sign determines excitatory or inhibitory effect, and larger absolute values strengthen connections. Same-area entries are ignored (these connections are configured in the Recurrent connectivity section).</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inter Area Delay Yx</code></th>
+                  <td>Transmission-delay matrix from source area-population nodes to target area-population nodes, in ms. Use non-negative values; larger values make activity arrive later. Same-area entries are ignored (these connections are configured in the Recurrent connectivity section).</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Area labels</code></th>
+                  <td>Names of the four modeled brain areas. Each area contains its own neuronal populations and has independently configurable Network and recurrent connectivity parameters. Changing an area label updates the Area selector and all area references throughout the configuration.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Population labels X</code></th>
+                  <td>Names of the neuronal populations contained within each brain area. The same population labels and ordering are shared by all four areas and are used throughout population-indexed and connectivity parameters. Changing a label updates all population references throughout the configuration.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Area selector frontal parietal temporal occipital</code></th>
+                  <td>Select the brain area whose area-local Network and recurrent connectivity parameters are displayed and edited below. Changing the selection does not modify shared simulation parameters, population labels, area labels, or inter-area connectivity.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+        </section>
+        <section id="field-potential" class="tooltip-module">
+          <div class="module-heading">
+            <div>
+              <span class="module-kicker">WebUI module</span>
+              <h2>Field Potential</h2>
+              <p>Proxy signals, biophysical kernels, CDM/LFP computation, and M/EEG forward models.</p>
+            </div>
+            <span class="module-count">34 entries</span>
+          </div>
+          <details class="config-group" open>
+            <summary><span>Module overview and available workflows</span><span class="entry-count">7 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Field Potential module</code></th>
+                  <td>Convert simulated neural activity into field-potential signals, including proxy and kernel-based forward-model outputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Load data</code></th>
+                  <td>Load existing field-potential outputs, such as current dipole moments, LFPs, M/EEG signals, and proxy signals.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Kernel</code></th>
+                  <td>Compute current dipole moments and field potentials (LFP, MEG, and EEG) from kernels.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Proxy</code></th>
+                  <td>Estimate field potentials from simulated neural activity using computationally efficient proxy signals.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/field_potential/load</code></th>
+                  <td>Load precomputed field-potential outputs such as current dipole moments, LFPs, M/EEG signals, or proxy signals.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/field_potential/kernel</code></th>
+                  <td>Configure biophysical kernels, convolve simulation spikes into current dipole moments or LFPs, and project dipoles to EEG or MEG sensors.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/field_potential/proxy</code></th>
+                  <td>Compute efficient field-potential proxy signals from simulation outputs such as spikes, membrane voltages, and synaptic currents.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Proxy-signal configuration</span><span class="entry-count">5 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Proxy Method</code></th>
+                  <td>Field-potential proxy formula to compute from simulation outputs. Available methods require different combinations of spikes, voltages, or synaptic currents.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Step</code></th>
+                  <td>Sampling interval of the simulation inputs. It is used to construct the output time axis and must match the source data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Proxy Decimation Factor</code></th>
+                  <td>Integer downsampling factor applied to the proxy output. Larger values reduce temporal resolution and output size.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Bin Size</code></th>
+                  <td>Time-bin width used when converting spikes into firing rates. Larger bins smooth activity more strongly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Excitatory Only</code></th>
+                  <td>When enabled, calculate the selected proxy using only the excitatory population.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Biophysical kernel construction</span><span class="entry-count">8 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Dt Kernel</code></th>
+                  <td>Temporal resolution used for kernel computation. Smaller values improve resolution but increase runtime and memory use.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>T X</code></th>
+                  <td>Time in ms at which presynaptic populations are activated when generating kernels. It defines the activation onset used to align the kernel response. Leave empty to use KernelParams.transient from the selected kernel parameters module.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Tau</code></th>
+                  <td>Kernel time lag in ms defining the duration or lag window represented by the generated kernels. Larger values retain responses over a longer interval but increase computation and output size. Leave empty to use KernelParams.tau from the selected kernel parameters module.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Mean Nu X</code></th>
+                  <td>Mean firing rate assumed for each presynaptic population during kernel construction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Vrest Value</code></th>
+                  <td>Resting membrane potential used by the biophysical kernel calculation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>G Eff</code></th>
+                  <td>Include effective conductance corrections when constructing kernels. Enable when the selected kernel model supports this approximation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Kernel Population Size E</code></th>
+                  <td>Number of excitatory neurons represented by the spike data. Use a non-negative integer matching the simulation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Kernel Population Size I</code></th>
+                  <td>Number of inhibitory neurons represented by the spike data. Use a non-negative integer matching the simulation.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>CDM and LFP convolution</span><span class="entry-count">4 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>CDM Component</code></th>
+                  <td>Select which spatial component of dipole kernels is retained during convolution. Choose z to compute only the z-oriented current dipole moment, which is commonly used for vertically aligned cortical populations, or xyz (all) to preserve all three Cartesian components for later vector analysis or M/EEG projection. This setting applies only to dipole probes; scalar LFP probes such as GaussCylinderPotential retain all electrode channels.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>CDM Mode</code></th>
+                  <td>Controls how the finite spike-rate signal and kernel overlap during convolution. same returns the centered portion with the length of the longer input and is usually appropriate for direct comparison with the simulated time series. full includes every partial overlap and therefore extends the output at both ends. valid keeps only positions where the signals overlap completely, producing a shorter output without edge contributions.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>CDM Scale</code></th>
+                  <td>Multiplicative factor applied after convolution to set the numerical scaling of every computed CDM/LFP signal. The default dt * 10^-3 converts the kernel sampling interval from milliseconds to seconds so firing rates expressed in Hz are integrated consistently over time. Change it only when a different normalization or unit conversion is required.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>CDM Decimation Factor</code></th>
+                  <td>Integer downsampling factor applied after CDM/LFP computation. A value of N keeps one sample every N time points, reducing output size and sampling frequency by that factor while preserving the represented duration. Use 1 to disable decimation; larger values reduce temporal resolution and may discard fast signal changes.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>M/EEG forward modelling</span><span class="entry-count">2 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>M/EEG Model</code></th>
+                  <td>Select the physical volume-conductor model used to transform current dipole moments into EEG potentials or MEG fields. NYHeadModel computes EEG with a realistic New York head model and its built-in cortical and 10-20-aligned electrode geometry; it automatically controls locations and forward mode and is unavailable for four-area simulations. FourSphereVolumeConductor computes EEG in four concentric spherical tissue layers. InfiniteVolumeConductor computes EEG in an unbounded homogeneous conductor using each sensor&#x27;s position relative to the dipole. InfiniteHomogeneousVolCondMEG computes MEG in an unbounded homogeneous conductor, while SphericallySymmetricVolCondMEG computes MEG with spherical symmetry. The selected model determines whether the output is EEG or MEG, which locations are editable, and the default dipole and sensor geometry.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>M/EEG Forward Mode</code></th>
+                  <td>Controls how multiple dipoles contribute to the configured sensors. Simulate all dipoles simultaneously projects every dipole to every sensor and sums their contributions; ordinary Hagen and Cavallari inputs replicate the same CDM across configured dipoles, while four-area inputs use fixed frontal, parietal, temporal, and occipital dipoles with their corresponding area CDMs. Per-sensor independent simulation computes sensor i only from dipole i, requiring equal numbers of explicit sensors and dipoles for non-NYHead models. NYHeadModel always uses per-sensor independent mode automatically, and four-area simulations always use simultaneous mode.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Kernel workflow and data-source guidance</span><span class="entry-count">8 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Multicompartment neuron model folder</code></th>
+                  <td>Required folder containing the multicompartment neuron resources used to construct cells for kernel computation. It must contain the cell templates and morphologies referenced by the selected Kernel parameters module, together with compatible NEURON mechanism files under mod/*.mod.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Multicompartment network simulation outputs</code></th>
+                  <td>Optional folder containing outputs from a compatible multicompartment network simulation. spikes.h5 is used to estimate mean firing rates and somav.h5 is used to estimate Vrest. The outputs should match the selected Kernel parameters module. If this folder is omitted, provide both Mean firing rates (mean_nu_X) and Resting membrane potential (Vrest) manually.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Kernel parameters module</code></th>
+                  <td>Python module defining KernelParams and the multicompartment network specification required to construct kernels, including populations, cell parameters, morphologies, connectivity, synapses, and related settings. Select a compatible local or server Python file, or load the predefined module for the detected Hagen, Cavallari, or four-area model.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Biophysical membrane properties (biophys)</code></th>
+                  <td>Biophysical setup functions applied when constructing each multicompartment neuron for kernel computation. Select functions provided by ncpi.neuron_utils to configure membrane mechanisms and properties, such as active conductances or uniform membrane parameters. Functions are applied in the listed order, so later properties may modify settings established by earlier ones.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Population sizes</code></th>
+                  <td>Optional neuron counts for the excitatory (E) and inhibitory (I) populations represented by the spike-time data. During CDM/LFP computation, spike counts in each time bin are converted to rates in Hz and divided by the corresponding population size, producing a per-neuron population firing rate before convolution with the kernels. Enter values that match the simulated populations. Manual values override population sizes loaded from the simulation output; leave both empty to use available simulation population sizes or proceed without population-size normalization.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Probes</code></th>
+                  <td>Select the kernel output quantities to compute from the spike data. KernelApproxCurrentDipoleMoment produces an approximate current dipole moment, CurrentDipoleMoment produces the exact current dipole moment available from the kernels, and GaussCylinderPotential produces local field potentials at the electrode locations defined by KernelParams. You may compute a dipole probe together with GaussCylinderPotential, but KernelApproxCurrentDipoleMoment and CurrentDipoleMoment are alternative dipole representations and cannot be selected together.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Dipole locations</code></th>
+                  <td>Spatial positions of the current dipoles used by the selected forward model. Add one X, Y, Z coordinate triplet per dipole; non-NYHead models interpret coordinates in micrometers. For ordinary Hagen or Cavallari inputs, the same CDM is replicated across all configured dipole locations. NYHeadModel ignores manual coordinates and automatically assigns dipoles to built-in cortical targets aligned with its 10-20 electrode system. For four-area simulations, four fixed model-specific positions represent the frontal, parietal, temporal, and occipital areas, and each position receives its corresponding area CDM.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sensor locations</code></th>
+                  <td>Spatial positions where the selected forward model evaluates the EEG potential or MEG field. Add one X, Y, Z coordinate triplet per sensor or electrode; non-NYHead models interpret coordinates in micrometers. In simultaneous mode, every configured dipole contributes to every sensor. In per-sensor independent mode, sensor i is paired only with dipole i, so non-NYHead models require equal numbers of sensors and dipoles. NYHeadModel ignores manual sensor coordinates and uses its built-in 10-20-aligned electrode set automatically.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+        </section>
+        <section id="features" class="tooltip-module">
+          <div class="module-heading">
+            <div>
+              <span class="module-kicker">WebUI module</span>
+              <h2>Features</h2>
+              <p>Feature methods, computation settings, data loading, and electrophysiology parsing.</p>
+            </div>
+            <span class="module-count">123 entries</span>
+          </div>
+          <details class="config-group" open>
+            <summary><span>Module overview and available workflows</span><span class="entry-count">4 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features module</code></th>
+                  <td>Compute or load quantitative descriptors (features) from simulated or empirical neural signals for inference and analysis workflows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Load data</code></th>
+                  <td>Load precomputed feature datasets for inference or analysis.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Compute new features</code></th>
+                  <td>Compute new features from simulated or empirical data signals.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/features/load_data</code></th>
+                  <td>Load precomputed feature dataframes</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Feature-computation settings</span><span class="entry-count">4 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features N Jobs</code></th>
+                  <td>Number of worker processes used to compute features across dataframe rows. Use 1 for sequential execution and easier debugging. Larger values can reduce runtime when many signals are processed, but each worker consumes CPU and memory; do not exceed the resources available to the runtime.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features Chunksize</code></th>
+                  <td>Optional number of dataframe rows sent to each worker per multiprocessing task. Small chunks improve load balancing when signals vary in cost, while larger chunks reduce scheduling overhead. Leave empty to let the multiprocessing backend choose.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features Start Method</code></th>
+                  <td>Process-creation strategy used for parallel feature computation. spawn starts clean worker processes and is the most portable option. fork is faster on supported Unix systems but can inherit unsafe library state. forkserver creates workers from a dedicated server process and is available only on supported platforms.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features Subsample Percent</code></th>
+                  <td>Percentage of parsed dataframe rows retained before feature computation. Use 100 to process every row. Values below 100 select a deterministic random subset, which is useful for quick tests but produces an intentionally incomplete feature dataframe.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>catch22 parameters</span><span class="entry-count">1 entry</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Catch22 Normalize</code></th>
+                  <td>Standardize each signal before computing the 22 catch22 descriptors by removing its mean and scaling its variance. Enable this when descriptors should be less sensitive to absolute offset and amplitude. Leave disabled when signal magnitude is scientifically meaningful.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Spectral parameterization</span><span class="entry-count">30 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Fs</code></th>
+                  <td>Sampling frequency in Hz used to build the Welch power spectrum and frequency axis. Leave empty only when the parsed dataframe already contains a valid sampling frequency. An incorrect value shifts all reported peak frequencies and frequency-range boundaries.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Select Peak</code></th>
+                  <td>Controls which fitted oscillatory peak is exposed through the selected peak outputs. max_pw chooses the peak with greatest power, max_cf_in_range chooses the highest center-frequency peak inside the fitted range, and all preserves all fitted peak values where supported.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Freq Min</code></th>
+                  <td>Lower frequency bound in Hz of the spectrum passed to the spectral model. Frequencies below this value are excluded from fitting. Choose a bound above 0 and below Frequency range max.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Freq Max</code></th>
+                  <td>Upper frequency bound in Hz of the spectrum passed to the spectral model. It must exceed Frequency range min and remain below the Nyquist frequency, which is half the sampling frequency.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch N per segment</code></th>
+                  <td>Number of time samples in each Welch segment. Larger segments improve frequency resolution but provide fewer segments to average and require sufficiently long signals. The default shown by the WebUI is derived from the detected sampling frequency when available.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch N overlap</code></th>
+                  <td>Number of samples shared by consecutive Welch segments. Increasing overlap provides more spectral averages but increases computation and correlation between segments. It must be smaller than Welch nperseg.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch NFFT</code></th>
+                  <td>FFT length used for every Welch segment. It must be at least as large as the segment length. Values above Welch nperseg zero-pad the segment and create a denser frequency grid, but do not add true spectral resolution.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch Window</code></th>
+                  <td>Window function applied to every Welch segment before the FFT to control spectral leakage. Hann is a common general-purpose choice. Other windows trade main-lobe width, amplitude accuracy, and side-lobe suppression.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch Detrend</code></th>
+                  <td>Detrending applied independently to every Welch segment before spectral estimation. constant removes each segment mean, linear removes a fitted linear trend, and none preserves the segment unchanged.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch Scaling</code></th>
+                  <td>Controls the units of the Welch result. density returns power spectral density per Hz, while spectrum returns power per frequency bin. Use density for comparisons that should remain stable across frequency resolution.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Welch Average</code></th>
+                  <td>Method used to combine periodograms from Welch segments. mean is efficient for stable data; median is more robust to transient high-power segments and outliers.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Peak Threshold</code></th>
+                  <td>Relative peak-detection threshold, expressed in standard deviations above the modeled aperiodic background. Larger values accept only more prominent oscillatory peaks and generally reduce the number of fitted peaks.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Min Peak Height</code></th>
+                  <td>Minimum absolute height above the aperiodic fit required for a candidate oscillatory peak. Use it together with Peak threshold to suppress weak fitted peaks; 0 disables an additional absolute-height restriction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Max N Peaks</code></th>
+                  <td>Maximum number of oscillatory peaks fitted within the selected frequency range. Use 0 to prevent peak fitting. Larger values permit more complex spectra but can increase overfitting.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Peak Width Min</code></th>
+                  <td>Minimum accepted oscillatory peak bandwidth in Hz. Narrower candidate peaks are rejected. It must be positive and lower than Peak width max.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Peak Width Max</code></th>
+                  <td>Maximum accepted oscillatory peak bandwidth in Hz. Broader candidate peaks are rejected. It must exceed Peak width min and should be appropriate for the fitted frequency range.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Aperiodic Mode</code></th>
+                  <td>Shape used for the aperiodic spectral component. fixed fits offset and exponent as a straight line in log-log space. knee adds a bend parameter and is appropriate when the fitted spectrum visibly changes slope.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Verbose</code></th>
+                  <td>Enable or disable messages produced by the spectral-model fitting backend. Enable for diagnosis of fitting problems; disable for routine batch processing.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Metric Gof Adjrsquared</code></th>
+                  <td>Request adjusted R-squared as an additional model-fit metric. It measures explained variance while accounting for model complexity and can be selected for quality thresholds or saved output.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Model Metric Error MSE</code></th>
+                  <td>Request mean squared error as an additional model-fit metric. Lower values indicate smaller residual error and the metric can be used for quality thresholds or saved output.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Metric Policy</code></th>
+                  <td>Controls how fits that fail configured quality thresholds are represented. reject marks failing fits as invalid for downstream filtering, while flag retains the result and records its validity status for later review.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Threshold Gof Rsquared</code></th>
+                  <td>Minimum accepted model R-squared from 0 to 1. Fits below this threshold fail the quality policy. Increase it for stricter goodness-of-fit requirements.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Threshold Metric 1 Name</code></th>
+                  <td>Optional additional fit metric used as a quality threshold. Select adjusted R-squared or mean squared error, then provide its limit in Additional threshold value. The selected metric must also be computed by the model.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Threshold Metric 1 Value</code></th>
+                  <td>Threshold applied to the selected additional fit metric. Its interpretation follows the metric: adjusted R-squared generally requires a minimum value, while mean squared error generally requires a maximum value.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Output Key</code></th>
+                  <td>Select the value stored in the output dataframe Features column. Choose the full dictionary to preserve all fitted results, a named scalar for analysis or model training, or Custom path to extract another nested result.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Output Path</code></th>
+                  <td>Nested dictionary path extracted when Saved output value is Custom path, for example metrics.gof_rsquared or aperiodic_params.1. The resolved value should be numeric; missing paths produce missing feature values.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Debug</code></th>
+                  <td>Enable additional diagnostic behavior and messages during specparam computation. Use it to investigate failed or unexpected fits; leave disabled for normal batch processing.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Normalize</code></th>
+                  <td>Standardize each input signal before Welch spectral estimation. This reduces differences caused by absolute signal amplitude while preserving relative spectral shape. Disable it when absolute power or amplitude-dependent spectral values are important.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Drop Invalid Rows</code></th>
+                  <td>Remove output dataframe rows whose spectral fit is invalid or whose selected output value is missing. Disable this to preserve row alignment and inspect invalid results explicitly.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Specparam Reject Nonpositive Exponent</code></th>
+                  <td>Treat zero or negative aperiodic exponents as invalid. When the selected output is aperiodic exponent, invalid values become missing; with row dropping enabled, affected rows are removed.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Detrended fluctuation analysis (DFA)</span><span class="entry-count">18 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Fs</code></th>
+                  <td>Sampling frequency in Hz used to convert DFA windows, trimming, and filter ranges into samples. Leave empty only when the parsed dataframe contains a valid sampling frequency.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Normalize</code></th>
+                  <td>Standardize each signal before DFA preprocessing. Enable to reduce sensitivity to absolute offset and scale; disable when amplitude differences should remain part of the analysis.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Input Is Envelope</code></th>
+                  <td>Describe the supplied signal type. Select false for raw time series that must be band-pass filtered and Hilbert-transformed into amplitude envelopes. Select true only when every input is already the intended band-limited amplitude envelope; filtering settings are then ignored.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Trim Seconds</code></th>
+                  <td>Number of seconds removed from both edges after filtering and envelope extraction to reduce boundary artifacts. Use 0 to keep all samples. Excessive trimming can leave too little data for the requested DFA windows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Overlap</code></th>
+                  <td>Use 50% overlap between consecutive DFA windows at each evaluated scale. Overlap provides more fluctuation estimates but increases computation and dependence between windows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Fit Interval Min</code></th>
+                  <td>Smallest window duration in seconds included when fitting the log-log slope reported as DFA. It must be below Fit interval max and, when a compute interval is provided, lie inside it.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Fit Interval Max</code></th>
+                  <td>Largest window duration in seconds included when fitting the log-log slope reported as DFA. It must exceed Fit interval min, lie inside the optional compute interval, and remain feasible for the signal length.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Compute Interval Min</code></th>
+                  <td>Optional smallest DFA window duration in seconds evaluated by the algorithm. It may extend below the fit interval to retain diagnostic fluctuation values. Leave the compute pair empty to use method defaults.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Compute Interval Max</code></th>
+                  <td>Optional largest DFA window duration in seconds evaluated by the algorithm. It must exceed Compute interval min and contain the complete fit interval.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Frequency Min</code></th>
+                  <td>Lower cutoff in Hz of the single band used to filter raw signals before DFA. Provide it with Band frequency max. This single-band mode cannot be combined with Spectrum range and is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Frequency Max</code></th>
+                  <td>Upper cutoff in Hz of the single band used to filter raw signals before DFA. It must exceed Band frequency min and remain below Nyquist.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Spectrum Min</code></th>
+                  <td>Lower bound in Hz used to generate multiple analysis bands across a spectrum range. Provide it with Spectrum range max. This mode cannot be combined with Band frequency and is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Spectrum Max</code></th>
+                  <td>Upper bound in Hz used to generate multiple analysis bands across a spectrum range. It must exceed Spectrum range min and remain within the supported frequency range.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Bad Idxes</code></th>
+                  <td>Optional comma-separated zero-based channel indexes excluded before DFA computation, for example 0,2,5. Use indexes matching the channel order of the input sample.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Hilbert N FFT</code></th>
+                  <td>Optional FFT length used by the Hilbert-transform step when converting filtered raw signals into amplitude envelopes. Leave empty for the backend default. It is ignored when Input is envelope is true.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Filter Kwargs</code></th>
+                  <td>Optional Python dictionary of keyword arguments passed to the filtering operation before Hilbert envelope extraction, for example {&quot;fir_design&quot;:&quot;firwin&quot;}. Use valid backend filter arguments only. It is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Output Key</code></th>
+                  <td>Select the DFA result stored in the Features column. DFA value stores the fitted scaling exponent, intercept stores the fitted log-log intercept, full dictionary preserves diagnostics, and Custom path extracts another result.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>DFA Output Path</code></th>
+                  <td>Dictionary path extracted when Saved output value is Custom path, for example DFA or dfa_intercept. The resolved value is converted to a numeric scalar for the Features column.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Functional excitation-inhibition ratio (fEI)</span><span class="entry-count">21 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Fs</code></th>
+                  <td>Sampling frequency in Hz used for fEI windows, DFA scales, trimming, and filtering. Leave empty only when a valid sampling frequency is present in the parsed dataframe.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Normalize</code></th>
+                  <td>Standardize each signal before fEI preprocessing. Enable to reduce differences caused by absolute offset and scale; disable when amplitude magnitude must remain meaningful.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Input Is Envelope</code></th>
+                  <td>Describe the supplied signal type. Select false for raw signals that must be filtered and Hilbert-transformed. Select true only when every input already contains the intended band-limited amplitude envelope; frequency and filtering settings are then ignored.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Trim Seconds</code></th>
+                  <td>Number of seconds removed from both edges after filtering and envelope extraction to reduce boundary artifacts. Use 0 to disable trimming. Ensure enough data remains for fEI and DFA windows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Window Size Sec</code></th>
+                  <td>Required duration in seconds of each amplitude window used to estimate fEI. Larger windows provide more stable local amplitude and fluctuation estimates but reduce the number of windows and temporal detail.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Window Overlap</code></th>
+                  <td>Fraction of each fEI amplitude window shared with the next window. Use a value from 0 inclusive to 1 exclusive: 0 creates non-overlapping windows, while larger values increase window count and computation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI DFA Threshold</code></th>
+                  <td>Minimum DFA exponent used to consider the fEI estimate interpretable under the method’s scale-free criterion. Windows or results below the threshold are handled according to the fEI implementation and reported diagnostics.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI DFA Overlap</code></th>
+                  <td>Use 50% overlap between consecutive windows used by the internal DFA calculation. Overlap increases the number of fluctuation estimates at each scale but also increases computation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI DFA Fit Interval Min</code></th>
+                  <td>Smallest DFA window duration in seconds used to fit the scaling exponent calculated alongside fEI. It must be below DFA fit interval max and lie inside the optional DFA compute interval.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI DFA Fit Interval Max</code></th>
+                  <td>Largest DFA window duration in seconds used to fit the scaling exponent calculated alongside fEI. It must exceed the minimum, fit inside the optional compute interval, and be feasible for the signal length.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI DFA Compute Interval Min</code></th>
+                  <td>Optional smallest window duration in seconds evaluated by the internal DFA calculation. It may extend below the fit interval to preserve diagnostic fluctuation values.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI DFA Compute Interval Max</code></th>
+                  <td>Optional largest window duration in seconds evaluated by the internal DFA calculation. It must exceed the minimum and contain the complete DFA fit interval.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Frequency Min</code></th>
+                  <td>Lower cutoff in Hz of the single band used to filter raw signals before fEI. Provide it with Band frequency max. It cannot be combined with Spectrum range and is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Frequency Max</code></th>
+                  <td>Upper cutoff in Hz of the single band used to filter raw signals before fEI. It must exceed Band frequency min and remain below Nyquist.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Spectrum Min</code></th>
+                  <td>Lower bound in Hz used to generate multiple analysis bands for fEI. Provide it with Spectrum range max. It cannot be combined with Band frequency and is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Spectrum Max</code></th>
+                  <td>Upper bound in Hz used to generate multiple analysis bands for fEI. It must exceed Spectrum range min and remain within the supported frequency range.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Bad Idxes</code></th>
+                  <td>Optional comma-separated zero-based channel indexes excluded before fEI computation, for example 0,2,5. Use indexes matching the channel order of the input sample.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Hilbert N FFT</code></th>
+                  <td>Optional FFT length used by the Hilbert-transform step when converting filtered raw signals into amplitude envelopes. Leave empty for the backend default. It is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Filter Kwargs</code></th>
+                  <td>Optional Python dictionary of keyword arguments passed to filtering before Hilbert envelope extraction, for example {&quot;fir_design&quot;:&quot;firwin&quot;}. Use valid backend filter arguments only. It is ignored for envelope inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Output Key</code></th>
+                  <td>Select the fEI result stored in the Features column. Options include the primary scalar, outlier-aware variants, DFA, diagnostic arrays, outlier count, the full result dictionary, or a custom nested path.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>fEI Output Path</code></th>
+                  <td>Dictionary path extracted when Saved output value is Custom path, for example fEI_outliers_removed, DFA, or wAmp. Scalar outputs are stored directly; diagnostic arrays are preserved when selected.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Custom feature functions</span><span class="entry-count">2 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Custom Normalize</code></th>
+                  <td>Standardize each signal before passing it to custom_feature(sample, params). Enable when the custom feature should be independent of absolute offset and scale. The function receives the normalized sample only when this option is selected.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Custom Feature Script</code></th>
+                  <td>Python source code defining custom_feature(sample, params). The function runs once per parsed signal and must return a numeric scalar or numeric array; arrays must have equal length for every sample. Raise clear errors for invalid inputs and avoid relying on state that is unavailable in worker processes.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Electrophysiology dataset parser</span><span class="entry-count">37 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Data Locator</code></th>
+                  <td>Select the field, dataframe column, nested object path, or detected source value that contains the electrophysiological signal to parse. The resolved value should be a numeric time series or array. For arrays, use the axis mapping controls to identify channels, samples, IDs, and existing trials/epochs. This value becomes the canonical data column used by feature extraction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Array Axes Enabled</code></th>
+                  <td>Enable explicit array-axis mapping when automatic orientation detection is uncertain or incorrect. The mapping tells the parser what each dimension of the selected data array represents and overrides heuristic axis detection. Assign each role to a different dimension and verify the selected dimensions against the inspected array shape.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Axis Channels</code></th>
+                  <td>Select the array dimension containing sensors or channels. The parser splits this dimension into separate canonical sensor rows. Choose None only when the data has no channel dimension or already represents one signal per parsed item.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Axis Samples</code></th>
+                  <td>Select the array dimension containing consecutive time samples. This is the signal dimension used for temporal segmentation, z-scoring, epoching, and feature computation. It must identify the time-series axis rather than channels, subjects, or trials.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Axis Ids</code></th>
+                  <td>Optionally select the dimension containing independent IDs or subjects. The parser treats entries along this axis as distinct observations. Choose None when IDs are supplied through metadata, filenames, folders, or are not represented as an array dimension.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Axis Epochs</code></th>
+                  <td>Optionally select a dimension containing trials or epochs already present in the source array. Entries along this axis receive separate epoch identifiers. Parser-driven epoching can still be enabled later to divide each existing trial into shorter windows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Fs Source</code></th>
+                  <td>Choose how the parser obtains sampling frequency in Hz. Select Numeric value to apply one manually entered frequency to the parsed signals, choose a detected field or nested locator when frequency is stored in the source data, or choose None only when downstream operations do not require time-to-sample conversion. Correct sampling frequency is required for temporal segmentation, epoching, and frequency-based features.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Fs Manual</code></th>
+                  <td>Sampling frequency in Hz applied when Sampling frequency source is Numeric value. Enter samples per second, not the simulation time step. For example, a 0.0625 ms time step corresponds to 16000 Hz. The value must match the actual data to produce correct epoch lengths, time bounds, and spectral frequencies.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Ch Names Source</code></th>
+                  <td>Choose where channel names come from. Autocomplete creates generic sequential names, such as ch0, ch1, and ch2. Select a detected field when the dataset already stores channel names, or choose Manual list to enter comma-separated names below. Ensure the number and order of names match the channels in the data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Sensor Names</code></th>
+                  <td>Comma-separated sensor or channel labels used when Channel names source is Manual list. Enter names in the same order as channels appear along the configured Channels axis, with one label per channel, for example Fz, Cz, Pz.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Recording Type Source</code></th>
+                  <td>Choose whether recording modality is assigned from one constant value, read from a detected source field, or left unset. Recording type becomes canonical metadata used to distinguish signals such as LFP, CDM, EEG, MEG, and ECoG in downstream feature and analysis workflows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Recording Type</code></th>
+                  <td>Constant recording modality assigned to every parsed row when Recording type source uses a custom value. Select the physical signal type represented by the data; choose Unknown only when the modality cannot be determined.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Mode</code></th>
+                  <td>Choose how canonical metadata is populated. Empirical mode lets you map subject ID, group, species, and condition from source fields, filenames, token values, or constants. Simulated mode creates synthetic simulation metadata and uses available trial or repetition information for conditions.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Subject Id Source</code></th>
+                  <td>Select the source used to populate canonical subject_id for empirical data. Use a detected field or filename-derived value when each file contains different subjects, Custom value when all parsed rows belong to one subject, or None when subject identity is unavailable. Subject IDs are also required for joining subject-level additional metadata.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Subject Id</code></th>
+                  <td>Constant subject identifier assigned to every parsed row when Subject ID source is Custom value. Use a stable identifier that can also match the selected link field in any additional metadata table.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Group Source</code></th>
+                  <td>Select the source used to populate canonical group metadata, such as control, treatment, cohort, or diagnosis. The value may come from source data, filenames, filename-format tokens, or a constant. Choose None when no meaningful group classification exists.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Group</code></th>
+                  <td>Constant group label assigned to every parsed row when Group source is Custom value, for example control or treatment.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Species Source</code></th>
+                  <td>Select the source used to populate canonical species metadata. Use a source field, filename-derived value, or constant that describes the organism represented by each recording; choose None when species is unknown or irrelevant.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Species</code></th>
+                  <td>Constant species label assigned to every parsed row when Species source is Custom value, for example human, mouse, or rat.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Condition Source</code></th>
+                  <td>Select the source used to populate canonical experimental condition metadata, such as rest, task, baseline, or stimulation. Conditions can come from source fields, filenames, filename-format tokens, or a constant and are commonly used for grouping feature outputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Metadata Condition</code></th>
+                  <td>Constant experimental-condition label assigned to every parsed row when Condition source is Custom value, for example rest or baseline.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Subject Id Locator</code></th>
+                  <td>Select the source field or filename-derived value that becomes canonical subject_id for each empirical recording. This identifier distinguishes subjects and is used as the key when joining additional subject-level metadata.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Group Locator</code></th>
+                  <td>Select the source field or filename-derived value that becomes canonical group metadata for each empirical recording, such as cohort, treatment, or diagnosis.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Species Locator</code></th>
+                  <td>Select the source field or filename-derived value that becomes canonical species metadata for each empirical recording.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Condition Locator</code></th>
+                  <td>Select the source field or filename-derived value that becomes canonical condition metadata for each empirical recording, such as rest, task, baseline, or stimulation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Zscore</code></th>
+                  <td>Enable z-score normalization by subtracting the mean and dividing by the population standard deviation. Then use Z-score timing to choose whether the selected continuous signal is standardized once before epoching or each generated epoch is standardized independently after epoching.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Zscore After Epoch</code></th>
+                  <td>Choose when enabled z-score normalization is applied. Before epoching standardizes the selected continuous signal once, so all generated epochs share one normalization reference. After epoching standardizes every generated epoch independently.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Segment T0 S</code></th>
+                  <td>Optional non-negative start time in seconds for cropping each time-domain signal before normalization, epoching, and aggregation. Set only this value to keep data from the selected time to the end. Leave both segment times empty to use the full signal. The parser uses sampling frequency and existing time bounds to convert this time to samples.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Segment T1 S</code></th>
+                  <td>Optional end time in seconds for cropping each time-domain signal before normalization, epoching, and aggregation. Set only this value to keep data from the beginning to the selected time. It must be greater than the start time when both are provided. Leave both segment times empty to use the full signal; when epoching is enabled, the selected segment must be at least one epoch long.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Additional File Link Field</code></th>
+                  <td>Select the column in the additional metadata table whose values match canonical subject_id in the parsed dataset. The parser uses this key to join subject-level annotations such as group, condition, species, and recording type. Choose a column with stable identifiers and compatible values; unmatched subjects retain their existing metadata.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Enable Epoching</code></th>
+                  <td>Split each continuous time-domain sensor row into fixed-length sliding windows before feature extraction. Epoching requires a valid sampling frequency. Existing trials or epochs remain distinct and can each be subdivided further. Complete windows are emitted and epoch counts are aligned across comparable series.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Enable Aggregate</code></th>
+                  <td>Combine parsed rows across selected categorical fields after segmentation, normalization, and epoching. Aggregation reduces multiple sensors, epochs, subjects, or metadata groups into fewer signals using the selected reduction method. Only aggregate signals that have compatible array shapes and meaningful units.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Aggregate Over</code></th>
+                  <td>Select one or more canonical fields to collapse during aggregation. For example, selecting sensor combines channels while preserving other metadata; selecting epoch combines epochs and removes epoch-specific time bounds. All non-selected metadata fields remain grouping keys.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Aggregate Method</code></th>
+                  <td>Reduction applied element-by-element to aligned signal arrays in each aggregation group. Sum preserves total contribution, mean produces the arithmetic average, and median provides a robust central signal. Input arrays within a group must have compatible shapes.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Aggregate Label Value</code></th>
+                  <td>Optional replacement label written into each aggregated field, such as all or aggregate, so output rows clearly indicate that multiple original categories were combined.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Epoch Length S</code></th>
+                  <td>Duration in seconds of each fixed-length epoch generated from continuous time-domain signals. Sampling frequency converts this duration to samples. The value must be positive and cannot exceed the selected temporal segment; signals too short for one complete window remain unepoched.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parser Epoch Step S</code></th>
+                  <td>Time shift in seconds between consecutive epoch starts. Use the same value as epoch length for adjacent non-overlapping windows, a smaller positive value for overlapping windows, or a larger value to leave gaps. When omitted, the parser uses the epoch length.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Data loading and parser workflow guidance</span><span class="entry-count">6 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Data folder for feature extraction</code></th>
+                  <td>Select one or more folders containing the signals from which features will be computed. The folder may contain empirical recordings, simulation outputs, numeric arrays, or tabular datasets in supported formats such as MAT, NWB, NPY, CSV, TSV, Parquet, pickle, Excel, Feather, EEGLAB SET, FIF, EDF, BrainVision, or CTF DS. Nested folders are supported up to six levels. The application inspects representative files to detect candidate signal fields, sampling frequency, channel names, array axes, and metadata, then uses the parser configuration shown below to convert the selected data into a common dataframe before feature extraction. Files processed together within each folder should use the same structure, field names, dimensions, and units; inconsistent files may fail parsing or produce incorrect results.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Additional metadata files</code></th>
+                  <td>Optionally select individual files that describe or annotate the dataset selected in Data folder for feature extraction. These files are inspected together with the main data and can provide fields that are not stored in each recording, such as channel names, subject identifiers, experimental groups, species, conditions, or recording types. Tabular formats such as CSV, TSV, Excel, Parquet, and Feather are recommended: use one row per subject, channel, or other mapping item and clear column names. For subject-level enrichment, the parsed data must contain subject_id and the selected link-field column in the metadata file must contain matching subject identifiers. Metadata columns can then be mapped to canonical parser fields; a selected channel-name column can also supply channel labels. Additional metadata files complement the signal data and are not themselves treated as the primary signals for feature extraction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Filename format (optional)</code></th>
+                  <td>Optional pattern used to select files during folder inspection and extract metadata values from their names. Build the format from literal text, which must appear exactly, and variable tokens enclosed between dollar signs, such as $id$, $group$, or $condition$. Token names must start with a letter, may contain letters, numbers, and underscores, and may appear only once in a format. The pattern must contain at least one token. It is matched against each candidate file name rather than its folder path, including files inside nested datasets. Include the extension as literal text, for example .pkl, when only that complete filename form should match; when the format omits an explicit extension, matching can also use the filename stem. Files that do not match are excluded from inspection and feature extraction. Values captured by tokens become available as metadata sources, so a format such as $id$-$group$_$condition$.pkl can extract subject, group, and condition values from matching file names. Select Inspect to apply the current format and reinspect the data source. Select Use automatic detection to clear the format and inspect supported files without filename filtering.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Configure EphysDatasetParser</code></th>
+                  <td>Configure how heterogeneous electrophysiology files are converted into the canonical dataframe used by feature extraction. Map the signal, sampling frequency, channels, array dimensions, recording modality, and metadata to their source fields; then optionally crop time ranges, normalize signals, create fixed-length epochs, and aggregate rows. Processing is applied in this order: parse source fields, crop the temporal segment, z-score before epoching when selected, create epochs, z-score each epoch when selected, and aggregate last. Review detected defaults carefully, especially array axes and sampling frequency, because incorrect mappings can produce plausible but invalid features.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Data origin</code></th>
+                  <td>Choose how canonical metadata is populated for the parsed dataset. Select Empirical when processing measured recordings: this mode lets you map subject ID, group, species, and condition from detected source fields, filename-derived values, filename-format tokens, or constants. Select Simulated when processing generated neural activity: this mode creates metadata for one simulated subject and uses available trial or repetition information to populate conditions. Data origin changes metadata handling only; it does not change the selected signal data or recording type.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Z-score timing</code></th>
+                  <td>Choose when enabled z-score normalization is applied. Before epoching standardizes the selected continuous signal once, so all generated epochs share one normalization reference. After epoching standardizes every generated epoch independently.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+        </section>
+        <section id="inference" class="tooltip-module">
+          <div class="module-heading">
+            <div>
+              <span class="module-kicker">WebUI module</span>
+              <h2>Inference</h2>
+              <p>Inverse-model training, model assets, prediction settings, and SBI controls.</p>
+            </div>
+            <span class="module-count">37 entries</span>
+          </div>
+          <details class="config-group" open>
+            <summary><span>Module overview and available workflows</span><span class="entry-count">5 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference module</code></th>
+                  <td>Train inverse models from simulated features and parameters, or use trained models to estimate parameters from feature data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Load data</code></th>
+                  <td>Load precomputed parameter predictions.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>New training</code></th>
+                  <td>Train a new inverse model from paired simulation parameters and features.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Compute predictions</code></th>
+                  <td>Use a trained inverse model to estimate parameters from feature data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/inference/load_data</code></th>
+                  <td>Load precomputed predictions</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Inverse-model training</span><span class="entry-count">13 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Model Name</code></th>
+                  <td>Select the inverse model trained to predict neural-circuit parameters from feature vectors. Scikit-learn regressors produce point predictions and suit standard supervised regression. NPE, NLE, and NRE use simulation-based inference to estimate posterior information and require SBI prior bounds. Changing the model refreshes the example hyperparameters and parameter grid.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Hyperparams Json</code></th>
+                  <td>Base model configuration provided as a valid JSON object. For scikit-learn models, use constructor arguments accepted by the selected estimator. For SBI models, configure estimator_kwargs, inference_kwargs, and build_posterior_kwargs. These values are used directly in Single trial mode and serve as the base configuration during hyperparameter search.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Param Grid Json</code></th>
+                  <td>Candidate hyperparameter configurations evaluated in Hyperparameter search mode. Provide a JSON object whose values are candidate lists, or a JSON list of complete parameter objects. Every resulting configuration is evaluated with repeated cross-validation; larger grids multiply training time.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training SBI Train Params Json</code></th>
+                  <td>Arguments passed to the SBI training procedure, such as max_num_epochs, training_batch_size, learning_rate, and show_train_summary. Use valid JSON keys supported by the installed SBI backend. These settings control optimization of each SBI density estimator.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training SBI Eval Sampling Kwargs Json</code></th>
+                  <td>Posterior-sampling arguments used to evaluate SBI candidates during hyperparameter search. sample_shape controls the number of posterior samples generated per validation observation. NLE and NRE may also require MCMC-related settings such as method, thin, num_chains, or num_workers.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training N Splits</code></th>
+                  <td>Number of cross-validation folds used for each candidate in Hyperparameter search mode. It must be greater than 1 and should not exceed the number of paired training rows. More folds train on more data per fold but increase runtime.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training N Repeats</code></th>
+                  <td>Number of times the cross-validation procedure is repeated with different seeded splits in Hyperparameter search mode. More repeats provide a more stable estimate of model performance but multiply computation.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Seed</code></th>
+                  <td>Random seed used for deterministic row subsampling, cross-validation splitting, and supported model randomization. Reuse the same seed and configuration to improve reproducibility.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Scaler Type</code></th>
+                  <td>Transformation fitted only on training features when Use scaler is enabled and saved with the trained model. StandardScaler centers and scales variance; MinMaxScaler maps ranges; RobustScaler uses robust statistics; MaxAbsScaler scales by maximum absolute value.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Use Scaler</code></th>
+                  <td>Fit and apply the selected feature scaler before model training, then save it with the trained assets for consistent prediction preprocessing. Scaling is usually important for neural networks, SVR, Ridge, and other magnitude-sensitive models, but often unnecessary for random forests.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Sklearn Verbose</code></th>
+                  <td>Non-negative verbosity level passed to supported scikit-learn training and validation procedures. Use 0 for minimal output and larger values for more progress information. It does not apply to SBI models.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training Subsample Percent</code></th>
+                  <td>Percentage of paired feature and parameter rows randomly retained before training. Use 100 or leave empty to use the complete dataset. Subsampling uses Seed and preserves X/Y row pairing; lower percentages reduce runtime but discard training information.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>SBI Prior</code></th>
+                  <td>Lower and upper bounds of the BoxUniform prior for each inferred theta parameter. Add one ordered pair per target dimension, ensure low is strictly below high, and choose bounds that cover plausible values and the simulation support.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Prediction data and model assets</span><span class="entry-count">3 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features Source Mode</code></th>
+                  <td>Choose where feature data is loaded from. The selected data must match the feature structure expected by the trained model.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference Model Assets Source</code></th>
+                  <td>Choose the source of trained model assets. Include the model and any scaler used during training.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference Scaler</code></th>
+                  <td>Scaler fitted during model training. Supply it when training used scaling so prediction inputs receive the same transformation.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Prediction and posterior-sampling controls</span><span class="entry-count">9 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>SBI Sample Shape</code></th>
+                  <td>Number or shape of posterior samples generated per observation. More samples improve posterior summaries but increase runtime.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference Model Name</code></th>
+                  <td>Select the prediction backend associated with the uploaded model artifact. Auto is recommended because it inspects the artifact and initializes the matching scikit-learn or SBI model. Choose a model manually only when automatic detection fails and you know the artifact type; selecting an incompatible model causes loading or prediction errors.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Use Scaler</code></th>
+                  <td>Apply the uploaded fitted scaler to feature vectors before prediction. Enable this only when the selected model was trained with that exact scaler. The option is unavailable until a scaler artifact is provided; omitting a required scaler or applying the wrong one produces predictions from incompatible inputs.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference N Jobs</code></th>
+                  <td>Number of worker processes used for scikit-learn prediction across feature rows. Use 1 for sequential execution and easier debugging. Larger values can reduce runtime for large inputs but consume additional CPU and memory. This setting does not apply to SBI prediction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference Chunksize</code></th>
+                  <td>Optional number of feature rows assigned to each scikit-learn worker task. Smaller chunks improve load balancing, while larger chunks reduce multiprocessing overhead. Leave empty to use backend defaults. This setting does not apply to SBI prediction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference Start Method</code></th>
+                  <td>Process-creation strategy used for parallel scikit-learn prediction. spawn is portable and starts clean workers; fork can be faster on supported Unix systems but inherits process state; forkserver uses a dedicated worker server where supported. This setting does not apply to SBI prediction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference SBI Eval Sampling Kwargs Json</code></th>
+                  <td>Valid JSON arguments controlling posterior sampling for SBI prediction. sample_shape sets how many posterior samples are drawn per feature row. NLE and NRE may also use MCMC settings such as method, thin, num_chains, or num_workers. More samples improve summary stability but increase runtime and memory use.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>SBI Summary Mode</code></th>
+                  <td>Statistic used to convert posterior samples for each feature row into the value stored in Predictions. Posterior mean averages samples and is sensitive to skew and outliers; posterior median is more robust and may better represent asymmetric posterior distributions.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Inference Subsample Percent</code></th>
+                  <td>Percentage of input feature rows used for prediction. Use 100 to predict every row. Values below 100 select a deterministic random subset using seed 0, and the saved output contains predictions only for that retained subset.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Training workflow guidance</span><span class="entry-count">4 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features Data *</code></th>
+                  <td>Select the feature dataset used as model inputs X. Supported files are loaded as numeric matrices or dataframes; when a dataframe contains a Features column, that column is converted into the input matrix. Each row must correspond to the same observation or simulation as the matching row in Parameters Data, and all feature vectors must have a consistent numeric shape.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Parameters Data *</code></th>
+                  <td>Select the target neural-circuit parameter dataset used as training outputs Y or theta. It may contain one target or multiple parameter dimensions. Its rows must be ordered consistently with Features Data and the number of rows must match exactly, because row i in the feature dataset is paired with row i in the parameter dataset.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Training strategy</code></th>
+                  <td>Choose how models and hyperparameters are evaluated. Single trial trains one model using Model Hyperparameters on the available training rows. Hyperparameter search evaluates every configuration from Parameter Grid using repeated cross-validation, then selects and trains the best configuration.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>BoxUniform Prior Bounds (per theta parameter)</code></th>
+                  <td>Define the lower and upper bounds of the independent uniform prior used by SBI for every inferred theta parameter. Add one row per target dimension, keep the row order consistent with Parameters Data, and ensure low is strictly smaller than high. Priors should cover scientifically plausible parameter values and the support represented by the simulations.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Prediction workflow guidance</span><span class="entry-count">3 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Features Data *</code></th>
+                  <td>Select the feature dataframe used as prediction input. It must contain a Features column whose rows are numeric feature vectors compatible with the selected trained model: feature count, order, preprocessing, and units must match the data used during training. The resulting Predictions column is attached to the selected or subsampled rows.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sklearn Model / SBI Posterior *</code></th>
+                  <td>Select the trained prediction artifact. For a scikit-learn workflow, provide the serialized fitted model. For SBI, provide the serialized posterior object produced during training. Auto model detection inspects this artifact to determine the backend and model type; the artifact must be compatible with the ncpi and dependency versions used for prediction.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Scaler (optional)</code></th>
+                  <td>Optionally select the fitted feature scaler saved during model training. Supply the exact scaler associated with the selected model whenever training used scaling; a different or newly fitted scaler changes the feature representation and can invalidate predictions.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+        </section>
+        <section id="analysis" class="tooltip-module">
+          <div class="module-heading">
+            <div>
+              <span class="module-kicker">WebUI module</span>
+              <h2>Analysis</h2>
+              <p>Boxplots, topographic maps, and simulation-result visualization controls.</p>
+            </div>
+            <span class="module-count">39 entries</span>
+          </div>
+          <details class="config-group" open>
+            <summary><span>Module overview and available workflows</span><span class="entry-count">2 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Analysis module</code></th>
+                  <td>Explore, visualize, and statistically analyze generated data, extracted features, and inferred parameter results.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>/analysis</code></th>
+                  <td>Configure visualization and statistical analysis of dataframes or simulation outputs, including boxplots, topographic maps, and simulation-result plots.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Boxplot configuration</span><span class="entry-count">6 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Boxplot Group By</code></th>
+                  <td>Categorical column used to divide values into boxplot groups.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Boxplot Value Col</code></th>
+                  <td>Numeric column summarized by the boxplot.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Boxplot Showfliers</code></th>
+                  <td>Display observations beyond the whiskers as individual outlier markers.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Boxplot Width</code></th>
+                  <td>Relative width of each box. Enter a positive numeric value.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Boxplot Linewidth</code></th>
+                  <td>Width of boxplot outlines and whiskers.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Boxplot Control Group</code></th>
+                  <td>Reference category used when computing effect sizes against other groups.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Topographic-map configuration</span><span class="entry-count">20 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Signal Type</code></th>
+                  <td>Select EEG or MEG so the appropriate sensor geometry and plotting conventions are used.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap MEG Atlas</code></th>
+                  <td>Atlas or sensor layout used to position MEG values on the topographic map.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Grouping Mode</code></th>
+                  <td>Choose whether maps summarize each sensor grouping or compare categories within a selected column.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Compare Method</code></th>
+                  <td>Method used to compare categories: raw subtraction preserves units, while Cohen&#x27;s d expresses standardized effect size.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Cohend Abs Threshold</code></th>
+                  <td>Minimum absolute Cohen&#x27;s d displayed. Increase it to hide weak effects.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Group By</code></th>
+                  <td>Categorical column defining the groups or conditions displayed in topographic maps.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Control Group</code></th>
+                  <td>Reference category used for category comparisons.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Value Col</code></th>
+                  <td>Numeric measurement mapped to sensor positions.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Sensor Col</code></th>
+                  <td>Column containing sensor or channel names. Names must match the selected montage or atlas.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap EEG Montage</code></th>
+                  <td>EEG electrode montage used to obtain standard sensor coordinates.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap EEG Ch Type</code></th>
+                  <td>MNE channel type used when constructing EEG sensor information.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Cmap</code></th>
+                  <td>Matplotlib colormap used to encode values. Choose a sequential map for magnitudes or a diverging map for signed contrasts.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Vmin</code></th>
+                  <td>Lower color-scale limit. Leave as auto to derive it from the plotted data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Vmax</code></th>
+                  <td>Upper color-scale limit. Leave as auto to derive it from the plotted data.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Res</code></th>
+                  <td>Image resolution of the interpolated topographic map. Higher values improve smoothness but increase rendering time.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Contours</code></th>
+                  <td>Number or mode of contour lines drawn over the topographic map.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Extrapolate</code></th>
+                  <td>Controls interpolation outside the sensor convex hull.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Image Interp</code></th>
+                  <td>Interpolation method used when rendering the topographic image.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Show Sensors</code></th>
+                  <td>Show sensor locations on top of the interpolated map.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Topomap Scale Mode</code></th>
+                  <td>Controls whether maps share a common color scale or use separate scales.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+          <details class="config-group">
+            <summary><span>Simulation-result plots</span><span class="entry-count">11 entries</span></summary>
+            <div class="tooltip-table-wrap">
+            <table class="tooltip-table">
+              <thead><tr><th>Page, option, or parameter</th><th>Detailed information</th></tr></thead>
+              <tbody>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Plot Type</code></th>
+                  <td>Type of simulation result visualization to generate.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Trial Start</code></th>
+                  <td>First trial index included in the plot. Indices are zero-based.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Trial End</code></th>
+                  <td>Last trial boundary included in the plot. Leave empty where supported to include remaining trials.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Time Start</code></th>
+                  <td>Beginning of the plotted time interval.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Time End</code></th>
+                  <td>End of the plotted time interval.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Freq Min</code></th>
+                  <td>Lowest frequency included in spectral plots.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Freq Max</code></th>
+                  <td>Highest frequency included in spectral plots.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim CDM Psd Mode</code></th>
+                  <td>Method used to combine or display current-dipole-moment power spectra.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Welch N per segment</code></th>
+                  <td>Number of samples per Welch segment used for simulation-result spectra.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Welch N overlap</code></th>
+                  <td>Number of overlapping samples between adjacent Welch segments.</td>
+                </tr>
+                <tr class="tooltip-entry">
+                  <th scope="row"><code>Sim Welch NFFT</code></th>
+                  <td>FFT length used by Welch spectral estimation.</td>
+                </tr>
+              </tbody>
+            </table>
+            </div>
+          </details>
+
+        </section>
+
+        <p><a class="link" href="../webui-index.html">Back to WebUI Tutorials Index</a></p>
+      </article>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#simulation">Simulation</a></li>
+        <li><a href="#field-potential">Field Potential</a></li>
+        <li><a href="#features">Features</a></li>
+        <li><a href="#inference">Inference</a></li>
+        <li><a href="#analysis">Analysis</a></li>
+      </ul>
+    </aside>
+  </div>
+  <script src="../../nav-submenu-link.js"></script>
+  <script>
+    const search = document.getElementById("tooltip-search");
+    const entries = Array.from(document.querySelectorAll(".tooltip-entry"));
+    const tables = Array.from(document.querySelectorAll(".tooltip-table"));
+    const groups = Array.from(document.querySelectorAll(".config-group"));
+    const modules = Array.from(document.querySelectorAll(".tooltip-module"));
+    const cards = Array.from(document.querySelectorAll(".module-reference-card"));
+    const empty = document.getElementById("tooltip-empty");
+    search.addEventListener("input", () => {
+      const query = search.value.trim().toLowerCase();
+      modules.forEach((module) => {
+        const moduleMatches = Boolean(query) && module.querySelector(".module-heading").textContent.toLowerCase().includes(query);
+        module.querySelectorAll(".config-group").forEach((group) => {
+          const groupMatches = moduleMatches || (Boolean(query) && group.querySelector("summary").textContent.toLowerCase().includes(query));
+          group.querySelectorAll(".tooltip-entry").forEach((entry) => {
+            entry.hidden = Boolean(query) && !groupMatches && !entry.textContent.toLowerCase().includes(query);
+          });
+          const matches = Boolean(group.querySelector(".tooltip-entry:not([hidden])"));
+          group.hidden = !matches;
+          if (query && matches) group.open = true;
+        });
+        module.hidden = !module.querySelector(".config-group:not([hidden])");
+      });
+      tables.forEach((table) => { table.closest(".tooltip-table-wrap").hidden = !table.querySelector(".tooltip-entry:not([hidden])"); });
+      cards.forEach((card) => {
+        const target = document.querySelector(card.getAttribute("href"));
+        card.hidden = Boolean(query) && (!target || target.hidden);
+      });
+      empty.style.display = entries.some((entry) => !entry.hidden) ? "none" : "block";
+    });
+  </script>
+</body>
+</html>

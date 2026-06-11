@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ncpi Docs | Home</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png">
   <link rel="stylesheet" href="./docs_style.css">
 </head>
 <body>
@@ -22,6 +23,8 @@
           <details class="left-nav-collapse">
             <summary class="subnav">WebUI</summary>
             <ul class="left-nav nested-nav">
+              <li class="subnav-group">WebUI Reference</li>
+              <li><a class="subnav2" href="./tutorials/webui/webui-information-reference.html">Configuration Reference</a></li>
               <li class="subnav-group">Simulation Pipeline</li>
               <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
               <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
@@ -58,34 +61,62 @@
 
     <main class="content">
       <article class="doc">
-        <section id="overview">
-          <h1>ncpi: Neural Circuit Parameter Inference</h1>
+        <section id="overview" class="why-ncpi">
+          <h1>Welcome to ncpi!</h1>
           <p>
-            <span class="pill">Version 1.0</span>
-            <span class="pill">Python >= 3.10</span>
+            <code>ncpi</code> is a Python package for model-based inference of neural circuit parameters
+            from population-level electrophysiological recordings, such as LFP, ECoG, MEG, and EEG.
+            <code>ncpi</code> provides a rapid, reproducible, and robust framework for estimating the most
+            probable neural circuit parameters associated with an empirical observation, streamlining
+            traditionally complex workflows into a minimal amount of code.
           </p>
-          <p>
-            <code>ncpi</code> is a Python library for model-based inference of neural circuit parameters
-            from population-level electrophysiological signals such as LFP, ECoG, EEG, and MEG.
+          <div id="why-ncpi" class="why-ncpi-intro">
+            <h2>One environment, from simulated neural circuits to real data</h2>
+            <p class="why-ncpi-lead">
+              Translate mechanistic hypotheses into simulated neural activity, multiscale field potentials,
+              interpretable biomarkers, and model-based inference through a unified, end-to-end computational
+              workflow.
+            </p>
+            <p>
+              <code>ncpi</code> connects brain simulation, forward modelling of field potentials, feature
+              extraction, and neural circuit parameter inference in a modular and reproducible computational
+              framework. Use only the components you need, or combine them into a complete pipeline that links
+              computational models with empirical measurements across recording scales.
+            </p>
+          </div>
+
+          <div class="capability-grid">
+            <div class="capability-card">
+              <h3>Simulate and observe</h3>
+              <p>Generate synthetic neural activity and transform it into CDM, LFP, EEG, or MEG observables.</p>
+            </div>
+            <div class="capability-card">
+              <h3>Extract and infer</h3>
+              <p>Extract interpretable biomarkers, train inverse models, compute predictions, and analyze results.</p>
+            </div>
+            <div class="capability-card">
+              <h3>Choose how you work</h3>
+              <p>Build workflows in pure Python, develop interactively in Jupyter, or use the guided WebUI.</p>
+            </div>
+            <div class="capability-card">
+              <h3>Run wherever research happens</h3>
+              <p>Move reproducible workflows from local workstations to shared server infrastructure.</p>
+            </div>
+          </div>
+
+          <p class="why-ncpi-footer">
+            The intuitive WebUI turns complex modelling and data-processing pipelines into guided
+            configurations while keeping scientifically relevant parameters accessible. The toolbox supports
+            diverse empirical dataset structures through flexible data loading and provides documented
+            installation paths for Linux, macOS, and Windows.
           </p>
-        </section>
-
-        <section id="highlights">
-          <h2>Highlights</h2>
-          <ul>
-            <li>Integrated simulation, forward modelling of field potentials, feature extraction, inference, and analysis pipeline.</li>
-            <li>Modular architecture so you can use only the modules you need.</li>
-            <li>A super nice graphical interface (WebUI) designed for practical end-to-end workflows.</li>
-          </ul>
-        </section>
-
-        <section id="start-here">
-          <div class="card">
+          <div id="start-here">
             <h2>Start Here</h2>
             <p>
               If this is your first time with <code>ncpi</code>, start with
               <a class="link" href="./installation.html">Installation</a> to get everything set up.
-              Then jump into the <a class="link" href="./tutorials.html">Tutorials</a> to try guided WebUI and Jupyter workflows.
+              Then jump into the <a class="link" href="./tutorials.html">Tutorials</a> to try guided WebUI
+              or Jupyter workflows.
               When you need method-level details, the <a class="link" href="./api.html">API</a> page is ready.
             </p>
           </div>
@@ -97,8 +128,8 @@
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
         <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#why-ncpi">Why ncpi?</a></li>
         <li><a href="#start-here">Start Here</a></li>
-        <li><a href="#highlights">Highlights</a></li>
       </ul>
     </aside>
   </div>

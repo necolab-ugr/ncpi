@@ -405,23 +405,85 @@ def _click_training_modal_dir(page: Page, segment: str, timeout_ms: int = 15_000
 
 
 def _select_training_modal_file(page: Page, target_name: str) -> None:
-    labels = page.locator("#inferenceTrainingServerFileBrowserEntries label")
+    """Select a file in the training modal. Try several robust Playwright queries and scrolling
+    to handle cases where the modal is scrolled or elements are off-screen.
+    """
+    entries_container = page.locator("#inferenceTrainingServerFileBrowserEntries")
+    # Reset scroll and give the UI a brief moment to render
+    try:
+        entries_container.evaluate("el => { el.scrollTop = 0; }")
+    except PlaywrightError:
+        pass
+    page.wait_for_timeout(120)
+
     selected = None
-    for idx in range(labels.count()):
-        label = labels.nth(idx)
-        name = label.locator("span.font-mono").first.inner_text().strip()
-        if name == target_name:
-            selected = label
-            break
+
+    # 1) Prefer a direct locator that matches a label containing the target name in the font-mono span
+    try:
+        candidate = entries_container.locator(f"label:has(span.font-mono:has-text(\"{target_name}\"))").first
+        if candidate.count() > 0:
+            selected = candidate
+    except PlaywrightError:
+        # fall through to other strategies
+        pass
+
+    labels = page.locator("#inferenceTrainingServerFileBrowserEntries label")
+
+    # 2) Iterate labels and compare exact text (scrolling each into view first)
     if selected is None:
         for idx in range(labels.count()):
             label = labels.nth(idx)
-            name = label.locator("span.font-mono").first.inner_text().strip()
-            if name.lower() == target_name.lower():
+            try:
+                label.scroll_into_view_if_needed()
+            except PlaywrightError:
+                pass
+            try:
+                name = label.locator("span.font-mono").first.inner_text().strip()
+            except PlaywrightError:
+                name = label.inner_text().strip()
+            if name == target_name or name.lower() == target_name.lower():
                 selected = label
                 break
+
+    # 3) Try a loose text search inside the entries container and get the ancestor label
+    if selected is None:
+        try:
+            span = entries_container.get_by_text(target_name, exact=False)
+            if span.count() > 0:
+                # get nearest ancestor label
+                ancestor = span.first.locator("xpath=ancestor::label")
+                if ancestor.count() > 0:
+                    selected = ancestor.first
+        except PlaywrightError:
+            pass
+
+    # 4) Try scrolling the container from top to bottom and re-check labels
+    if selected is None:
+        try:
+            entries_container.evaluate("el => { el.scrollTop = 0; }")
+            page.wait_for_timeout(150)
+            entries_container.evaluate("el => { el.scrollTop = el.scrollHeight; }")
+            page.wait_for_timeout(150)
+        except PlaywrightError:
+            pass
+
+        for idx in range(labels.count()):
+            label = labels.nth(idx)
+            try:
+                label.scroll_into_view_if_needed()
+            except PlaywrightError:
+                pass
+            try:
+                name = label.locator("span.font-mono").first.inner_text().strip()
+            except PlaywrightError:
+                name = label.inner_text().strip()
+            if name == target_name or name.lower() == target_name.lower() or target_name.lower() in name.lower():
+                selected = label
+                break
+
     if selected is None:
         raise RuntimeError(f"Could not find file '{target_name}' in training server browser.")
+
     smooth_click(page, selected, after_ms=300)
     smooth_click(page, page.locator("#inferenceTrainingServerFileBrowserSelect"), after_ms=620)
 

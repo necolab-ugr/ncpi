@@ -45,3 +45,69 @@ html[data-webdriver="true"] *::after {
     position: relative;
     z-index: 10;
 }
+.field-help {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-left: 0.35rem;
+    border-radius: 9999px;
+    color: rgb(100 116 139);
+    vertical-align: middle;
+    cursor: help;
+    flex: 0 0 auto;
+}
+
+.field-help:hover,
+.field-help:focus,
+.field-help:focus-visible {
+    color: var(--field-help-accent, #1337ec);
+    background: color-mix(in srgb, var(--field-help-accent, #1337ec) 12%, transparent);
+    outline: none;
+}
+
+.field-help:focus-visible {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--field-help-accent, #1337ec) 40%, transparent);
+}
+
+.field-help-tooltip {
+    pointer-events: none;
+    position: absolute;
+    z-index: 100;
+    top: calc(100% + 0.45rem);
+    right: 0;
+    width: min(22rem, calc(100vw - 2rem));
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.5rem;
+    background: rgb(15 23 42);
+    color: white;
+    box-shadow: 0 12px 30px rgb(15 23 42 / 0.28);
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.45;
+    text-align: left;
+    white-space: normal;
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-0.25rem);
+    transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+}
+
+.field-help:hover .field-help-tooltip,
+.field-help:focus .field-help-tooltip,
+.field-help:focus-visible .field-help-tooltip {
+    visibility: visible;
+    opacity: 1;
+    transform: translateY(0);
+}
+
+.dark .field-help {
+    color: rgb(148 163 184);
+}
+
+.dark .field-help-tooltip {
+    background: rgb(241 245 249);
+    color: rgb(15 23 42);
+}

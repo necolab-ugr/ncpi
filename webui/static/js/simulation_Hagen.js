@@ -4,6 +4,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const fixedGridParams = new Set(['X', 'model']);
     const populationIndexedVectorParams = new Set(['X', 'N_X', 'C_m_X', 'tau_m_X', 'E_L_X', 'n_ext']);
     const sourceTargetMatrixParams = new Set(['C_YX', 'J_YX', 'delay_YX']);
+    const jointParamUnits = {
+        C_m_X: 'pF',
+        tau_m_X: 'ms',
+        E_L_X: 'mV',
+        J_YX: 'nA',
+        delay_YX: 'ms',
+        tau_syn_YX: 'ms',
+        nu_ext: 'Hz',
+        J_ext: 'nA',
+    };
     // Parameters preset values of ncpi simulation configuration option
     const ncpiPresets = {
         tstop: 12000.0,
@@ -328,6 +338,10 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const seen = new Set();
         const options = [];
+        const displayLabel = (paramName) => {
+            const unit = jointParamUnits[paramName];
+            return unit ? `${paramName} (${unit})` : paramName;
+        };
         const inputs = Array.from(elements.form.querySelectorAll('.param-input'))
             .filter(input => {
                 const paramName = input.dataset.param || input.name || '';
@@ -347,7 +361,7 @@ document.addEventListener('DOMContentLoaded', function() {
             if (!isArrayKind || rows.length <= 1) {
                 if (!seen.has(paramName)) {
                     seen.add(paramName);
-                    options.push({ value: paramName, label: paramName });
+                    options.push({ value: paramName, label: displayLabel(paramName) });
                 }
                 return;
             }
@@ -360,7 +374,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 }
                 seen.add(token);
                 const leafLabel = describeLeafLabel(paramName, path, index, true);
-                options.push({ value: token, label: `${paramName} - ${leafLabel}` });
+                options.push({ value: token, label: `${displayLabel(paramName)} - ${leafLabel}` });
             });
         });
 
@@ -482,7 +496,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     Remove
                 </button>
             </div>
-            <label class="mt-3 flex flex-col gap-2">
+            <label class="mt-3 flex flex-col gap-2" data-field-help-skip="1">
                 <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Grouped parameters</span>
                 <select
                     multiple

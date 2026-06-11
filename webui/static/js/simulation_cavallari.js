@@ -21,6 +21,35 @@ document.addEventListener('DOMContentLoaded', function() {
         'I_e_X',
     ]);
     const sourceTargetMatrixParams = new Set([]);
+    const jointParamUnits = {
+        exc_exc_recurrent: 'nS',
+        exc_inh_recurrent: 'nS',
+        inh_exc_recurrent: 'nS',
+        inh_inh_recurrent: 'nS',
+        th_exc_external: 'nS',
+        th_inh_external: 'nS',
+        cc_exc_external: 'nS',
+        cc_inh_external: 'nS',
+        v_0: 'spikes/ms',
+        A_ext: 'spikes/ms',
+        f_ext: 'Hz',
+        OU_sigma: 'spikes/ms',
+        OU_tau: 'ms',
+        V_th_X: 'mV',
+        V_reset_X: 'mV',
+        t_ref_X: 'ms',
+        g_L_X: 'nS',
+        C_m_X: 'pF',
+        E_ex_X: 'mV',
+        E_in_X: 'mV',
+        E_L_X: 'mV',
+        tau_rise_AMPA_X: 'ms',
+        tau_decay_AMPA_X: 'ms',
+        tau_rise_GABA_A_X: 'ms',
+        tau_decay_GABA_A_X: 'ms',
+        tau_m_X: 'ms',
+        I_e_X: 'pA',
+    };
     const ncpiPresets = {
         tstop: 6000.0,
         dt: 0.0625,
@@ -29,7 +58,6 @@ document.addEventListener('DOMContentLoaded', function() {
         N_X: "[4000, 1000]",
         model: "iaf_bw_2003",
         P: 0.2,
-        extent: 1.0,
         exc_exc_recurrent: 0.178,
         exc_inh_recurrent: 0.233,
         inh_exc_recurrent: -2.01,
@@ -352,10 +380,12 @@ document.addEventListener('DOMContentLoaded', function() {
         }
         const seen = new Set();
         const options = [];
-        const displayLabelForInput = (input, fallback) => {
-            const labelNode = input.closest('label')?.querySelector('span');
-            const text = String(labelNode?.textContent || '').trim().replace(/\s+/g, ' ');
-            return text || fallback;
+        const displayLabel = (paramName) => {
+            if (paramName === 'P') {
+                return 'Connection probability P';
+            }
+            const unit = jointParamUnits[paramName];
+            return unit ? `${paramName} (${unit})` : paramName;
         };
         const inputs = Array.from(elements.form.querySelectorAll('.param-input'))
             .filter(input => {
@@ -378,7 +408,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     seen.add(paramName);
                     options.push({
                         value: paramName,
-                        label: displayLabelForInput(input, paramName)
+                        label: displayLabel(paramName)
                     });
                 }
                 return;
@@ -394,7 +424,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const leafLabel = describeLeafLabel(paramName, path, index, true);
                 options.push({
                     value: token,
-                    label: `${displayLabelForInput(input, paramName)} - ${leafLabel}`
+                    label: `${displayLabel(paramName)} - ${leafLabel}`
                 });
             });
         });
@@ -517,7 +547,7 @@ document.addEventListener('DOMContentLoaded', function() {
                     Remove
                 </button>
             </div>
-            <label class="mt-3 flex flex-col gap-2">
+            <label class="mt-3 flex flex-col gap-2" data-field-help-skip="1">
                 <span class="text-xs font-medium text-slate-700 dark:text-slate-300">Grouped parameters</span>
                 <select
                     multiple

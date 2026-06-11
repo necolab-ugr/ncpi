@@ -175,7 +175,7 @@
             </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" data-field-help-static="1" data-help="Select the feature dataset used as model inputs X. Supported files are loaded as numeric matrices or dataframes; when a dataframe contains a Features column, that column is converted into the input matrix. Each row must correspond to the same observation or simulation as the matching row in Parameters Data, and all feature vectors must have a consistent numeric shape.">
                         Features Data <span class="text-red-500">*</span>
                     </label>
                     <div
@@ -214,11 +214,10 @@
                             </div>
                         </div>
                     </div>
-                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Features matrix/dataframe (X). If dataframe contains <code>Features</code>, it will be used directly.</p>
                 </div>
 
                 <div>
-                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" data-field-help-static="1" data-help="Select the target neural-circuit parameter dataset used as training outputs Y or theta. It may contain one target or multiple parameter dimensions. Its rows must be ordered consistently with Features Data and the number of rows must match exactly, because row i in the feature dataset is paired with row i in the parameter dataset.">
                         Parameters Data <span class="text-red-500">*</span>
                     </label>
                     <div
@@ -257,7 +256,6 @@
                             </div>
                         </div>
                     </div>
-                    <p class="mt-2 text-sm text-slate-500 dark:text-slate-400">Target parameters matrix/vector (Y, θ).</p>
                 </div>
             </div>
         </section>
@@ -313,15 +311,18 @@
 
             <div class="space-y-6">
                 <input type="hidden" name="training_strategy_mode" x-model="trainingMode" />
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <label class="inline-flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+                <div>
+                    <span class="mb-2 block text-sm font-medium text-slate-700 dark:text-slate-300" data-field-help-static="1" data-help="Choose how models and hyperparameters are evaluated. Single trial trains one model using Model Hyperparameters on the available training rows. Hyperparameter search evaluates every configuration from Parameter Grid using repeated cross-validation, then selects and trains the best configuration.">Training strategy</span>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <label class="inline-flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2" data-field-help-skip="1">
                         <input id="training-mode-single" name="training_strategy_mode_choice" class="rounded border-slate-300 text-primary focus:ring-primary" type="radio" value="single_trial" x-model="trainingMode" checked />
                         <span class="text-sm text-slate-700 dark:text-slate-300">Single trial (no param_grid)</span>
                     </label>
-                    <label class="inline-flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2">
+                    <label class="inline-flex items-center gap-2 rounded-md border border-slate-200 dark:border-slate-700 px-3 py-2" data-field-help-skip="1">
                         <input id="training-mode-grid" name="training_strategy_mode_choice" class="rounded border-slate-300 text-primary focus:ring-primary" type="radio" value="param_grid" x-model="trainingMode" />
                         <span class="text-sm text-slate-700 dark:text-slate-300">Hyperparameter search (param_grid)</span>
                     </label>
+                    </div>
                 </div>
 
                 <p class="text-xs text-slate-500 dark:text-slate-400" x-show="trainingMode === 'single_trial'">
@@ -369,7 +370,7 @@
                         <input id="training-sbi-prior-low" name="training_sbi_prior_low" type="hidden" value="" />
                         <input id="training-sbi-prior-high" name="training_sbi_prior_high" type="hidden" value="" />
                         <div class="flex items-center justify-between gap-3">
-                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300">BoxUniform Prior Bounds (per theta parameter)</label>
+                            <label class="block text-sm font-medium text-slate-700 dark:text-slate-300" data-field-help-static="1" data-help="Define the lower and upper bounds of the independent uniform prior used by SBI for every inferred theta parameter. Add one row per target dimension, keep the row order consistent with Parameters Data, and ensure low is strictly smaller than high. Priors should cover scientifically plausible parameter values and the support represented by the simulations.">BoxUniform Prior Bounds (per theta parameter)</label>
                             <button
                                 type="button"
                                 id="training-sbi-prior-add-row"
@@ -1113,6 +1114,7 @@
 
         const nameWrapper = document.createElement("label");
         nameWrapper.className = "text-xs text-slate-600 dark:text-slate-300";
+        nameWrapper.dataset.fieldHelpSkip = "1";
         nameWrapper.textContent = "Parameter";
         const nameInput = document.createElement("input");
         nameInput.type = "text";
@@ -1122,6 +1124,7 @@
 
         const lowWrapper = document.createElement("label");
         lowWrapper.className = "text-xs text-slate-600 dark:text-slate-300";
+        lowWrapper.dataset.fieldHelpSkip = "1";
         lowWrapper.textContent = "Lower";
         const lowInput = document.createElement("input");
         lowInput.type = "number";
@@ -1133,6 +1136,7 @@
 
         const highWrapper = document.createElement("label");
         highWrapper.className = "text-xs text-slate-600 dark:text-slate-300";
+        highWrapper.dataset.fieldHelpSkip = "1";
         highWrapper.textContent = "Upper";
         const highInput = document.createElement("input");
         highInput.type = "number";

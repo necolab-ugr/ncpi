@@ -1,6 +1,26 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 
+{% block extra_css %}
+<style>
+	.module-info-tooltip {
+		pointer-events: none;
+		visibility: hidden;
+		opacity: 0;
+		transform: translateY(-0.25rem);
+		transition: opacity 150ms ease, transform 150ms ease, visibility 150ms ease;
+	}
+
+	.module-info:hover .module-info-tooltip,
+	.module-info:focus .module-info-tooltip,
+	.module-info:focus-visible .module-info-tooltip {
+		visibility: visible;
+		opacity: 1;
+		transform: translateY(0);
+	}
+</style>
+{% endblock %}
+
 <!-- Main content of the dashboard page -->
 {% block content %}
 						<div class="flex flex-col items-center gap-4 text-center px-4">
@@ -19,8 +39,16 @@
 						</div>
 
 						<div class="mt-12 grid grid-cols-1 gap-6 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+							<a class="group relative flex flex-col hover:z-20 focus-within:z-20 gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
 								href="{{url_for('simulation')}}">
+								<span class="module-info absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 dark:text-slate-400"
+									tabindex="0" aria-label="About the Simulation module" aria-describedby="simulation-module-tooltip">
+									<span class="material-symbols-outlined !text-[20px]" aria-hidden="true">info</span>
+									<span id="simulation-module-tooltip" role="tooltip"
+										class="module-info-tooltip absolute right-0 top-9 z-30 w-72 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs font-normal leading-relaxed text-white shadow-xl dark:bg-slate-100 dark:text-slate-900">
+										Configure and run neural circuit simulations, or upload existing simulation outputs, to generate synthetic data for downstream processing.
+									</span>
+								</span>
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
 									<!-- <span class="material-symbols-outlined !text-3xl">psychology</span> -->
@@ -32,8 +60,16 @@
 										to test your hypotheses.</p>
 								</div>
 							</a>
-							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+							<a class="group relative flex flex-col hover:z-20 focus-within:z-20 gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
 								href="{{url_for('field_potential')}}">
+								<span class="module-info absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 dark:text-slate-400"
+									tabindex="0" aria-label="About the Field Potential module" aria-describedby="field-potential-module-tooltip">
+									<span class="material-symbols-outlined !text-[20px]" aria-hidden="true">info</span>
+									<span id="field-potential-module-tooltip" role="tooltip"
+										class="module-info-tooltip absolute right-0 top-9 z-30 w-72 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs font-normal leading-relaxed text-white shadow-xl dark:bg-slate-100 dark:text-slate-900">
+										Convert simulated neural activity into field-potential signals, including proxy and kernel-based forward-model outputs.
+									</span>
+								</span>
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
 									<!-- <span class="material-symbols-outlined !text-3xl">waves</span> -->
@@ -45,8 +81,16 @@
 										simulated neural activity.</p>
 								</div>
 							</a>
-							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+							<a class="group relative flex flex-col hover:z-20 focus-within:z-20 gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
 								href="{{url_for('features')}}">
+								<span class="module-info absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 dark:text-slate-400"
+									tabindex="0" aria-label="About the Features module" aria-describedby="features-module-tooltip">
+									<span class="material-symbols-outlined !text-[20px]" aria-hidden="true">info</span>
+									<span id="features-module-tooltip" role="tooltip"
+										class="module-info-tooltip absolute right-0 top-9 z-30 w-72 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs font-normal leading-relaxed text-white shadow-xl dark:bg-slate-100 dark:text-slate-900">
+										Compute or load quantitative descriptors (features) from simulated or empirical neural signals for inference and analysis workflows.
+									</span>
+								</span>
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary">
 									<!-- <span class="material-symbols-outlined !text-3xl">analytics</span> -->
@@ -58,8 +102,16 @@
 										patterns from neural signals.</p>
 								</div>
 							</a>
-							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+							<a class="group relative flex flex-col hover:z-20 focus-within:z-20 gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
 								href="{{url_for('inference')}}">
+								<span class="module-info absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 dark:text-slate-400"
+									tabindex="0" aria-label="About the Inference module" aria-describedby="inference-module-tooltip">
+									<span class="material-symbols-outlined !text-[20px]" aria-hidden="true">info</span>
+									<span id="inference-module-tooltip" role="tooltip"
+										class="module-info-tooltip absolute right-0 top-9 z-30 w-72 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs font-normal leading-relaxed text-white shadow-xl dark:bg-slate-100 dark:text-slate-900">
+										Train inverse models from simulated features and parameters, or use trained models to estimate parameters from feature data.
+									</span>
+								</span>
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary p-2">
 									<!-- <span class="material-symbols-outlined !text-3xl">share</span> -->
@@ -71,8 +123,16 @@
 										and build predictive models.</p>
 								</div>
 							</a>
-							<a class="group flex flex-col gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
+							<a class="group relative flex flex-col hover:z-20 focus-within:z-20 gap-4 items-center rounded-xl border border-gray-200/80 bg-white p-6 transition-all hover:-translate-y-1 hover:shadow-lg dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10"
 								href="{{url_for('analysis')}}">
+								<span class="module-info absolute right-3 top-3 z-20 flex h-7 w-7 items-center justify-center rounded-full text-slate-400 transition-colors hover:bg-primary/10 hover:text-primary focus:bg-primary/10 focus:text-primary focus:outline-none focus:ring-2 focus:ring-primary/40 dark:text-slate-400"
+									tabindex="0" aria-label="About the Analysis module" aria-describedby="analysis-module-tooltip">
+									<span class="material-symbols-outlined !text-[20px]" aria-hidden="true">info</span>
+									<span id="analysis-module-tooltip" role="tooltip"
+										class="module-info-tooltip absolute right-0 top-9 z-30 w-72 rounded-lg bg-slate-900 px-3 py-2 text-left text-xs font-normal leading-relaxed text-white shadow-xl dark:bg-slate-100 dark:text-slate-900">
+										Explore, visualize, and statistically analyze generated data, extracted features, and inferred parameter results.
+									</span>
+								</span>
 								<div
 									class="flex h-32 w-32 items-center justify-center rounded-lg bg-primary/10 text-primary p-2">
 									<!-- <span class="material-symbols-outlined !text-3xl">query_stats</span> -->
@@ -255,6 +315,13 @@
 
 {% block scripts %}
 <script>
+	document.querySelectorAll(".module-info").forEach((infoIcon) => {
+		infoIcon.addEventListener("click", (event) => {
+			event.preventDefault();
+			event.stopPropagation();
+		});
+	});
+
 	const initClearDataModalHandlers = () => {
 		const clearForms = document.querySelectorAll(".js-clear-data-form");
 		const modal = document.getElementById("clearDataConfirmModal");

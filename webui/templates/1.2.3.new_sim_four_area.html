@@ -78,23 +78,11 @@
         </section>
         <section class="flex flex-col gap-6">
             <h2
-                class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
-                Network</h2>
+                class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em] px-4 pb-3 pt-5 border-b border-slate-200 dark:border-slate-800">
+                <span>Network</span>
+                <span id="network-selected-area" class="text-sm font-normal tracking-normal text-slate-500 dark:text-slate-400">Selected area: frontal</span>
+            </h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
-                <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Areas
-                        <i>areas</i></span>
-                    <input
-                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                        type="text" data-param="areas"/>
-                </label>
-                <label class="flex flex-col gap-2">
-                    <span class="text-slate-800 dark:text-white text-sm font-medium">Populations
-                        <i>X</i></span>
-                    <input
-                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
-                        type="text" data-param="X"/>
-                </label>
                 <label class="flex flex-col gap-2">
                     <span class="text-slate-800 dark:text-white text-sm font-medium">Population
                         sizes <i>N</i><sub><i>X</i></sub></span>
@@ -139,8 +127,10 @@
                 Connectivity</h2>
             <div class="flex flex-col gap-6">
                 <div class="px-4">
-                    <h3 class="text-slate-800 dark:text-white text-lg font-semibold leading-tight">
-                        Recurrent connectivity</h3>
+                    <h3 class="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-slate-800 dark:text-white text-lg font-semibold leading-tight">
+                        <span>Recurrent connectivity</span>
+                        <span id="recurrent-selected-area" class="text-sm font-normal text-slate-500 dark:text-slate-400">Selected area: frontal</span>
+                    </h3>
                 </div>
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
                     <label class="flex flex-col gap-2">
@@ -197,10 +187,10 @@
                     <h3 class="text-slate-800 dark:text-white text-lg font-semibold leading-tight">
                         Inter-area connectivity</h3>
                     <p id="inter-area-mode-status" class="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                        Inter-area connectivity is common for all areas and is configured here as full area-population matrices (8x8). Same-area entries are ignored by the simulator. Rows are color-coded by source area (frontal: red, parietal: blue, temporal: green, occipital: purple).
+                        Inter-area connectivity is common for all areas and is configured here as full area-population matrices (8x8). Same-area entries are ignored by the simulator (these connections are configured in the Recurrent connectivity section).
                     </p>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-6 px-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-x-6 gap-y-6 px-4">
                     <label class="flex flex-col gap-2">
                         <span class="text-slate-800 dark:text-white text-sm font-medium">Inter-area
                             <i>C</i><sub><i>Y</i><i>X</i></sub></span>
@@ -232,9 +222,23 @@
 <form id="run-simulation-form" method="POST" action="{{ url_for('run_trial_simulation', model_type='four_area') }}">
     <script id="simulation-restore-form" type="application/json">{{ simulation_restore_form | default({}) | tojson }}</script>
     <section class="flex flex-col gap-3 px-4 pb-2">
-        <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Local area editor</h2>
-        <div class="grid grid-cols-1 md:grid-cols-[minmax(14rem,20rem)_1fr] gap-3 items-end">
-            <label class="flex flex-col gap-2">
+        <h2 class="text-slate-900 dark:text-white text-xl font-bold leading-tight tracking-[-0.015em]">Brain area editor</h2>
+        <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div class="flex flex-col gap-4">
+                <label class="flex flex-col gap-2" data-help="Names of the four modeled brain areas. Each area contains its own neuronal populations and has independently configurable Network and recurrent connectivity parameters. Changing an area label updates the Area selector and all area references throughout the configuration.">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Area labels</span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="areas"/>
+                </label>
+                <label class="flex flex-col gap-2" data-help="Names of the neuronal populations contained within each brain area. The same population labels and ordering are shared by all four areas and are used throughout population-indexed and connectivity parameters. Changing a label updates all population references throughout the configuration.">
+                    <span class="text-slate-800 dark:text-white text-sm font-medium">Population labels <i>X</i></span>
+                    <input
+                        class="param-input form-input rounded-lg border-slate-300 dark:border-slate-700 bg-background-light dark:bg-[#191e33] text-slate-900 dark:text-white"
+                        type="text" data-param="X"/>
+                </label>
+            </div>
+            <label class="flex flex-col gap-2" data-help="Select the brain area whose area-local Network and recurrent connectivity parameters are displayed and edited below. Changing the selection does not modify shared simulation parameters, population labels, area labels, or inter-area connectivity.">
                 <span class="text-slate-800 dark:text-white text-sm font-medium">Area selector</span>
                 <select
                     id="four-area-selector"
@@ -246,9 +250,6 @@
                     <option value="3">occipital</option>
                 </select>
             </label>
-            <p id="four-area-editor-status" class="text-xs text-slate-500 dark:text-slate-400">
-                Area selector affects Network local parameters and recurrent connectivity for the selected area only. Simulation parameters and inter-area connectivity are common for all areas.
-            </p>
         </div>
     </section>
 
@@ -270,15 +271,15 @@
         <div class="flex flex-col gap-2">
             <h3 class="text-base font-semibold text-slate-900 dark:text-white">Joint sweep groups</h3>
             <p class="text-sm text-slate-600 dark:text-slate-300">
-                Keep the current per-parameter sweep controls below. Add a group only when selected parameters should use the same candidate index together instead of forming a Cartesian product.
+                By default, every swept parameter varies independently, so all candidate combinations are simulated. Create a joint group when parameters should vary together as paired configurations. Area-local groups apply to the area selected when the group is created.
             </p>
             <p class="text-xs text-slate-500 dark:text-slate-400">
-                Example: if `J_YX` has 3 candidates and `nu_ext` has 3 candidates in the same group, the sweep runs 3 linked configurations, not 9 combinations.
+                Example: grouping `J_YX (nA)` and `nu_ext (Hz)` with 3 candidates each runs 3 paired configurations for the selected area instead of all 9 combinations. Every parameter in a group must define the same number of candidates.
             </p>
         </div>
         <div id="joint-groups-container" class="mt-4 flex flex-col gap-3"></div>
         <div class="mt-4 flex items-center justify-between gap-3">
-            <p class="text-xs text-slate-500 dark:text-slate-400">Each grouped parameter must define the same number of candidates.</p>
+            <p class="text-xs text-slate-500 dark:text-slate-400">Parameters outside a joint group continue to vary independently.</p>
             <button
                 id="add-joint-group-button"
                 type="button"

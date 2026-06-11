@@ -125,6 +125,38 @@ tests = [
     "rpy2",
 ]
 
+# All optional dependencies
+all = [
+    "h5py",
+    "mne",
+    "pandas",
+    "pyEDFlib",
+    "pyarrow",
+    "pynwb",
+    "rpy2",
+    "nibabel",
+    "pyvista",
+    "pyvistaqt",
+    "qtpy",
+    "PyQt5",
+    "ipywidgets",
+    "ipyevents",
+    "LFPy",
+    "lfpykernels",
+    "lfpykit",
+    "neuron",
+    "Pillow",
+    "openpyxl",
+    "xlrd",
+    "mpi4py",
+    "pdf2image",
+    "seaborn",
+    "statsmodels",
+    "matlabengine",
+    "playwright",
+    "pytest",
+]
+
 
 [project.urls]
 repository = "https://github.com/necolab-ugr/ncpi"
