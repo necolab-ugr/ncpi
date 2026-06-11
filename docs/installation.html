@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ncpi Docs | Installation</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png">
   <link rel="stylesheet" href="./docs_style.css">
 </head>
 <body>
@@ -22,6 +23,8 @@
           <details class="left-nav-collapse">
             <summary class="subnav">WebUI</summary>
             <ul class="left-nav nested-nav">
+              <li class="subnav-group">WebUI Reference</li>
+              <li><a class="subnav2" href="./tutorials/webui/webui-information-reference.html">Configuration Reference</a></li>
               <li class="subnav-group">Simulation Pipeline</li>
               <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
               <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
@@ -133,15 +136,56 @@ pip install "ncpi[hctsa]"           # hctsa backend support</code></pre>
           <pre><code>pip install "ncpi[webui]"</code></pre>
 
           <h3>Start WebUI</h3>
-          <p>From the repository root:</p>
+          <p>From the repository root, with the Conda environment activated:</p>
+          <pre><code>python webui/launcher.py local</code></pre>
+
+          <p>The launcher starts Flask and opens the default browser at:</p>
+          <pre><code>http://127.0.0.1:5000</code></pre>
+
+          <p>The following compatibility command also starts the local WebUI:</p>
           <pre><code>python webui/app.py</code></pre>
 
-          <p>Then open:</p>
-          <pre><code>http://127.0.0.1:5000</code></pre>
           <p>
-            For best results, we recommend running the WebUI in Chrome, as our tests are most stable there and we
-            have observed a couple of issues in other browsers.
+            For best results, we recommend running the WebUI in Chrome, as our tests are most stable there and we have observed a couple of issues in other browsers.
           </p>
+
+          <h3>Run on a remote server over SSH</h3>
+
+          <h4>Remote command</h4>
+
+          <p>Run the following command from the <code>ncpi</code> repository on your local machine:</p>
+          <pre><code>python webui/launcher.py remote &lt;user&gt;@&lt;server&gt; \
+  --ssh-port &lt;P&gt; \
+  --local-port &lt;L&gt; \
+  --remote-port &lt;R&gt; \
+  --remote-dir &lt;path/to/ncpi&gt; \
+  --python &lt;path/to/python&gt;</code></pre>
+
+          <p>Replace the placeholders:</p>
+          <ul>
+            <li><code>&lt;user&gt;@&lt;server&gt;</code>: SSH destination (e.g., <code>username@example.org</code>)</li>
+            <li><code>&lt;P&gt;</code>: SSH port (default: 22)</li>
+            <li><code>&lt;L&gt;</code>: Local port on your machine for the browser (default: 5000)</li>
+            <li><code>&lt;R&gt;</code>: Remote port on the server where Flask runs (default: 5000)</li>
+            <li><code>&lt;path/to/ncpi&gt;</code>: Absolute path to the <code>ncpi</code> repository on the server</li>
+            <li><code>&lt;path/to/python&gt;</code>: Absolute path to Python executable on the server (from <code>which python</code>)</li>
+          </ul>
+
+          <p>The browser opens <code>http://127.0.0.1:&lt;L&gt;</code>. Keep the launcher terminal open while using the WebUI. Press <code>Ctrl+C</code> to close the SSH tunnel and stop the remote Flask process.</p>
+
+          <h4>Manual SSH alternative</h4>
+
+          <p>The launcher is recommended, but the equivalent workflow can be performed manually:</p>
+          <pre><code>ssh -L &lt;L&gt;:127.0.0.1:&lt;R&gt; -p &lt;P&gt; &lt;user&gt;@&lt;server&gt;</code></pre>
+
+          <p>Then, inside the SSH session:</p>
+          <pre><code>cd &lt;path/to/ncpi&gt;
+&lt;path/to/python&gt; webui/app.py \
+  --host 127.0.0.1 \
+  --port &lt;R&gt; \
+  --no-browser</code></pre>
+
+          <p>Finally, open <code>http://127.0.0.1:&lt;L&gt;</code> on the local machine.</p>
 
           <h3>Windows note</h3>
           <p>

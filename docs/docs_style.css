@@ -357,7 +357,8 @@ table {
 }
 
 .why-ncpi-intro {
-  max-width: 850px;
+  width: 100%;
+  margin: 1.5rem 0 0;
 }
 
 .section-eyebrow {
@@ -372,18 +373,23 @@ table {
 }
 
 .why-ncpi h2 {
-  max-width: 800px;
-  margin-bottom: 0.8rem;
+  margin: 0 0 0.8rem;
   font-size: clamp(1.55rem, 2.7vw, 2.15rem);
   line-height: 1.18;
 }
 
 .why-ncpi-lead {
-  margin: 0 0 0.85rem;
-  color: var(--ink);
-  font-size: clamp(1.02rem, 1.5vw, 1.18rem);
-  font-weight: 600;
-  line-height: 1.7;
+  margin: 0 0 1rem;
+  padding: 0.2rem 1rem 0.2rem 0.8rem;
+  border-left: 3px solid rgba(0, 137, 199, 0.28);
+  color: var(--accent);
+  font-size: 1rem;
+  font-weight: 400;
+  line-height: normal;
+}
+
+.why-ncpi-intro p:last-child {
+  margin: 0;
 }
 
 .capability-grid {
@@ -394,11 +400,9 @@ table {
 }
 
 .capability-card {
-  padding: 1rem;
-  border: 1px solid rgba(0, 137, 199, 0.18);
-  border-radius: 12px;
+  padding: 0.2rem 1rem 0.2rem 0.8rem;
+  border-left: 3px solid rgba(0, 137, 199, 0.28);
   background: #fff;
-  box-shadow: 0 10px 24px rgba(18, 50, 78, 0.08);
 }
 
 .capability-card h3 {
@@ -415,6 +419,16 @@ table {
 .why-ncpi-footer {
   padding-top: 1rem;
   border-top: 1px solid rgba(0, 137, 199, 0.2);
+}
+
+#start-here {
+  margin-top: 1.35rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(0, 137, 199, 0.2);
+}
+
+#start-here p {
+  margin-bottom: 0;
 }
 
 .tutorial-option {

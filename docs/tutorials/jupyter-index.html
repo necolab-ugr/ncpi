@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ncpi Docs | Tutorials | Jupyter Index</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png">
   <link rel="stylesheet" href="../docs_style.css">
 </head>
 <body>
@@ -22,6 +23,8 @@
           <details class="left-nav-collapse">
             <summary class="subnav">WebUI</summary>
             <ul class="left-nav nested-nav">
+              <li class="subnav-group">WebUI Reference</li>
+              <li><a class="subnav2" href="./webui/webui-information-reference.html">Configuration Reference</a></li>
               <li class="subnav-group">Simulation Pipeline</li>
               <li><a class="subnav2" href="./webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
               <li><a class="subnav2" href="./webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
@@ -60,8 +63,14 @@
       <article class="doc">
         <section id="jupyter-tutorials-index">
           <h1>Python Jupyter Tutorials Index</h1>
-          <p><span class="pill">Overview</span></p>
-          <p>Choose a tutorial from the categories below.</p>
+          <p>
+            The <strong>Simulation Pipeline</strong> notebooks demonstrate how to build a complete
+            model-based inference workflow in Python, from simulating neural activity and computing field
+            potentials to extracting features, training an inverse model, and estimating circuit parameters.
+            The <strong>Empirical Dataset Analysis</strong> notebooks show how to load measured
+            electrophysiological recordings, prepare them for feature extraction, and estimate neural circuit
+            parameters using a trained model.
+          </p>
         </section>
 
         <section id="simulation-pipeline">
@@ -87,7 +96,7 @@
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#jupyter-tutorials-index">Overview</a></li>
+        <li><a class="active" href="#jupyter-tutorials-index">Jupyter Tutorials</a></li>
         <li><a href="#simulation-pipeline">Simulation Pipeline</a></li>
         <li><a href="#empirical-dataset-analysis">Empirical Dataset Analysis</a></li>
       </ul>
