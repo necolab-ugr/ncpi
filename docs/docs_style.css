@@ -379,13 +379,11 @@ table {
 }
 
 .why-ncpi-lead {
-  margin: 0 0 1rem;
-  padding: 0.2rem 1rem 0.2rem 0.8rem;
-  border-left: 3px solid rgba(0, 137, 199, 0.28);
-  color: var(--accent);
-  font-size: 1rem;
-  font-weight: 400;
-  line-height: normal;
+  margin: -0.35rem 0 1.15rem;
+  color: var(--muted);
+  font-size: 1.02rem;
+  font-weight: 500;
+  line-height: 1.55;
 }
 
 .why-ncpi-intro p:last-child {

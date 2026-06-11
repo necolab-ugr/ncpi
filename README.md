@@ -17,7 +17,7 @@ framework for estimating the most probable neural circuit parameters associated 
 streamlining traditionally complex workflows into a minimal amount of code.
 
 <div align="center">
-  <img src="docs/tutorials/automation/videos/compute-field-potentials.gif" alt="Field-potential computation workflow in the ncpi WebUI" width="900">
+  <img src="docs/tutorials/automation/videos/compute-field-potentials.gif" alt="Field-potential computation workflow in the ncpi WebUI" width="800">
 </div>
 
 # Key Features of `ncpi`

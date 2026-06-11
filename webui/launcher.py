@@ -103,11 +103,33 @@ def should_open_browser(host, no_browser=False, environ=None):
     return not no_browser and host in LOOPBACK_HOSTS and not is_ssh_session(environ)
 
 
+def _open_browser(url):
+    if sys.platform == "win32":
+        try:
+            os.startfile(url)
+            return True
+        except (AttributeError, OSError):
+            pass
+
+    try:
+        if webbrowser.open(url, new=2):
+            return True
+    except Exception:
+        pass
+
+    print(f"Could not open a browser automatically. Open {url}", flush=True)
+    return False
+
+
 def _schedule_browser_open(url, debug, environ=None):
     environ = os.environ if environ is None else environ
-    if debug and environ.get("WERKZEUG_RUN_MAIN") != "true":
+    # Schedule from Werkzeug's reloader parent. On Windows, launching from the
+    # reloader child during process startup can silently fail or open twice.
+    if debug and environ.get("WERKZEUG_RUN_MAIN") == "true":
         return
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    timer = threading.Timer(1.0, lambda: _open_browser(url))
+    timer.daemon = True
+    timer.start()
 
 
 def _build_local_parser():
@@ -314,8 +336,8 @@ def run_remote(argv=None):
 
     try:
         wait_for_webui(process, args.local_port, args.startup_timeout)
-        if not args.no_browser and not webbrowser.open(url):
-            print(f"Could not open a browser automatically. Open {url}", flush=True)
+        if not args.no_browser:
+            _open_browser(url)
         return process.wait()
     except KeyboardInterrupt:
         return 130
@@ -367,4 +389,3 @@ def main(argv=None):
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
