@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ncpi Docs | Datasets</title>
+  <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png">
+  <link rel="stylesheet" href="./docs_style.css">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar-left">
+      <div class="brand">
+        <a class="brand-home" href="./index.html"><img src="https://raw.githubusercontent.com/necolab-ugr/ncpi/main/img/ncpi_logo.png" alt="ncpi logo"></a>
+        <div class="title"><a href="./index.html">Documentation</a></div>
+      </div>
+      <ul class="left-nav">
+        <li><a class="github-link" href="https://github.com/necolab-ugr/ncpi"><img class="github-mark" src="https://github.githubassets.com/favicons/favicon.svg" alt=""/>GitHub Repository</a></li>
+        <li><a href="./index.html">Home</a></li>
+        <li><a href="./installation.html">Installation</a></li>
+        <li><a href="./tutorials.html">Tutorials</a></li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">WebUI</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">WebUI Reference</li>
+              <li><a class="subnav2" href="./tutorials/webui/webui-information-reference.html">Configuration Reference</a></li>
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/webui/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/train-inverse-model.html">4. Inverse Model Training</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/compute-predictions.html">5. Compute Predictions</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/webui/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+              <li><a class="subnav2" href="./tutorials/webui/plot-empirical-results.html">2. Plot Empirical Results</a></li>
+            </ul>
+          </details>
+        </li>
+        <li>
+          <details class="left-nav-collapse">
+            <summary class="subnav">Jupyter</summary>
+            <ul class="left-nav nested-nav">
+              <li class="subnav-group">Simulation Pipeline</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/simulate-lif-network.html">1. Simulate a LIF Network</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/compute-field-potentials.html">2. Compute Field Potentials</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/extract-features.html">3. Feature Extraction</a></li>
+              <li><a class="subnav2" href="./tutorials/jupyter/training-predictions.html">4 - Training an Inverse Model and Computing Predictions</a></li>
+              <li class="subnav-group">Empirical Dataset Analysis</li>
+              <li><a class="subnav2" href="./tutorials/jupyter/empirical-data-processing.html">1. Load Empirical Data, Extract Features, and Compute Predictions</a></li>
+            </ul>
+          </details>
+        </li>
+        <li><a class="active" href="./datasets.html">Datasets</a></li>
+        <li><a href="./api.html">API</a></li>
+        <li><a href="./contributing.html">Contributing</a></li>
+        <li><a href="./citation.html">Citation</a></li>
+        <li><a href="./credits.html">Credits</a></li>
+      </ul>
+    </aside>
+
+    <main class="content">
+      <article class="doc">
+        <section id="overview">
+          <h1>Zenodo Datasets</h1>
+          <p>
+            These open Zenodo datasets provide empirical recordings, simulation resources, extracted
+            features, and trained models that can be used to test and reproduce <code>ncpi</code> workflows.
+          </p>
+        </section>
+
+        <section id="datasets">
+          <div class="dataset-grid">
+            <a class="card dataset-card" href="https://zenodo.org/records/15351118" target="_blank" rel="noopener noreferrer">
+              <span class="zenodo-mark">Z</span>
+              <span class="dataset-card-content">
+                <h2>Simulation data and machine learning models from 'A Python toolbox for neural circuit parameter inference'</h2>
+                <p>Simulation feature datasets and trained inference assets used in the corresponding publication.</p>
+                <span class="dataset-open">Open on Zenodo</span>
+              </span>
+            </a>
+
+            <a class="card dataset-card" href="https://zenodo.org/records/20657586" target="_blank" rel="noopener noreferrer">
+              <span class="zenodo-mark">Z</span>
+              <span class="dataset-card-content">
+                <h2>Massive Simulation Feature Datasets and Inverse Models</h2>
+                <p>Up to 36 reproducible configurations combining 3 simulated datasets, 3 feature sets, and 4 inverse-model types.</p>
+                <span class="dataset-open">Open on Zenodo</span>
+              </span>
+            </a>
+
+            <a class="card dataset-card" href="https://zenodo.org/records/15429373" target="_blank" rel="noopener noreferrer">
+              <span class="zenodo-mark">Z</span>
+              <span class="dataset-card-content">
+                <h2>Multicompartmental Neuron Network Simulation Data</h2>
+                <p>Cell templates, mechanism files, and precomputed outputs used by the reference multicompartment network simulations.</p>
+                <span class="dataset-open">Open on Zenodo</span>
+              </span>
+            </a>
+
+            <a class="card dataset-card" href="https://zenodo.org/records/15382047" target="_blank" rel="noopener noreferrer">
+              <span class="zenodo-mark">Z</span>
+              <span class="dataset-card-content">
+                <h2>Developmental Mouse LFP Recordings</h2>
+                <p>Developmental LFP recordings re-uploaded from the GIN repository for Python integration.</p>
+                <span class="dataset-open">Open on Zenodo</span>
+              </span>
+            </a>
+          </div>
+        </section>
+      </article>
+    </main>
+
+    <aside class="sidebar-right">
+      <h2 class="right-title">On This Page</h2>
+      <ul class="right-nav">
+        <li><a class="active" href="#overview">Overview</a></li>
+        <li><a href="#datasets">Datasets</a></li>
+      </ul>
+    </aside>
+  </div>
+  <script src="./nav-submenu-link.js"></script>
+</body>
+</html>

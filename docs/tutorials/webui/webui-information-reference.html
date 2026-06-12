@@ -35,6 +35,7 @@
     .tooltip-table th:first-child { min-width: 14rem; width: 27%; }
     .tooltip-table td { min-width: 28rem; }
     .tooltip-empty { display: none; color: var(--muted); font-style: italic; }
+    .module-reference-card[hidden], .tooltip-module[hidden], .config-group[hidden], .tooltip-table-wrap[hidden], .tooltip-entry[hidden] { display: none !important; }
     @media (max-width: 760px) { .module-reference-grid { grid-template-columns: 1fr; } .module-heading { display: block; } .module-count { display: inline-block; margin-top: 0.65rem; } }
   </style>
 </head>
@@ -82,8 +83,8 @@
             </ul>
           </details>
         </li>
+        <li><a href="../../datasets.html">Datasets</a></li>
         <li><a href="../../api.html">API</a></li>
-        <li><a href="../../faq.html">FAQ</a></li>
         <li><a href="../../contributing.html">Contributing</a></li>
         <li><a href="../../citation.html">Citation</a></li>
         <li><a href="../../credits.html">Credits</a></li>
@@ -94,12 +95,9 @@
       <article class="doc">
         <section id="overview" class="reference-overview">
           <h1>WebUI Configuration Reference</h1>
-          <p><span class="pill">Modules and Parameters</span></p>
           <p>
             This reference summarizes the purpose, workflows, and configurable parameters of every WebUI
-            module. Information is organized by module, task, feature method, and simulation model so related
-            settings can be reviewed together. Generic fallback messages for controls without explicit help
-            are not repeated here.
+            module.
           </p>
           <label for="tooltip-search"><strong>Search the configuration reference</strong></label>
           <input id="tooltip-search" class="tooltip-search" type="search" placeholder="Search modules, categories, parameters, and descriptions">

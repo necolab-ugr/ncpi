@@ -46,4 +46,88 @@
   summaries.forEach(function (summary) {
     summary.addEventListener("click", onSummaryClick);
   });
+
+  var rightNavLinks = Array.from(document.querySelectorAll(".right-nav a[href^='#']"));
+  var rightNavItems = rightNavLinks
+    .map(function (link) {
+      var id = decodeURIComponent(link.getAttribute("href").slice(1));
+      return { link: link, section: document.getElementById(id) };
+    })
+    .filter(function (item) {
+      return item.section;
+    });
+
+  if (!rightNavItems.length) return;
+
+  function setActiveRightNav(link) {
+    rightNavLinks.forEach(function (candidate) {
+      var isActive = candidate === link;
+      candidate.classList.toggle("active", isActive);
+      if (isActive) {
+        candidate.setAttribute("aria-current", "location");
+      } else {
+        candidate.removeAttribute("aria-current");
+      }
+    });
+  }
+
+  function updateActiveRightNav() {
+    // Prefer an explicit hash in the URL (e.g., when clicking a right-nav link)
+    if (window.location.hash) {
+      var matchingItem = rightNavItems.find(function (item) {
+        return item.link.hash === window.location.hash;
+      });
+      if (matchingItem) {
+        setActiveRightNav(matchingItem.link);
+        return;
+      }
+    }
+
+    var visibleItems = rightNavItems.filter(function (item) {
+      return !item.section.hidden;
+    });
+    if (!visibleItems.length) return;
+
+    var activeItem = visibleItems[0];
+    var activationLine = Math.min(window.innerHeight * 0.25, 180);
+
+    visibleItems.forEach(function (item) {
+      if (item.section.getBoundingClientRect().top <= activationLine) {
+        activeItem = item;
+      }
+    });
+
+    if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2) {
+      activeItem = visibleItems[visibleItems.length - 1];
+    }
+
+    setActiveRightNav(activeItem.link);
+  }
+
+  var rightNavUpdatePending = false;
+  function scheduleRightNavUpdate() {
+    if (rightNavUpdatePending) return;
+    rightNavUpdatePending = true;
+    window.requestAnimationFrame(function () {
+      rightNavUpdatePending = false;
+      updateActiveRightNav();
+    });
+  }
+
+  rightNavItems.forEach(function (item) {
+    item.link.addEventListener("click", function () {
+      setActiveRightNav(item.link);
+    });
+  });
+
+  window.addEventListener("scroll", scheduleRightNavUpdate, { passive: true });
+  window.addEventListener("resize", scheduleRightNavUpdate);
+  window.addEventListener("hashchange", function () {
+    var matchingItem = rightNavItems.find(function (item) {
+      return item.link.hash === window.location.hash;
+    });
+    if (matchingItem) setActiveRightNav(matchingItem.link);
+    scheduleRightNavUpdate();
+  });
+  scheduleRightNavUpdate();
 })();

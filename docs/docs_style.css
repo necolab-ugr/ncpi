@@ -22,7 +22,7 @@
 }
 
 html {
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
 }
 
 body {
@@ -120,8 +120,7 @@ a:hover {
 }
 
 .left-nav a,
-.left-nav summary.subnav,
-.right-nav a {
+.left-nav summary.subnav {
   display: block;
   border-radius: 999px;
   padding: 0.37rem 0.78rem;
@@ -130,6 +129,17 @@ a:hover {
   color: var(--muted);
   border: 1px solid transparent;
   transition: all 0.22s ease;
+}
+
+.right-nav a {
+  display: block;
+  border-radius: 999px;
+  padding: 0.37rem 0.78rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+  border: 1px solid transparent;
+  transition: none;
 }
 
 .left-nav a.subnav,
@@ -346,6 +356,65 @@ table {
   border-radius: 12px;
   padding: 0.92rem;
   box-shadow: var(--shadow-soft);
+}
+
+.dataset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.dataset-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.85rem;
+  color: inherit;
+  min-height: 190px;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.dataset-card:hover {
+  color: inherit;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-card);
+  border-color: var(--line-strong);
+}
+
+.zenodo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 8px;
+  background: #1e5bb8;
+  color: #fff;
+  font-family: "Sora", "Century Gothic", sans-serif;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.dataset-card-content {
+  min-width: 0;
+}
+
+.dataset-card h2 {
+  margin-bottom: 0.45rem;
+  font-size: 1.05rem;
+  line-height: 1.35;
+}
+
+.dataset-card p {
+  margin: 0.5rem 0 0;
+}
+
+.dataset-open {
+  display: inline-block;
+  margin-top: 0.7rem;
+  color: var(--accent);
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .why-ncpi {
@@ -591,6 +660,10 @@ table {
   }
 
   .card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dataset-grid {
     grid-template-columns: 1fr;
   }
 
