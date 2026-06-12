@@ -1720,21 +1720,21 @@ def custom_feature(sample, params):
                     return;
                 }
                 const current = String(this.parserDataLocator || '').trim();
-                if (current && (allowed.includes(current) || this.isNewDataParserFlow())) {
+                if (current && allowed.includes(current)) {
                     this.syncParserSelectDom();
                     return;
                 }
+                // Current value is invalid for this folder -> reset
                 const backendDefault = String(this.parserInfo?.defaults?.data || '').trim();
                 if (backendDefault && allowed.includes(backendDefault)) {
                     this.parserDataLocator = backendDefault;
-                    this.syncParserSelectDom();
-                    return;
+                } else {
+                    const preferred = this.autoPickCandidateField(
+                        ['lfp', 'eeg', 'meg', 'ecog', 'signal', 'samples', 'data'],
+                        allowed,
+                    );
+                    this.parserDataLocator = preferred || allowed[0] || '';
                 }
-                const preferred = this.autoPickCandidateField(
-                    ['lfp', 'eeg', 'meg', 'ecog', 'signal', 'samples', 'data'],
-                    allowed,
-                );
-                this.parserDataLocator = preferred || allowed[0] || '';
                 this.syncParserSelectDom();
             },
             hasFeatureFieldValue(value) {
@@ -1932,18 +1932,24 @@ def custom_feature(sample, params):
                         if (!selectedValue) return;
                         document.querySelectorAll(selector).forEach((select) => {
                             if (!select || String(select.tagName || '').toLowerCase() !== 'select') return;
-                            const exists = Array.from(select.options || []).some((option) => option.value === selectedValue);
-                            if (!exists) {
-                                const option = document.createElement('option');
-                                option.value = selectedValue;
-                                option.textContent = String(label || selectedValue);
-                                option.dataset.autodetected = '1';
-                                select.appendChild(option);
-                            }
-                            select.value = selectedValue;
+                            // Remove any previously auto-detected option that is not in the new set
                             Array.from(select.options || []).forEach((option) => {
-                                option.selected = option.value === selectedValue;
+                                if (option.dataset && option.dataset.autodetected === '1') {
+                                    select.removeChild(option);
+                                }
                             });
+                            const exists = Array.from(select.options || []).some((option) => option.value === selectedValue);
+                            if (!exists && selectedValue) { // Value is not valid for this select. Reset to empty or first option.
+                                select.value = '';
+                                Array.from(select.options || []).forEach((option) => {
+                                    option.selected = option.value === select.value;
+                                });
+                            } else if (exists) {
+                                select.value = selectedValue;
+                                Array.from(select.options || []).forEach((option) => {
+                                    option.selected = option.value === selectedValue;
+                                });
+                            }
                         });
                     };
 
@@ -2204,6 +2210,10 @@ def custom_feature(sample, params):
                 this.parserLoading = true;
                 this.parserAxisUserEdited = false;
                 this.parserPrimaryFieldsUserEdited = false;
+                this.parserAxisSamples = '0';
+                this.parserAxisChannels = '-1';
+                this.parserAxisIds = '-1';
+                this.parserAxisEpochs = '-1';
                 const generation = (Number(this.parserInspectionGeneration) || 0) + 1;
                 this.parserInspectionGeneration = generation;
                 const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
@@ -2243,6 +2253,7 @@ def custom_feature(sample, params):
                     });
                     const payload = await this.parseJsonFromResponse(response, 'Failed to inspect simulation outputs folder.');
                     if (generation !== this.parserInspectionGeneration) return;
+                    this.dataSourceKind = 'new-simulation';
                     this.parserInfo = payload;
                     this._baseParserInfo = payload;
                     this.syncDataFileSelectionsFromPayload(payload, 'simulation');
@@ -2271,7 +2282,6 @@ def custom_feature(sample, params):
                     this.simulationFolderPath = this.simulationFolderPaths.length > 0 ? this.simulationFolderPaths[0] : '';
                     this.simulationListedFileNames = [];
                     this.simulationFolderExtensionError = '';
-                    this.dataSourceKind = 'new-simulation';
                     if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) {
                         await this.inspectAllAdditionalFiles();
                     }
@@ -2364,6 +2374,10 @@ def custom_feature(sample, params):
                 this.parserLoading = true;
                 this.parserAxisUserEdited = false;
                 this.parserPrimaryFieldsUserEdited = false;
+                this.parserAxisSamples = '0';
+                this.parserAxisChannels = '-1';
+                this.parserAxisIds = '-1';
+                this.parserAxisEpochs = '-1';
                 const previousParserInfo = this.parserInfo || this._baseParserInfo || null;
                 const previousEmpiricalFileCount = this.empiricalFileCount;
                 const previousEmpiricalSampleName = this.empiricalSampleName;
@@ -2388,6 +2402,7 @@ def custom_feature(sample, params):
                         body: formData,
                     });
                     const payload = await this.parseJsonFromResponse(response, 'Failed to inspect empirical folder.');
+                    this.dataSourceKind = 'new-empirical';
                     this.parserInfo = payload;
                     this._baseParserInfo = payload
                     this.syncDataFileSelectionsFromPayload(payload, 'empirical');
@@ -2397,7 +2412,6 @@ def custom_feature(sample, params):
                     this.parserDeepScanError = '';
                     this.empiricalFileCount = Number(payload.folder_file_count || 0);
                     this.empiricalSampleName = payload.source_name || '';
-                    this.dataSourceKind = 'new-empirical';
                     if (this.additionalLocalFiles.length > 0 || (this.additionalServerFilePaths || []).length > 0) {
                         await this.inspectAllAdditionalFiles();
                     }
@@ -2602,35 +2616,137 @@ def custom_feature(sample, params):
                 const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
                 const detailDataAllowed = detailData && dataCandidates.includes(detailData);
                 const preferredDataLocator = (defaultDataAllowed ? defaultData : '') || (detailDataAllowed ? detailData : '') || autoData || (dataCandidates[0] || '');
-                if (this.isNewDataParserFlow()) {
-                    // In New data flow, always apply the latest inspected recommendation.
-                    // User can still change it manually afterwards.
+                const currentDataLocator = String(this.parserDataLocator || '').trim();
+                const dataLocatorValid = currentDataLocator && dataCandidates.includes(currentDataLocator);
+                if (!dataLocatorValid) {
+                    // Current value is from a previous folder — reset to automatic
                     this.parserDataLocator = preferredDataLocator;
-                } else if (!this.parserDataLocator || !dataCandidates.includes(String(this.parserDataLocator || '').trim())) {
+                } else if (this.isNewDataParserFlow()) {
+                    if (!this.parserPrimaryFieldsUserEdited) {
+                        this.parserDataLocator = preferredDataLocator;
+                    }
+                } else if (!this.parserDataLocator || !dataCandidates.includes(currentDataLocator)) {
                     this.parserDataLocator = preferredDataLocator;
                 }
-                const fsCandidates = this.parserFsSourceCandidates();
                 const currentFsLocator = String(this.parserFsLocator || '').trim();
+                const fsCandidates = this.parserFsSourceCandidates();
+                const fsLocatorValid = currentFsLocator && fsCandidates.includes(currentFsLocator);
                 const preferredFs = String(sampleTableGuesses.fs || '').trim() || String(defaults.fs || '').trim() || detailFs || autoFs || '';
-                if (this.isNewDataParserFlow()) {
+
+                if (!fsLocatorValid) {
                     this.parserFsLocator = preferredFs;
+                    // Reset the effect of fs locator too.
+                    if (!this.parserPrimaryFieldsUserEdited) {
+                        if (String(this.parserFsLocator || '').trim()) {
+                            this.parserFsSource = this.parserFsLocator;
+                            this.parserFsManual = '';
+                        } else if (payload?.fs_hint_hz && Number.isFinite(Number(payload.fs_hint_hz)) && Number(payload.fs_hint_hz) > 0) {
+                            this.parserFsSource = '__numeric__';
+                            this.parserFsManual = String(Number(payload.fs_hint_hz));
+                            this.parserFsLocator = '';
+                        } else {
+                            this.parserFsSource = '__none__';
+                            this.parserFsManual = '';
+                            this.parserFsLocator = '';
+                        }
+                    }
+                } else if (this.isNewDataParserFlow()) {
+                    if (!this.parserPrimaryFieldsUserEdited) {
+                        this.parserFsLocator = preferredFs;
+                    }
                 } else if (!currentFsLocator || !fsCandidates.includes(currentFsLocator)) {
                     this.parserFsLocator = preferredFs;
                 }
-                if (!this.parserRecordingTypeLocator) this.parserRecordingTypeLocator = defaults.recording_type || '';
-                if (!this.parserSubjectIdLocator) this.parserSubjectIdLocator = defaults.subject_id || '';
-                if (!this.parserGroupLocator) this.parserGroupLocator = defaults.group || '';
-                if (!this.parserSpeciesLocator) this.parserSpeciesLocator = defaults.species || '';
-                if (!this.parserConditionLocator) this.parserConditionLocator = defaults.condition || '';
-                if (this.parserMetadataSubjectIdSource === '__none__' && defaults.subject_id) this.parserMetadataSubjectIdSource = defaults.subject_id;
-                if (this.parserMetadataGroupSource === '__none__' && defaults.group) this.parserMetadataGroupSource = defaults.group;
-                if (this.parserMetadataSpeciesSource === '__none__' && defaults.species) this.parserMetadataSpeciesSource = defaults.species;
-                if (this.parserMetadataConditionSource === '__none__' && defaults.condition) this.parserMetadataConditionSource = defaults.condition;
+                // --- recording type locator ---
+                const currentRecLocator = String(this.parserRecordingTypeLocator || '').trim();
+                const recLocatorValid = currentRecLocator && (candidateSet.has(currentRecLocator) || ['__value__', '__none__', '__file_id__'].includes(currentRecLocator));
+                if (!recLocatorValid || !this.parserRecordingTypeLocator) {
+                    this.parserRecordingTypeLocator = defaults.recording_type || '';
+                }
+
+                // --- subject id locator ---
+                const currentSubjectIdLocator = String(this.parserSubjectIdLocator || '').trim();
+                const subjectIdLocatorValid = currentSubjectIdLocator && (candidateSet.has(currentSubjectIdLocator) || ['__value__', '__none__', '__file_id__'].includes(currentSubjectIdLocator));
+                if (!subjectIdLocatorValid || !this.parserSubjectIdLocator) {
+                    this.parserSubjectIdLocator = defaults.subject_id || '';
+                }
+
+                // --- group locator ---
+                const currentGroupLocator = String(this.parserGroupLocator || '').trim();
+                const groupLocatorValid = currentGroupLocator && (candidateSet.has(currentGroupLocator) || ['__value__', '__none__', '__file_id__'].includes(currentGroupLocator));
+                if (!groupLocatorValid || !this.parserGroupLocator) {
+                    this.parserGroupLocator = defaults.group || '';
+                }
+
+                // --- species locator ---
+                const currentSpeciesLocator = String(this.parserSpeciesLocator || '').trim();
+                const speciesLocatorValid = currentSpeciesLocator && (candidateSet.has(currentSpeciesLocator) || ['__value__', '__none__', '__file_id__'].includes(currentSpeciesLocator));
+                if (!speciesLocatorValid || !this.parserSpeciesLocator) {
+                    this.parserSpeciesLocator = defaults.species || '';
+                }
+
+                // --- condition locator ---
+                const currentConditionLocator = String(this.parserConditionLocator || '').trim();
+                const conditionLocatorValid = currentConditionLocator && (candidateSet.has(currentConditionLocator) || ['__value__', '__none__', '__file_id__'].includes(currentConditionLocator));
+                if (!conditionLocatorValid || !this.parserConditionLocator) {
+                    this.parserConditionLocator = defaults.condition || '';
+                }
+
+                // --- metadata subject id source ---
+                const currentSubjectIdSource = String(this.parserMetadataSubjectIdSource || '').trim();
+                const subjectIdSourceValid = currentSubjectIdSource && (candidateSet.has(currentSubjectIdSource) || ['__value__', '__none__', '__file_id__'].includes(currentSubjectIdSource));
+                if (!subjectIdSourceValid) {
+                    this.parserMetadataSubjectIdSource = defaults.subject_id || '__none__';
+                } else if (this.parserMetadataSubjectIdSource === '__none__' && defaults.subject_id) {
+                    this.parserMetadataSubjectIdSource = defaults.subject_id;
+                }
+
+                // --- metadata group source ---
+                const currentGroupSource = String(this.parserMetadataGroupSource || '').trim();
+                const groupSourceValid = currentGroupSource && (candidateSet.has(currentGroupSource) || ['__value__', '__none__', '__file_id__'].includes(currentGroupSource));
+                if (!groupSourceValid) {
+                    this.parserMetadataGroupSource = defaults.group || '__none__';
+                } else if (this.parserMetadataGroupSource === '__none__' && defaults.group) {
+                    this.parserMetadataGroupSource = defaults.group;
+                }
+
+                // --- metadata species source ---
+                const currentSpeciesSource = String(this.parserMetadataSpeciesSource || '').trim();
+                const speciesSourceValid = currentSpeciesSource && (candidateSet.has(currentSpeciesSource) || ['__value__', '__none__', '__file_id__'].includes(currentSpeciesSource));
+                if (!speciesSourceValid) {
+                    this.parserMetadataSpeciesSource = defaults.species || '__none__';
+                } else if (this.parserMetadataSpeciesSource === '__none__' && defaults.species) {
+                    this.parserMetadataSpeciesSource = defaults.species;
+                }
+
+                // --- metadata condition source ---
+                const currentConditionSource = String(this.parserMetadataConditionSource || '').trim();
+                const conditionSourceValid = currentConditionSource && (candidateSet.has(currentConditionSource) || ['__value__', '__none__', '__file_id__'].includes(currentConditionSource));
+                if (!conditionSourceValid) {
+                    this.parserMetadataConditionSource = defaults.condition || '__none__';
+                } else if (this.parserMetadataConditionSource === '__none__' && defaults.condition) {
+                    this.parserMetadataConditionSource = defaults.condition;
+                }
+                
                 const channelSourceCandidates = this.parserChannelNameSourceCandidates();
                 const currentChLocator = String(this.parserChNamesLocator || '').trim();
                 const preferredCh = String(sampleTableGuesses.ch_names || '').trim() || String(defaults.ch_names || '').trim() || detailChannels || autoChannels || '';
-                if (this.isNewDataParserFlow()) {
+                const chLocatorValid = currentChLocator && channelSourceCandidates.includes(currentChLocator);
+                if (!chLocatorValid) {
                     this.parserChNamesLocator = preferredCh;
+                    if (!this.parserPrimaryFieldsUserEdited) {
+                        if (String(this.parserChNamesLocator || '').trim()) {
+                            this.parserChNamesSource = this.parserChNamesLocator;
+                            this.parserSensorNames = '';
+                        } else {
+                            this.parserChNamesSource = '__autocomplete__';
+                            this.parserChNamesLocator = '';
+                        }
+                    }
+                } else if (this.isNewDataParserFlow()) {
+                    if (!this.parserPrimaryFieldsUserEdited) {
+                        this.parserChNamesLocator = preferredCh;
+                    }
                 } else if (!currentChLocator || !channelSourceCandidates.includes(currentChLocator)) {
                     this.parserChNamesLocator = preferredCh;
                 }
@@ -2642,99 +2758,132 @@ def custom_feature(sample, params):
                 this.parserAggregateOverSelected = (this.parserAggregateOverSelected || []).filter((dim) => validAggregate.has(dim));
                 if (this.parserAggregateOverSelected.length === 0) this.parserAggregateOverSelected = ['sensor'];
 
-                if (String(this.parserFsLocator || '').trim()) {
-                    this.parserFsSource = this.parserFsLocator;
-                    this.parserFsManual = '';
-                } else if (
-                    payload?.fs_hint_hz !== null &&
-                    payload?.fs_hint_hz !== undefined &&
-                    Number.isFinite(Number(payload.fs_hint_hz)) &&
-                    Number(payload.fs_hint_hz) > 0
-                ) {
-                    this.parserFsSource = '__numeric__';
-                    this.parserFsManual = String(Number(payload.fs_hint_hz));
-                    this.parserFsLocator = '';
-                } else {
-                    this.parserFsSource = '__none__';
-                    this.parserFsManual = '';
-                    this.parserFsLocator = '';
+                if (!this.parserPrimaryFieldsUserEdited) {
+                    if (String(this.parserFsLocator || '').trim()) {
+                        this.parserFsSource = this.parserFsLocator;
+                        this.parserFsManual = '';
+                    } else if (
+                        payload?.fs_hint_hz !== null &&
+                        payload?.fs_hint_hz !== undefined &&
+                        Number.isFinite(Number(payload.fs_hint_hz)) &&
+                        Number(payload.fs_hint_hz) > 0
+                    ) {
+                        this.parserFsSource = '__numeric__';
+                        this.parserFsManual = String(Number(payload.fs_hint_hz));
+                        this.parserFsLocator = '';
+                    } else {
+                        this.parserFsSource = '__none__';
+                        this.parserFsManual = '';
+                        this.parserFsLocator = '';
+                    }
                 }
 
-                if (String(this.parserRecordingTypeLocator || '').trim()) {
-                    this.parserRecordingTypeSource = this.parserRecordingTypeLocator;
-                    this.parserRecordingType = '';
-                } else {
-                    this.parserRecordingTypeSource = '__value__';
-                    if (!String(this.parserRecordingType || '').trim()) this.parserRecordingType = 'LFP';
-                    this.parserRecordingTypeLocator = '';
+                if (!this.parserPrimaryFieldsUserEdited) {
+                    if (String(this.parserRecordingTypeLocator || '').trim()) {
+                        this.parserRecordingTypeSource = this.parserRecordingTypeLocator;
+                        this.parserRecordingType = '';
+                    } else {
+                        this.parserRecordingTypeSource = '__value__';
+                        if (!String(this.parserRecordingType || '').trim()) this.parserRecordingType = 'LFP';
+                        this.parserRecordingTypeLocator = '';
+                    }
                 }
 
-                if (String(this.parserChNamesLocator || '').trim()) {
-                    this.parserChNamesSource = this.parserChNamesLocator;
-                    this.parserSensorNames = '';
-                } else {
-                    this.parserChNamesSource = '__autocomplete__';
-                    this.parserChNamesLocator = '';
+                if (!this.parserPrimaryFieldsUserEdited) {
+                    if (String(this.parserChNamesLocator || '').trim()) {
+                        this.parserChNamesSource = this.parserChNamesLocator;
+                        this.parserSensorNames = '';
+                    } else {
+                        this.parserChNamesSource = '__autocomplete__';
+                        this.parserChNamesLocator = '';
+                    }
                 }
 
-                // Auto-assign parser dropdowns from explicit filename tokens when present.
-                const tokenSubjectField = resolveMappedTokenField('subject_id');
-                if (tokenSubjectField) this.parserMetadataSubjectIdSource = tokenSubjectField;
-                const tokenGroupField = resolveMappedTokenField('group');
-                if (tokenGroupField) this.parserMetadataGroupSource = tokenGroupField;
-                const tokenSpeciesField = resolveMappedTokenField('species');
-                if (tokenSpeciesField) this.parserMetadataSpeciesSource = tokenSpeciesField;
-                const tokenConditionField = resolveMappedTokenField('condition');
-                if (tokenConditionField) this.parserMetadataConditionSource = tokenConditionField;
-                const tokenRecordingTypeField = resolveMappedTokenField('recording_type');
-                if (tokenRecordingTypeField) {
-                    this.parserRecordingTypeSource = tokenRecordingTypeField;
-                    this.parserRecordingTypeLocator = tokenRecordingTypeField;
-                    this.parserRecordingType = '';
-                }
-                const tokenSamplingFrequencyField = resolveMappedTokenField('sampling_frequency');
-                if (tokenSamplingFrequencyField) {
-                    this.parserFsSource = tokenSamplingFrequencyField;
-                    this.parserFsLocator = tokenSamplingFrequencyField;
-                    this.parserFsManual = '';
+                if (!this.parserPrimaryFieldsUserEdited) {
+                    // Auto-assign parser dropdowns from explicit filename tokens when present if the user hasn't edited them yet.
+                    const tokenSubjectField = resolveMappedTokenField('subject_id');
+                    if (tokenSubjectField) {
+                        this.parserMetadataSubjectIdSource = tokenSubjectField;
+                    } else if (this.parserMetadataSubjectIdSource === '__file_token_subject_id__') {
+                        this.parserMetadataSubjectIdSource = '__none__';
+                    }
+                    const tokenGroupField = resolveMappedTokenField('group');
+                    if (tokenGroupField) {
+                        this.parserMetadataGroupSource = tokenGroupField;
+                    } else if (this.parserMetadataGroupSource === '__file_token_group__') {
+                        this.parserMetadataGroupSource = '__none__';
+                    }
+                    const tokenSpeciesField = resolveMappedTokenField('species');
+                    if (tokenSpeciesField) {
+                        this.parserMetadataSpeciesSource = tokenSpeciesField;
+                    } else if (this.parserMetadataSpeciesSource === '__file_token_species__') {
+                        this.parserMetadataSpeciesSource = '__none__';
+                    }
+                    const tokenConditionField = resolveMappedTokenField('condition');
+                    if (tokenConditionField) {
+                        this.parserMetadataConditionSource = tokenConditionField;
+                    } else if (this.parserMetadataConditionSource === '__file_token_condition__') {
+                        this.parserMetadataConditionSource = '__none__';
+                    }
+                    const tokenRecordingTypeField = resolveMappedTokenField('recording_type');
+                    if (tokenRecordingTypeField) {
+                        this.parserRecordingTypeSource = tokenRecordingTypeField;
+                        this.parserRecordingTypeLocator = tokenRecordingTypeField;
+                        this.parserRecordingType = '';
+                    }
+                    const tokenSamplingFrequencyField = resolveMappedTokenField('sampling_frequency');
+                    if (tokenSamplingFrequencyField) {
+                        this.parserFsSource = tokenSamplingFrequencyField;
+                        this.parserFsLocator = tokenSamplingFrequencyField;
+                        this.parserFsManual = '';
+                    }
                 }
 
-                const allowedChSources = new Set(this.parserChannelNameSourceCandidates().map((field) => String(field)));
-                const normalizedChSource = String(this.parserChNamesSource || '').trim();
-                if (
-                    !normalizedChSource ||
-                    (normalizedChSource !== '__manual__' &&
-                        normalizedChSource !== '__autocomplete__' &&
-                        !allowedChSources.has(normalizedChSource))
-                ) {
-                    this.parserChNamesSource = '__autocomplete__';
-                    this.parserChNamesLocator = '';
+                if (!this.parserPrimaryFieldsUserEdited) {
+                    const allowedChSources = new Set(this.parserChannelNameSourceCandidates().map((field) => String(field)));
+                    const normalizedChSource = String(this.parserChNamesSource || '').trim();
+                    if (
+                        !normalizedChSource ||
+                        (normalizedChSource !== '__manual__' &&
+                            normalizedChSource !== '__autocomplete__' &&
+                            !allowedChSources.has(normalizedChSource))
+                    ) {
+                        this.parserChNamesSource = '__autocomplete__';
+                        this.parserChNamesLocator = '';
+                    }
                 }
                 const kind = this.resolvedDataSourceKind();
                 if (kind === 'new-simulation' || kind === 'new-empirical') {
-                    this.parserArrayAxesEnabled = true;
-                    if (!this.parserAxisUserEdited) {
-                        const inferredAxes = inferAxesFromShapes(
-                            this.parserDataLocator,
-                            this.parserChNamesLocator,
-                            this.parserSubjectIdLocator,
-                        );
-                        const axisSamples = parseAxis(
-                            inferredAxes?.axis_samples ?? defaults.axis_samples,
-                            0
-                        );
-                        const axisChannels = parseAxis(
-                            inferredAxes?.axis_channels ?? defaults.axis_channels,
-                            -1
-                        );
-                        const axisIds = parseAxis(
-                            inferredAxes?.axis_ids ?? defaults.axis_ids,
-                            -1
-                        );
-                        const axisEpochs = parseAxis(
-                            inferredAxes?.axis_epochs ?? defaults.axis_epochs,
-                            -1
-                        );
+                    this.parserArrayAxesEnabled = true;                    
+                    // Calculate the inferred axes for the current quick scan data
+                    const inferredAxes = inferAxesFromShapes(
+                        this.parserDataLocator,
+                        this.parserChNamesLocator,
+                        this.parserSubjectIdLocator,
+                    );
+
+                    const axisSamples = parseAxis(inferredAxes?.axis_samples ?? defaults.axis_samples, 0);
+                    const axisChannels = parseAxis(inferredAxes?.axis_channels ?? defaults.axis_channels, -1);
+                    const axisIds = parseAxis(inferredAxes?.axis_ids ?? defaults.axis_ids, -1);
+                    const axisEpochs = parseAxis(inferredAxes?.axis_epochs ?? defaults.axis_epochs, -1);
+
+                    // Fetch the dimensions (shape length) of the newly selected data
+                    const dataDetail = findFieldDetail(this.parserDataLocator);
+                    const ndim = Array.isArray(dataDetail?.shape) ? dataDetail.shape.length : 0;
+
+                    // Determine if current axes are strictly out of bounds for the new data
+                    // If a user selected Axis 3 in the previous folder, but new data only has 2 dimensions, it is invalid.
+                    const isAxisSamplesInvalid = ndim > 0 && Number(this.parserAxisSamples) >= ndim;
+                    const isAxisChannelsInvalid = ndim > 0 && Number(this.parserAxisChannels) >= ndim;
+                    
+                    // Overwrite if the user hasn't edited them, OR if we are in a fresh data flow,
+                    // OR if the old values are physically impossible for the new data shape.
+                    const shouldOverwriteAxes = 
+                        !this.parserAxisUserEdited || 
+                        isAxisSamplesInvalid || 
+                        isAxisChannelsInvalid;
+
+                    if (shouldOverwriteAxes) {
                         this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
                         this.parserAxisChannels = String(axisChannels);
                         this.parserAxisIds = String(axisIds);
