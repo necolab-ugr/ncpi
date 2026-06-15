@@ -6879,6 +6879,11 @@ def _headless_subprocess_env():
     return env
 
 
+def _python_command(*args):
+    """Run child Python scripts with the interpreter that started the WebUI."""
+    return [sys.executable, *args]
+
+
 def _run_process_with_progress(
     cmd,
     cwd,
@@ -8199,7 +8204,7 @@ def _simulation_computation(job_id, job_status, params):
                 job_status[job_id]["progress"] = max(job_status[job_id].get("progress", 0), overall)
 
             returncode, output_text = _run_process_with_progress(
-                ["python", "example_model_simulation.py"],
+                _python_command("example_model_simulation.py"),
                 run_root,
                 job_status,
                 job_id,
@@ -8341,7 +8346,7 @@ def _simulation_computation_custom(job_id, job_status, params):
             f.write(example_script)
 
         returncode, output_text = _run_process_with_progress(
-            ["python", "example_model_simulation.py"],
+            _python_command("example_model_simulation.py"),
             temp_run_dir,
             job_status,
             job_id,
