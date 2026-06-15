@@ -1,4 +1,4 @@
-> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 16, 2026.**
+> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 22, 2026.**
 
 <div align="center">
 
@@ -16,7 +16,9 @@ electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provide
 framework for estimating the most probable neural circuit parameters associated with an empirical observation,
 streamlining traditionally complex workflows into a minimal amount of code.
 
-https://github.com/user-attachments/assets/9d436338-387c-4a58-a9c4-ed3a41da7b6b
+<video controls width="100%" poster="docs/tutorials/automation/videos/ncpi-webui-overview-poster.png">
+  <source src="docs/tutorials/automation/videos/ncpi-webui-overview.mp4" type="video/mp4">
+</video>
 
 # Key Features of `ncpi`
 - **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural
@@ -176,6 +178,32 @@ Replace the placeholders:
 - `<path/to/python>`: Absolute path to Python executable on the server (from `which python`)
 
 The browser opens `http://127.0.0.1:<L>`. Keep the launcher terminal open while using the WebUI. Press `Ctrl+C` to close the SSH tunnel and stop the remote Flask process.
+
+### Start WebUI manually with Flask
+
+To start the server locally with Flask, activate the Conda environment and run the following command from the
+`<path/to/ncpi>/webui` directory:
+
+```bash
+flask run --port <PORT>
+```
+
+Then manually open `http://127.0.0.1:<PORT>` in your local browser.
+
+To run Flask on a remote server, first connect from your local machine and create an SSH tunnel:
+
+```bash
+ssh -L <PORT>:localhost:<PORT> <user>@<server>
+```
+
+In the resulting remote SSH session, activate the Conda environment, change to the `<path/to/ncpi>/webui` directory,
+and start Flask:
+
+```bash
+flask run --port <PORT>
+```
+
+Then manually open `http://127.0.0.1:<PORT>` in your local browser. Keep the SSH session open while using the WebUI.
 
 ### Windows note
 

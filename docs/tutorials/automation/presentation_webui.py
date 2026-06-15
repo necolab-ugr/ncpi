@@ -11,7 +11,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from playwright.sync_api import Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
+from playwright.sync_api import Locator, Page, TimeoutError as PlaywrightTimeoutError, sync_playwright
 
 import simulate_lif_network_webui as simulation_flow
 
@@ -71,6 +71,34 @@ def return_to_dashboard(page: Page, base_url: str) -> None:
         page.goto(base_url, wait_until="domcontentloaded")
 
 
+def slow_scroll_down_to_locator(
+    page: Page,
+    locator: Locator,
+    step_px: int = 180,
+    pause_ms: int = 260,
+) -> None:
+    """Scroll down incrementally until the target control is visible."""
+    locator.wait_for(state="attached")
+    while True:
+        position = locator.evaluate(
+            """
+            (el) => {
+              const rect = el.getBoundingClientRect();
+              return { top: rect.top, bottom: rect.bottom, viewportHeight: window.innerHeight };
+            }
+            """
+        )
+        if position["top"] >= 80 and position["bottom"] <= position["viewportHeight"] - 80:
+            break
+        previous_y = int(page.evaluate("() => window.scrollY") or 0)
+        page.mouse.wheel(0, max(80, int(step_px)))
+        page.wait_for_timeout(max(120, int(pause_ms)))
+        current_y = int(page.evaluate("() => window.scrollY") or 0)
+        if current_y <= previous_y:
+            break
+    simulation_flow.smooth_scroll_to_locator(page, locator, wait_ms=900)
+
+
 def record_presentation(
     base_url: str,
     *,
@@ -117,13 +145,8 @@ def record_presentation(
             page.wait_for_url("**/simulation/new_sim**")
             simulation_flow.smooth_click(page, page.locator("a[href='/simulation/new_sim/hagen']").first)
             page.wait_for_url("**/simulation/new_sim/hagen**")
-            simulation_flow.smooth_fill(
-                page,
-                page.locator("input[data-param='local_num_threads']"),
-                "32",
-            )
             run_trial_button = page.get_by_role("button", name="Run trial simulation")
-            simulation_flow.smooth_scroll_to_locator(page, run_trial_button)
+            slow_scroll_down_to_locator(page, run_trial_button)
             simulation_flow.smooth_click(
                 page,
                 run_trial_button,
