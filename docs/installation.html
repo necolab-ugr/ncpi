@@ -183,6 +183,21 @@ pip install "ncpi[all]"             # all optional dependencies [Windows: WSL re
 
           <p>The browser opens <code>http://127.0.0.1:&lt;L&gt;</code>. Keep the launcher terminal open while using the WebUI. Press <code>Ctrl+C</code> to close the SSH tunnel and stop the remote Flask process.</p>
 
+          <h3>Start WebUI manually with Flask</h3>
+
+          <p>To start the server locally with Flask, activate the Conda environment and run the following command from the <code>&lt;path/to/ncpi&gt;/webui</code> directory:</p>
+          <pre><code>flask run --port &lt;PORT&gt;</code></pre>
+
+          <p>Then manually open <code>http://127.0.0.1:&lt;PORT&gt;</code> in your local browser.</p>
+
+          <p>To run Flask on a remote server, first connect from your local machine and create an SSH tunnel:</p>
+          <pre><code>ssh -L &lt;PORT&gt;:localhost:&lt;PORT&gt; &lt;user&gt;@&lt;server&gt;</code></pre>
+
+          <p>In the resulting remote SSH session, activate the Conda environment, change to the <code>&lt;path/to/ncpi&gt;/webui</code> directory, and start Flask:</p>
+          <pre><code>flask run --port &lt;PORT&gt;</code></pre>
+
+          <p>Then manually open <code>http://127.0.0.1:&lt;PORT&gt;</code> in your local browser. Keep the SSH session open while using the WebUI.</p>
+
           <h3>Windows note</h3>
           <p>
             You can run the same commands from Anaconda Prompt or PowerShell. Run the WebUI from WSL if your workflow requires
