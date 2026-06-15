@@ -20,6 +20,8 @@ streamlining traditionally complex workflows into a minimal amount of code.
   <source src="docs/tutorials/automation/videos/ncpi-webui-overview.mp4" type="video/mp4">
 </video>
 
+**[Watch the ncpi WebUI overview video](https://github.com/necolab-ugr/ncpi/blob/main/docs/tutorials/automation/videos/ncpi-webui-overview.mp4)**
+
 # Key Features of `ncpi`
 - **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural
   circuit simulations.
