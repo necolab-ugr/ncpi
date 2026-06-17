@@ -253,6 +253,14 @@
             class="bg-primary text-white px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
             Continue to Field Potential
         </a>
+        <form x-show="!pending && (status === 'failed' || status === 'cancelled') && canRestoreConfig"
+            method="POST"
+            action="{{ url_for('restore_simulation_config', job_id=job_id) }}">
+            <button type="submit"
+                class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
+                Back to configuration
+            </button>
+        </form>
         <a x-show="!pending && status === 'failed'" href="{{url_for('simulation')}}"
             class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
             Return to Simulation
@@ -316,6 +324,7 @@ document.addEventListener('alpine:init', () => {
         output: "",
         cancelRequested: false,
         cancelling: false,
+        canRestoreConfig: false,
         uploadProgress: 0,
         uploadMessage: "",
         simulationTotal: 0,
@@ -391,6 +400,7 @@ document.addEventListener('alpine:init', () => {
                     this.progress = Number(data.progress || 0);
                     this.output = data.output || "";
                     this.cancelRequested = !!data.cancel_requested || this.status === 'cancelled';
+                    this.canRestoreConfig = !!data.can_restore_config;
                     this.simulationTotal = Number(data.simulation_total || 0);
                     this.simulationCompleted = Number(data.simulation_completed || 0);
                     this.meegTrialTotal = Number(data.meeg_trial_total || 0);

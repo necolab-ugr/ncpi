@@ -8007,6 +8007,14 @@ def _pop_simulation_restore_form(model_type):
     return form if isinstance(form, dict) else {}
 
 
+def _simulation_restore_endpoint_for_model(model_type):
+    return {
+        "hagen": "new_sim_hagen",
+        "cavallari": "new_sim_cavallari",
+        "four_area": "new_sim_four_area",
+    }.get(str(model_type or "").strip().lower())
+
+
 @app.route("/simulation/new_sim/hagen")
 def new_sim_hagen():
     restore_form = _pop_simulation_restore_form("hagen")
@@ -8038,6 +8046,28 @@ def new_sim_four_area():
 @app.route("/simulation/new_sim/custom")
 def new_sim_custom():
     return render_template("1.2.1.new_sim_custom.html")
+
+
+@app.route("/simulation/restore_config/<job_id>", methods=["POST"])
+def restore_simulation_config(job_id):
+    status = job_status.get(job_id)
+    if not isinstance(status, dict):
+        flash("Simulation job not found.", "error")
+        return redirect(url_for("simulation"))
+
+    if status.get("status") not in {"failed", "cancelled"}:
+        flash("Configuration can only be restored after a failed or cancelled simulation.", "error")
+        return redirect(url_for("job_status_page", job_id=job_id, computation_type="simulation"))
+
+    model_type = status.get("simulation_restore_model_type")
+    restore_form = status.get("simulation_restore_form")
+    endpoint = _simulation_restore_endpoint_for_model(model_type)
+    if not endpoint or not isinstance(restore_form, dict):
+        flash("No restorable simulation configuration is available for this job.", "error")
+        return redirect(url_for("simulation"))
+
+    _remember_simulation_restore_form(model_type, restore_form)
+    return redirect(url_for(endpoint))
 
 
 def _simulation_computation(job_id, job_status, params):
@@ -8465,6 +8495,8 @@ def run_trial_simulation(model_type):
         "simulation_total": len(run_forms),
         "simulation_completed": 0,
         "simulation_mode": run_mode,
+        "simulation_restore_model_type": model_type,
+        "simulation_restore_form": dict(form),
     }
 
     future = executor.submit(
@@ -18164,6 +18196,11 @@ def get_status(job_id):
         "simulation_total": status.get("simulation_total"),
         "simulation_completed": status.get("simulation_completed"),
         "simulation_mode": status.get("simulation_mode"),
+        "can_restore_config": bool(
+            status.get("status") in {"failed", "cancelled"}
+            and _simulation_restore_endpoint_for_model(status.get("simulation_restore_model_type"))
+            and isinstance(status.get("simulation_restore_form"), dict)
+        ),
         "meeg_trial_total": status.get("meeg_trial_total"),
         "meeg_trial_index": status.get("meeg_trial_index"),
         "meeg_sensors_total": status.get("meeg_sensors_total"),
