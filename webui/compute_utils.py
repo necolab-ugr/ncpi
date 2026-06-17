@@ -3803,7 +3803,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         samples = _extract_feature_samples(df)
         _append_job_output(job_status, job_id, f"Extracted {len(samples)} signal sample(s) from dataframe.")
 
-        features_subsample_percent_raw = _parse_float_param(params, "features_subsample_percent", default=None)
+        features_subsample_percent_raw = _parse_float_param(params, "features_preload_subsample_percent", default=None)
         if features_subsample_percent_raw is None:
             # Legacy fallback for older forms: "subsampling" + "sampling_percentage".
             legacy_subsampling = _parse_bool_param(params, "subsampling", default=False)
