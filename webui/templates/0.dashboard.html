@@ -13,10 +13,20 @@
 
 	.module-info:hover .module-info-tooltip,
 	.module-info:focus .module-info-tooltip,
-	.module-info:focus-visible .module-info-tooltip {
+	.module-info:focus-visible .module-info-tooltip,
+	.module-info.is-open .module-info-tooltip {
 		visibility: visible;
 		opacity: 1;
 		transform: translateY(0);
+	}
+
+	.module-info.is-click-closed .module-info-tooltip,
+	.module-info.is-click-closed:hover .module-info-tooltip,
+	.module-info.is-click-closed:focus .module-info-tooltip,
+	.module-info.is-click-closed:focus-visible .module-info-tooltip {
+		visibility: hidden;
+		opacity: 0;
+		transform: translateY(-0.25rem);
 	}
 </style>
 {% endblock %}
@@ -315,11 +325,44 @@
 
 {% block scripts %}
 <script>
+	const closeModuleInfoIcons = () => {
+		document.querySelectorAll(".module-info.is-open").forEach((infoIcon) => {
+			infoIcon.classList.remove("is-open");
+			infoIcon.classList.remove("is-click-closed");
+			infoIcon.setAttribute("aria-expanded", "false");
+		});
+	};
+
 	document.querySelectorAll(".module-info").forEach((infoIcon) => {
+		infoIcon.setAttribute("aria-expanded", "false");
 		infoIcon.addEventListener("click", (event) => {
 			event.preventDefault();
 			event.stopPropagation();
+			if (infoIcon.classList.contains("is-open")) {
+				infoIcon.classList.remove("is-open");
+				infoIcon.classList.add("is-click-closed");
+				infoIcon.setAttribute("aria-expanded", "false");
+				infoIcon.blur();
+				return;
+			}
+			closeModuleInfoIcons();
+			infoIcon.classList.remove("is-click-closed");
+			infoIcon.classList.add("is-open");
+			infoIcon.setAttribute("aria-expanded", "true");
 		});
+		infoIcon.addEventListener("mouseleave", () => {
+			infoIcon.classList.remove("is-click-closed");
+		});
+		infoIcon.addEventListener("keydown", (event) => {
+			if (event.key !== "Enter" && event.key !== " ") return;
+			event.preventDefault();
+			event.stopPropagation();
+			infoIcon.click();
+		});
+	});
+	document.addEventListener("click", closeModuleInfoIcons);
+	document.addEventListener("keydown", (event) => {
+		if (event.key === "Escape") closeModuleInfoIcons();
 	});
 
 	const initClearDataModalHandlers = () => {
