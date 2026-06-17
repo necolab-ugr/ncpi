@@ -6,6 +6,7 @@
 <script>
     window.__webuiRuntime = {{ webui_runtime | tojson }};
     window.isLocalRuntime = !(window.__webuiRuntime?.is_server_runtime);
+    window.__fieldPotentialKernelRestoreForm = {{ module_restore_form | default({}) | tojson }};
 </script>
 <script id="tailwind-config">
     tailwind.config = {
@@ -85,6 +86,7 @@
     <!-- Tab contents -->
     <form id="kernel-compute-form" method="POST" enctype="multipart/form-data"
         action="{{ url_for('start_computation_redirect', computation_type='field_potential_kernel') }}">
+    <input type="hidden" name="restore_active_tab" :value="activeTab" />
     <div class="space-y-8 pt-6">
         <!-- Create Kernel Tab -->
         <div x-show="activeTab === 'create_kernel'">
@@ -772,6 +774,15 @@
 <script defer="" src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', () => {
+    const kernelRestoreForm = (
+        window.__fieldPotentialKernelRestoreForm
+        && typeof window.__fieldPotentialKernelRestoreForm === 'object'
+        && !Array.isArray(window.__fieldPotentialKernelRestoreForm)
+    ) ? window.__fieldPotentialKernelRestoreForm : {};
+    const hasKernelRestoreField = (name) => Object.prototype.hasOwnProperty.call(kernelRestoreForm, name);
+    const kernelRestoreValue = (name, fallback = '') => (
+        hasKernelRestoreField(name) ? String(kernelRestoreForm[name] ?? '') : fallback
+    );
     const kernelComputeForm = document.getElementById('kernel-compute-form');
     const meegComputeForm = document.getElementById('meeg-compute-form');
     const kernelDtInput = document.querySelector('input[name="dt"]');
@@ -782,7 +793,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const biophysHidden = document.getElementById('biophysHidden');
     const availableBiophysOptions = {{ biophys_options | tojson }};
     const preferredBiophysDefaults = ['set_Ih_linearized_hay2011', 'make_cell_uniform'];
-    const defaultBiophysItems = preferredBiophysDefaults.filter((name) => availableBiophysOptions.includes(name));
+    const restoredBiophysItems = (() => {
+        if (!hasKernelRestoreField('biophys')) {
+            return [];
+        }
+        try {
+            const parsed = JSON.parse(kernelRestoreValue('biophys', '[]'));
+            return Array.isArray(parsed)
+                ? parsed.map((item) => String(item || '').trim()).filter(Boolean)
+                : [];
+        } catch (_err) {
+            return [];
+        }
+    })();
+    const defaultBiophysItems = restoredBiophysItems.length
+        ? restoredBiophysItems
+        : preferredBiophysDefaults.filter((name) => availableBiophysOptions.includes(name));
     if (defaultBiophysItems.length === 0 && availableBiophysOptions.length > 0) {
         defaultBiophysItems.push(availableBiophysOptions[0]);
     }
@@ -1095,18 +1121,49 @@ document.addEventListener('DOMContentLoaded', () => {
         return normalizeKernelBrowseSourceMode(sourceInput?.value || runtimeDefaultPathMode);
     };
 
+    const restoredMcFolderMode = normalizeKernelBrowseSourceMode(
+        kernelRestoreValue('mc_folder_source_mode', kernelMcFolderSourceInput?.value || ''),
+    );
+    const restoredOutputSimMode = normalizeKernelBrowseSourceMode(
+        kernelRestoreValue('output_sim_path_source_mode', kernelOutputSimSourceInput?.value || ''),
+    );
+    const restoredMcFolderPath = kernelRestoreValue(
+        'mc_folder',
+        String(kernelMcFolderInput?.value || '').trim(),
+    ).trim();
+    const restoredOutputSimPath = kernelRestoreValue(
+        'output_sim_path',
+        String(kernelOutputSimPathInput?.value || '').trim(),
+    ).trim();
+
     const folderSelectionStateByName = {
         mc_folder: {
-            mode: resolveInitialFolderMode('mc_folder', kernelMcFolderSourceInput),
-            serverPath: String(kernelMcFolderInput?.value || '').trim(),
-            localStagedPath: rememberedLocalStagedByField.mc_folder || '',
-            localLabel: basenameFromFolderPath(rememberedLocalStagedByField.mc_folder || ''),
+            mode: resolveInitialFolderMode('mc_folder', { value: restoredMcFolderMode }),
+            serverPath: restoredMcFolderMode === 'local-upload'
+                ? String(kernelMcFolderInput?.value || '').trim()
+                : restoredMcFolderPath,
+            localStagedPath: restoredMcFolderMode === 'local-upload'
+                ? restoredMcFolderPath
+                : (rememberedLocalStagedByField.mc_folder || ''),
+            localLabel: basenameFromFolderPath(
+                restoredMcFolderMode === 'local-upload'
+                    ? restoredMcFolderPath
+                    : (rememberedLocalStagedByField.mc_folder || ''),
+            ),
         },
         output_sim_path: {
-            mode: resolveInitialFolderMode('output_sim_path', kernelOutputSimSourceInput),
-            serverPath: String(kernelOutputSimPathInput?.value || '').trim(),
-            localStagedPath: rememberedLocalStagedByField.output_sim_path || '',
-            localLabel: basenameFromFolderPath(rememberedLocalStagedByField.output_sim_path || ''),
+            mode: resolveInitialFolderMode('output_sim_path', { value: restoredOutputSimMode }),
+            serverPath: restoredOutputSimMode === 'local-upload'
+                ? String(kernelOutputSimPathInput?.value || '').trim()
+                : restoredOutputSimPath,
+            localStagedPath: restoredOutputSimMode === 'local-upload'
+                ? restoredOutputSimPath
+                : (rememberedLocalStagedByField.output_sim_path || ''),
+            localLabel: basenameFromFolderPath(
+                restoredOutputSimMode === 'local-upload'
+                    ? restoredOutputSimPath
+                    : (rememberedLocalStagedByField.output_sim_path || ''),
+            ),
         },
     };
     const kernelPathPreviewStateByField = {
@@ -2088,6 +2145,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const kernelPredefinedParamsByModel = {{ kernel_predefined_params_by_model | tojson }};
     const detectedKernelSimulationModel = String({{ detected_simulation_model | tojson }} || '').trim().toLowerCase();
     const detectedKernelSimulationOrigin = String({{ detected_simulation_origin | tojson }} || '').trim().toLowerCase();
+    const hasKernelParamsRestore = hasKernelRestoreField('kernel_params_module')
+        || hasKernelRestoreField('kernel_params_module_source_mode')
+        || hasKernelRestoreField('kernel_params_predefined_model');
+    if (hasKernelParamsRestore) {
+        if (kernelParamsSourceModeInput) {
+            kernelParamsSourceModeInput.value = kernelRestoreValue(
+                'kernel_params_module_source_mode',
+                kernelParamsSourceModeInput.value || '',
+            );
+        }
+        if (kernelParamsServerPathInput) {
+            kernelParamsServerPathInput.value = kernelRestoreValue(
+                'kernel_params_module',
+                kernelParamsServerPathInput.value || '',
+            );
+        }
+        if (kernelParamsPredefinedModelInput) {
+            kernelParamsPredefinedModelInput.value = kernelRestoreValue(
+                'kernel_params_predefined_model',
+                kernelParamsPredefinedModelInput.value || '',
+            );
+        }
+    }
     const kernelHasDetectedPredefinedModel = ['hagen', 'cavallari', 'four_area'].includes(detectedKernelSimulationModel)
         && detectedKernelSimulationOrigin !== 'custom';
 
@@ -2218,12 +2298,19 @@ document.addEventListener('DOMContentLoaded', () => {
         kernelParamsAutoButtons.forEach((btn) => setKernelParamButtonState(btn, false));
         const initialRawMode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase();
         const initialMode = initialRawMode === 'server-path' ? 'server-path' : 'upload';
+        const initialPredefinedModel = String(kernelParamsPredefinedModelInput.value || '').trim().toLowerCase();
         setKernelParamsMode(initialMode, { clearAuto: false });
         const initialServerPath = String(kernelParamsServerPathInput.value || '').trim();
         if (initialServerPath) {
-            setKernelParamsServerSelection(initialServerPath);
+            setKernelParamsServerSelection(initialServerPath, { preserveAuto: Boolean(initialPredefinedModel) });
         }
-        if (kernelHasDetectedPredefinedModel && !kernelParamsAutoDisabled) {
+        if (initialPredefinedModel && !kernelParamsAutoDisabled) {
+            const initialModelCfg = kernelPredefinedParamsByModel[initialPredefinedModel] || {};
+            setKernelParamsAutoSelection(
+                initialPredefinedModel,
+                initialModelCfg.label || initialPredefinedModel,
+            );
+        } else if (kernelHasDetectedPredefinedModel && !kernelParamsAutoDisabled && !hasKernelParamsRestore) {
             const detectedAutoBtn = kernelParamsAutoButtons.find(
                 (btn) => String(btn.dataset.kernelParamsAutoModel || '').trim().toLowerCase() === detectedKernelSimulationModel,
             );

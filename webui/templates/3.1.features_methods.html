@@ -5,6 +5,7 @@
 <script>
     window.__featuresPipelineFiles = {{ pipeline_files | tojson }};
     window.__featuresRuntime = {{ (features_runtime if features_runtime is defined else webui_runtime) | tojson }};
+    window.__featuresRestoreForm = {{ module_restore_form | default({}) | tojson }};
     window.__featuresInitialEntry = {{ request.args.get('entry', '') | tojson }};
     window.__featuresInitialTab = {{ request.args.get('tab', '') | tojson }};
 
@@ -17,10 +18,15 @@
             ? 'server-path'
             : 'upload';
         const defaultSimulationSourceMode = 'server-path';
+        const restoreForm = (() => {
+            const value = window.__featuresRestoreForm || {};
+            return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        })();
+        const hasRestoreForm = Object.keys(restoreForm).length > 0;
         const initialEntry = String(window.__featuresInitialEntry || '').trim().toLowerCase();
         const initialTab = String(window.__featuresInitialTab || '').trim().toLowerCase();
         const startOnLoadPrecomputed = initialEntry === 'load' || initialTab === 'load-precomputed';
-        const startOnCompute = initialEntry === 'compute' || ['load-data', 'select-method', 'configure-method'].includes(initialTab);
+        const startOnCompute = hasRestoreForm || initialEntry === 'compute' || ['load-data', 'select-method', 'configure-method'].includes(initialTab);
         let initialActiveTab = 'entry';
         let initialEntryChoice = '';
         if (startOnLoadPrecomputed){
@@ -227,7 +233,9 @@ def custom_feature(sample, params):
                 }
             ],
             init() {
-                if (this.entryChoice === 'compute' && this.activeTab === 'load-data') {
+                if (hasRestoreForm) {
+                    this.restoreFeaturesConfiguration(restoreForm);
+                } else if (this.entryChoice === 'compute' && this.activeTab === 'load-data') {
                     this.computeFlowSelectorOpen = true;
                     this.computeFlowConfigOpen = false;
                 }
@@ -245,6 +253,126 @@ def custom_feature(sample, params):
                         });
                     });
                 });
+            },
+            restoreValue(form, name, fallback = '') {
+                if (!form || !Object.prototype.hasOwnProperty.call(form, name)) return fallback;
+                return form[name] ?? fallback;
+            },
+            restoreBool(form, name) {
+                return ['1', 'true', 'on', 'yes'].includes(String(this.restoreValue(form, name, '')).trim().toLowerCase());
+            },
+            restoreJson(form, name, fallback) {
+                const raw = this.restoreValue(form, name, '');
+                if (raw === '') return fallback;
+                try {
+                    const parsed = JSON.parse(String(raw));
+                    return parsed ?? fallback;
+                } catch (_err) {
+                    return fallback;
+                }
+            },
+            restoreParserControls(form) {
+                const textFields = {
+                    parser_data_locator: 'parserDataLocator',
+                    parser_fs_manual: 'parserFsManual',
+                    parser_fs_source: 'parserFsSource',
+                    parser_sensor_names: 'parserSensorNames',
+                    parser_ch_names_source: 'parserChNamesSource',
+                    parser_ch_names_autocomplete_axis: 'parserChNamesAutocompleteAxis',
+                    parser_recording_type: 'parserRecordingType',
+                    parser_recording_type_locator: 'parserRecordingTypeLocator',
+                    parser_recording_type_source: 'parserRecordingTypeSource',
+                    parser_metadata_mode: 'parserMetadataMode',
+                    parser_metadata_subject_id_source: 'parserMetadataSubjectIdSource',
+                    parser_metadata_subject_id: 'parserMetadataSubjectId',
+                    parser_metadata_group_source: 'parserMetadataGroupSource',
+                    parser_metadata_group: 'parserMetadataGroup',
+                    parser_metadata_species_source: 'parserMetadataSpeciesSource',
+                    parser_metadata_species: 'parserMetadataSpecies',
+                    parser_metadata_condition_source: 'parserMetadataConditionSource',
+                    parser_metadata_condition: 'parserMetadataCondition',
+                    parser_subject_id_locator: 'parserSubjectIdLocator',
+                    parser_group_locator: 'parserGroupLocator',
+                    parser_species_locator: 'parserSpeciesLocator',
+                    parser_condition_locator: 'parserConditionLocator',
+                    parser_fs_locator: 'parserFsLocator',
+                    parser_ch_names_locator: 'parserChNamesLocator',
+                    parser_table_layout: 'parserTableLayout',
+                    parser_long_time_col: 'parserLongTimeCol',
+                    parser_long_channel_col: 'parserLongChannelCol',
+                    parser_long_value_col: 'parserLongValueCol',
+                    parser_axis_channels: 'parserAxisChannels',
+                    parser_axis_samples: 'parserAxisSamples',
+                    parser_axis_epochs: 'parserAxisEpochs',
+                    parser_axis_ids: 'parserAxisIds',
+                    parser_epoch_length_s: 'parserEpochLengthS',
+                    parser_epoch_step_s: 'parserEpochStepS',
+                    parser_segment_t0_s: 'parserSegmentT0S',
+                    parser_segment_t1_s: 'parserSegmentT1S',
+                    parser_aggregate_method: 'parserAggregateMethod',
+                    parser_aggregate_labels: 'parserAggregateLabels',
+                    parser_aggregate_label_value: 'parserAggregateLabelValue',
+                    parser_filename_format: 'parserFilenameFormat',
+                    additional_file_link_field: 'additionalFileLinkField',
+                };
+                Object.entries(textFields).forEach(([fieldName, propName]) => {
+                    if (Object.prototype.hasOwnProperty.call(form, fieldName)) {
+                        this[propName] = String(form[fieldName] ?? '');
+                    }
+                });
+                this.parserArrayAxesEnabled = this.restoreBool(form, 'parser_array_axes_enabled');
+                this.parserEnableEpoching = this.restoreBool(form, 'parser_enable_epoching');
+                this.parserZscore = this.restoreBool(form, 'parser_zscore');
+                this.parserZscoreAfterEpoch = this.restoreBool(form, 'parser_zscore_after_epoch');
+                this.parserEnableAggregate = this.restoreBool(form, 'parser_enable_aggregate');
+                if (Object.prototype.hasOwnProperty.call(form, 'parser_aggregate_over')) {
+                    this.parserAggregateOverSelected = String(form.parser_aggregate_over || '')
+                        .split(',')
+                        .map((item) => item.trim())
+                        .filter((item) => item.length > 0);
+                }
+                if (Object.prototype.hasOwnProperty.call(form, 'select-method')) {
+                    this.selectedMethod = String(form['select-method'] || '');
+                }
+                this.normalizeParserRecordingTypeSource();
+                this.syncParserSelectDom();
+            },
+            async restoreFeaturesConfiguration(form) {
+                this.entryChoice = 'compute';
+                this.activeTab = 'load-data';
+                this.computeFlowSelectorOpen = false;
+                this.computeFlowConfigOpen = true;
+                const sourceKind = String(this.restoreValue(form, 'data_source_kind', 'new-simulation')).trim() || 'new-simulation';
+                try {
+                    if (sourceKind === 'pipeline') {
+                        const existingPath = String(this.restoreValue(form, 'existing_data_path', '')).trim();
+                        this.computeFlowChoice = 'pipeline';
+                        this.dataSourceKind = 'pipeline';
+                        this.selectedPipelinePath = existingPath;
+                        if (existingPath) await this.inspectParserSource(existingPath, null);
+                    } else if (sourceKind === 'new-empirical') {
+                        this.computeFlowChoice = 'new-data';
+                        this.dataSourceKind = 'new-empirical';
+                        this.empiricalSourceMode = String(this.restoreValue(form, 'empirical_source_mode', this.defaultEmpiricalSourceMode)).trim() || this.defaultEmpiricalSourceMode;
+                        this.empiricalFolderPath = String(this.restoreValue(form, 'empirical_folder_path', '')).trim();
+                        this.empiricalDataFileSelections = this.restoreJson(form, 'empirical_data_file_selections', {});
+                        this.empiricalSubfolderSelections = this.restoreJson(form, 'empirical_subfolder_selections', {});
+                        if (this.empiricalSourceMode === 'server-path' && this.empiricalFolderPath) await this.inspectEmpiricalFolderPath();
+                    } else {
+                        this.computeFlowChoice = 'new-data';
+                        this.dataSourceKind = 'new-simulation';
+                        this.simulationSourceMode = 'server-path';
+                        this.simulationFolderPath = String(this.restoreValue(form, 'simulation_folder_path', '')).trim();
+                        this.simulationFolderPaths = this.restoreJson(form, 'simulation_folder_paths', this.simulationFolderPath ? [this.simulationFolderPath] : []);
+                        this.simulationDataFileSelections = this.restoreJson(form, 'simulation_data_file_selections', {});
+                        if ((this.simulationFolderPaths || []).length > 0 || this.simulationFolderPath) await this.inspectSimulationFolderPath();
+                    }
+                } finally {
+                    this.restoreParserControls(form);
+                    this.computeFlowSelectorOpen = false;
+                    this.computeFlowConfigOpen = true;
+                    this.activeTab = 'load-data';
+                }
             },
             isUploaded(id) {
                 return this.uploads[id] !== undefined;

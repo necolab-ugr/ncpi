@@ -248,19 +248,20 @@
             Save results
         </button>
 
-        {% if computation_type == 'simulation' %}
-        <a x-show="!pending && status === 'finished'" href="{{url_for('field_potential')}}"
-            class="bg-primary text-white px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
-            Continue to Field Potential
-        </a>
         <form x-show="!pending && (status === 'failed' || status === 'cancelled') && canRestoreConfig"
             method="POST"
-            action="{{ url_for('restore_simulation_config', job_id=job_id) }}">
+            action="{{ url_for('restore_job_config', job_id=job_id) }}">
             <button type="submit"
                 class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
                 Back to configuration
             </button>
         </form>
+
+        {% if computation_type == 'simulation' %}
+        <a x-show="!pending && status === 'finished'" href="{{url_for('field_potential')}}"
+            class="bg-primary text-white px-10 py-3 rounded-lg font-bold text-lg hover:brightness-105 transition-all shadow-md">
+            Continue to Field Potential
+        </a>
         <a x-show="!pending && status === 'failed'" href="{{url_for('simulation')}}"
             class="bg-white text-primary border border-primary px-10 py-3 rounded-lg font-bold text-lg hover:bg-primary/5 transition-all shadow-md">
             Return to Simulation
