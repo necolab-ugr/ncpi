@@ -47,7 +47,7 @@
         modelName: 'MLPRegressor',
         lastDefaultsModel: null,
         trainingMode: 'single_trial',
-        hyperparamsJson: '{}',
+        hyperparamsJson: JSON.stringify({hidden_layer_sizes: [100], activation: 'relu', solver: 'adam', max_iter: 500}, null, 2),
         paramGridJson: '',
         sbiTrainParamsJson: '{\"max_num_epochs\": 50, \"training_batch_size\": 64, \"learning_rate\": 0.001, \"show_train_summary\": false}',
         sbiEvalSamplingKwargsJson: '{\"sample_shape\": [2000], \"max_sampling_batch_size\": 10000, \"show_progress_bars\": false}',
@@ -314,7 +314,14 @@
                         rows="5"
                         x-model="hyperparamsJson"
                         class="code-editor block w-full rounded-md border-slate-300 dark:border-slate-600 font-mono text-sm bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-300 focus:border-primary focus:ring-primary"
-                    ></textarea>
+                    >{
+  "hidden_layer_sizes": [
+    100
+  ],
+  "activation": "relu",
+  "solver": "adam",
+  "max_iter": 500
+}</textarea>
                     <p class="mt-1 text-xs text-slate-500 dark:text-slate-400">Use valid JSON (double quotes for keys/strings).</p>
                 </div>
             </div>
@@ -544,6 +551,29 @@
 {{ super() }}
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
+window.__trainingDefaultHyperparamsByModel = {
+    MLPRegressor: {hidden_layer_sizes: [100], activation: "relu", solver: "adam", max_iter: 500},
+    RandomForestRegressor: {n_estimators: 300, max_depth: null, min_samples_split: 2, min_samples_leaf: 1},
+    Ridge: {alpha: 1.0},
+    SVR: {kernel: "rbf", C: 1.0, gamma: "scale", epsilon: 0.1},
+    LinearRegression: {},
+    NPE: {estimator_kwargs: {estimator: "nsf"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
+    NLE: {estimator_kwargs: {estimator: "nsf"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
+    NRE: {estimator_kwargs: {estimator: "mlp"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
+};
+
+document.addEventListener("DOMContentLoaded", () => {
+    const modelSelect = document.getElementById("training-model-name");
+    const hyperparamsBox = document.getElementById("training-hyperparams-json");
+    if (!modelSelect || !hyperparamsBox || String(hyperparamsBox.value || "").trim()) {
+        return;
+    }
+    const model = modelSelect.value || "MLPRegressor";
+    const defaults = window.__trainingDefaultHyperparamsByModel[model] || {};
+    hyperparamsBox.value = JSON.stringify(defaults, null, 2);
+    hyperparamsBox.dispatchEvent(new Event("input", {bubbles: true}));
+});
+
 (() => {
     const runtime = window.__webuiRuntime || {};
     const allowServerSource = true; // Always enable server-side file browsing
@@ -1052,17 +1082,18 @@
         return;
     }
 
+    const trainingDefaults = window.__trainingDefaultHyperparamsByModel || {};
     const sklearnDefaults = {
-        MLPRegressor: {hidden_layer_sizes: [100], activation: "relu", solver: "adam", max_iter: 500},
-        RandomForestRegressor: {n_estimators: 300, max_depth: null, min_samples_split: 2, min_samples_leaf: 1},
-        Ridge: {alpha: 1.0},
-        SVR: {kernel: "rbf", C: 1.0, gamma: "scale", epsilon: 0.1},
-        LinearRegression: {}
+        MLPRegressor: trainingDefaults.MLPRegressor || {},
+        RandomForestRegressor: trainingDefaults.RandomForestRegressor || {},
+        Ridge: trainingDefaults.Ridge || {},
+        SVR: trainingDefaults.SVR || {},
+        LinearRegression: trainingDefaults.LinearRegression || {}
     };
     const sbiDefaults = {
-        NPE: {estimator_kwargs: {estimator: "nsf"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
-        NLE: {estimator_kwargs: {estimator: "nsf"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}},
-        NRE: {estimator_kwargs: {estimator: "mlp"}, inference_kwargs: {device: "cpu"}, build_posterior_kwargs: {}}
+        NPE: trainingDefaults.NPE || {},
+        NLE: trainingDefaults.NLE || {},
+        NRE: trainingDefaults.NRE || {}
     };
     const sklearnGridDefaults = {
         MLPRegressor: {hidden_layer_sizes: [[64], [128], [128, 64]], alpha: [0.0001, 0.001]},
