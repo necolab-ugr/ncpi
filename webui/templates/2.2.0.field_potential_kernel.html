@@ -307,8 +307,9 @@
                                 <input type="hidden" id="kernelParamsModuleServerPath" name="kernel_params_module" value="{{ kernel_params_default }}" />
                                 <input type="hidden" id="kernelParamsPredefinedModel" name="kernel_params_predefined_model" value="" />
                                 <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
-                                    <button type="button" data-kernel-params-action="true" class="kernel-params-upload-local kernel-params-upload-server px-2.5 py-1 text-[10px] rounded border"
-                                        x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></button>
+                                    <button type="button" data-kernel-params-action="true" class="kernel-params-file-mode px-2.5 py-1 text-[10px] rounded border">
+                                        <span x-text="isLocalRuntime ? 'Local upload' : 'Server file'"></span>
+                                    </button>
                                 </div>
                                 <div class="w-full flex flex-wrap items-center justify-center gap-2 mb-1">
                                     {% for model_key in ["hagen", "cavallari", "four_area"] %}
@@ -342,6 +343,13 @@
                                 {% else %}
                                 <p id="kernelParamsAutoStatus" class="mt-1 hidden text-[10px] text-emerald-700 dark:text-emerald-300"></p>
                                 {% endif %}
+                                <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
+                                    data-role="auto-summary">
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Detected from pipeline:</span>
+                                    <div class="mt-1">
+                                        <span class="block flex-1 font-mono break-all" data-role="auto-name"></span>
+                                    </div>
+                                </div>
                                 <div class="mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300"
                                     data-role="local-summary">
                                     <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
@@ -428,7 +436,7 @@
                                 data-source-mode-input="kernel_spike_times_file_source_mode"
                                 class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                                 <input class="hidden" type="file" id="kernelSpikeTimesFile" name="kernel_spike_times_file" accept=".pkl" />
-                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="server-path" />
+                                <input type="hidden" name="kernel_spike_times_file_source_mode" value="{{ 'auto-detected' if default_sim.times else 'upload' }}" />
                                 <input type="hidden" name="kernel_spike_times_file_server_path" value="{{ default_sim_paths.times if default_sim.times else '' }}" />
                                 <span class="material-symbols-outlined text-slate-400">upload_file</span>
                                 <span class="text-xs font-bold lowercase tracking-wider text-slate-500">Spike times (times in simulation.pkl or times.pkl)</span>
@@ -575,7 +583,7 @@
                             data-source-mode-input="meeg_cdm_file_source_mode"
                             class="upload-zone border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all bg-slate-50 dark:bg-slate-900/50">
                             <input class="hidden" type="file" id="meegCdmFile" name="meeg_cdm_file" accept=".pkl" />
-                            <input type="hidden" name="meeg_cdm_file_source_mode" value="server-path" />
+                            <input type="hidden" name="meeg_cdm_file_source_mode" value="{{ 'auto-detected' if default_meeg.cdm_exists else 'upload' }}" />
                             <input type="hidden" name="meeg_cdm_file_server_path" value="{{ default_meeg.cdm if default_meeg.cdm_exists else '' }}" />
                             <span class="material-symbols-outlined text-slate-400">upload_file</span>
                             <span class="text-xs font-bold lowercase tracking-wider text-slate-500">CDM (.pkl)</span>
@@ -2132,9 +2140,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const kernelParamsAutoButtons = kernelParamsUploadZone
         ? Array.from(kernelParamsUploadZone.querySelectorAll('.kernel-params-auto-load[data-kernel-params-auto-model]'))
         : [];
-    const kernelParamsLocalModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-upload-local') : null;
-    const kernelParamsServerModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-upload-server') : null;
+    const kernelParamsFileModeBtn = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('.kernel-params-file-mode') : null;
     const kernelParamsHint = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="hint"]') : null;
+    const kernelParamsAutoSummary = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="auto-summary"]') : null;
+    const kernelParamsAutoName = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="auto-name"]') : null;
     const kernelParamsLocalSummary = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="local-summary"]') : null;
     const kernelParamsLocalName = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="local-name"]') : null;
     const kernelParamsLocalClear = kernelParamsUploadZone ? kernelParamsUploadZone.querySelector('[data-role="local-clear"]') : null;
@@ -2193,8 +2202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     const syncKernelParamsChoiceVisuals = () => {
         const choiceKey = inferKernelParamsChoiceKey();
-        setKernelParamButtonState(kernelParamsLocalModeBtn, choiceKey === 'local-upload');
-        setKernelParamButtonState(kernelParamsServerModeBtn, choiceKey === 'server-file');
+        setKernelParamButtonState(kernelParamsFileModeBtn, choiceKey === 'local-upload' || choiceKey === 'server-file');
         kernelParamsAutoButtons.forEach((btn) => {
             const modelKey = String(btn.dataset.kernelParamsAutoModel || '').trim().toLowerCase();
             setKernelParamButtonState(btn, choiceKey === `auto-${modelKey}`);
@@ -2211,10 +2219,25 @@ document.addEventListener('DOMContentLoaded', () => {
         kernelParamsAutoStatus.classList.toggle('hidden', !clean);
     };
 
+    const setKernelParamsAutoSummary = (text) => {
+        const clean = String(text || '').trim();
+        if (kernelParamsAutoName) {
+            kernelParamsAutoName.textContent = clean;
+        }
+        if (kernelParamsAutoSummary) {
+            kernelParamsAutoSummary.classList.toggle('hidden', !clean);
+        }
+        if (clean) {
+            if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
+            if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
+        }
+    };
+
     const clearKernelParamsAutoSelection = () => {
         if (kernelParamsPredefinedModelInput) {
             kernelParamsPredefinedModelInput.value = '';
         }
+        setKernelParamsAutoSummary('');
         if (!kernelParamsAutoDisabled && !kernelHasDetectedPredefinedModel) {
             setKernelParamsAutoStatusText('');
         }
@@ -2232,6 +2255,7 @@ document.addEventListener('DOMContentLoaded', () => {
         syncKernelParamsChoiceVisuals();
         const label = String(modelLabel || normalizedModel).trim();
         setKernelParamsAutoStatusText(`${label} analysis_params.py loaded automatically.`);
+        setKernelParamsAutoSummary(`${label} analysis_params.py`);
     };
 
     const setKernelParamsModeVisuals = () => {
@@ -2249,6 +2273,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (kernelParamsLocalName) kernelParamsLocalName.textContent = clean;
         if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.toggle('hidden', !clean);
         if (kernelParamsServerSummary) kernelParamsServerSummary.classList.add('hidden');
+        if (kernelParamsAutoSummary) kernelParamsAutoSummary.classList.add('hidden');
         if (kernelParamsServerPathInput) kernelParamsServerPathInput.value = '';
         updateKernelSubmitAvailability();
     };
@@ -2262,6 +2287,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (kernelParamsServerPath) kernelParamsServerPath.textContent = clean;
         if (kernelParamsServerSummary) kernelParamsServerSummary.classList.toggle('hidden', !clean);
         if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
+        if (kernelParamsAutoSummary) kernelParamsAutoSummary.classList.add('hidden');
         if (kernelParamsLocalName) kernelParamsLocalName.textContent = '';
         if (kernelParamsFileInput) kernelParamsFileInput.value = '';
         syncKernelParamsChoiceVisuals();
@@ -2293,14 +2319,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     if (kernelParamsUploadZone && kernelParamsFileInput && kernelParamsSourceModeInput && kernelParamsServerPathInput) {
-        setKernelParamButtonState(kernelParamsLocalModeBtn, false);
-        setKernelParamButtonState(kernelParamsServerModeBtn, false);
+        setKernelParamButtonState(kernelParamsFileModeBtn, false);
         kernelParamsAutoButtons.forEach((btn) => setKernelParamButtonState(btn, false));
         const initialRawMode = String(kernelParamsSourceModeInput.value || '').trim().toLowerCase();
-        const initialMode = initialRawMode === 'server-path' ? 'server-path' : 'upload';
         const initialPredefinedModel = String(kernelParamsPredefinedModelInput.value || '').trim().toLowerCase();
-        setKernelParamsMode(initialMode, { clearAuto: false });
         const initialServerPath = String(kernelParamsServerPathInput.value || '').trim();
+        const runtimeFileMode = window.isLocalRuntime && !initialServerPath ? 'upload' : 'server-path';
+        const initialMode = initialRawMode === 'server-path' ? runtimeFileMode : 'upload';
+        setKernelParamsMode(initialMode, { clearAuto: false });
         if (initialServerPath) {
             setKernelParamsServerSelection(initialServerPath, { preserveAuto: Boolean(initialPredefinedModel) });
         }
@@ -2329,16 +2355,10 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         syncKernelParamsChoiceVisuals();
 
-        if (kernelParamsLocalModeBtn) {
-            kernelParamsLocalModeBtn.addEventListener('click', (event) => {
+        if (kernelParamsFileModeBtn) {
+            kernelParamsFileModeBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
-                setKernelParamsMode('upload', { clearAuto: true });
-            });
-        }
-        if (kernelParamsServerModeBtn) {
-            kernelParamsServerModeBtn.addEventListener('click', (event) => {
-                event.stopPropagation();
-                setKernelParamsMode('server-path', { clearAuto: true });
+                setKernelParamsMode(window.isLocalRuntime ? 'upload' : 'server-path', { clearAuto: true });
             });
         }
         if (kernelParamsLocalClear) {
@@ -2476,17 +2496,23 @@ document.addEventListener('DOMContentLoaded', () => {
         const hasDetectedDefault = Boolean(defaultLoadedName);
         controls.innerHTML = `
             <button type="button" data-kernel-upload-action="true" class="kernel-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
-            <button type="button" data-kernel-upload-action="true" class="kernel-upload-server px-2.5 py-1 text-[10px] rounded border"></button>
+            <button type="button" data-kernel-upload-action="true" class="kernel-upload-file-mode px-2.5 py-1 text-[10px] rounded border">${window.isLocalRuntime ? 'Local upload' : 'Server file'}</button>
         `;
-        // Set dynamic label
-        const serverBtn = controls.querySelector('.kernel-upload-server');
-        if (serverBtn) {
-            serverBtn.textContent = window.isLocalRuntime ? 'Local upload' : 'Server file';
-        }
+        const fileModeBtn = controls.querySelector('.kernel-upload-file-mode');
         zone.insertBefore(controls, zone.firstChild);
 
         const autoBtn = controls.querySelector('.kernel-upload-auto');
         const hintEl = zone.querySelector('[data-role="hint"]') || zone.querySelector('p.text-\\[10px\\]');
+
+        const autoSummary = document.createElement('div');
+        autoSummary.className = 'mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300';
+        autoSummary.innerHTML = `
+            <span class="font-semibold text-green-800 dark:text-green-200">Detected from pipeline:</span>
+            <div class="mt-1 flex items-start justify-between gap-2">
+                <span class="block flex-1 font-mono break-all" data-role="auto-name"></span>
+            </div>
+        `;
+        zone.appendChild(autoSummary);
 
         const localSummary = document.createElement('div');
         localSummary.className = 'mt-2 hidden w-full rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300';
@@ -2522,11 +2548,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const localClearBtn = localSummary.querySelector('[data-role="local-clear"]');
         const serverPathEl = serverSummary.querySelector('[data-role="server-path"]');
         const serverClearBtn = serverSummary.querySelector('[data-role="server-clear"]');
+        const autoNameEl = autoSummary.querySelector('[data-role="auto-name"]');
 
         const applyModeVisuals = (mode) => {
             const activeClasses = ['border-primary', 'bg-primary/10', 'text-primary', 'font-semibold'];
             const inactiveClasses = ['border-slate-300', 'dark:border-slate-700', 'text-slate-600', 'dark:text-slate-300'];
-            [autoBtn, serverBtn].forEach((btn) => {
+            [autoBtn, fileModeBtn].forEach((btn) => {
                 if (!btn) return;
                 btn.classList.remove(...activeClasses);
                 btn.classList.add(...inactiveClasses);
@@ -2534,10 +2561,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (mode === 'auto-detected' && autoBtn) {
                 autoBtn.classList.add(...activeClasses);
                 autoBtn.classList.remove(...inactiveClasses);
-            } else if (mode === 'server-path') {
-                serverBtn.classList.add(...activeClasses);
-                serverBtn.classList.remove(...inactiveClasses);
-            } 
+            } else if (fileModeBtn) {
+                fileModeBtn.classList.add(...activeClasses);
+                fileModeBtn.classList.remove(...inactiveClasses);
+            }
         };
 
         if (hintEl) {
@@ -2545,7 +2572,7 @@ document.addEventListener('DOMContentLoaded', () => {
             hintEl.setAttribute('data-role', 'hint');
         }
 
-        let fallbackDefaultName = defaultLoadedName;
+        const detectedPipelineName = defaultLoadedName;
 
         const getMode = () => {
             const mode = String(modeInput.value || '').trim().toLowerCase();
@@ -2565,6 +2592,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             localSummary.classList.toggle('hidden', !clean);
             serverSummary.classList.add('hidden');
+            autoSummary.classList.add('hidden');
         };
 
         const setServerSummary = (pathValue) => {
@@ -2574,6 +2602,17 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             serverSummary.classList.toggle('hidden', !clean);
             localSummary.classList.add('hidden');
+            autoSummary.classList.add('hidden');
+        };
+
+        const setAutoDetectedSummary = (name) => {
+            const clean = String(name || '').trim();
+            if (autoNameEl) {
+                autoNameEl.textContent = clean;
+            }
+            autoSummary.classList.toggle('hidden', !clean);
+            localSummary.classList.add('hidden');
+            serverSummary.classList.add('hidden');
         };
 
         const renderUploadMode = () => {
@@ -2587,7 +2626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const renderAutoDetectedMode = () => {
-            setLocalSummary(hasDetectedDefault ? fallbackDefaultName : '');
+            setAutoDetectedSummary(hasDetectedDefault ? detectedPipelineName : '');
             if (hintEl) {
                 hintEl.textContent = hasDetectedDefault
                     ? 'Using detected file from previous steps'
@@ -2603,6 +2642,8 @@ document.addEventListener('DOMContentLoaded', () => {
             modeInput.value = nextMode;
             applyModeVisuals(nextMode);
             if (nextMode === 'auto-detected') {
+                fileInput.value = '';
+                serverPathInput.value = '';
                 renderAutoDetectedMode();
             } else if (nextMode === 'server-path') {
                 renderServerMode();
@@ -2619,12 +2660,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 setMode('auto-detected');
             });
         }
-        serverBtn.addEventListener('click', (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (!kernelServerModeEnabled) return;
-            setMode('server-path');
-        });
+        if (fileModeBtn) {
+            fileModeBtn.addEventListener('click', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                setMode(window.isLocalRuntime ? 'upload' : 'server-path');
+            });
+        }
 
         if (localClearBtn) {
             localClearBtn.addEventListener('click', (event) => {
@@ -2633,8 +2675,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const selectedLocal = getSelectedLocalFile();
                 if (selectedLocal) {
                     fileInput.value = '';
-                } else {
-                    fallbackDefaultName = '';
                 }
                 renderUploadMode();
             });
@@ -2694,7 +2734,6 @@ document.addEventListener('DOMContentLoaded', () => {
             const dt = new DataTransfer();
             dt.items.add(files[0]);
             fileInput.files = dt.files;
-            fallbackDefaultName = '';
             serverPathInput.value = '';
             renderUploadMode();
         });
@@ -2702,9 +2741,6 @@ document.addEventListener('DOMContentLoaded', () => {
         fileInput.addEventListener('change', () => {
             if (getMode() !== 'upload') {
                 return;
-            }
-            if (getSelectedLocalFile()) {
-                fallbackDefaultName = '';
             }
             serverPathInput.value = '';
             renderUploadMode();
@@ -2720,7 +2756,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const initialModeRaw = String(modeInput.value || '').trim().toLowerCase();
         const initialMode = initialModeRaw === 'auto-detected'
             ? 'auto-detected'
-            : ((kernelServerModeEnabled && initialModeRaw === 'server-path') ? 'server-path' : 'upload');
+            : ((kernelServerModeEnabled && (initialModeRaw === 'server-path' || !window.isLocalRuntime)) ? 'server-path' : 'upload');
         if (!kernelServerModeEnabled) {
             serverPathInput.value = '';
         }

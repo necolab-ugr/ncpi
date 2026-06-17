@@ -394,12 +394,9 @@
         icon.setAttribute("role", "button");
         icon.setAttribute("aria-label", `Information about ${labelText}`);
         icon.setAttribute("aria-describedby", tooltipId);
+        icon.setAttribute("aria-expanded", "false");
         icon.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">info</span><span id="${tooltipId}" class="field-help-tooltip" role="tooltip"></span>`;
         icon.querySelector(".field-help-tooltip").textContent = help;
-        icon.addEventListener("click", (event) => {
-            event.preventDefault();
-            event.stopPropagation();
-        });
         const positionTooltip = () => {
             const tooltip = icon.querySelector(".field-help-tooltip");
             if (!tooltip) return;
@@ -428,10 +425,54 @@
             tooltip.style.left = `${left}px`;
             tooltip.style.top = `${top}px`;
         };
+        const closeTooltip = ({suppressCurrentHover = false} = {}) => {
+            icon.classList.remove("is-open");
+            icon.setAttribute("aria-expanded", "false");
+            if (suppressCurrentHover) {
+                icon.classList.add("is-click-closed");
+            }
+        };
+        const openTooltip = () => {
+            document.querySelectorAll(".field-help.is-open").forEach((otherIcon) => {
+                if (otherIcon !== icon) {
+                    otherIcon.classList.remove("is-open");
+                    otherIcon.setAttribute("aria-expanded", "false");
+                }
+            });
+            icon.classList.remove("is-click-closed");
+            icon.classList.add("is-open");
+            icon.setAttribute("aria-expanded", "true");
+            positionTooltip();
+        };
+        icon.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (icon.classList.contains("is-open")) {
+                closeTooltip({suppressCurrentHover: true});
+                icon.blur();
+                return;
+            }
+            openTooltip();
+        });
+        icon.addEventListener("mouseleave", () => {
+            icon.classList.remove("is-click-closed");
+        });
+        icon.addEventListener("keydown", (event) => {
+            if (event.key !== "Enter" && event.key !== " ") return;
+            event.preventDefault();
+            if (icon.classList.contains("is-open")) {
+                closeTooltip({suppressCurrentHover: true});
+            } else {
+                openTooltip();
+            }
+        });
         icon.addEventListener("mouseenter", positionTooltip);
         icon.addEventListener("focus", positionTooltip);
+        icon.addEventListener("focusout", () => {
+            icon.classList.remove("is-click-closed");
+        });
         window.addEventListener("resize", () => {
-            if (document.activeElement === icon || icon.matches(":hover")) {
+            if (icon.classList.contains("is-open") || document.activeElement === icon || icon.matches(":hover")) {
                 positionTooltip();
             }
         });
@@ -501,6 +542,23 @@
             );
         });
     };
+
+    document.addEventListener("click", () => {
+        document.querySelectorAll(".field-help.is-open").forEach((icon) => {
+            icon.classList.remove("is-open");
+            icon.classList.remove("is-click-closed");
+            icon.setAttribute("aria-expanded", "false");
+        });
+    });
+
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        document.querySelectorAll(".field-help.is-open").forEach((icon) => {
+            icon.classList.remove("is-open");
+            icon.classList.remove("is-click-closed");
+            icon.setAttribute("aria-expanded", "false");
+        });
+    });
 
     const start = () => {
         const pageEntry = pageHelp

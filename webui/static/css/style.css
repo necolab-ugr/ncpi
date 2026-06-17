@@ -97,10 +97,20 @@ html[data-webdriver="true"] *::after {
 
 .field-help:hover .field-help-tooltip,
 .field-help:focus .field-help-tooltip,
-.field-help:focus-visible .field-help-tooltip {
+.field-help:focus-visible .field-help-tooltip,
+.field-help.is-open .field-help-tooltip {
     visibility: visible;
     opacity: 1;
     transform: translateY(0);
+}
+
+.field-help.is-click-closed .field-help-tooltip,
+.field-help.is-click-closed:hover .field-help-tooltip,
+.field-help.is-click-closed:focus .field-help-tooltip,
+.field-help.is-click-closed:focus-visible .field-help-tooltip {
+    visibility: hidden;
+    opacity: 0;
+    transform: translateY(-0.25rem);
 }
 
 .dark .field-help {
