@@ -1123,6 +1123,59 @@ function inferencePredictionsData() {
         errorEl.textContent = errorText;
     }
 
+    function selectedPredictionBackend(modelName) {
+        const selected = String(modelName || "").trim();
+        if (selected === "__auto__" || selected === "") return "";
+        if (["NPE", "NLE", "NRE"].includes(selected)) return "sbi";
+        return "sklearn";
+    }
+
+    function knownModelFromInferredType(inferredType, backend) {
+        const text = String(inferredType || "").toUpperCase();
+        const candidates = backend === "sbi"
+            ? ["NPE", "NLE", "NRE"]
+            : ["MLPREGRESSOR", "RANDOMFORESTREGRESSOR", "RIDGE", "SVR", "LINEARREGRESSION"];
+        for (const candidate of candidates) {
+            if (text.includes(candidate)) return candidate;
+        }
+        return "";
+    }
+
+    function buildModelMismatchWarning(selectedModelName, detection) {
+        const selected = String(selectedModelName || "").trim();
+        if (!selected || selected === "__auto__") return "";
+
+        const detail = detection || {};
+        const detectedBackend = String(detail.backend || "").trim().toLowerCase();
+        const inferredType = String(detail.inferred_type || "").trim();
+        if (!["sklearn", "sbi"].includes(detectedBackend)) return "";
+
+        const selectedBackend = selectedPredictionBackend(selected);
+        const selectedKnown = selected.toUpperCase();
+        const detectedKnown = knownModelFromInferredType(inferredType, detectedBackend);
+        const backendMismatch = Boolean(selectedBackend && selectedBackend !== detectedBackend);
+        const modelMismatch = Boolean(
+            !backendMismatch &&
+            detectedKnown &&
+            selectedKnown !== detectedKnown
+        );
+
+        if (!backendMismatch && !modelMismatch) return "";
+
+        const detectedLabel = detectedKnown || inferredType || detectedBackend;
+        const executionArtifact = detectedBackend === "sbi" ? "posterior.pkl" : "model.pkl";
+        const executionMode = detectedBackend === "sbi" ? "SBI posterior" : "sklearn model";
+
+        return [
+            `The loaded model artifact appears to be ${detectedLabel} (${detectedBackend}), but the dropdown is set to ${selected}.`,
+            "",
+            `If you continue, the backend will use the loaded ${executionMode} artifact from ${executionArtifact}.`,
+            "The dropdown selection does not replace an incompatible uploaded model; the artifact type wins, so predictions will be computed with the loaded artifact.",
+            "",
+            "Press OK to continue or Cancel to return and change the selection."
+        ].join("\n");
+    }
+
     function bindSingleFileStatus(inputId, statusId, nameId) {
         const input = byId(inputId);
         const status = byId(statusId);
@@ -1499,6 +1552,8 @@ function inferencePredictionsData() {
             fileEntriesEl.innerHTML = "";
             const dirItems = Array.isArray(dirs) ? dirs : [];
             const fileItems = Array.isArray(files) ? files : [];
+            const hideSelectionControl = activeFileTarget === "assets-model" || activeFileTarget === "assets-scaler";
+            const selectedRowClasses = ["bg-primary/10", "text-primary", "dark:text-primary"];
             dirItems.forEach((entry) => {
                 const btn = document.createElement("button");
                 btn.type = "button";
@@ -1520,7 +1575,21 @@ function inferencePredictionsData() {
                 const span = document.createElement("span");
                 span.className = "font-mono";
                 span.textContent = entry.name;
-                label.appendChild(input);
+                if (hideSelectionControl) {
+                    label.addEventListener("click", () => {
+                        selectedFilePath = entry.path;
+                        fileEntriesEl.querySelectorAll("[data-asset-file-row='1']").forEach((row) => {
+                            row.classList.remove(...selectedRowClasses);
+                        });
+                        label.classList.add(...selectedRowClasses);
+                    });
+                    label.dataset.assetFileRow = "1";
+                    if (entry.path === selectedFilePath) {
+                        label.classList.add(...selectedRowClasses);
+                    }
+                } else {
+                    label.appendChild(input);
+                }
                 label.appendChild(span);
                 fileEntriesEl.appendChild(label);
             });
@@ -1868,7 +1937,9 @@ function inferencePredictionsData() {
         let requestCounter = 0;
 
         const emit = (detail) => {
-            window.dispatchEvent(new CustomEvent("auto-model-detection", { detail: detail || {} }));
+            const payload = detail || {};
+            window.dispatchEvent(new CustomEvent("auto-model-detection", { detail: payload }));
+            return payload;
         };
 
         const pickModelFileFromFolder = (files) => {
@@ -1891,8 +1962,7 @@ function inferencePredictionsData() {
             const requestId = requestCounter;
 
             if (!file) {
-                emit({});
-                return;
+                return emit({});
             }
 
             emit({ pending: true });
@@ -1907,19 +1977,18 @@ function inferencePredictionsData() {
                 if (requestId !== requestCounter) return;
 
                 if (response.ok && payload && payload.ok && payload.backend) {
-                    emit({
+                    return emit({
                         backend: payload.backend,
                         inferred_type: payload.inferred_type || "",
                     });
-                    return;
                 }
 
-                emit({
+                return emit({
                     error: (payload && payload.error) ? payload.error : "Could not auto-detect model backend.",
                 });
             } catch (err) {
                 if (requestId !== requestCounter) return;
-                emit({ error: (err && err.message) ? err.message : "Could not auto-detect model backend." });
+                return emit({ error: (err && err.message) ? err.message : "Could not auto-detect model backend." });
             }
         };
 
@@ -1928,8 +1997,7 @@ function inferencePredictionsData() {
             const requestId = requestCounter;
             const modelServerPath = String(serverPath || "").trim();
             if (!modelServerPath) {
-                emit({});
-                return;
+                return emit({});
             }
 
             emit({ pending: true });
@@ -1944,58 +2012,50 @@ function inferencePredictionsData() {
                 if (requestId !== requestCounter) return;
 
                 if (response.ok && payload && payload.ok && payload.backend) {
-                    emit({
+                    return emit({
                         backend: payload.backend,
                         inferred_type: payload.inferred_type || "",
                     });
-                    return;
                 }
 
-                emit({
+                return emit({
                     error: (payload && payload.error) ? payload.error : "Could not auto-detect model backend.",
                 });
             } catch (err) {
                 if (requestId !== requestCounter) return;
-                emit({ error: (err && err.message) ? err.message : "Could not auto-detect model backend." });
+                return emit({ error: (err && err.message) ? err.message : "Could not auto-detect model backend." });
             }
         };
 
         const refresh = () => {
-            if (modelSelect.value !== "__auto__") {
-                requestCounter += 1;
-                emit({});
-                return;
-            }
-
             const assetsSourceMode = String(modelAssetsSourceInput.value || "upload").trim().toLowerCase();
             if (assetsSourceMode === "server-path") {
                 const modelServerPath = String(modelServerPathInput.value || "").trim();
                 if (!modelServerPath) {
                     requestCounter += 1;
-                    emit({});
-                    return;
+                    return emit({});
                 }
-                detectFromServerPath(modelServerPath);
-                return;
+                return detectFromServerPath(modelServerPath);
             }
 
             if (folderRadio.checked) {
                 const folderFiles = folderInput.files ? Array.from(folderInput.files) : [];
                 const modelFile = pickModelFileFromFolder(folderFiles);
                 if (!modelFile) {
-                    emit({});
-                    return;
+                    return emit({});
                 }
-                detectFromFile(modelFile);
-                return;
+                return detectFromFile(modelFile);
             }
 
             const selectedModelFile = (modelInput.files && modelInput.files[0]) ? modelInput.files[0] : null;
             if (!selectedModelFile) {
-                emit({});
-                return;
+                return emit({});
             }
-            detectFromFile(selectedModelFile);
+            return detectFromFile(selectedModelFile);
+        };
+
+        window.__inferenceModelDetection = {
+            detectCurrent: refresh,
         };
 
         modelSelect.addEventListener("change", refresh);
@@ -2384,9 +2444,13 @@ function inferencePredictionsData() {
         });
 
         if (form && featuresSourceModeInput && modelAssetsSourceInput) {
-            form.addEventListener("submit", (event) => {
+            form.addEventListener("submit", async (event) => {
                 const liveState = getInferenceState();
                 const assetsUploadModeHidden = byId("assets-upload-mode-hidden");
+                const skipModelMismatchWarning = form.dataset.skipModelMismatchWarning === "1";
+                if (skipModelMismatchWarning) {
+                    delete form.dataset.skipModelMismatchWarning;
+                }
 
                 let featuresMode = String(featuresSourceModeInput.value || "upload").trim().toLowerCase();
                 const hasLocalFeatures = Boolean(input && input.files && input.files.length);
@@ -2539,6 +2603,45 @@ function inferencePredictionsData() {
 
                 if (typeof syncAssetsMode === "function") syncAssetsMode();
                 refreshFeaturesLoadStatus();
+
+                const selectedModelName = inferenceModelSelect
+                    ? String(inferenceModelSelect.value || "").trim()
+                    : "";
+                if (!skipModelMismatchWarning && selectedModelName && selectedModelName !== "__auto__") {
+                    event.preventDefault();
+                    let detection = null;
+                    try {
+                        const detector = window.__inferenceModelDetection;
+                        if (detector && typeof detector.detectCurrent === "function") {
+                            detection = await detector.detectCurrent();
+                        }
+                    } catch (_err) {
+                        detection = null;
+                    }
+                    if (!detection) {
+                        const stateAfterDetect = getInferenceState();
+                        detection = {
+                            backend: stateAfterDetect
+                                ? stateAfterDetect.autoDetectedBackend
+                                : lastAutoDetection.backend,
+                            inferred_type: stateAfterDetect
+                                ? stateAfterDetect.autoDetectedType
+                                : lastAutoDetection.inferred_type,
+                        };
+                    }
+
+                    const warning = buildModelMismatchWarning(selectedModelName, detection);
+                    if (warning && !window.confirm(warning)) {
+                        return;
+                    }
+
+                    form.dataset.skipModelMismatchWarning = "1";
+                    if (typeof form.requestSubmit === "function") {
+                        form.requestSubmit();
+                    } else {
+                        form.submit();
+                    }
+                }
             });
         }
 
