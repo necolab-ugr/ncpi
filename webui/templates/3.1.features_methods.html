@@ -4662,19 +4662,21 @@ def custom_feature(sample, params):
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                             </select>
                                         </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type value</span>
-                                            <select name="parser_recording_type" x-model="parserRecordingType"
-                                                :disabled="parserRecordingTypeSource !== '__value__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50">
-                                                <option value="LFP">LFP</option>
-                                                <option value="CDM">CDM</option>
-                                                <option value="EEG">EEG</option>
-                                                <option value="MEG">MEG</option>
-                                                <option value="ECoG">ECoG</option>
-                                                <option value="Unknown">Unknown</option>
-                                            </select>
-                                        </label>
+                                        <template x-if="parserRecordingTypeSource === '__value__'">
+                                            <label class="text-sm">
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type value</span>
+                                                <select name="parser_recording_type" x-model="parserRecordingType"
+                                                    :disabled="parserRecordingTypeSource !== '__value__'"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50">
+                                                    <option value="LFP">LFP</option>
+                                                    <option value="CDM">CDM</option>
+                                                    <option value="EEG">EEG</option>
+                                                    <option value="MEG">MEG</option>
+                                                    <option value="ECoG">ECoG</option>
+                                                    <option value="Unknown">Unknown</option>
+                                                </select>
+                                            </label>
+                                        </template>
                                     </div>
                                     <input type="hidden" name="parser_recording_type_locator"
                                         :value="(parserRecordingTypeSource && parserRecordingTypeSource !== '__value__' && parserRecordingTypeSource !== '__none__') ? parserRecordingTypeSource : ''">
@@ -4994,19 +4996,21 @@ def custom_feature(sample, params):
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                             </select>
                                         </label>
-                                        <label class="text-sm">
-                                            <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type value</span>
-                                            <select name="parser_recording_type" x-model="parserRecordingType"
-                                                :disabled="parserRecordingTypeSource !== '__value__'"
-                                                class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50">
-                                                <option value="LFP">LFP</option>
-                                                <option value="CDM">CDM</option>
-                                                <option value="EEG">EEG</option>
-                                                <option value="MEG">MEG</option>
-                                                <option value="ECoG">ECoG</option>
-                                                <option value="Unknown">Unknown</option>
-                                            </select>
-                                        </label>
+                                         <template x-if="parserRecordingTypeSource === '__value__'">
+                                            <label class="text-sm">
+                                                <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Recording type value</span>
+                                                <select name="parser_recording_type" x-model="parserRecordingType"
+                                                    :disabled="parserRecordingTypeSource !== '__value__'"
+                                                    class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm disabled:opacity-50">
+                                                    <option value="LFP">LFP</option>
+                                                    <option value="CDM">CDM</option>
+                                                    <option value="EEG">EEG</option>
+                                                    <option value="MEG">MEG</option>
+                                                    <option value="ECoG">ECoG</option>
+                                                    <option value="Unknown">Unknown</option>
+                                                </select>
+                                            </label>
+                                        </template>
                                     </div>
                                     <input type="hidden" name="parser_recording_type_locator"
                                         :value="(parserRecordingTypeSource && parserRecordingTypeSource !== '__value__' && parserRecordingTypeSource !== '__none__') ? parserRecordingTypeSource : ''">
