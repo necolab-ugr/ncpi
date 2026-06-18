@@ -17953,6 +17953,46 @@ def start_computation_redirect(computation_type):
                 shutil.copy2(source_path, copied_path)
                 file_paths[file_key] = copied_path
         if computation_type == "field_potential_kernel":
+            kernel_missing = []
+            if not (request.form.get("mc_folder") or "").strip():
+                kernel_missing.append("Multicompartment neuron model folder")
+
+            output_sim_path_value = (request.form.get("output_sim_path") or "").strip()
+            mean_nu_value = (request.form.get("mean_nu_x") or "").strip()
+            vrest_value = (request.form.get("vrest_value") or "").strip()
+            if not output_sim_path_value:
+                if not mean_nu_value and not vrest_value:
+                    kernel_missing.append(
+                        "Multicompartment network simulation outputs, or both Mean firing rates "
+                        "(mean_nu_X) and Resting membrane potential (Vrest)"
+                    )
+                elif not mean_nu_value:
+                    kernel_missing.append("Mean firing rates (mean_nu_X), or Multicompartment network simulation outputs")
+                elif not vrest_value:
+                    kernel_missing.append("Resting membrane potential (Vrest), or Multicompartment network simulation outputs")
+            elif bool(mean_nu_value) != bool(vrest_value):
+                kernel_missing.append(
+                    "both Mean firing rates (mean_nu_X) and Resting membrane potential (Vrest), "
+                    "or neither manual value when using simulation outputs"
+                )
+
+            kernel_params_source_mode_for_required = (
+                request.form.get("kernel_params_module_source_mode") or "server-path"
+            ).strip().lower()
+            has_kernel_params_upload = bool(file_paths.get("kernel_params_file"))
+            has_kernel_params_server = bool((request.form.get("kernel_params_module") or "").strip())
+            has_kernel_params = (
+                has_kernel_params_upload
+                if kernel_params_source_mode_for_required == "upload"
+                else has_kernel_params_server
+            )
+            if not has_kernel_params:
+                kernel_missing.append("Kernel parameters module")
+
+            if kernel_missing:
+                flash(f"Required before compute: {'; '.join(kernel_missing)}.", "error")
+                return redirect(request.referrer or url_for("field_potential_kernel"))
+
             kernel_params_source_mode = (request.form.get("kernel_params_module_source_mode") or "server-path").strip().lower()
             if kernel_params_source_mode not in {"upload", "server-path"}:
                 kernel_params_source_mode = "server-path"

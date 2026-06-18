@@ -64,6 +64,92 @@ def test_analysis_plot_warns_when_reducing_vector_signals_to_vector_magnitude(
     assert "Warning: this plot computes vector magnitude (module)" in html
 
 
+def _kernel_post_flash_messages(app_module, data):
+    with app_module.app.test_client() as client:
+        response = client.post(
+            "/start_computation_redirect/field_potential_kernel",
+            data=data,
+            headers={"Referer": "/field_potential/kernel?tab=cdm_computation"},
+        )
+        assert response.status_code in {302, 303}
+        with client.session_transaction() as session:
+            return [message for _category, message in session.get("_flashes", [])]
+
+
+def test_kernel_start_redirect_requires_output_or_manual_cdm_inputs(
+    field_potential_webui_app_module,
+    field_potential_example_paths,
+):
+    paths = field_potential_example_paths["hagen"]
+    messages = _kernel_post_flash_messages(
+        field_potential_webui_app_module,
+        {
+            "mc_folder": paths["mc_folder"],
+            "kernel_params_module_source_mode": "server-path",
+            "kernel_params_module": paths["kernel_params_module"],
+        },
+    )
+
+    assert any("Multicompartment network simulation outputs" in message for message in messages)
+    assert any("Mean firing rates (mean_nu_X)" in message for message in messages)
+    assert any("Resting membrane potential (Vrest)" in message for message in messages)
+
+
+def test_kernel_start_redirect_requires_missing_manual_counterpart(
+    field_potential_webui_app_module,
+    field_potential_example_paths,
+):
+    paths = field_potential_example_paths["hagen"]
+    messages = _kernel_post_flash_messages(
+        field_potential_webui_app_module,
+        {
+            "mc_folder": paths["mc_folder"],
+            "kernel_params_module_source_mode": "server-path",
+            "kernel_params_module": paths["kernel_params_module"],
+            "mean_nu_x": "1.0",
+        },
+    )
+
+    assert any("Resting membrane potential (Vrest)" in message for message in messages)
+
+
+def test_kernel_start_redirect_rejects_partial_manual_values_with_outputs(
+    field_potential_webui_app_module,
+    field_potential_example_paths,
+):
+    paths = field_potential_example_paths["hagen"]
+    messages = _kernel_post_flash_messages(
+        field_potential_webui_app_module,
+        {
+            "mc_folder": paths["mc_folder"],
+            "output_sim_path": "/tmp/simulation-output",
+            "mean_nu_x": "1.0",
+            "kernel_params_module_source_mode": "server-path",
+            "kernel_params_module": paths["kernel_params_module"],
+        },
+    )
+
+    assert any("both Mean firing rates" in message for message in messages)
+    assert any("Resting membrane potential (Vrest)" in message for message in messages)
+
+
+def test_kernel_start_redirect_requires_mc_folder(
+    field_potential_webui_app_module,
+    field_potential_example_paths,
+):
+    paths = field_potential_example_paths["hagen"]
+    messages = _kernel_post_flash_messages(
+        field_potential_webui_app_module,
+        {
+            "output_sim_path": "/tmp/simulation-output",
+            "kernel_params_module_source_mode": "server-path",
+            "kernel_params_module": paths["kernel_params_module"],
+        },
+    )
+
+    assert any("Multicompartment neuron model folder" in message for message in messages)
+
+
 def test_kernel_probe_selection_rejects_simultaneous_cdm_probe_choices(
     hagen_simulation_output,
     compute_utils_module,
