@@ -104,6 +104,7 @@
             topomapSensorCol: '',
             topomapMode: 'per_sensor',
             topomapCompareMethod: 'raw',
+            topomapCohendAbsThreshold: '',
             topomapSignalType: 'eeg',
             topomapMegAtlas: 'dk',
             topomapMegAtlasOptions: (window.__megTopomapAtlases || []),
@@ -590,6 +591,7 @@
                 this.topomapValueCol = '';
                 this.topomapSensorCol = '';
                 this.topomapCompareMethod = 'raw';
+                this.topomapCohendAbsThreshold = '';
                 this.topomapControlGroup = '';
                 this.topomapGroupValues = [];
                 this.topomapGroupValuesError = '';
@@ -671,6 +673,7 @@
                 this.topomapMegAtlas = first('topomap_meg_atlas', this.topomapMegAtlas);
                 this.topomapMode = first('topomap_grouping_mode', this.topomapMode);
                 this.topomapCompareMethod = first('topomap_compare_method', this.topomapCompareMethod);
+                this.topomapCohendAbsThreshold = first('topomap_cohend_abs_threshold', this.topomapCohendAbsThreshold);
                 this.topomapGroupBy = first('topomap_group_by', this.topomapGroupBy);
                 this.topomapControlGroup = first('topomap_control_group', this.topomapControlGroup);
                 this.topomapValueCol = first('topomap_value_col', this.topomapValueCol);
@@ -730,6 +733,105 @@
                 } else {
                     setTimeout(applyDomValues, 0);
                 }
+            },
+            isTopomapGroupComparisonActive() {
+                return this.topomapMode === 'compare_categories' && this.isDataframeSelected() && !this.isSimulationSelectionActive();
+            },
+            topomapCohendThresholdIssue() {
+                if (!this.isTopomapGroupComparisonActive() || this.topomapCompareMethod !== 'cohen_d') {
+                    return '';
+                }
+                const raw = String(this.topomapCohendAbsThreshold ?? '').trim();
+                if (!raw) {
+                    return '';
+                }
+                const value = Number(raw);
+                if (!Number.isFinite(value)) {
+                    return 'Enter a numeric threshold.';
+                }
+                if (value < 0) {
+                    return 'Minimum |Cohen\'s d| must be greater than or equal to 0.';
+                }
+                return '';
+            },
+            topomapValidationIssue(field) {
+                if (!this.isTopomapGroupComparisonActive()) {
+                    return '';
+                }
+                if (field === 'group_by') {
+                    if (!this.topomapGroupBy) {
+                        return 'Select the grouping column used to compare groups.';
+                    }
+                    return '';
+                }
+                if (field === 'control_group') {
+                    if (!this.topomapGroupBy) {
+                        return 'Select a grouping column before choosing the control group.';
+                    }
+                    if (this.topomapGroupValuesLoading) {
+                        return '';
+                    }
+                    if (this.topomapGroupValuesError) {
+                        return 'Resolve the group values error before plotting.';
+                    }
+                    if (!this.topomapGroupValues.length) {
+                        return 'The grouping column must contain groups to compare.';
+                    }
+                    if (this.topomapGroupValues.length < 2) {
+                        return 'The grouping column must contain at least two groups.';
+                    }
+                    if (!this.topomapControlGroup) {
+                        return 'Select the control group.';
+                    }
+                    if (!this.topomapGroupValues.includes(this.topomapControlGroup)) {
+                        return 'Select a control group from the available values.';
+                    }
+                    return '';
+                }
+                if (field === 'value_col') {
+                    if (!this.topomapValueCol) {
+                        return 'Select the numeric column to plot.';
+                    }
+                    return '';
+                }
+                if (field === 'cohend_abs_threshold') {
+                    return this.topomapCohendThresholdIssue();
+                }
+                return '';
+            },
+            topomapComparisonValidationMessages() {
+                if (!this.isTopomapGroupComparisonActive()) {
+                    return [];
+                }
+                const fields = ['group_by', 'control_group', 'value_col', 'cohend_abs_threshold'];
+                return fields.map((field) => this.topomapValidationIssue(field)).filter(Boolean);
+            },
+            topomapComparisonBlockReason() {
+                if (!this.dfColumns.length) {
+                    return 'Upload a dataframe to enable column selection.';
+                }
+                if (this.columnsLoading) {
+                    return 'Wait for columns to finish loading.';
+                }
+                if (this.topomapSignalType === 'meg' && !this.topomapMegAtlas) {
+                    return 'Select the MEG atlas.';
+                }
+                if (this.topomapMode !== 'compare_categories') {
+                    if (!this.topomapGroupBy) {
+                        return 'Select the grouping column.';
+                    }
+                    if (!this.topomapValueCol) {
+                        return 'Select the column to plot.';
+                    }
+                    return '';
+                }
+                if (this.topomapGroupValuesLoading) {
+                    return 'Wait for group values to finish loading.';
+                }
+                return this.topomapComparisonValidationMessages()[0] || '';
+            },
+            isTopomapPlotDisabled() {
+                return Boolean(this.topomapComparisonBlockReason());
             },
             init() {
                 if (!this.allowServerSource) {
@@ -1004,6 +1106,7 @@
                 this.topomapValueCol = '';
                 this.topomapSensorCol = '';
                 this.topomapCompareMethod = 'raw';
+                this.topomapCohendAbsThreshold = '';
                 this.topomapControlGroup = '';
                 this.topomapGroupValues = [];
                 this.topomapGroupValuesError = '';
@@ -1295,6 +1398,7 @@
                 this.topomapValueCol = '';
                 this.topomapSensorCol = '';
                 this.topomapCompareMethod = 'raw';
+                this.topomapCohendAbsThreshold = '';
                 this.topomapControlGroup = '';
                 this.topomapGroupValues = [];
                 this.topomapGroupValuesError = '';
@@ -2087,8 +2191,10 @@
                                         <input
                                             class="block w-full rounded-md border-0 py-1.5 text-slate-900 dark:text-slate-300 dark:bg-slate-900 shadow-sm ring-1 ring-inset ring-slate-300 dark:ring-slate-700 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:ring-2 focus:ring-inset focus:ring-primary sm:text-sm sm:leading-6"
                                             id="topomap-cohend-abs-threshold" name="topomap_cohend_abs_threshold"
-                                            type="number" min="0" step="any" placeholder="No filter" />
+                                            type="number" min="0" step="any" placeholder="No filter"
+                                            x-model="topomapCohendAbsThreshold" />
                                     </div>
+                                    <p x-show="topomapValidationIssue('cohend_abs_threshold')" class="mt-1 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('cohend_abs_threshold')"></p>
                                 </div>
                                 <div class="sm:col-span-3">
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
@@ -2107,6 +2213,7 @@
                                     </div>
                                     <p x-show="columnsLoading" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Loading columns...</p>
                                     <p x-show="!columnsLoading && !dfColumns.length" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Upload a dataframe to enable column selection.</p>
+                                    <p x-show="topomapValidationIssue('group_by')" class="mt-2 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('group_by')"></p>
                                 </div>
                                 <div class="sm:col-span-3" x-show="topomapMode === 'compare_categories'" x-cloak>
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
@@ -2124,6 +2231,7 @@
                                     </div>
                                     <p x-show="topomapGroupValuesLoading" class="mt-1 text-xs text-slate-500 dark:text-slate-400">Loading group values...</p>
                                     <p x-show="topomapGroupValuesError" class="mt-1 text-xs text-red-600 dark:text-red-400" x-text="topomapGroupValuesError"></p>
+                                    <p x-show="topomapValidationIssue('control_group')" class="mt-1 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('control_group')"></p>
                                 </div>
                                 <div class="sm:col-span-3">
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
@@ -2141,6 +2249,7 @@
                                     </div>
                                     <p x-show="columnsLoading" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Loading columns...</p>
                                     <p x-show="!columnsLoading && !dfColumns.length" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Upload a dataframe to enable column selection.</p>
+                                    <p x-show="topomapValidationIssue('value_col')" class="mt-2 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('value_col')"></p>
                                 </div>
 
                                 <div class="sm:col-span-3">
@@ -2522,7 +2631,7 @@
                         formaction="{{ url_for('analysis_plot_topomap') }}"
                         data-plot-action="topomap"
                         class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
-                        :disabled="!dfColumns.length || columnsLoading || !topomapGroupBy || !topomapValueCol || (topomapMode === 'compare_categories' && !topomapControlGroup) || (topomapSignalType === 'meg' && !topomapMegAtlas)">
+                        :disabled="isTopomapPlotDisabled()">
                         Plot topomap
                     </button>
                 </template>
@@ -2710,6 +2819,15 @@
                 return;
             }
             event.preventDefault();
+            if (submitter.dataset.plotAction === 'topomap') {
+                const componentRoot = form.closest('[x-data]');
+                const componentData = componentRoot && window.Alpine && typeof window.Alpine.$data === 'function'
+                    ? window.Alpine.$data(componentRoot)
+                    : null;
+                if (componentData && typeof componentData.isTopomapPlotDisabled === 'function' && componentData.isTopomapPlotDisabled()) {
+                    return;
+                }
+            }
             if (window.ncpiServerErrorBanner && typeof window.ncpiServerErrorBanner.hide === 'function') {
                 window.ncpiServerErrorBanner.hide();
             }

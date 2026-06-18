@@ -195,6 +195,8 @@ def custom_feature(sample, params):
             uploadWaitTimer: null,
             uploadWaitSeconds: 0,
             submitError: '',
+            methodValidationVersion: 0,
+            methodValidationTouchedFields: {},
             methods: [
                 {
                     key: 'catch22',
@@ -253,6 +255,13 @@ def custom_feature(sample, params):
                         });
                     });
                 });
+                this.$watch('selectedMethod', () => {
+                    this.$nextTick(() => this.refreshFeatureMethodValidation());
+                });
+                this.$watch('activeTab', () => {
+                    this.$nextTick(() => this.refreshFeatureMethodValidation());
+                });
+                this.$nextTick(() => this.setupFeatureMethodValidation());
             },
             restoreValue(form, name, fallback = '') {
                 if (!form || !Object.prototype.hasOwnProperty.call(form, name)) return fallback;
@@ -1913,6 +1922,271 @@ def custom_feature(sample, params):
                 const parsed = Number(text);
                 return Number.isFinite(parsed) ? parsed : NaN;
             },
+            featureMethodConfigForm() {
+                const root = this.$root || document;
+                const methodInput = root.querySelector('input[name="select-method"]');
+                if (methodInput && methodInput.form) return methodInput.form;
+                return root.querySelector('form[action*="start_computation"]') || document.querySelector('form[action*="start_computation"]');
+            },
+            featureMethodField(name) {
+                const form = this.featureMethodConfigForm();
+                if (!form || !name) return null;
+                return form.querySelector(`[name="${String(name).replace(/"/g, '\\"')}"]`);
+            },
+            featureMethodFieldValue(name) {
+                const field = this.featureMethodField(name);
+                if (!field || field.disabled) return '';
+                if (field.type === 'checkbox') return field.checked ? String(field.value || '1') : '';
+                return String(field.value ?? '').trim();
+            },
+            featureMethodFieldTouched(name) {
+                return !!(this.methodValidationTouchedFields && this.methodValidationTouchedFields[name]);
+            },
+            markFeatureMethodFieldTouched(name) {
+                if (!name) return;
+                this.methodValidationTouchedFields = {
+                    ...(this.methodValidationTouchedFields || {}),
+                    [name]: true,
+                };
+            },
+            featureMethodNumber(name, { required = false, integer = false, min = null, max = null, minExclusive = false, maxExclusive = false, label = name, validateUntouched = false } = {}) {
+                const raw = this.featureMethodFieldValue(name);
+                if (!required && !validateUntouched && !this.featureMethodFieldTouched(name)) return '';
+                if (!raw) return required ? `${label} is required.` : '';
+                const value = Number(raw);
+                if (!Number.isFinite(value)) return `${label} must be numeric.`;
+                if (integer && !Number.isInteger(value)) return `${label} must be an integer.`;
+                if (min !== null && (minExclusive ? value <= min : value < min)) {
+                    return `${label} must be ${minExclusive ? 'greater than' : 'at least'} ${min}.`;
+                }
+                if (max !== null && (maxExclusive ? value >= max : value > max)) {
+                    return `${label} must be ${maxExclusive ? 'lower than' : 'at most'} ${max}.`;
+                }
+                return '';
+            },
+            featureMethodRangeIssue(minName, maxName, label, { required = false, minAllowed = null, validateUntouched = false } = {}) {
+                const minRaw = this.featureMethodFieldValue(minName);
+                const maxRaw = this.featureMethodFieldValue(maxName);
+                const touched = this.featureMethodFieldTouched(minName) || this.featureMethodFieldTouched(maxName);
+                if (!required && !validateUntouched && !touched) return '';
+                if (!minRaw && !maxRaw) return required ? `${label}: provide both minimum and maximum values.` : '';
+                if (!minRaw || !maxRaw) return `${label}: provide both minimum and maximum values.`;
+                const minValue = Number(minRaw);
+                const maxValue = Number(maxRaw);
+                if (!Number.isFinite(minValue) || !Number.isFinite(maxValue)) return `${label}: values must be numeric.`;
+                if (minAllowed !== null && (minValue < minAllowed || maxValue < minAllowed)) return `${label}: values must be at least ${minAllowed}.`;
+                if (minValue >= maxValue) return `${label}: minimum must be lower than maximum.`;
+                return '';
+            },
+            featureMethodJsonDictIssue(name, label) {
+                if (!this.featureMethodFieldTouched(name)) return '';
+                const raw = this.featureMethodFieldValue(name);
+                if (!raw) return '';
+                try {
+                    const parsed = JSON.parse(raw);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return `${label} must be a JSON object.`;
+                } catch (_error) {
+                    return `${label} must be valid JSON, e.g. {"key": "value"}.`;
+                }
+                return '';
+            },
+            featureMethodIndexListIssue(name, label) {
+                if (!this.featureMethodFieldTouched(name)) return '';
+                const raw = this.featureMethodFieldValue(name);
+                if (!raw) return '';
+                const parts = raw.split(',').map((item) => item.trim()).filter(Boolean);
+                if (!parts.length) return '';
+                for (const part of parts) {
+                    const value = Number(part);
+                    if (!Number.isInteger(value) || value < 0) return `${label} must contain comma-separated non-negative integers.`;
+                }
+                return '';
+            },
+            featureMethodCustomPathIssue(keyName, pathName, label) {
+                const keyValue = this.featureMethodFieldValue(keyName);
+                const pathValue = this.featureMethodFieldValue(pathName);
+                if (keyValue === 'custom' && (this.featureMethodFieldTouched(keyName) || this.featureMethodFieldTouched(pathName)) && !pathValue) return `${label} is required when Saved output value is Custom.`;
+                return '';
+            },
+            featureMethodThresholdPairIssues(prefix) {
+                const errors = {};
+                const metricNameKey = `${prefix}_threshold_metric_1_name`;
+                const metricValueKey = `${prefix}_threshold_metric_1_value`;
+                const touched = this.featureMethodFieldTouched(metricNameKey) || this.featureMethodFieldTouched(metricValueKey);
+                if (!touched) return errors;
+                const metricName = this.featureMethodFieldValue(metricNameKey);
+                const metricValue = this.featureMethodFieldValue(metricValueKey);
+                if (metricName && !metricValue) {
+                    errors[metricValueKey] = 'Additional threshold value is required when a metric is selected.';
+                } else if (!metricName && metricValue) {
+                    errors[metricNameKey] = 'Select a metric for this threshold value.';
+                } else if (metricValue && !Number.isFinite(Number(metricValue))) {
+                    errors[metricValueKey] = 'Additional threshold value must be numeric.';
+                }
+                return errors;
+            },
+            featureMethodValidationErrors() {
+                const _version = this.methodValidationVersion;
+                const errors = {};
+                const add = (name, message) => {
+                    if (message && !errors[name]) errors[name] = message;
+                };
+
+                add('features_n_jobs', this.featureMethodNumber('features_n_jobs', { required: true, integer: true, min: 1, label: 'Parallel workers (n_jobs)' }));
+                add('features_chunksize', this.featureMethodNumber('features_chunksize', { integer: true, min: 1, label: 'Chunksize' }));
+                add('features_subsample_percent', this.featureMethodNumber('features_subsample_percent', { required: true, min: 0, max: 100, label: 'Input subsample (%)' }));
+
+                if (this.selectedMethod === 'specparam') {
+                    add('specparam_fs', this.featureMethodNumber('specparam_fs', { min: 0, minExclusive: true, label: 'Specparam sampling frequency' }));
+                    add('specparam_freq_min', this.featureMethodRangeIssue('specparam_freq_min', 'specparam_freq_max', 'Specparam frequency range', { minAllowed: 0 }));
+                    add('specparam_freq_max', errors.specparam_freq_min);
+                    add('specparam_welch_nperseg', this.featureMethodNumber('specparam_welch_nperseg', { integer: true, min: 1, label: 'Welch nperseg' }));
+                    add('specparam_welch_noverlap', this.featureMethodNumber('specparam_welch_noverlap', { integer: true, min: 0, label: 'Welch noverlap' }));
+                    add('specparam_welch_nfft', this.featureMethodNumber('specparam_welch_nfft', { integer: true, min: 1, label: 'Welch nfft' }));
+                    const npersegRaw = this.featureMethodFieldValue('specparam_welch_nperseg');
+                    const noverlapRaw = this.featureMethodFieldValue('specparam_welch_noverlap');
+                    const nfftRaw = this.featureMethodFieldValue('specparam_welch_nfft');
+                    const nperseg = Number(npersegRaw);
+                    const noverlap = Number(noverlapRaw);
+                    const nfft = Number(nfftRaw);
+                    if (npersegRaw && noverlapRaw && (this.featureMethodFieldTouched('specparam_welch_nperseg') || this.featureMethodFieldTouched('specparam_welch_noverlap')) && Number.isFinite(nperseg) && Number.isFinite(noverlap) && noverlap >= nperseg) {
+                        add('specparam_welch_noverlap', 'Welch noverlap must be lower than nperseg.');
+                    }
+                    if (npersegRaw && nfftRaw && (this.featureMethodFieldTouched('specparam_welch_nperseg') || this.featureMethodFieldTouched('specparam_welch_nfft')) && Number.isFinite(nperseg) && Number.isFinite(nfft) && nfft < nperseg) {
+                        add('specparam_welch_nfft', 'Welch nfft must be at least nperseg.');
+                    }
+                    add('specparam_model_peak_threshold', this.featureMethodNumber('specparam_model_peak_threshold', { min: 0, label: 'Peak threshold' }));
+                    add('specparam_model_min_peak_height', this.featureMethodNumber('specparam_model_min_peak_height', { min: 0, label: 'Min peak height' }));
+                    add('specparam_model_max_n_peaks', this.featureMethodNumber('specparam_model_max_n_peaks', { integer: true, min: 0, label: 'Max number of peaks' }));
+                    add('specparam_model_peak_width_min', this.featureMethodRangeIssue('specparam_model_peak_width_min', 'specparam_model_peak_width_max', 'Peak width limits', { minAllowed: 0 }));
+                    add('specparam_model_peak_width_max', errors.specparam_model_peak_width_min);
+                    add('specparam_threshold_gof_rsquared', this.featureMethodNumber('specparam_threshold_gof_rsquared', { min: 0, max: 1, label: 'Threshold gof_rsquared' }));
+                    Object.assign(errors, this.featureMethodThresholdPairIssues('specparam'));
+                    add('specparam_output_path', this.featureMethodCustomPathIssue('specparam_output_key', 'specparam_output_path', 'Custom output path'));
+                }
+
+                if (this.selectedMethod === 'dfa') {
+                    add('dfa_fs', this.featureMethodNumber('dfa_fs', { min: 0, minExclusive: true, label: 'DFA sampling frequency' }));
+                    add('dfa_trim_seconds', this.featureMethodNumber('dfa_trim_seconds', { min: 0, label: 'DFA trim' }));
+                    const dfaBand = this.featureMethodRangeIssue('dfa_frequency_min', 'dfa_frequency_max', 'DFA band frequency', { minAllowed: 0 });
+                    const dfaSpectrum = this.featureMethodRangeIssue('dfa_spectrum_min', 'dfa_spectrum_max', 'DFA spectrum range', { minAllowed: 0 });
+                    const dfaFit = this.featureMethodRangeIssue('dfa_fit_interval_min', 'dfa_fit_interval_max', 'DFA fit interval', { minAllowed: 0 });
+                    const dfaCompute = this.featureMethodRangeIssue('dfa_compute_interval_min', 'dfa_compute_interval_max', 'DFA compute interval', { minAllowed: 0 });
+                    add('dfa_frequency_min', dfaBand); add('dfa_frequency_max', dfaBand);
+                    add('dfa_spectrum_min', dfaSpectrum); add('dfa_spectrum_max', dfaSpectrum);
+                    add('dfa_fit_interval_min', dfaFit); add('dfa_fit_interval_max', dfaFit);
+                    add('dfa_compute_interval_min', dfaCompute); add('dfa_compute_interval_max', dfaCompute);
+                    const dfaWindowTouched = ['dfa_fit_interval_min', 'dfa_fit_interval_max', 'dfa_compute_interval_min', 'dfa_compute_interval_max'].some((name) => this.featureMethodFieldTouched(name));
+                    if (dfaWindowTouched && !dfaFit && !dfaCompute) {
+                        add('dfa_fit_interval_min', this.featureNestedRangeBlockReason('DFA', this.dfaFitIntervalMin, this.dfaFitIntervalMax, this.dfaComputeIntervalMin, this.dfaComputeIntervalMax));
+                    }
+                    if (!this.dfaUsesEnvelope() && this.dfaHasBandRange() && this.dfaHasSpectrumRange()) {
+                        add('dfa_frequency_min', 'Use either Band frequency or Spectrum range, not both.');
+                        add('dfa_spectrum_min', 'Use either Band frequency or Spectrum range, not both.');
+                    }
+                    if (!this.dfaUsesEnvelope() && !this.dfaHasBandRange() && !this.dfaHasSpectrumRange()) {
+                        add('dfa_frequency_min', 'Raw-signal mode requires Band frequency or Spectrum range.');
+                    }
+                    add('dfa_bad_idxes', this.featureMethodIndexListIssue('dfa_bad_idxes', 'Bad channel indexes'));
+                    add('dfa_hilbert_n_fft', this.featureMethodNumber('dfa_hilbert_n_fft', { integer: true, min: 1, label: 'Hilbert n_fft' }));
+                    add('dfa_filter_kwargs', this.featureMethodJsonDictIssue('dfa_filter_kwargs', 'Filter kwargs'));
+                    add('dfa_output_path', this.featureMethodCustomPathIssue('dfa_output_key', 'dfa_output_path', 'Custom output path'));
+                }
+
+                if (this.selectedMethod === 'fEI') {
+                    add('fei_fs', this.featureMethodNumber('fei_fs', { min: 0, minExclusive: true, label: 'fEI sampling frequency' }));
+                    add('fei_trim_seconds', this.featureMethodNumber('fei_trim_seconds', { min: 0, label: 'fEI trim' }));
+                    add('fei_window_size_sec', this.featureMethodNumber('fei_window_size_sec', { required: true, min: 0, minExclusive: true, label: 'Window size' }));
+                    add('fei_window_overlap', this.featureMethodNumber('fei_window_overlap', { min: 0, max: 1, maxExclusive: true, label: 'Window overlap' }));
+                    add('fei_dfa_threshold', this.featureMethodNumber('fei_dfa_threshold', { label: 'DFA threshold' }));
+                    const feiBand = this.featureMethodRangeIssue('fei_frequency_min', 'fei_frequency_max', 'fEI band frequency', { minAllowed: 0 });
+                    const feiSpectrum = this.featureMethodRangeIssue('fei_spectrum_min', 'fei_spectrum_max', 'fEI spectrum range', { minAllowed: 0 });
+                    const feiFit = this.featureMethodRangeIssue('fei_dfa_fit_interval_min', 'fei_dfa_fit_interval_max', 'fEI DFA fit interval', { minAllowed: 0 });
+                    const feiCompute = this.featureMethodRangeIssue('fei_dfa_compute_interval_min', 'fei_dfa_compute_interval_max', 'fEI DFA compute interval', { minAllowed: 0 });
+                    add('fei_frequency_min', feiBand); add('fei_frequency_max', feiBand);
+                    add('fei_spectrum_min', feiSpectrum); add('fei_spectrum_max', feiSpectrum);
+                    add('fei_dfa_fit_interval_min', feiFit); add('fei_dfa_fit_interval_max', feiFit);
+                    add('fei_dfa_compute_interval_min', feiCompute); add('fei_dfa_compute_interval_max', feiCompute);
+                    const feiWindowTouched = ['fei_dfa_fit_interval_min', 'fei_dfa_fit_interval_max', 'fei_dfa_compute_interval_min', 'fei_dfa_compute_interval_max'].some((name) => this.featureMethodFieldTouched(name));
+                    if (feiWindowTouched && !feiFit && !feiCompute) {
+                        add('fei_dfa_fit_interval_min', this.featureNestedRangeBlockReason('fEI DFA', this.feiDfaFitIntervalMin, this.feiDfaFitIntervalMax, this.feiDfaComputeIntervalMin, this.feiDfaComputeIntervalMax));
+                    }
+                    if (!this.feiUsesEnvelope() && this.feiHasBandRange() && this.feiHasSpectrumRange()) {
+                        add('fei_frequency_min', 'Use either Band frequency or Spectrum range, not both.');
+                        add('fei_spectrum_min', 'Use either Band frequency or Spectrum range, not both.');
+                    }
+                    if (!this.feiUsesEnvelope() && !this.feiHasBandRange() && !this.feiHasSpectrumRange()) {
+                        add('fei_frequency_min', 'Raw-signal mode requires Band frequency or Spectrum range.');
+                    }
+                    add('fei_bad_idxes', this.featureMethodIndexListIssue('fei_bad_idxes', 'Bad channel indexes'));
+                    add('fei_hilbert_n_fft', this.featureMethodNumber('fei_hilbert_n_fft', { integer: true, min: 1, label: 'Hilbert n_fft' }));
+                    add('fei_filter_kwargs', this.featureMethodJsonDictIssue('fei_filter_kwargs', 'Filter kwargs'));
+                    add('fei_output_path', this.featureMethodCustomPathIssue('fei_output_key', 'fei_output_path', 'Custom output path'));
+                }
+
+                if (this.selectedMethod === 'custom') {
+                    if (!String(this.customFeatureScript || '').trim()) errors.custom_feature_script = 'Custom feature script is required.';
+                }
+
+                return errors;
+            },
+            featureMethodConfigurationBlockReason() {
+                const errors = this.featureMethodValidationErrors();
+                const firstKey = Object.keys(errors).find((key) => errors[key]);
+                return firstKey ? errors[firstKey] : '';
+            },
+            clearFeatureMethodValidationMessages() {
+                const form = this.featureMethodConfigForm();
+                if (!form) return;
+                form.querySelectorAll('[data-feature-param-error]').forEach((node) => node.remove());
+                form.querySelectorAll('[data-feature-param-invalid="1"]').forEach((field) => {
+                    field.removeAttribute('data-feature-param-invalid');
+                    field.classList.remove('border-red-500', 'dark:border-red-400', 'focus:border-red-500', 'focus:ring-red-500');
+                    field.removeAttribute('aria-invalid');
+                });
+            },
+            renderFeatureMethodValidationMessages(errors) {
+                const form = this.featureMethodConfigForm();
+                if (!form) return;
+                this.clearFeatureMethodValidationMessages();
+                Object.entries(errors || {}).forEach(([name, message]) => {
+                    if (!message) return;
+                    const field = this.featureMethodField(name);
+                    if (!field || field.disabled) return;
+                    field.setAttribute('data-feature-param-invalid', '1');
+                    field.setAttribute('aria-invalid', 'true');
+                    field.classList.add('border-red-500', 'dark:border-red-400', 'focus:border-red-500', 'focus:ring-red-500');
+                    const messageNode = document.createElement('p');
+                    messageNode.setAttribute('data-feature-param-error', name);
+                    messageNode.className = 'mt-1 text-xs font-medium text-red-600 dark:text-red-400';
+                    messageNode.textContent = message;
+                    const container = field.closest('label') || field.parentElement;
+                    if (container) container.appendChild(messageNode);
+                });
+            },
+            refreshFeatureMethodValidation() {
+                this.methodValidationVersion += 1;
+                if (this.activeTab !== 'configure-method') {
+                    this.clearFeatureMethodValidationMessages();
+                    return;
+                }
+                this.renderFeatureMethodValidationMessages(this.featureMethodValidationErrors());
+            },
+            setupFeatureMethodValidation() {
+                if (this._featureMethodValidationBound) return;
+                const form = this.featureMethodConfigForm();
+                if (!form) return;
+                const handler = (event) => {
+                    const target = event.target;
+                    if (!target || !target.name) return;
+                    this.markFeatureMethodFieldTouched(target.name);
+                    this.$nextTick(() => this.refreshFeatureMethodValidation());
+                };
+                form.addEventListener('input', handler);
+                form.addEventListener('change', handler);
+                this._featureMethodValidationBound = true;
+                this.refreshFeatureMethodValidation();
+            },
             featureRangeBlockReason(label, minValue, maxValue) {
                 const hasMin = this.hasFeatureFieldValue(minValue);
                 const hasMax = this.hasFeatureFieldValue(maxValue);
@@ -1983,17 +2257,8 @@ def custom_feature(sample, params):
                 if (this.submitInProgress) return '';
                 const kind = this.resolvedDataSourceKind();
                 if (!this.selectedMethod) return 'Select a feature method in "Select Method".';
-                if (this.selectedMethod === 'custom' && !String(this.customFeatureScript || '').trim()) {
-                    return 'Provide a custom feature extraction script.';
-                }
-                if (this.selectedMethod === 'dfa') {
-                    const dfaIssue = this.dfaConfigurationBlockReason();
-                    if (dfaIssue) return dfaIssue;
-                }
-                if (this.selectedMethod === 'fEI') {
-                    const feiIssue = this.feiConfigurationBlockReason();
-                    if (feiIssue) return feiIssue;
-                }
+                const methodIssue = this.featureMethodConfigurationBlockReason();
+                if (methodIssue) return methodIssue;
                 if (!this.parserDataLocator) return 'Select a Data locator in EphysDatasetParser configuration.';
                 if (this.segmentBoundsInvalid()) return this.segmentValidationError();
                 if (this.parserEnableAggregate && (!Array.isArray(this.parserAggregateOverSelected) || this.parserAggregateOverSelected.length === 0)) {
