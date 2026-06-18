@@ -160,6 +160,52 @@
 						<script src="{{ url_for('static', filename='js/alertMessages.js') }}"></script>
 					<!-- Block for page-specific JavaScript -->
 					{% block scripts %}{% endblock %}
+					{% set module_restore_form_data = module_restore_form | default({}) %}
+					{% if module_restore_form_data %}
+					<script id="module-restore-form" type="application/json">{{ module_restore_form_data | tojson }}</script>
+					<script>
+					(function () {
+						function readRestoreForm() {
+							const node = document.getElementById('module-restore-form');
+							if (!node) return {};
+							try {
+								const parsed = JSON.parse(node.textContent || '{}');
+								return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+							} catch (_err) {
+								return {};
+							}
+						}
+
+						function restoreField(field, rawValue) {
+							if (!field || field.type === 'file') return;
+							const value = String(rawValue ?? '');
+							if (field.type === 'radio') {
+								field.checked = field.value === value;
+							} else if (field.type === 'checkbox') {
+								field.checked = value === 'on' || value === 'true' || value === '1' || field.value === value;
+							} else {
+								field.value = value;
+							}
+							field.dispatchEvent(new Event('input', { bubbles: true }));
+							field.dispatchEvent(new Event('change', { bubbles: true }));
+						}
+
+						function restoreFormValues() {
+							const restoreForm = readRestoreForm();
+							Object.entries(restoreForm).forEach(([name, value]) => {
+								if (!name) return;
+								document.querySelectorAll(`[name="${CSS.escape(name)}"]`).forEach((field) => {
+									restoreField(field, value);
+								});
+							});
+						}
+
+						document.addEventListener('DOMContentLoaded', function () {
+							window.setTimeout(restoreFormValues, 0);
+						});
+					})();
+					</script>
+					{% endif %}
 				</div>
 			</div>
 		</div>

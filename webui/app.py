@@ -8007,6 +8007,53 @@ def _pop_simulation_restore_form(model_type):
     return form if isinstance(form, dict) else {}
 
 
+def _simulation_restore_endpoint_for_model(model_type):
+    return {
+        "hagen": "new_sim_hagen",
+        "cavallari": "new_sim_cavallari",
+        "four_area": "new_sim_four_area",
+    }.get(str(model_type or "").strip().lower())
+
+
+_RESTORABLE_COMPUTATION_TARGETS = {
+    "field_potential_proxy": ("field_potential_proxy", {}),
+    "field_potential_kernel": ("field_potential_kernel", {}),
+    "field_potential_meeg": ("field_potential_kernel", {"tab": "meeg"}),
+    "features": ("features_methods", {"entry": "compute"}),
+    "inference_training": ("new_training", {}),
+    "inference": ("compute_predictions", {}),
+    "analysis": ("analysis", {}),
+}
+
+
+def _restore_target_for_computation_type(computation_type, form=None):
+    key = str(computation_type or "").strip().lower()
+    if key == "field_potential_kernel" and isinstance(form, dict):
+        active_tab = str(form.get("restore_active_tab") or "").strip()
+        if active_tab in {"create_kernel", "cdm_computation"}:
+            return "field_potential_kernel", {"tab": active_tab}
+    return _RESTORABLE_COMPUTATION_TARGETS.get(key)
+
+
+def _remember_module_restore_form(computation_type, form):
+    session["module_restore_form"] = {
+        "computation_type": str(computation_type or "").strip().lower(),
+        "form": dict(form or {}),
+    }
+
+
+def _pop_module_restore_form(computation_type):
+    payload = session.pop("module_restore_form", None)
+    if not isinstance(payload, dict):
+        return {}
+    expected_type = str(computation_type or "").strip().lower()
+    payload_type = str(payload.get("computation_type") or "").strip().lower()
+    if payload_type != expected_type:
+        return {}
+    form = payload.get("form")
+    return form if isinstance(form, dict) else {}
+
+
 @app.route("/simulation/new_sim/hagen")
 def new_sim_hagen():
     restore_form = _pop_simulation_restore_form("hagen")
@@ -8038,6 +8085,44 @@ def new_sim_four_area():
 @app.route("/simulation/new_sim/custom")
 def new_sim_custom():
     return render_template("1.2.1.new_sim_custom.html")
+
+
+@app.route("/restore_config/<job_id>", methods=["POST"])
+def restore_job_config(job_id):
+    status = job_status.get(job_id)
+    if not isinstance(status, dict):
+        flash("Job not found.", "error")
+        return redirect(url_for("dashboard"))
+
+    computation_type = str(status.get("computation_type") or "").strip().lower()
+    if status.get("status") not in {"failed", "cancelled"}:
+        flash("Configuration can only be restored after a failed or cancelled job.", "error")
+        return redirect(url_for("job_status_page", job_id=job_id, computation_type=computation_type))
+
+    if computation_type == "simulation":
+        model_type = status.get("simulation_restore_model_type")
+        restore_form = status.get("simulation_restore_form")
+        endpoint = _simulation_restore_endpoint_for_model(model_type)
+        if not endpoint or not isinstance(restore_form, dict):
+            flash("No restorable simulation configuration is available for this job.", "error")
+            return redirect(url_for("simulation"))
+        _remember_simulation_restore_form(model_type, restore_form)
+        return redirect(url_for(endpoint))
+
+    restore_form = status.get("restore_form")
+    target = _restore_target_for_computation_type(computation_type, restore_form)
+    if not target or not isinstance(restore_form, dict):
+        flash("No restorable configuration is available for this job.", "error")
+        return redirect(url_for("dashboard"))
+
+    endpoint, values = target
+    _remember_module_restore_form(computation_type, restore_form)
+    return redirect(url_for(endpoint, **values))
+
+
+@app.route("/simulation/restore_config/<job_id>", methods=["POST"])
+def restore_simulation_config(job_id):
+    return restore_job_config(job_id)
 
 
 def _simulation_computation(job_id, job_status, params):
@@ -8465,6 +8550,8 @@ def run_trial_simulation(model_type):
         "simulation_total": len(run_forms),
         "simulation_completed": 0,
         "simulation_mode": run_mode,
+        "simulation_restore_model_type": model_type,
+        "simulation_restore_form": dict(form),
     }
 
     future = executor.submit(
@@ -8893,6 +8980,9 @@ def field_potential_kernel():
         detected_simulation_model=detected_simulation_model,
         detected_simulation_origin=detected_simulation_origin,
         initial_tab=initial_tab,
+        module_restore_form=_pop_module_restore_form(
+            "field_potential_meeg" if initial_tab == "meeg" else "field_potential_kernel"
+        ),
         biophys_options=biophys_options,
         mc_models_local_staged_default=remembered_mc_folder_local,
         mc_outputs_local_staged_default=remembered_output_sim_local,
@@ -8952,6 +9042,7 @@ def field_potential_proxy():
         default_sim_names=default_sim_names,
         default_sim_paths=default_paths,
         webui_runtime=webui_runtime,
+        module_restore_form=_pop_module_restore_form("field_potential_proxy"),
     )
 
 
@@ -9311,6 +9402,7 @@ def features_methods():
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
         features_runtime=runtime_context,
+        module_restore_form=_pop_module_restore_form("features"),
     )
 
 
@@ -10720,7 +10812,10 @@ def remove_inference_file():
 # New training for inference configuration page
 @app.route("/inference/new_training")
 def new_training():
-    return render_template("4.2.0.new_training.html")
+    return render_template(
+        "4.2.0.new_training.html",
+        module_restore_form=_pop_module_restore_form("inference_training"),
+    )
 
 
 @app.route("/inference/training/compare_inputs", methods=["POST"])
@@ -10828,6 +10923,7 @@ def compute_predictions():
         feature_data_files=feature_data_files,
         has_feature_data=bool(feature_data_files),
         default_feature_file=default_feature_file,
+        module_restore_form=_pop_module_restore_form("inference"),
     )
 
 
@@ -11165,6 +11261,7 @@ def analysis():
         topomap_image_interp_options=TOPO_MAP_IMAGE_INTERP_OPTIONS,
         boxplot_colormap_options=_boxplot_colormap_options(),
         analysis_plot_config=_load_analysis_plot_config(),
+        module_restore_form=_pop_module_restore_form("analysis"),
     )
 
 
@@ -18046,6 +18143,7 @@ def start_computation_redirect(computation_type):
             "field_potential_kernel",
             "field_potential_meeg",
         } else "time",
+        "restore_form": dict(request.form),
     }
 
     # Submit the long-running task according to the computation type.
@@ -18164,6 +18262,23 @@ def get_status(job_id):
         "simulation_total": status.get("simulation_total"),
         "simulation_completed": status.get("simulation_completed"),
         "simulation_mode": status.get("simulation_mode"),
+        "can_restore_config": bool(
+            status.get("status") in {"failed", "cancelled"}
+            and (
+                (
+                    status.get("computation_type") == "simulation"
+                    and _simulation_restore_endpoint_for_model(status.get("simulation_restore_model_type"))
+                    and isinstance(status.get("simulation_restore_form"), dict)
+                )
+                or (
+                    _restore_target_for_computation_type(
+                        status.get("computation_type"),
+                        status.get("restore_form"),
+                    )
+                    and isinstance(status.get("restore_form"), dict)
+                )
+            )
+        ),
         "meeg_trial_total": status.get("meeg_trial_total"),
         "meeg_trial_index": status.get("meeg_trial_index"),
         "meeg_sensors_total": status.get("meeg_sensors_total"),
