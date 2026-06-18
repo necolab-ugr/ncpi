@@ -378,6 +378,50 @@
         return directSpans.find((span) => !span.contains(control)) || label;
     };
 
+    const pathBrowserNeedles = [
+        "filebrowser",
+        "folderbrowser",
+        "serverbrowser",
+        "file-browser",
+        "folder-browser",
+        "directory-browser",
+        "serverfilebrowser",
+        "serverfolderbrowser",
+        "serverdirbrowser",
+        "server-file-browser",
+        "server-folder-browser",
+        "server-dir-browser",
+        "serverfilebrowseropen",
+        "serverfolderbrowseropen",
+        "serverdirbrowseropen"
+    ];
+
+    const isInsidePathBrowser = (node) => {
+        let current = node instanceof Element ? node : node?.parentElement || null;
+        while (current && current !== document.body) {
+            if (current.dataset.fieldHelpSkip === "1") return true;
+            const values = [
+                current.id,
+                current.getAttribute("x-show"),
+                current.getAttribute("x-for"),
+                current.getAttribute("@click"),
+                current.getAttribute("data-browser"),
+                current.getAttribute("data-role")
+            ].map((value) => String(value || "").toLowerCase());
+            if (values.some((value) => pathBrowserNeedles.some((needle) => value.includes(needle)))) {
+                return true;
+            }
+            current = current.parentElement;
+        }
+        return false;
+    };
+
+    const removePathBrowserHelpIcons = (root = document) => {
+        root.querySelectorAll(".field-help").forEach((icon) => {
+            if (isInsidePathBrowser(icon)) icon.remove();
+        });
+    };
+
     let sequence = 0;
     const appendHelpIcon = (target, labelText, help, className = "") => {
         // Do not add field-help icons on the Analysis module pages per request
@@ -386,6 +430,7 @@
         } catch (_e) {
             // ignore
         }
+        if (isInsidePathBrowser(target)) return null;
         if (!target || !help || target.querySelector(":scope > .field-help")) return null;
         const tooltipId = `field-help-tooltip-${++sequence}`;
         const icon = document.createElement("span");
@@ -486,6 +531,7 @@
             || control.type === "hidden"
             || control.type === "file"
             || control.disabled && control.type === "hidden"
+            || isInsidePathBrowser(control)
         ) return;
 
         const key = controlKey(control);
@@ -593,6 +639,7 @@
         }
         annotateStaticHelp();
         annotate();
+        removePathBrowserHelpIcons();
         const observer = new MutationObserver((mutations) => {
             mutations.forEach((mutation) => mutation.addedNodes.forEach((node) => {
                 if (!(node instanceof Element)) return;
@@ -600,6 +647,7 @@
                 annotateStaticHelp(node);
                 if (node.matches("input, select, textarea")) annotateControl(node);
                 annotate(node);
+                removePathBrowserHelpIcons(node);
             }));
         });
         observer.observe(document.body, {childList: true, subtree: true});
