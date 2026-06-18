@@ -496,7 +496,7 @@ function setupUploadZones() {
             if (!uploadedBox || !uploadedName) return;
             if (defaultName && !isDefaultIgnored()) {
                 uploadedName.textContent = defaultName;
-                if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
+                if (uploadedLabel) uploadedLabel.textContent = 'Pipeline detection';
                 uploadedBox.classList.remove('hidden');
                 if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
             } else {
@@ -537,12 +537,11 @@ function setupUploadZones() {
         let autoBtn = null;
         let localBtn = null;
         let serverBtn = null;
-        let hasDetectedDefault = false;
+        const hasDetectedDefault = Boolean(defaultName);
 
         if (!customBrowseBtn) {
             const controls = document.createElement('div');
             controls.className = 'w-full flex flex-wrap items-center justify-center gap-2 mb-1';
-            hasDetectedDefault = Boolean(defaultName);
             controls.innerHTML = `
                 <button type="button" data-upload-action="true" class="proxy-upload-auto px-2.5 py-1 text-[10px] rounded border" ${hasDetectedDefault ? '' : 'disabled aria-disabled="true"'}>Pipeline detection</button>
                 <button type="button" data-upload-action="true" class="proxy-upload-local px-2.5 py-1 text-[10px] rounded border">Local upload</button>
@@ -557,7 +556,24 @@ function setupUploadZones() {
                 serverBtn.classList.add('hidden');
             }
         } else {
-            if (sourceModeInput) sourceModeInput.value = 'server-path';
+            customBrowseBtn.setAttribute('data-upload-action', 'true');
+            const pipelineBtn = document.createElement('button');
+            pipelineBtn.type = 'button';
+            pipelineBtn.setAttribute('data-upload-action', 'true');
+            pipelineBtn.className = 'proxy-upload-auto px-2.5 py-1 text-[10px] rounded border';
+            pipelineBtn.textContent = 'Pipeline detection';
+            if (!hasDetectedDefault) {
+                pipelineBtn.disabled = true;
+                pipelineBtn.setAttribute('aria-disabled', 'true');
+            }
+            const controls = customBrowseBtn.parentElement || zone;
+            controls.insertBefore(pipelineBtn, customBrowseBtn);
+            autoBtn = pipelineBtn;
+            if (window.isLocalRuntime) {
+                localBtn = customBrowseBtn;
+            } else {
+                serverBtn = customBrowseBtn;
+            }
         }
 
         const applyModeVisuals = (mode) => {
@@ -587,7 +603,9 @@ function setupUploadZones() {
         const syncServerSelectionUi = () => {
             const selected = String(serverPathInput.value || '').trim();
             if (filename) {
-                filename.textContent = selected ? basenameFromPath(selected) : 'Server file not selected';
+                filename.textContent = selected
+                    ? basenameFromPath(selected)
+                    : (defaultName && !isDefaultIgnored() ? defaultName : 'Server file not selected');
             }
             if (uploadedBox && uploadedName) {
                 if (selected) {
@@ -595,6 +613,11 @@ function setupUploadZones() {
                     setDefaultIgnored(true);
                     uploadedName.textContent = basenameFromPath(selected);
                     if (uploadedLabel) uploadedLabel.textContent = 'Selected server file';
+                    uploadedBox.classList.remove('hidden');
+                    if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
+                } else if (defaultName && !isDefaultIgnored()) {
+                    uploadedName.textContent = defaultName;
+                    if (uploadedLabel) uploadedLabel.textContent = 'Pipeline detection';
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
@@ -610,7 +633,7 @@ function setupUploadZones() {
             if (uploadedBox && uploadedName) {
                 if (hasDetectedDefault && !isDefaultIgnored()) {
                     uploadedName.textContent = defaultName;
-                    if (uploadedLabel) uploadedLabel.textContent = 'Loaded';
+                    if (uploadedLabel) uploadedLabel.textContent = 'Pipeline detection';
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
@@ -683,6 +706,9 @@ function setupUploadZones() {
             localBtn.addEventListener('click', (event) => {
                 event.stopPropagation();
                 setMode('upload');
+                if (customBrowseBtn && localBtn === customBrowseBtn) {
+                    input.click();
+                }
                 notifyNuExtTrialDetection();
             });
         }
@@ -699,6 +725,9 @@ function setupUploadZones() {
                 event.stopPropagation();
                 if (!allowServerSource) return;
                 setMode('server-path');
+                if (customBrowseBtn && serverBtn === customBrowseBtn) {
+                    openServerPicker();
+                }
                 notifyNuExtTrialDetection();
             });
         }
@@ -720,11 +749,6 @@ function setupUploadZones() {
         }
 
         zone.addEventListener('click', (event) => {
-            if (customBrowseBtn) {
-                if (event.target && event.target.closest('[data-upload-action]')) return;
-                openServerPicker();
-                return;
-            }
             if (event.target && event.target.closest('[data-upload-action]')) {
                 return;
             }
@@ -739,43 +763,32 @@ function setupUploadZones() {
             input.click();
         });
 
-        // Drag & drop disabled when custom button exists
-        if (!customBrowseBtn) {
-            zone.addEventListener('dragover', (event) => {
-                event.preventDefault();
-                if (isServerPathMode() || isAutoDetectedMode()) return;
-                zone.classList.add('border-primary', 'bg-primary/5');
-            });
-            zone.addEventListener('dragleave', () => {
-                zone.classList.remove('border-primary', 'bg-primary/5');
-            });
-            zone.addEventListener('drop', (event) => {
-                event.preventDefault();
-                if (isServerPathMode() || isAutoDetectedMode()) return;
-                zone.classList.remove('border-primary', 'bg-primary/5');
-                if (event.dataTransfer.files && event.dataTransfer.files[0]) {
-                    input.files = event.dataTransfer.files;
-                    serverPathInput.value = '';
-                    syncLocalSelectionUi();
-                    notifyNuExtTrialDetection();
-                }
-            });
-        }
+        zone.addEventListener('dragover', (event) => {
+            event.preventDefault();
+            if (isServerPathMode() || isAutoDetectedMode()) return;
+            zone.classList.add('border-primary', 'bg-primary/5');
+        });
+        zone.addEventListener('dragleave', () => {
+            zone.classList.remove('border-primary', 'bg-primary/5');
+        });
+        zone.addEventListener('drop', (event) => {
+            event.preventDefault();
+            if (isServerPathMode() || isAutoDetectedMode()) return;
+            zone.classList.remove('border-primary', 'bg-primary/5');
+            if (event.dataTransfer.files && event.dataTransfer.files[0]) {
+                input.files = event.dataTransfer.files;
+                serverPathInput.value = '';
+                syncLocalSelectionUi();
+                notifyNuExtTrialDetection();
+            }
+        });
 
         input.addEventListener('change', () => {
-            if (customBrowseBtn) return;
             if (isServerPathMode()) return;
             serverPathInput.value = '';
             syncLocalSelectionUi();
             notifyNuExtTrialDetection();
         });
-
-        if (customBrowseBtn) {
-            customBrowseBtn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openServerPicker();
-            });
-        }
 
         zoneCandidateGetters.push(() => {
             const selectedFile = input.files && input.files[0] ? input.files[0] : null;
@@ -787,28 +800,25 @@ function setupUploadZones() {
                 return { fileKey, kind: 'server', path: selectedServerPath };
             }
             const mode = String(sourceModeInput.value || '').trim().toLowerCase();
-            if ((mode === 'auto-detected' || mode === 'upload') && defaultName && !isDefaultIgnored()) {
+            if (defaultName && !isDefaultIgnored() && (mode === 'auto-detected' || mode === 'upload' || !selectedServerPath)) {
                 return { fileKey, kind: 'default', useDefault: true };
             }
             return null;
         });
 
-        if (customBrowseBtn) {
-            // Always server-path, no visual buttons to update
-            sourceModeInput.value = 'server-path';
-            syncServerSelectionUi();
+        const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
+        const initialServerPath = String(serverPathInput.value || '').trim();
+        if (!allowServerSource) {
+            serverPathInput.value = '';
+            setMode('upload');
+        } else if (initialMode === 'auto-detected' || (hasDetectedDefault && !isDefaultIgnored() && !initialServerPath)) {
+            setMode('auto-detected');
+        } else if (customBrowseBtn && window.isLocalRuntime && initialMode === 'server-path' && !initialServerPath) {
+            setMode('upload');
+        } else if (initialMode === 'server-path') {
+            setMode('server-path');
         } else {
-            const initialMode = String(sourceModeInput.value || '').trim().toLowerCase();
-            if (!allowServerSource) {
-                serverPathInput.value = '';
-                setMode('upload');
-            } else if (initialMode === 'server-path') {
-                setMode('server-path');
-            } else if (initialMode === 'auto-detected' || (hasDetectedDefault && !isDefaultIgnored())) {
-                setMode('auto-detected');
-            } else {
-                setMode(defaultMode);
-            }
+            setMode(defaultMode);
         }
     });
 
