@@ -7847,6 +7847,7 @@ def _clear_simulation_data_files():
             or name in SIMULATION_GRID_METADATA_LEGACY_FILES
         ):
             continue
+
         path = os.path.join(simulation_data_dir, name)
         if os.path.isfile(path):
             try:

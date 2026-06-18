@@ -151,6 +151,7 @@
             parserEpochStepS: '5.0',
             parserSegmentT0S: '',
             parserSegmentT1S: '',
+            parserZscoreEnabled: false,
             parserZscore: false,
             parserZscoreAfterEpoch: false,
             parserEnableAggregate: false,
@@ -324,6 +325,9 @@ def custom_feature(sample, params):
                 this.parserEnableEpoching = this.restoreBool(form, 'parser_enable_epoching');
                 this.parserZscore = this.restoreBool(form, 'parser_zscore');
                 this.parserZscoreAfterEpoch = this.restoreBool(form, 'parser_zscore_after_epoch');
+                this.parserZscoreEnabled = Object.prototype.hasOwnProperty.call(form, 'parser_zscore_enabled')
+                    ? this.restoreBool(form, 'parser_zscore_enabled')
+                    : (this.parserZscore || this.parserZscoreAfterEpoch);
                 this.parserEnableAggregate = this.restoreBool(form, 'parser_enable_aggregate');
                 if (Object.prototype.hasOwnProperty.call(form, 'parser_aggregate_over')) {
                     this.parserAggregateOverSelected = String(form.parser_aggregate_over || '')
@@ -467,6 +471,7 @@ def custom_feature(sample, params):
                     'parserEpochStepS',
                     'parserSegmentT0S',
                     'parserSegmentT1S',
+                    'parserZscoreEnabled',
                     'parserZscore',
                     'parserZscoreAfterEpoch',
                     'parserEnableAggregate',
@@ -2205,6 +2210,7 @@ def custom_feature(sample, params):
                 this.parserEpochStepS = '5.0';
                 this.parserSegmentT0S = '';
                 this.parserSegmentT1S = '';
+                this.parserZscoreEnabled = false;
                 this.parserZscore = false;
                 this.parserZscoreAfterEpoch = false;
                 this.parserEnableAggregate = false;
@@ -3529,8 +3535,8 @@ def custom_feature(sample, params):
                         lines.push(`    epoch_length_s=${epochLength},`);
                         lines.push(`    epoch_step_s=${epochStep},`);
                     }
-                    lines.push(`    zscore=${this.parserZscore ? 'True' : 'False'},`);
-                    lines.push(`    zscore_after_epoch=${this.parserZscore && this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                    lines.push(`    zscore=${this.parserZscoreEnabled && this.parserZscore ? 'True' : 'False'},`);
+                    lines.push(`    zscore_after_epoch=${this.parserZscoreEnabled && this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
                     if (this.parserEnableAggregate) {
                         const aggDims = (this.parserAggregateOverSelected || [])
                             .map((item) => String(item || '').trim())
@@ -3581,7 +3587,7 @@ def custom_feature(sample, params):
                 const conditionValue = kind === 'new-empirical' && String(this.parserConditionLocator || '').trim()
                     ? locatorToMetadataCode(String(this.parserConditionLocator).trim())
                     : 'None';
-                const zscoreFlag = this.parserZscore ? 'True' : 'False';
+                const zscoreFlag = this.parserZscoreEnabled && this.parserZscore ? 'True' : 'False';
                 const lines = [
                     'ParseConfig(',
                     '    fields=CanonicalFields(',
@@ -3632,7 +3638,7 @@ def custom_feature(sample, params):
                     lines.push(`    epoch_step_s=${epochStep},`);
                 }
                 lines.push(`    zscore=${zscoreFlag},`);
-                lines.push(`    zscore_after_epoch=${this.parserZscore && this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
+                lines.push(`    zscore_after_epoch=${this.parserZscoreEnabled && this.parserZscoreAfterEpoch ? 'True' : 'False'},`);
                 if (this.parserEnableAggregate) {
                     const aggDims = (this.parserAggregateOverSelected || [])
                         .map((item) => String(item || '').trim())
@@ -4913,30 +4919,6 @@ def custom_feature(sample, params):
                                             </label>
                                         </div>
                                     </div>
-                                    <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                        <input type="checkbox" x-model="parserZscore" data-param="parser_zscore"
-                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                        Apply z-score
-                                    </label>
-                                    <fieldset class="space-y-2" :disabled="!parserZscore" :class="{ 'opacity-50': !parserZscore }">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100" data-field-help-static="1" data-help="Choose when enabled z-score normalization is applied. Before epoching standardizes the selected continuous signal once, so all generated epochs share one normalization reference. After epoching standardizes every generated epoch independently.">Z-score timing</span>
-                                        <div class="flex flex-wrap gap-2">
-                                            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
-                                                :class="!parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
-                                                @click="parserZscoreAfterEpoch = false">
-                                                <input type="radio" :checked="!parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = false"
-                                                    class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
-                                                <span>Before epoching</span>
-                                            </label>
-                                            <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
-                                                :class="parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
-                                                @click="parserZscoreAfterEpoch = true">
-                                                <input type="radio" :checked="parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = true"
-                                                    class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
-                                                <span>After epoching</span>
-                                            </label>
-                                        </div>
-                                    </fieldset>
 
                                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                         <label class="text-sm">
@@ -5190,30 +5172,6 @@ def custom_feature(sample, params):
                                         </label>
                                     </div>
 
-                                <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                    <input type="checkbox" x-model="parserZscore" data-param="parser_zscore"
-                                        class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                    Apply z-score
-                                </label>
-                                <fieldset class="space-y-2" :disabled="!parserZscore" :class="{ 'opacity-50': !parserZscore }">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100" data-field-help-static="1" data-help="Choose when enabled z-score normalization is applied. Before epoching standardizes the selected continuous signal once, so all generated epochs share one normalization reference. After epoching standardizes every generated epoch independently.">Z-score timing</span>
-                                    <div class="flex flex-wrap gap-2">
-                                        <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
-                                            :class="!parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
-                                            @click="parserZscoreAfterEpoch = false">
-                                            <input type="radio" :checked="!parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = false"
-                                                class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
-                                            <span>Before epoching</span>
-                                        </label>
-                                        <label class="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-300 dark:border-[#323b67] cursor-pointer" data-field-help-skip="1"
-                                            :class="parserZscoreAfterEpoch ? 'bg-gray-100 border-gray-500 text-gray-900 dark:bg-[#252a3d] dark:border-gray-400 dark:text-gray-100' : ''"
-                                            @click="parserZscoreAfterEpoch = true">
-                                            <input type="radio" :checked="parserZscoreAfterEpoch" @click.stop="parserZscoreAfterEpoch = true"
-                                                class="rounded-full border-gray-400 text-gray-700 focus:ring-gray-400">
-                                            <span>After epoching</span>
-                                        </label>
-                                    </div>
-                                </fieldset>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
@@ -5291,6 +5249,30 @@ def custom_feature(sample, params):
                                 <input type="hidden" name="parser_enable_epoching" :value="parserEnableEpoching ? '1' : '0'">
 
                                 <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-4 space-y-4">
+                                    <label class="inline-flex items-center gap-2 text-sm font-semibold text-[#34495E] dark:text-gray-300" data-field-help-static="1" data-help="Enable z-score normalization controls. Before epoching standardizes the selected continuous signal once. After epoching standardizes every generated epoch independently. Enable both to normalize before splitting and again per epoch.">
+                                        <input type="checkbox" x-model="parserZscoreEnabled" data-param="parser_zscore_enabled"
+                                            @change="if (parserZscoreEnabled && !parserZscore && !parserZscoreAfterEpoch) parserZscore = true; if (!parserZscoreEnabled) { parserZscore = false; parserZscoreAfterEpoch = false; }"
+                                            class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                        Apply z-score
+                                    </label>
+
+                                    <div class="flex flex-wrap gap-3" x-show="parserZscoreEnabled" x-cloak>
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300" data-field-help-skip="1">
+                                            <input type="checkbox" x-model="parserZscore" data-param="parser_zscore"
+                                                aria-label="Apply z-score before epoching"
+                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                            <span>Before epoching</span>
+                                        </label>
+                                        <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300" data-field-help-skip="1">
+                                            <input type="checkbox" x-model="parserZscoreAfterEpoch" data-param="parser_zscore_after_epoch"
+                                                aria-label="Apply z-score after epoching"
+                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
+                                            <span>After epoching</span>
+                                        </label>
+                                    </div>
+                                </div>
+
+                                <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-4 space-y-4">
                                     <label class="inline-flex items-center gap-2 text-sm font-semibold text-[#34495E] dark:text-gray-300">
                                         <input type="checkbox" x-model="parserEnableAggregate" data-param="parser_enable_aggregate"
                                             class="rounded border-gray-300 text-primary focus:ring-primary/50">
@@ -5327,8 +5309,9 @@ def custom_feature(sample, params):
                                 </div>
                                 <input type="hidden" name="parser_enable_aggregate" :value="parserEnableAggregate ? '1' : '0'">
                                 <input type="hidden" name="parser_aggregate_over" :value="(parserAggregateOverSelected || []).join(',')">
-                                <input type="hidden" name="parser_zscore" :value="parserZscore ? '1' : '0'">
-                                <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscore && parserZscoreAfterEpoch ? '1' : '0'">
+                                <input type="hidden" name="parser_zscore_enabled" :value="parserZscoreEnabled ? '1' : '0'">
+                                <input type="hidden" name="parser_zscore" :value="parserZscoreEnabled && parserZscore ? '1' : '0'">
+                                <input type="hidden" name="parser_zscore_after_epoch" :value="parserZscoreEnabled && parserZscoreAfterEpoch ? '1' : '0'">
                             </div>
                         </template>
                     </div>

@@ -32,6 +32,7 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("Condition source None Custom").select_option("__value__")
     page.get_by_role("textbox", name="Condition value").click()
     page.get_by_role("textbox", name="Condition value").fill("resting-state")
+    page.get_by_role("checkbox", name="Apply z-score", exact=True).check()
     page.get_by_role("checkbox", name="Apply z-score before epoching").check()
     page.get_by_role("checkbox", name="Enable epoching").check()
     page.get_by_role("button", name="Next: Select method").click()

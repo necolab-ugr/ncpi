@@ -33,6 +33,7 @@ def run(playwright: Playwright) -> None:
     page.get_by_label("Recording type source * Custom (Select Recording type value)").first.select_option("__value__")
     page.get_by_label("Recording type value LFP CDM").first.select_option("EEG")
     page.get_by_role("checkbox", name="Enable epoching").check()
+    page.get_by_role("checkbox", name="Apply z-score", exact=True).check()
     page.get_by_role("checkbox", name="Apply z-score before epoching").check()
     page.get_by_role("button", name="Next: Select method").click()
 

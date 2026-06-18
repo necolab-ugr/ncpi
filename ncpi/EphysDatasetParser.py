@@ -1031,8 +1031,8 @@ class EphysDatasetParser:
 
         df = self._rows_to_df(rows)
 
-        # 2) Optional z-scoring BEFORE epoching (default behavior)
-        if self.config.zscore and not self.config.zscore_after_epoch:
+        # 2) Optional z-scoring BEFORE epoching.
+        if self.config.zscore:
             df = self._apply_zscore(df)
 
         # 3) Epoch continuous rows before any aggregation.
@@ -1056,7 +1056,7 @@ class EphysDatasetParser:
             df = self._exclude_incomplete_final_epoch(df)
 
         # 4) Optional z-scoring AFTER epoching (per-epoch normalization)
-        if self.config.zscore and self.config.zscore_after_epoch:
+        if self.config.zscore_after_epoch:
             df = self._apply_zscore(df)
 
         # 5) Aggregation is applied last so it can collapse parser-created epochs.

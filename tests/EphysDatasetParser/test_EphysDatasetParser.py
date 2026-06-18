@@ -459,6 +459,36 @@ def test_zscore_rowwise_constant_vector() -> None:
 
 
 @pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
+def test_zscore_can_run_before_and_after_epoching() -> None:
+    payload = {"data": np.arange(12, dtype=float), "fs": 1.0}
+    cfg = ParseConfig(
+        fields=CanonicalFields(data="data", fs="fs"),
+        epoch_length_s=4.0,
+        epoch_step_s=4.0,
+        zscore=True,
+        zscore_after_epoch=True,
+    )
+    parser = EphysDatasetParser(cfg)
+    original_apply_zscore = parser._apply_zscore
+    call_count = 0
+
+    def counting_apply_zscore(df):
+        nonlocal call_count
+        call_count += 1
+        return original_apply_zscore(df)
+
+    parser._apply_zscore = counting_apply_zscore
+
+    out = parser.parse(payload)
+
+    _assert_df_contract(out)
+    assert call_count == 2
+    assert len(out) == 3
+    assert all(out["data"].apply(lambda x: np.isclose(np.asarray(x).mean(), 0.0)))
+    assert all(out["data"].apply(lambda x: np.isclose(np.asarray(x).std(ddof=0), 1.0)))
+
+
+@pytest.mark.skipif(not HAS_PANDAS, reason="pandas not installed")
 def test_aggregation_over_sensor_mean() -> None:
     payload = {
         "data": np.array(
