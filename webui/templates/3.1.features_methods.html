@@ -1433,6 +1433,18 @@ def custom_feature(sample, params):
                 if (!clean) return;
                 const current = String(this.parserFilenameFormat || '').trim();
                 this.parserFilenameFormat = current ? `${current}${clean}` : clean;
+                this.focusParserFilenameFormatInput();
+            },
+            focusParserFilenameFormatInput() {
+                this.$nextTick(() => {
+                    const input = this.$refs.parserFilenameFormatInput;
+                    if (!input) return;
+                    input.focus({ preventScroll: true });
+                    if (typeof input.setSelectionRange === 'function') {
+                        const cursorPosition = String(input.value || '').length;
+                        input.setSelectionRange(cursorPosition, cursorPosition);
+                    }
+                });
             },
             appendFilenameFormatToFormData(formData) {
                 if (!formData || typeof formData.append !== 'function') return;
@@ -4283,6 +4295,7 @@ def custom_feature(sample, params):
                             <label class="text-sm block" data-help="Optional pattern used to select files during folder inspection and extract metadata values from their names. Build the format from literal text, which must appear exactly, and variable tokens enclosed between dollar signs, such as $id$, $group$, or $condition$. Token names must start with a letter, may contain letters, numbers, and underscores, and may appear only once in a format. The pattern must contain at least one token. It is matched against each candidate file name rather than its folder path, including files inside nested datasets. Include the extension as literal text, for example .pkl, when only that complete filename form should match; when the format omits an explicit extension, matching can also use the filename stem. Files that do not match are excluded from inspection and feature extraction. Values captured by tokens become available as metadata sources, so a format such as $id$-$group$_$condition$.pkl can extract subject, group, and condition values from matching file names. Select Inspect to apply the current format and reinspect the data source. Select Use automatic detection to clear the format and inspect supported files without filename filtering.">
                                 <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filename format (optional)</span>
                                 <input
+                                    x-ref="parserFilenameFormatInput"
                                     type="text"
                                     x-model="parserFilenameFormat"
                                     placeholder="$id$-$group$_$condition$.pkl"
