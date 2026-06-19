@@ -2140,6 +2140,12 @@ def custom_feature(sample, params):
                 const firstKey = Object.keys(errors).find((key) => errors[key]);
                 return firstKey ? errors[firstKey] : '';
             },
+            computeSubmitValidationMessages() {
+                const messages = Object.values(this.featureMethodValidationErrors()).filter(Boolean);
+                const blockReason = this.computeSubmitBlockReason();
+                if (blockReason && !messages.includes(blockReason)) messages.push(blockReason);
+                return [...new Set(messages)];
+            },
             clearFeatureMethodValidationMessages() {
                 const form = this.featureMethodConfigForm();
                 if (!form) return;
@@ -2161,12 +2167,6 @@ def custom_feature(sample, params):
                     field.setAttribute('data-feature-param-invalid', '1');
                     field.setAttribute('aria-invalid', 'true');
                     field.classList.add('border-red-500', 'dark:border-red-400', 'focus:border-red-500', 'focus:ring-red-500');
-                    const messageNode = document.createElement('p');
-                    messageNode.setAttribute('data-feature-param-error', name);
-                    messageNode.className = 'mt-1 text-xs font-medium text-red-600 dark:text-red-400';
-                    messageNode.textContent = message;
-                    const container = field.closest('label') || field.parentElement;
-                    if (container) container.appendChild(messageNode);
                 });
             },
             refreshFeatureMethodValidation() {
@@ -3500,7 +3500,7 @@ def custom_feature(sample, params):
             },
             submitComputeFeatures(event) {
                 const form = event.target;
-                if (this.submitInProgress) return;
+                if (this.submitInProgress || this.computeSubmitBlockReason()) return;
 
                 this.stopUploadWaitPulse();
                 this.submitError = '';
@@ -6473,15 +6473,6 @@ def custom_feature(sample, params):
                 <p x-show="submitError" class="text-xs text-red-600 dark:text-red-400" x-text="submitError"></p>
             </div>
 
-            <template x-if="activeTab === 'configure-method' && !submitInProgress && computeSubmitBlockReason()">
-                <div class="flex mt-6 w-full p-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 rounded-xl">
-                    <span class="text-blue-600 dark:text-blue-400 text-base leading-5">⏳</span>
-                    <p class="text-sm text-amber-800 dark:text-amber-200">
-                        Configuration issue: <span class="font-semibold" x-text="computeSubmitBlockReason()"></span>
-                    </p>
-                </div>
-            </template>
-
             <div class="mt-10 flex flex-col sm:flex-row justify-between items-center gap-4">
                 <template x-if="activeTab === 'load-data'">
                     <a href="{{ url_for('dashboard') }}"
@@ -6500,14 +6491,21 @@ def custom_feature(sample, params):
                     </button>
                 </template>
 
-                <template x-if="activeTab === 'configure-method' && canSubmitFeatures()">
-                    <button type="submit"
-                        :disabled="submitInProgress"
-                        :class="submitInProgress ? 'opacity-70 cursor-not-allowed' : ''"
-                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
-                        <span x-text="submitInProgress ? (hasUploadPayload() ? 'Uploading files...' : 'Processing...') : 'Compute features'"></span>
-                        <span class="material-symbols-outlined">arrow_forward</span>
-                    </button>
+                <template x-if="activeTab === 'configure-method'">
+                    <div class="w-full sm:w-auto">
+                        <button type="submit"
+                            :disabled="submitInProgress || Boolean(computeSubmitBlockReason())"
+                            :class="(submitInProgress || computeSubmitBlockReason()) ? 'opacity-70 cursor-not-allowed' : ''"
+                            class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors">
+                            <span x-text="submitInProgress ? (hasUploadPayload() ? 'Uploading files...' : 'Processing...') : 'Compute features'"></span>
+                            <span class="material-symbols-outlined">arrow_forward</span>
+                        </button>
+                        <div x-show="!submitInProgress && computeSubmitValidationMessages().length" class="mt-2 space-y-1 text-xs font-medium text-red-600 dark:text-red-400">
+                            <template x-for="message in computeSubmitValidationMessages()" :key="message">
+                                <p x-text="message"></p>
+                            </template>
+                        </div>
+                    </div>
                 </template>
 
                 <template x-if="activeTab === 'select-method' && hasAnyData()">
