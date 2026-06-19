@@ -806,6 +806,12 @@
                 const fields = ['group_by', 'control_group', 'value_col', 'cohend_abs_threshold'];
                 return fields.map((field) => this.topomapValidationIssue(field)).filter(Boolean);
             },
+            topomapPlotValidationMessages() {
+                const messages = this.topomapComparisonValidationMessages();
+                const blockReason = this.topomapComparisonBlockReason();
+                if (blockReason && !messages.includes(blockReason)) messages.push(blockReason);
+                return [...new Set(messages)];
+            },
             topomapComparisonBlockReason() {
                 if (!this.dfColumns.length) {
                     return 'Upload a dataframe to enable column selection.';
@@ -2194,7 +2200,6 @@
                                             type="number" min="0" step="any" placeholder="No filter"
                                             x-model="topomapCohendAbsThreshold" />
                                     </div>
-                                    <p x-show="topomapValidationIssue('cohend_abs_threshold')" class="mt-1 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('cohend_abs_threshold')"></p>
                                 </div>
                                 <div class="sm:col-span-3">
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
@@ -2213,7 +2218,6 @@
                                     </div>
                                     <p x-show="columnsLoading" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Loading columns...</p>
                                     <p x-show="!columnsLoading && !dfColumns.length" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Upload a dataframe to enable column selection.</p>
-                                    <p x-show="topomapValidationIssue('group_by')" class="mt-2 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('group_by')"></p>
                                 </div>
                                 <div class="sm:col-span-3" x-show="topomapMode === 'compare_categories'" x-cloak>
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
@@ -2231,7 +2235,6 @@
                                     </div>
                                     <p x-show="topomapGroupValuesLoading" class="mt-1 text-xs text-slate-500 dark:text-slate-400">Loading group values...</p>
                                     <p x-show="topomapGroupValuesError" class="mt-1 text-xs text-red-600 dark:text-red-400" x-text="topomapGroupValuesError"></p>
-                                    <p x-show="topomapValidationIssue('control_group')" class="mt-1 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('control_group')"></p>
                                 </div>
                                 <div class="sm:col-span-3">
                                     <label class="block text-sm font-medium leading-6 text-slate-900 dark:text-slate-300"
@@ -2249,7 +2252,6 @@
                                     </div>
                                     <p x-show="columnsLoading" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Loading columns...</p>
                                     <p x-show="!columnsLoading && !dfColumns.length" class="mt-2 text-xs text-slate-500 dark:text-slate-400">Upload a dataframe to enable column selection.</p>
-                                    <p x-show="topomapValidationIssue('value_col')" class="mt-2 text-xs text-red-600 dark:text-red-400" x-text="topomapValidationIssue('value_col')"></p>
                                 </div>
 
                                 <div class="sm:col-span-3">
@@ -2627,13 +2629,20 @@
                 </template>
 
                 <template x-if="activeTab === 'topomap' && isDataframeSelected() && !isSimulationSelectionActive()">
-                    <button type="submit"
-                        formaction="{{ url_for('analysis_plot_topomap') }}"
-                        data-plot-action="topomap"
-                        class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors"
-                        :disabled="isTopomapPlotDisabled()">
-                        Plot topomap
-                    </button>
+                    <div class="w-full sm:w-auto">
+                        <button type="submit"
+                            formaction="{{ url_for('analysis_plot_topomap') }}"
+                            data-plot-action="topomap"
+                            class="flex items-center justify-center gap-2 h-12 px-6 w-full sm:w-auto bg-primary text-white font-bold text-base rounded-lg hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary/50 dark:focus:ring-offset-background-dark transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            :disabled="isTopomapPlotDisabled()">
+                            Plot topomap
+                        </button>
+                        <div x-show="topomapPlotValidationMessages().length" class="mt-2 space-y-1 text-xs font-medium text-red-600 dark:text-red-400">
+                            <template x-for="message in topomapPlotValidationMessages()" :key="message">
+                                <p x-text="message"></p>
+                            </template>
+                        </div>
+                    </div>
                 </template>
 
                 <template x-if="activeTab === 'simulation-outputs' && isSimulationSelectionActive() && !isDataframeSelected()">
