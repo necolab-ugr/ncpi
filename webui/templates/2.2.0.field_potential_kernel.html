@@ -2332,6 +2332,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const setKernelParamsMode = (mode, { clearAuto = true } = {}) => {
         if (!kernelParamsSourceModeInput) return;
+        const hadAutoSelection = Boolean(String(kernelParamsPredefinedModelInput?.value || '').trim());
         const wantsServer = String(mode || '').trim().toLowerCase() === 'server-path';
         const nextMode = wantsServer ? 'server-path' : 'upload';
         if (clearAuto) {
@@ -2343,6 +2344,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (kernelParamsFileInput) kernelParamsFileInput.value = '';
             if (kernelParamsLocalSummary) kernelParamsLocalSummary.classList.add('hidden');
             if (kernelParamsLocalName) kernelParamsLocalName.textContent = '';
+            if (clearAuto && hadAutoSelection && kernelParamsServerPathInput) {
+                kernelParamsServerPathInput.value = '';
+            }
             const currentServerPath = String(kernelParamsServerPathInput?.value || '').trim();
             if (kernelParamsServerSummary) kernelParamsServerSummary.classList.toggle('hidden', !currentServerPath);
             if (kernelParamsServerPath) kernelParamsServerPath.textContent = currentServerPath;
@@ -2671,6 +2675,7 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         const setMode = (mode) => {
+            const previousMode = getMode();
             const normalized = String(mode || '').trim().toLowerCase();
             const nextMode = (kernelServerModeEnabled && normalized === 'server-path')
                 ? 'server-path'
@@ -2679,11 +2684,15 @@ document.addEventListener('DOMContentLoaded', () => {
             applyModeVisuals(nextMode);
             if (nextMode === 'auto-detected') {
                 fileInput.value = '';
-                serverPathInput.value = '';
                 renderAutoDetectedMode();
             } else if (nextMode === 'server-path') {
+                fileInput.value = '';
+                if (previousMode === 'auto-detected') {
+                    serverPathInput.value = '';
+                }
                 renderServerMode();
             } else {
+                serverPathInput.value = '';
                 renderUploadMode();
             }
         };
