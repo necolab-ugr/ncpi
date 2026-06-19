@@ -126,8 +126,8 @@
             <div>
                 <h4 class="text-xs font-bold uppercase tracking-widest text-slate-400 mb-6">Upload Status</h4>
                 <div class="bg-slate-100 dark:bg-slate-800 rounded-xl p-6 border border-slate-200 dark:border-slate-700">
-                    <div class="flex items-center gap-4">
-                        <div class="relative flex">
+                    <div class="flex items-center gap-4 min-w-0">
+                        <div class="relative flex shrink-0">
                             {% if has_features_data %}
                             <span class="material-symbols-outlined text-green-500 text-3xl">check_circle</span>
                             {% else %}
@@ -135,14 +135,14 @@
                             <span class="material-symbols-outlined text-primary text-3xl">hourglass_empty</span>
                             {% endif %}
                         </div>
-                        <div>
+                        <div class="min-w-0 flex-1">
                             {% if has_features_data %}
                             <p class="text-sm font-bold text-green-600 dark:text-green-500">Status: Files detected</p>
                             <p class="text-xs text-slate-500 dark:text-slate-400 mt-1">Features files are ready.</p>
                             <div class="mt-2 text-xs text-slate-500 dark:text-slate-400">
                                 {% for filename in features_data_files %}
-                                <div class="flex items-center justify-between gap-2 py-0.5">
-                                    <span class="truncate" title="{{ filename }}">{{ filename }}</span>
+                                <div class="flex items-start justify-between gap-2 py-0.5">
+                                    <span class="min-w-0 break-all" title="{{ filename }}">{{ filename }}</span>
                                     <form action="{{ url_for('remove_features_file') }}" method="POST" class="shrink-0">
                                         <input type="hidden" name="filename" value="{{ filename }}">
                                         <button type="submit" class="inline-flex items-center gap-1 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
