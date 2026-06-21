@@ -3284,15 +3284,11 @@ def custom_feature(sample, params):
 
                     // Determine if current axes are strictly out of bounds for the new data
                     // If a user selected Axis 3 in the previous folder, but new data only has 2 dimensions, it is invalid.
-                    const isAxisSamplesInvalid = ndim > 0 && Number(this.parserAxisSamples) >= ndim;
-                    const isAxisChannelsInvalid = ndim > 0 && Number(this.parserAxisChannels) >= ndim;
+                    // const isAxisSamplesInvalid = ndim > 0 && Number(this.parserAxisSamples) >= ndim;
+                    // const isAxisChannelsInvalid = ndim > 0 && Number(this.parserAxisChannels) >= ndim;
                     
-                    // Overwrite if the user hasn't edited them, OR if we are in a fresh data flow,
-                    // OR if the old values are physically impossible for the new data shape.
-                    const shouldOverwriteAxes = 
-                        !this.parserAxisUserEdited || 
-                        isAxisSamplesInvalid || 
-                        isAxisChannelsInvalid;
+                    // Overwrite if the user hasn't edited them
+                    const shouldOverwriteAxes = !this.parserAxisUserEdited;
 
                     if (shouldOverwriteAxes) {
                         this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
