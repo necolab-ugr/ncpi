@@ -991,7 +991,7 @@ class Inference:
                 model = best_fold_models  # <- ensemble list
 
             else:
-                print("Training single sklearn model on full data...")
+                print("Training single sklearn model on data...")
                 # single model on full data
                 model = sklearn_clone(base_model)
                 if "random_state" in model.get_params():
