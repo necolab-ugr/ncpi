@@ -5100,7 +5100,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 progress_state["current_fold_total"] = fold_total
                 return
 
-            if "Training single sklearn model on full data" in text:
+            if "Training single sklearn model on data" in text:
                 return
 
             iter_match = _MLP_ITER_PROGRESS_RE.search(text)
