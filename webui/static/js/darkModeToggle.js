@@ -1,11 +1,11 @@
 // DARK MODE TOGGLE
 // Get elements
-const darkModeToggle = document.getElementById('darkModeToggle');
-const darkModeIcon = document.getElementById('darkModeIcon');
-const htmlElement = document.documentElement;
+var darkModeToggle = document.getElementById('darkModeToggle');
+var darkModeIcon = document.getElementById('darkModeIcon');
+var htmlElement = document.documentElement;
 
 // Check for saved theme preference or respect OS preference
-const getCurrentTheme = () => {
+var getCurrentTheme = () => {
     const savedTheme = localStorage.getItem('theme');
     if (savedTheme) {
         return savedTheme;
@@ -14,7 +14,7 @@ const getCurrentTheme = () => {
 };
 
 // Apply theme on page load
-const currentTheme = getCurrentTheme();
+var currentTheme = getCurrentTheme();
 if (currentTheme === 'dark') {
     htmlElement.classList.add('dark');
     darkModeIcon.textContent = 'light_mode'; // Change icon to light mode
