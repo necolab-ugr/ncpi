@@ -105,21 +105,12 @@
             <div class="grid grid-cols-1 gap-6">
                 <div>
                     <input id="existing-features-file" type="hidden" name="existing_features_file" value="{{ default_feature_file | default('') }}">
-                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="{{ 'auto-detected' if default_feature_file else 'server-path' }}">
-                    <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="">
+                    <input id="features-source-mode" type="hidden" name="features_source_mode" value="{{ default_features_source_mode or 'server-path' }}">
+                    <input id="features-server-file-path" type="hidden" name="features_server_file_path" value="{{ default_features_server_file_path | default('') }}">
                     <input id="file-upload-features" class="hidden" name="features_predict_file" type="file" />
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1" data-field-help-static="1" data-help="Select the feature dataframe used as prediction input. It must contain a Features column whose rows are numeric feature vectors compatible with the selected trained model: feature count, order, preprocessing, and units must match the data used during training. The resulting Predictions column is attached to the selected or subsampled rows.">
                         Features Data <span class="text-red-500">*</span>
                     </label>
-                    <div
-                        id="features-loaded-status"
-                        class="mb-3 w-full rounded-md bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 text-green-700 dark:text-green-300 text-sm font-semibold px-3 py-2"
-                        {% if not default_feature_file %}style="display:none;"{% endif %}
-                    >
-                        Loaded:
-                        <span id="features-loaded-name">{{ default_feature_file | default('') }}</span>
-                        (detected from previous steps)
-                    </div>
                     <div
                         id="features-drop-zone"
                         class="custom-file-card drop-zone rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
@@ -150,7 +141,7 @@
                             </div>
                         </div>
                         <div id="features-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="featuresSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected local file:' : 'Selected server file:')"></span>
                             <div class="mt-1 flex items-start justify-between gap-2">
                                 <span id="features-selected-server-path" class="block flex-1 font-mono break-all"></span>
                                 <button id="features-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
@@ -162,7 +153,7 @@
                     <div
                         id="features-not-loaded-status"
                         class="mt-2 w-full rounded-md bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 text-amber-700 dark:text-amber-300 text-[10px] font-semibold px-2 py-1"
-                        {% if default_feature_file %}style="display:none;"{% endif %}
+                        {% if default_feature_file or default_features_server_file_path %}style="display:none;"{% endif %}
                     >
                         Not loaded: no features dataframe detected from previous steps.
                     </div>
@@ -638,11 +629,12 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
 window.__inferenceInitialData = {
-    featuresSourceMode: {{ ('auto-detected' if default_feature_file else inference_default_source_mode) | tojson }},
+    featuresSourceMode: {{ (default_features_source_mode or inference_default_source_mode) | tojson }},
     assetsSourceMode: {{ inference_default_source_mode | tojson }},
     isLocalRuntime: !(window.__webuiRuntime || {}).is_server_runtime,
     hasDefaultFeature: {{ 'true' if default_feature_file else 'false' }},
     defaultFeatureFile: {{ (default_feature_file | default('')) | tojson }},
+    defaultFeaturesServerFilePath: {{ (default_features_server_file_path | default('')) | tojson }},
     defaultTrainedAssetsFolder: {{ (default_trained_assets_folder | default('')) | tojson }},
     defaultTrainedModelFile: {{ (default_trained_model_file | default('')) | tojson }},
     defaultTrainedScalerFile: {{ (default_trained_scaler_file | default('')) | tojson }}
@@ -654,7 +646,7 @@ function inferencePredictionsData() {
         allowServerSource: true,
         isLocalRuntime: window.__inferenceInitialData.isLocalRuntime,
         featuresSourceMode: window.__inferenceInitialData.featuresSourceMode,
-        featuresServerFilePath: '',
+        featuresServerFilePath: window.__inferenceInitialData.defaultFeaturesServerFilePath,
         assetsSourceMode: window.__inferenceInitialData.assetsSourceMode,
         assetsSelectionSourceMode: window.__inferenceInitialData.defaultTrainedModelFile ? 'auto-detected' : 'server-path',
         assetsServerFolderPath: window.__inferenceInitialData.defaultTrainedAssetsFolder,
@@ -805,7 +797,6 @@ function inferencePredictionsData() {
         const existingInput = byId("existing-features-file");
         const featuresSourceModeInput = byId("features-source-mode");
         const featuresServerFilePathInput = byId("features-server-file-path");
-        const loadedStatus = byId("features-loaded-status");
         const notLoadedStatus = byId("features-not-loaded-status");
         const localSummary = byId("features-selected-local");
         const localName = byId("features-selected-local-name");
@@ -819,7 +810,7 @@ function inferencePredictionsData() {
 
         if (
             !input || !existingInput || !featuresSourceModeInput || !featuresServerFilePathInput
-            || !loadedStatus || !notLoadedStatus || !localSummary || !localName
+            || !notLoadedStatus || !localSummary || !localName
             || !serverSummary || !serverPathEl || !uploadBtn || !serverBtn
         ) {
             return;
@@ -847,9 +838,8 @@ function inferencePredictionsData() {
             }
             if (hintEl) hintEl.textContent = "Using detected features dataframe from previous steps";
             localSummary.classList.add("hidden");
-            serverSummary.classList.add("hidden");
-            serverPathEl.textContent = "";
-            loadedStatus.style.display = existingName ? "" : "none";
+            serverPathEl.textContent = existingName;
+            serverSummary.classList.toggle("hidden", !existingName);
             notLoadedStatus.style.display = existingName ? "none" : "";
             if (state) {
                 state.featuresSourceMode = "auto-detected";
@@ -862,7 +852,6 @@ function inferencePredictionsData() {
             serverBtn.classList.remove(...inactiveClasses);
             if (hintEl) hintEl.textContent = "Drag and drop files or click to browse";
             localSummary.classList.add("hidden");
-            loadedStatus.style.display = "none";
             serverPathEl.textContent = serverPath;
             if (serverPath) {
                 serverSummary.classList.remove("hidden");
@@ -890,14 +879,12 @@ function inferencePredictionsData() {
         if (file) {
             localName.textContent = file.name;
             localSummary.classList.remove("hidden");
-            loadedStatus.style.display = "none";
             notLoadedStatus.style.display = "none";
             return;
         }
 
         localName.textContent = "";
         localSummary.classList.add("hidden");
-        loadedStatus.style.display = "none";
         notLoadedStatus.style.display = "";
     }
 
