@@ -2848,6 +2848,7 @@
                 const formData = new FormData(form);
                 const response = await fetch(submitter.getAttribute('formaction'), {
                     method: 'POST',
+                    credentials: 'same-origin',
                     body: formData,
                 });
                 const html = await response.text();
