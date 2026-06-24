@@ -1879,6 +1879,14 @@ def _list_features_data_files():
     return sorted(files)
 
 
+def _is_pipeline_features_file(relative_path):
+    """Return whether a features file was computed by the Features pipeline."""
+    try:
+        return Path(str(relative_path)).parts[:1] == ("pipeline",)
+    except (TypeError, ValueError):
+        return False
+
+
 def _bootstrap_features_data_from_previous_steps():
     """
     Ensure inference can auto-detect features from earlier steps.
@@ -1912,7 +1920,9 @@ def _bootstrap_features_data_from_previous_steps():
     _, src_path = max(candidates, key=lambda item: item[0])
     features_dir = _features_data_dir(create=True)
     dst_name = os.path.basename(src_path)
-    dst_path = os.path.join(features_dir, dst_name)
+    pipeline_dir = os.path.join(features_dir, "pipeline")
+    os.makedirs(pipeline_dir, exist_ok=True)
+    dst_path = os.path.join(pipeline_dir, dst_name)
 
     # Avoid noisy copy errors if source and destination are already the same.
     if os.path.realpath(src_path) != os.path.realpath(dst_path):
@@ -10961,21 +10971,54 @@ def compute_predictions():
         flush=True,
     )
     default_feature_file = ""
+    default_features_server_file_path = ""
+    default_features_source_mode = ""
     if feature_data_files:
         features_root = _features_data_dir(create=False)
-        try:
-            default_feature_file = max(
-                feature_data_files,
-                key=lambda name: os.path.getmtime(os.path.join(features_root, name))
-            )
-        except Exception:
-            default_feature_file = feature_data_files[-1]
+        pipeline_feature_files = {
+            name for name in feature_data_files if _is_pipeline_features_file(name)
+        }
+        # Backward compatibility for feature outputs written before pipeline
+        # outputs had their own folder.  A completed Features job still
+        # identifies those in-memory outputs as pipeline data.
+        for status in job_status.values():
+            candidate = status.get("dashboard_features_path") if isinstance(status, dict) else None
+            if not candidate or not _is_path_within_root(candidate, features_root):
+                continue
+            relative_candidate = os.path.relpath(candidate, features_root)
+            if relative_candidate in feature_data_files:
+                pipeline_feature_files.add(relative_candidate)
+        def _newest_feature_file(candidates):
+            if not candidates:
+                return ""
+            try:
+                return max(
+                    candidates,
+                    key=lambda name: os.path.getmtime(os.path.join(features_root, name)),
+                )
+            except Exception:
+                return candidates[-1]
+
+        # Keep the two sources independent.  A previously loaded dataframe
+        # must not suppress pipeline detection when a computed output exists.
+        default_feature_file = _newest_feature_file(
+            [name for name in feature_data_files if name in pipeline_feature_files]
+        )
+        manually_loaded_feature_file = _newest_feature_file(
+            [name for name in feature_data_files if name not in pipeline_feature_files]
+        )
+        if default_feature_file:
+            default_features_source_mode = "auto-detected"
+        if manually_loaded_feature_file:
+            default_features_server_file_path = os.path.join(features_root, manually_loaded_feature_file)
     trained_assets = _trained_inference_assets(request.args.get("training_job_id"))
     return render_template(
         "4.3.0.compute_predictions.html",
         feature_data_files=feature_data_files,
         has_feature_data=bool(feature_data_files),
         default_feature_file=default_feature_file,
+        default_features_server_file_path=default_features_server_file_path,
+        default_features_source_mode=default_features_source_mode,
         default_trained_model_file=trained_assets.get("model_file", ""),
         default_trained_scaler_file=trained_assets.get("scaler_file", ""),
         default_trained_assets_folder=trained_assets.get("folder_path", ""),

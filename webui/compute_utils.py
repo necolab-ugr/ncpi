@@ -204,6 +204,8 @@ def _features_data_dir():
 
 def _persist_features_dataframe(output_df, method):
     features_dir = _features_data_dir()
+    pipeline_dir = os.path.join(features_dir, "pipeline")
+    os.makedirs(pipeline_dir, exist_ok=True)
     safe_method = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(method or "features"))
     # Cleanup legacy per-job files for this method so only one canonical file remains.
     legacy_pattern = os.path.join(features_dir, f"features_computed_{safe_method}_*.pkl")
@@ -214,7 +216,10 @@ def _persist_features_dataframe(output_df, method):
         except OSError:
             pass
 
-    output_path = os.path.join(features_dir, f"{safe_method}_features.pkl")
+    # Keep computed outputs separate from files loaded through the Features
+    # module.  Inference uses this location to distinguish pipeline detection
+    # from an explicitly loaded features dataframe.
+    output_path = os.path.join(pipeline_dir, f"{safe_method}_features.pkl")
     output_df.to_pickle(output_path)
     return output_path
 
