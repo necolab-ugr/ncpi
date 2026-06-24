@@ -56,6 +56,7 @@ FEATURES_DATA_DIR = _module_tmp_subdir("features", "data")
 FEATURES_INSPECTION_DIR = _module_tmp_subdir("features", "inspection")
 PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
 INFERENCE_UPLOADS_DIR = _module_tmp_subdir("inference", "uploads")
+INFERENCE_TRAINING_DATA_DIR = _module_tmp_subdir("inference", "training_data")
 ANALYSIS_DATA_DIR = _module_tmp_subdir("analysis", "data")
 
 
@@ -63,7 +64,8 @@ def refresh_tmp_paths():
     global SIMULATION_DATA_DIR, SIMULATION_RUNS_DIR, SIMULATION_CUSTOM_UPLOADS_DIR
     global FIELD_POTENTIAL_PROXY_DIR, FIELD_POTENTIAL_KERNEL_DIR, FIELD_POTENTIAL_MEEG_DIR
     global FIELD_POTENTIAL_KERNEL_LOCAL_UPLOADS_DIR, FEATURES_DATA_DIR, FEATURES_INSPECTION_DIR
-    global PREDICTIONS_DATA_DIR, INFERENCE_UPLOADS_DIR, ANALYSIS_DATA_DIR, PATH_HISTORY_STORAGE_DIR
+    global PREDICTIONS_DATA_DIR, INFERENCE_UPLOADS_DIR, INFERENCE_TRAINING_DATA_DIR
+    global ANALYSIS_DATA_DIR, PATH_HISTORY_STORAGE_DIR
 
     configure_temp_environment()
     SIMULATION_DATA_DIR = _module_tmp_subdir("simulation", "data")
@@ -77,6 +79,7 @@ def refresh_tmp_paths():
     FEATURES_INSPECTION_DIR = _module_tmp_subdir("features", "inspection")
     PREDICTIONS_DATA_DIR = _module_tmp_subdir("inference", "predictions")
     INFERENCE_UPLOADS_DIR = _module_tmp_subdir("inference", "uploads")
+    INFERENCE_TRAINING_DATA_DIR = _module_tmp_subdir("inference", "training_data")
     ANALYSIS_DATA_DIR = _module_tmp_subdir("analysis", "data")
     PATH_HISTORY_STORAGE_DIR = tmp_subdir("ncpi_webui_path_history")
     return tmp_paths.TMP_ROOT
@@ -9360,6 +9363,54 @@ def _collect_inference_assets_folder_files(folder_path):
     return matched
 
 
+def _is_path_within_directory(path, directory):
+    """Return whether *path* resolves inside *directory*."""
+    try:
+        return os.path.commonpath((os.path.realpath(path), os.path.realpath(directory))) == os.path.realpath(directory)
+    except (TypeError, ValueError, OSError):
+        return False
+
+
+def _trained_inference_assets(training_job_id=None):
+    """Find persisted model assets from a completed inference-training job.
+
+    The job-specific folder is preferred when a continuation link supplies its
+    job id.  The ``training_artifacts_latest`` alias keeps the same workflow
+    usable after the in-memory job status has been discarded (for example,
+    after returning to the dashboard or restarting the web server).
+    """
+    root = os.path.realpath(INFERENCE_TRAINING_DATA_DIR)
+    candidates = []
+    job_id = str(training_job_id or "").strip()
+    if job_id:
+        status = job_status.get(job_id, {})
+        status_dir = status.get("training_artifacts_dir") if isinstance(status, dict) else None
+        if status_dir and _is_path_within_directory(status_dir, root):
+            candidates.append((job_id, status_dir))
+        candidates.append((job_id, os.path.join(root, f"training_artifacts_{job_id}")))
+
+    candidates.append(("", os.path.join(root, "training_artifacts_latest")))
+    seen = set()
+    for candidate_job_id, candidate_dir in candidates:
+        real_dir = os.path.realpath(candidate_dir)
+        if real_dir in seen or not _is_path_within_directory(real_dir, root):
+            continue
+        seen.add(real_dir)
+        if not os.path.isdir(real_dir):
+            continue
+        assets = _collect_inference_assets_folder_files(real_dir)
+        model_path = assets.get("model_file")
+        if not model_path:
+            continue
+        return {
+            "job_id": candidate_job_id,
+            "folder_path": real_dir,
+            "model_file": model_path,
+            "scaler_file": assets.get("scaler_file") or "",
+        }
+    return {}
+
+
 @app.context_processor
 def inject_webui_runtime_context():
     return {"webui_runtime": _detect_webui_runtime_context(request)}
@@ -10919,11 +10970,15 @@ def compute_predictions():
             )
         except Exception:
             default_feature_file = feature_data_files[-1]
+    trained_assets = _trained_inference_assets(request.args.get("training_job_id"))
     return render_template(
         "4.3.0.compute_predictions.html",
         feature_data_files=feature_data_files,
         has_feature_data=bool(feature_data_files),
         default_feature_file=default_feature_file,
+        default_trained_model_file=trained_assets.get("model_file", ""),
+        default_trained_scaler_file=trained_assets.get("scaler_file", ""),
+        default_trained_assets_folder=trained_assets.get("folder_path", ""),
         module_restore_form=_pop_module_restore_form("inference"),
     )
 

@@ -5221,6 +5221,10 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             "estimated_time_remaining": 0,
             "results": persisted_zip_path or zip_path,
             "error": False,
+            # Kept separately from the downloadable archive so the web UI can
+            # preload the exact model/posterior and fitted scaler after a
+            # successful training job.
+            "training_artifacts_dir": persisted_artifacts_dir,
         })
 
     except ComputationCancelled:

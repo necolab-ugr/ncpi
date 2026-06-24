@@ -178,10 +178,13 @@
             </h2>
             <div class="grid grid-cols-1 gap-6">
                 <input id="model-assets-source" type="hidden" name="model_assets_source" value="server-path">
+                <input id="assets-source-mode" type="hidden" value="{{ 'auto-detected' if default_trained_model_file else 'server-path' }}">
                 <input type="hidden" id="assets-upload-mode-hidden" name="assets_upload_mode" value="server-path">
-                <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" value="">
-                <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" value="">
-                <input id="inference-scaler-server-file-path" type="hidden" name="inference_scaler_server_file_path" value="">
+                <input id="inference-assets-server-folder-path" type="hidden" name="inference_assets_server_folder_path" value="{{ default_trained_assets_folder | default('') }}">
+                <input id="inference-model-server-file-path" type="hidden" name="inference_model_server_file_path" value="{{ default_trained_model_file | default('') }}">
+                <input id="inference-scaler-server-file-path" type="hidden" name="inference_scaler_server_file_path" value="{{ default_trained_scaler_file | default('') }}">
+                <input id="manual-model-server-file-path" type="hidden" value="">
+                <input id="manual-scaler-server-file-path" type="hidden" value="">
 
                 <div class="hidden rounded-md border border-slate-200 dark:border-slate-700 p-3 bg-slate-50 dark:bg-slate-800/30">
                     <label class="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Assets Source</label>
@@ -263,6 +266,12 @@
                         <div id="assets-model-drop-zone"
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
+                                {% if default_trained_model_file %}
+                                <button id="assets-model-source-pipeline-btn" type="button"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
+                                    Pipeline detection
+                                </button>
+                                {% endif %}
                                 <button id="assets-model-source-upload-btn" type="button" class="hidden custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border"></button>
                                 <button id="assets-model-source-server-btn" type="button" @click.stop
                                     class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
@@ -283,7 +292,7 @@
                                 </div>
                             </div>
                             <div id="assets-model-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="assetsSelectionSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected local file:' : 'Selected server file:')"></span>
                                 <div class="mt-1 flex items-start justify-between gap-2">
                                     <span id="assets-model-selected-server-path" class="block flex-1 font-mono break-all"></span>
                                     <button id="assets-model-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
@@ -301,6 +310,12 @@
                         <div id="assets-scaler-drop-zone"
                             class="custom-file-card drop-zone mt-1 rounded-xl border-2 border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 p-4 transition-all cursor-pointer">
                             <div class="flex flex-wrap justify-center gap-2">
+                                {% if default_trained_scaler_file %}
+                                <button id="assets-scaler-source-pipeline-btn" type="button"
+                                    class="px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
+                                    Pipeline detection
+                                </button>
+                                {% endif %}
                                 <button id="assets-scaler-source-upload-btn" type="button" class="hidden custom-mode-upload-btn px-3 py-1.5 text-xs rounded-lg border {% if inference_default_source_mode == 'upload' %}border-primary bg-primary/10 text-primary font-semibold{% else %}border-slate-300 dark:border-slate-700 text-slate-600 dark:text-slate-300{% endif %}">Local upload</button>
                                 <button id="assets-scaler-source-server-btn" type="button" @click.stop
                                     class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold">
@@ -321,7 +336,7 @@
                                 </div>
                             </div>
                             <div id="assets-scaler-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="assetsSelectionSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected local file:' : 'Selected server file:')"></span>
                                 <div class="mt-1 flex items-start justify-between gap-2">
                                     <span id="assets-scaler-selected-server-path" class="block flex-1 font-mono break-all"></span>
                                     <button id="assets-scaler-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
@@ -627,7 +642,10 @@ window.__inferenceInitialData = {
     assetsSourceMode: {{ inference_default_source_mode | tojson }},
     isLocalRuntime: !(window.__webuiRuntime || {}).is_server_runtime,
     hasDefaultFeature: {{ 'true' if default_feature_file else 'false' }},
-    defaultFeatureFile: {{ (default_feature_file | default('')) | tojson }}
+    defaultFeatureFile: {{ (default_feature_file | default('')) | tojson }},
+    defaultTrainedAssetsFolder: {{ (default_trained_assets_folder | default('')) | tojson }},
+    defaultTrainedModelFile: {{ (default_trained_model_file | default('')) | tojson }},
+    defaultTrainedScalerFile: {{ (default_trained_scaler_file | default('')) | tojson }}
 };
 
 function inferencePredictionsData() {
@@ -638,9 +656,12 @@ function inferencePredictionsData() {
         featuresSourceMode: window.__inferenceInitialData.featuresSourceMode,
         featuresServerFilePath: '',
         assetsSourceMode: window.__inferenceInitialData.assetsSourceMode,
-        assetsServerFolderPath: '',
-        assetsModelServerFilePath: '',
-        assetsScalerServerFilePath: '',
+        assetsSelectionSourceMode: window.__inferenceInitialData.defaultTrainedModelFile ? 'auto-detected' : 'server-path',
+        assetsServerFolderPath: window.__inferenceInitialData.defaultTrainedAssetsFolder,
+        assetsModelServerFilePath: window.__inferenceInitialData.defaultTrainedModelFile,
+        assetsScalerServerFilePath: window.__inferenceInitialData.defaultTrainedScalerFile,
+        manualAssetsModelServerFilePath: '',
+        manualAssetsScalerServerFilePath: '',
         assetsServerDetectedModel: '',
         assetsServerDetectedScaler: '',
         assetsServerInspectError: '',
@@ -882,13 +903,17 @@ function inferencePredictionsData() {
 
     function refreshAssetsIndividualCards() {
         const assetsSourceInput = byId("model-assets-source");
+        const assetsSelectionSourceInput = byId("assets-source-mode");
         const assetsModeIndividual = byId("assets-mode-individual");
         const state = getInferenceState();
-        if (!assetsSourceInput || !assetsModeIndividual) return;
+        if (!assetsSourceInput || !assetsSelectionSourceInput || !assetsModeIndividual) return;
 
         const sourceMode = String(assetsSourceInput.value || "upload").trim().toLowerCase() === "server-path"
             ? "server-path"
             : "upload";
+        const selectionMode = String(assetsSelectionSourceInput.value || sourceMode).trim().toLowerCase() === "auto-detected"
+            ? "auto-detected"
+            : sourceMode;
         const isIndividual = Boolean(assetsModeIndividual.checked);
         const activeClasses = ["border-primary", "bg-primary/10", "text-primary", "font-semibold"];
         const inactiveClasses = ["border-slate-300", "dark:border-slate-700", "text-slate-600", "dark:text-slate-300"];
@@ -898,6 +923,7 @@ function inferencePredictionsData() {
                 key: "model",
                 input: byId("file-upload-model"),
                 serverInput: byId("inference-model-server-file-path"),
+                pipelineBtn: byId("assets-model-source-pipeline-btn"),
                 uploadBtn: byId("assets-model-source-upload-btn"),
                 serverBtn: byId("assets-model-source-server-btn"),
                 hint: byId("assets-model-drop-zone-hint"),
@@ -910,6 +936,7 @@ function inferencePredictionsData() {
                 key: "scaler",
                 input: byId("file-upload-scaler"),
                 serverInput: byId("inference-scaler-server-file-path"),
+                pipelineBtn: byId("assets-scaler-source-pipeline-btn"),
                 uploadBtn: byId("assets-scaler-source-upload-btn"),
                 serverBtn: byId("assets-scaler-source-server-btn"),
                 hint: byId("assets-scaler-drop-zone-hint"),
@@ -928,7 +955,7 @@ function inferencePredictionsData() {
                 return;
             }
 
-            [card.uploadBtn, card.serverBtn].forEach((btn) => {
+            [card.pipelineBtn, card.uploadBtn, card.serverBtn].filter(Boolean).forEach((btn) => {
                 btn.classList.remove(...activeClasses);
                 btn.classList.add(...inactiveClasses);
             });
@@ -939,6 +966,18 @@ function inferencePredictionsData() {
             if (!isIndividual) {
                 card.localSummary.classList.add("hidden");
                 card.serverSummary.classList.add("hidden");
+                return;
+            }
+
+            if (selectionMode === "auto-detected") {
+                if (card.pipelineBtn) {
+                    card.pipelineBtn.classList.add(...activeClasses);
+                    card.pipelineBtn.classList.remove(...inactiveClasses);
+                }
+                if (card.hint) card.hint.textContent = "Using assets detected from the completed training step";
+                card.localSummary.classList.add("hidden");
+                card.serverPath.textContent = serverPath;
+                card.serverSummary.classList.toggle("hidden", !serverPath);
                 return;
             }
 
@@ -961,6 +1000,7 @@ function inferencePredictionsData() {
 
         if (state) {
             state.assetsSourceMode = sourceMode;
+            state.assetsSelectionSourceMode = selectionMode;
         }
 
         refreshInferenceAssetDependencies();
@@ -1293,8 +1333,8 @@ function inferencePredictionsData() {
                 modelInput.disabled = true;
                 scalerInput.disabled = true;
                 folderInput.disabled = true;
-                clearIndividual();
-                clearFolder();
+                // Preserve manual selections while pipeline assets are active,
+                // so users can switch back without selecting files again.
             } else {
                 const individualEnabled = mode === "individual";
                 modelInput.disabled = !individualEnabled;
@@ -1331,6 +1371,8 @@ function inferencePredictionsData() {
         const assetsServerFolderInput = byId("inference-assets-server-folder-path");
         const assetsModelServerFilePathInput = byId("inference-model-server-file-path");
         const assetsScalerServerFilePathInput = byId("inference-scaler-server-file-path");
+        const manualModelServerFilePathInput = byId("manual-model-server-file-path");
+        const manualScalerServerFilePathInput = byId("manual-scaler-server-file-path");
         const featuresBrowseBtn = byId("features-server-browse-btn");
         const assetsBrowseBtn = byId("assets-server-browse-btn");
         const assetsModelBrowseBtn = byId("assets-model-server-browse-btn");
@@ -1777,7 +1819,11 @@ function inferencePredictionsData() {
                 clearServerFolderInspection();
                 assetsModelServerFilePathInput.value = selectedPath;
                 syncInputValue(assetsModelServerFilePathInput);
-                if (state) state.assetsModelServerFilePath = selectedPath;
+                if (manualModelServerFilePathInput) manualModelServerFilePathInput.value = selectedPath;
+                if (state) {
+                    state.assetsModelServerFilePath = selectedPath;
+                    state.manualAssetsModelServerFilePath = selectedPath;
+                }
                 rememberAssetsServerPath(selectedPath);
                 if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
                 return;
@@ -1813,7 +1859,11 @@ function inferencePredictionsData() {
                 clearServerFolderInspection();
                 assetsScalerServerFilePathInput.value = selectedPath;
                 syncInputValue(assetsScalerServerFilePathInput);
-                if (state) state.assetsScalerServerFilePath = selectedPath;
+                if (manualScalerServerFilePathInput) manualScalerServerFilePathInput.value = selectedPath;
+                if (state) {
+                    state.assetsScalerServerFilePath = selectedPath;
+                    state.manualAssetsScalerServerFilePath = selectedPath;
+                }
                 rememberAssetsServerPath(selectedPath);
                 if (typeof onAssetsSourceChange === "function") onAssetsSourceChange();
                 return;
@@ -1859,11 +1909,19 @@ function inferencePredictionsData() {
                 clearServerFolderInspection();
                 if (activeFileTarget === "assets-model") {
                     assetsModelServerFilePathInput.value = selectedFilePath;
-                    if (state) state.assetsModelServerFilePath = selectedFilePath;
+                    if (manualModelServerFilePathInput) manualModelServerFilePathInput.value = selectedFilePath;
+                    if (state) {
+                        state.assetsModelServerFilePath = selectedFilePath;
+                        state.manualAssetsModelServerFilePath = selectedFilePath;
+                    }
                     syncInputValue(assetsModelServerFilePathInput);
                 } else if (activeFileTarget === "assets-scaler") {
                     assetsScalerServerFilePathInput.value = selectedFilePath;
-                    if (state) state.assetsScalerServerFilePath = selectedFilePath;
+                    if (manualScalerServerFilePathInput) manualScalerServerFilePathInput.value = selectedFilePath;
+                    if (state) {
+                        state.assetsScalerServerFilePath = selectedFilePath;
+                        state.manualAssetsScalerServerFilePath = selectedFilePath;
+                    }
                     syncInputValue(assetsScalerServerFilePathInput);
                 }
                 rememberAssetsServerPath(selectedFilePath);
@@ -2093,10 +2151,13 @@ function inferencePredictionsData() {
         const featuresServerClearBtn = byId("features-server-clear");
         const assetsSourceButtons = Array.from(document.querySelectorAll("[data-assets-source-btn]"));
         const modelAssetsSourceInput = byId("model-assets-source");
+        const assetsSelectionSourceInput = byId("assets-source-mode");
         const inferenceModelSelect = byId("inference-model-name");
         const assetsServerFolderInput = byId("inference-assets-server-folder-path");
         const assetsModelServerFilePathInput = byId("inference-model-server-file-path");
         const assetsScalerServerFilePathInput = byId("inference-scaler-server-file-path");
+        const manualModelServerFilePathInput = byId("manual-model-server-file-path");
+        const manualScalerServerFilePathInput = byId("manual-scaler-server-file-path");
         const assetsModeIndividual = byId("assets-mode-individual");
         const assetsModeFolder = byId("assets-mode-folder");
         const modelInput = byId("file-upload-model");
@@ -2106,11 +2167,13 @@ function inferencePredictionsData() {
         const assetsScalerDropZone = byId("assets-scaler-drop-zone");
         const assetsFolderDropZone = byId("assets-folder-drop-zone");
         const assetsModelUploadBtn = byId("assets-model-source-upload-btn");
+        const assetsModelPipelineBtn = byId("assets-model-source-pipeline-btn");
         const assetsModelServerBtn = byId("assets-model-source-server-btn");
         const assetsModelBrowseBtn = byId("assets-model-server-browse-btn");
         const assetsModelLocalClearBtn = byId("assets-model-local-clear");
         const assetsModelServerClearBtn = byId("assets-model-server-clear");
         const assetsScalerUploadBtn = byId("assets-scaler-source-upload-btn");
+        const assetsScalerPipelineBtn = byId("assets-scaler-source-pipeline-btn");
         const assetsScalerServerBtn = byId("assets-scaler-source-server-btn");
         const assetsScalerBrowseBtn = byId("assets-scaler-server-browse-btn");
         const assetsScalerLocalClearBtn = byId("assets-scaler-local-clear");
@@ -2322,7 +2385,32 @@ function inferencePredictionsData() {
         });
 
         const setAssetsIndividualSourceMode = (mode) => {
+            const wasPipelineDetected = assetsSelectionSourceInput
+                && String(assetsSelectionSourceInput.value || "").trim().toLowerCase() === "auto-detected";
             applyAssetsSourceMode(mode);
+            if (assetsSelectionSourceInput) {
+                assetsSelectionSourceInput.value = mode;
+                syncInputValue(assetsSelectionSourceInput);
+            }
+            if (wasPipelineDetected && mode === "server-path") {
+                if (assetsModelServerFilePathInput) {
+                    assetsModelServerFilePathInput.value = manualModelServerFilePathInput
+                        ? manualModelServerFilePathInput.value
+                        : (state.manualAssetsModelServerFilePath || "");
+                    syncInputValue(assetsModelServerFilePathInput);
+                }
+                if (assetsScalerServerFilePathInput) {
+                    assetsScalerServerFilePathInput.value = manualScalerServerFilePathInput
+                        ? manualScalerServerFilePathInput.value
+                        : (state.manualAssetsScalerServerFilePath || "");
+                    syncInputValue(assetsScalerServerFilePathInput);
+                }
+                if (state) {
+                    state.assetsServerFolderPath = "";
+                    state.assetsModelServerFilePath = assetsModelServerFilePathInput.value || "";
+                    state.assetsScalerServerFilePath = assetsScalerServerFilePathInput.value || "";
+                }
+            }
             if (assetsModeIndividual) {
                 assetsModeIndividual.checked = true;
             }
@@ -2336,6 +2424,54 @@ function inferencePredictionsData() {
             refreshAssetsIndividualCards();
         };
 
+        const usePipelineDetectedAssets = () => {
+            const initial = window.__inferenceInitialData;
+            if (!initial.defaultTrainedModelFile || !assetsSelectionSourceInput) return;
+
+            const currentSelectionMode = String(assetsSelectionSourceInput.value || "").trim().toLowerCase();
+            if (currentSelectionMode === "server-path") {
+                const manualModelPath = assetsModelServerFilePathInput
+                    ? String(assetsModelServerFilePathInput.value || "").trim()
+                    : "";
+                const manualScalerPath = assetsScalerServerFilePathInput
+                    ? String(assetsScalerServerFilePathInput.value || "").trim()
+                    : "";
+                if (manualModelServerFilePathInput) manualModelServerFilePathInput.value = manualModelPath;
+                if (manualScalerServerFilePathInput) manualScalerServerFilePathInput.value = manualScalerPath;
+                if (state) {
+                    state.manualAssetsModelServerFilePath = manualModelPath;
+                    state.manualAssetsScalerServerFilePath = manualScalerPath;
+                }
+            }
+
+            applyAssetsSourceMode("server-path");
+            assetsSelectionSourceInput.value = "auto-detected";
+            syncInputValue(assetsSelectionSourceInput);
+            if (assetsModeIndividual) assetsModeIndividual.checked = true;
+            if (assetsModeFolder) assetsModeFolder.checked = false;
+            if (assetsServerFolderInput) assetsServerFolderInput.value = initial.defaultTrainedAssetsFolder;
+            if (assetsModelServerFilePathInput) assetsModelServerFilePathInput.value = initial.defaultTrainedModelFile;
+            if (assetsScalerServerFilePathInput) assetsScalerServerFilePathInput.value = initial.defaultTrainedScalerFile;
+            [assetsServerFolderInput, assetsModelServerFilePathInput, assetsScalerServerFilePathInput].forEach(syncInputValue);
+            if (state) {
+                state.assetsSelectionSourceMode = "auto-detected";
+                state.assetsUploadMode = "individual";
+                state.assetsServerFolderPath = initial.defaultTrainedAssetsFolder;
+                state.assetsModelServerFilePath = initial.defaultTrainedModelFile;
+                state.assetsScalerServerFilePath = initial.defaultTrainedScalerFile;
+            }
+            if (typeof syncAssetsMode === "function") syncAssetsMode();
+            refreshAssetsIndividualCards();
+        };
+
+        [assetsModelPipelineBtn, assetsScalerPipelineBtn].filter(Boolean).forEach((button) => {
+            button.addEventListener("click", (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                usePipelineDetectedAssets();
+            });
+        });
+
         const bindAssetCard = (config) => {
             if (!config.dropZone || !config.input || !config.serverInput) return;
 
@@ -2344,8 +2480,6 @@ function inferencePredictionsData() {
                     event.preventDefault();
                     event.stopPropagation();
                     setAssetsIndividualSourceMode("upload");
-                    config.input.value = "";
-                    config.input.click();
                 });
             }
             if (config.serverBtn) {
@@ -2354,9 +2488,6 @@ function inferencePredictionsData() {
                     event.stopPropagation();
                     if (!allowServerSource) return;
                     setAssetsIndividualSourceMode("server-path");
-                    if (config.browseBtn) {
-                        config.browseBtn.click();
-                    }
                 });
             }
             if (config.localClearBtn) {
@@ -2372,6 +2503,7 @@ function inferencePredictionsData() {
                     event.preventDefault();
                     event.stopPropagation();
                     config.serverInput.value = "";
+                    if (config.manualCacheInput) config.manualCacheInput.value = "";
                     syncInputValue(config.serverInput);
                     refreshAssetsIndividualCards();
                 });
@@ -2393,6 +2525,7 @@ function inferencePredictionsData() {
             dropZone: assetsModelDropZone,
             input: modelInput,
             serverInput: assetsModelServerFilePathInput,
+            manualCacheInput: manualModelServerFilePathInput,
             uploadBtn: assetsModelUploadBtn,
             serverBtn: assetsModelServerBtn,
             browseBtn: assetsModelBrowseBtn,
@@ -2403,6 +2536,7 @@ function inferencePredictionsData() {
             dropZone: assetsScalerDropZone,
             input: scalerInput,
             serverInput: assetsScalerServerFilePathInput,
+            manualCacheInput: manualScalerServerFilePathInput,
             uploadBtn: assetsScalerUploadBtn,
             serverBtn: assetsScalerServerBtn,
             browseBtn: assetsScalerBrowseBtn,
