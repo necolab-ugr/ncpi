@@ -605,14 +605,14 @@ function setupUploadZones() {
             if (filename) {
                 filename.textContent = selected
                     ? basenameFromPath(selected)
-                    : (defaultName && !isDefaultIgnored() ? defaultName : 'Server file not selected');
+                    : (defaultName && !isDefaultIgnored() ? defaultName : 'File not selected');
             }
             if (uploadedBox && uploadedName) {
                 if (selected) {
                     // A new explicit selection replaces the preloaded default.
                     setDefaultIgnored(true);
                     uploadedName.textContent = basenameFromPath(selected);
-                    if (uploadedLabel) uploadedLabel.textContent = 'Selected server file';
+                    if (uploadedLabel) uploadedLabel.textContent = 'Selected file';
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else if (defaultName && !isDefaultIgnored()) {
@@ -647,14 +647,14 @@ function setupUploadZones() {
         const syncLocalSelectionUi = () => {
             const selectedFile = input.files && input.files[0] ? input.files[0] : null;
             if (filename) {
-                filename.textContent = selectedFile ? selectedFile.name : 'Local file not selected';
+                filename.textContent = selectedFile ? selectedFile.name : 'File not selected';
             }
             if (uploadedBox && uploadedName) {
                 if (selectedFile) {
                     // A new explicit selection replaces the preloaded default.
                     setDefaultIgnored(true);
                     uploadedName.textContent = selectedFile.name;
-                    if (uploadedLabel) uploadedLabel.textContent = 'Selected local file';
+                    if (uploadedLabel) uploadedLabel.textContent = 'Selected file';
                     uploadedBox.classList.remove('hidden');
                     if (clearSelectionBtn) clearSelectionBtn.classList.remove('hidden');
                 } else {
