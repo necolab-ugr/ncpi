@@ -141,19 +141,19 @@
                         <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Features Data</p>
                         <p id="features-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
                         <div id="features-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected file:' : 'Selected file:'"></span>
                             <div class="mt-1 flex items-start justify-between gap-2">
                                 <span id="features-selected-local-name" class="block flex-1"></span>
-                                <button id="features-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                <button id="features-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                     <span class="material-symbols-outlined text-sm leading-none">close</span>
                                 </button>
                             </div>
                         </div>
                         <div id="features-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                            <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected file:' : 'Selected file:'"></span>
                             <div class="mt-1 flex items-start justify-between gap-2">
                                 <span id="features-selected-server-path" class="block flex-1 font-mono break-all"></span>
-                                <button id="features-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                <button id="features-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                     <span class="material-symbols-outlined text-sm leading-none">close</span>
                                 </button>
                             </div>
@@ -283,19 +283,19 @@
                             <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Sklearn Model / SBI Posterior</p>
                             <p id="assets-model-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
                             <div id="assets-model-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected file:' : 'Selected file:'"></span>
                                 <div class="mt-1 flex items-start justify-between gap-2">
                                     <span id="assets-model-selected-local-name" class="block flex-1"></span>
-                                    <button id="assets-model-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                    <button id="assets-model-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                         <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>
                             </div>
                             <div id="assets-model-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="assetsSelectionSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected local file:' : 'Selected server file:')"></span>
+                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="assetsSelectionSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected file:' : 'Selected file:')"></span>
                                 <div class="mt-1 flex items-start justify-between gap-2">
                                     <span id="assets-model-selected-server-path" class="block flex-1 font-mono break-all"></span>
-                                    <button id="assets-model-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                    <button id="assets-model-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                         <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>
@@ -327,19 +327,19 @@
                             <p class="mt-2 text-sm font-medium text-slate-700 dark:text-slate-200 text-center">Scaler (optional)</p>
                             <p id="assets-scaler-drop-zone-hint" class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop files or click to browse</p>
                             <div id="assets-scaler-selected-local" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected local file:' : 'Selected server file:'"></span>
+                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="isLocalRuntime ? 'Selected file:' : 'Selected file:'"></span>
                                 <div class="mt-1 flex items-start justify-between gap-2">
                                     <span id="assets-scaler-selected-local-name" class="block flex-1"></span>
-                                    <button id="assets-scaler-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected local file" aria-label="Remove selected local file">
+                                    <button id="assets-scaler-local-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                         <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>
                             </div>
                             <div id="assets-scaler-selected-server" class="mt-3 hidden rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="assetsSelectionSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected local file:' : 'Selected server file:')"></span>
+                                <span class="font-semibold text-green-800 dark:text-green-200" x-text="assetsSelectionSourceMode === 'auto-detected' ? 'Pipeline detection:' : (isLocalRuntime ? 'Selected file:' : 'Selected file:')"></span>
                                 <div class="mt-1 flex items-start justify-between gap-2">
                                     <span id="assets-scaler-selected-server-path" class="block flex-1 font-mono break-all"></span>
-                                    <button id="assets-scaler-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected server file" aria-label="Remove selected server file">
+                                    <button id="assets-scaler-server-clear" type="button" class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400" title="Remove selected file" aria-label="Remove selected file">
                                         <span class="material-symbols-outlined text-sm leading-none">close</span>
                                     </button>
                                 </div>

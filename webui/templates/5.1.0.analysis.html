@@ -1861,24 +1861,24 @@
                                 <p class="mt-1 text-xs text-slate-500 dark:text-slate-400 text-center">Drag and drop pkl files or click to browse</p>
                                 <div x-show="analysisSourceMode === 'upload' && hasAnalysisLocalSelection()" x-cloak
                                     class="mt-3 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected local file:</span>
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected file:</span>
                                     <div class="mt-1 flex items-start justify-between gap-2">
                                         <span class="block flex-1" x-text="getAnalysisLocalSelectionName()"></span>
                                         <button type="button" @click.stop.prevent="clearAnalysisLocalSelection()"
                                             class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
-                                            title="Remove selected local file" aria-label="Remove selected local file">
+                                            title="Remove selected file" aria-label="Remove selected file">
                                             <span class="material-symbols-outlined text-sm leading-none">close</span>
                                         </button>
                                     </div>
                                 </div>
                                 <div x-show="analysisSourceMode === 'server-path' && hasAnalysisServerSelection()" x-cloak
                                     class="mt-3 rounded-md border border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/30 px-3 py-2 text-xs text-green-700 dark:text-green-300">
-                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected server file:</span>
+                                    <span class="font-semibold text-green-800 dark:text-green-200">Selected file:</span>
                                     <div class="mt-1 flex items-start justify-between gap-2">
                                         <span class="block flex-1 font-mono break-all" x-text="getAnalysisServerSelectionPath()"></span>
                                         <button type="button" @click.stop.prevent="clearAnalysisServerSelection()"
                                             class="inline-flex items-center justify-center rounded-md p-1 text-green-700 hover:text-red-600 dark:text-green-300 dark:hover:text-red-400"
-                                            title="Remove selected server file" aria-label="Remove selected server file">
+                                            title="Remove selected file" aria-label="Remove selected file">
                                             <span class="material-symbols-outlined text-sm leading-none">close</span>
                                         </button>
                                     </div>

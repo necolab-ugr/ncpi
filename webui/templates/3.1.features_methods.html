@@ -2290,7 +2290,7 @@ def custom_feature(sample, params):
                             return 'Full folder inspection is still running in background. Please wait before computing features.';
                         }
                         if (deepStatus === 'failed') {
-                            return 'Full folder inspection failed. Reinspect the selected server folder before computing features.';
+                            return 'Full folder inspection failed. Reinspect the selected folder before computing features.';
                         }
                     }
                     const folderPaths = Array.isArray(this.simulationFolderPaths) ? this.simulationFolderPaths : [];
@@ -4089,11 +4089,11 @@ def custom_feature(sample, params):
                                             Drag and drop pkl files or click to browse
                                         </p>
                                         <div id="selectedFeaturesFiles" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
-                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected local files</span>
+                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected files</span>
                                             <div id="selectedFeaturesFilesList" class="mt-2"></div>
                                         </div>
                                         <div id="selectedPrecomputedFeaturesServerFile" class="mt-4 text-xs text-slate-500 dark:text-slate-400 hidden">
-                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected server files</span>
+                                            <span class="block font-semibold text-slate-600 dark:text-slate-300">Selected files</span>
                                             <div id="selectedPrecomputedFeaturesServerFilePath" class="mt-2 font-mono break-all"></div>
                                         </div>
                                     </div>
@@ -4389,11 +4389,11 @@ def custom_feature(sample, params):
                                 </button>
                             </div>
                             <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'upload' && simulationFileCount > 0" x-cloak>
-                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected local folder sample file</span>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected folder sample file</span>
                                 <div class="mt-2 font-mono break-all" x-text="simulationSampleName"></div>
                             </div>
                             <div class="mt-4 text-xs text-gray-500 dark:text-gray-400" x-show="simulationSourceMode === 'server-path' && (simulationFolderPaths || []).length > 0" x-cloak>
-                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server folders</span>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected folders</span>
                                 <div class="mt-2 space-y-2">
                                     <template x-for="path in simulationFolderPaths" :key="'sim-folder-'+path">
                                         <div class="flex items-center gap-2">
@@ -4484,7 +4484,7 @@ def custom_feature(sample, params):
                                 </button>
                             </div>
                             <div class="mt-4 text-xs text-gray-500 dark:text-gray-400 w-full" x-show="additionalFileSourceMode === 'server-path' && (additionalServerFilePaths || []).length > 0" x-cloak>
-                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected server files</span>
+                                <span class="block font-semibold text-gray-600 dark:text-gray-300">Selected files</span>
                                 <div class="mt-2 space-y-2">
                                     <template x-for="path in additionalServerFilePaths" :key="'add-srv-'+path">
                                         <div class="flex items-center gap-2">
