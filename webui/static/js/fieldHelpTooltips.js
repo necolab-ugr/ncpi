@@ -440,7 +440,7 @@
         icon.setAttribute("aria-label", `Information about ${labelText}`);
         icon.setAttribute("aria-describedby", tooltipId);
         icon.setAttribute("aria-expanded", "false");
-        icon.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">info</span><span id="${tooltipId}" class="field-help-tooltip" role="tooltip"></span>`;
+        // icon.innerHTML = `<span class="material-symbols-outlined" aria-hidden="true" style="font-size:18px">info</span><span id="${tooltipId}" class="field-help-tooltip" role="tooltip"></span>`;
         icon.querySelector(".field-help-tooltip").textContent = help;
         const positionTooltip = () => {
             const tooltip = icon.querySelector(".field-help-tooltip");
