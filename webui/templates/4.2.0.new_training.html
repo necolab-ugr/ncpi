@@ -203,6 +203,7 @@
                         <input id="training_features_file_input" name="training_features_file" type="file" class="hidden" />
                         <input id="training_features_file_source_mode" name="training_features_source_mode" type="hidden" value="server-path" />
                         <input id="training_features_file_server_path" name="training_features_server_file_path" type="hidden" value="" />
+                        <input id="training_features_file_display_name" name="training_features_display_name" type="hidden" value="" />
                         <div class="flex flex-wrap justify-center gap-2">
                             <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
                                 @click.stop>
@@ -245,6 +246,7 @@
                         <input id="training_parameters_file_input" name="training_parameters_file" type="file" class="hidden" />
                         <input id="training_parameters_file_source_mode" name="training_parameters_source_mode" type="hidden" value="server-path" />
                         <input id="training_parameters_file_server_path" name="training_parameters_server_file_path" type="hidden" value="" />
+                        <input id="training_parameters_file_display_name" name="training_parameters_display_name" type="hidden" value="" />
                         <div class="flex flex-wrap justify-center gap-2">
                             <button type="button" class="custom-mode-server-btn px-3 py-1.5 text-xs rounded-lg border border-primary bg-primary/10 text-primary font-semibold"
                                 @click.stop>
@@ -623,6 +625,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const getModeInput = (field) => document.getElementById(`${field}_source_mode`);
     const getServerInput = (field) => document.getElementById(`${field}_server_path`);
     const getFileInput = (field) => document.getElementById(`${field}_input`);
+    const getDisplayInput = (field) => document.getElementById(`${field}_display_name`);
 
     const selectedInput = (field) => {
         const mode = String(getModeInput(field)?.value || "upload").trim().toLowerCase();
@@ -766,8 +769,10 @@ document.addEventListener("DOMContentLoaded", () => {
             const card = getCard(field);
             const serverPath = card ? card.querySelector('[data-role="server-path"]') : null;
             const serverSummary = card ? card.querySelector('[data-role="server-summary"]') : null;
+            const displayInput = getDisplayInput(field);
             if (serverPath) serverPath.textContent = "";
             if (serverSummary) serverSummary.classList.add("hidden");
+            if (displayInput) displayInput.value = "";
         }
         setModeVisuals(field, normalized);
         scheduleInputComparison();
@@ -780,26 +785,31 @@ document.addEventListener("DOMContentLoaded", () => {
         const localSummary = card.querySelector('[data-role="local-summary"]');
         const serverSummary = card.querySelector('[data-role="server-summary"]');
         const serverInput = getServerInput(field);
+        const displayInput = getDisplayInput(field);
         if (localName) localName.textContent = fileName || "";
         if (localSummary) localSummary.classList.toggle("hidden", !fileName);
         if (serverSummary) serverSummary.classList.add("hidden");
         if (serverInput) serverInput.value = "";
+        if (displayInput) displayInput.value = "";
         scheduleInputComparison();
     };
 
-    const setServerSelection = (field, pathValue) => {
+    const setServerSelection = (field, pathValue, displayValue = "") => {
         const card = getCard(field);
         const serverInput = getServerInput(field);
         if (!card || !serverInput) return;
         const cleanPath = String(pathValue || "").trim();
+        const cleanDisplay = String(displayValue || "").trim();
         serverInput.value = cleanPath;
         const serverPath = card.querySelector('[data-role="server-path"]');
         const serverSummary = card.querySelector('[data-role="server-summary"]');
         const localSummary = card.querySelector('[data-role="local-summary"]');
         const localName = card.querySelector('[data-role="local-name"]');
         const fileInput = getFileInput(field);
+        const displayInput = getDisplayInput(field);
 
-        if (serverPath) serverPath.textContent = cleanPath;
+        if (displayInput) displayInput.value = cleanDisplay;
+        if (serverPath) serverPath.textContent = cleanDisplay || cleanPath;
         if (serverSummary) serverSummary.classList.toggle("hidden", !cleanPath);
         if (localSummary) localSummary.classList.add("hidden");
         if (localName) localName.textContent = "";
@@ -912,17 +922,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const fileInput = getFileInput(field);
         const modeInput = getModeInput(field);
+        const serverInput = getServerInput(field);
+        const displayInput = getDisplayInput(field);
         const uploadBtn = card.querySelector(".custom-mode-upload-btn");
         const serverBtn = card.querySelector(".custom-mode-server-btn");
         const localClearBtn = card.querySelector('[data-role="local-clear"]');
         const serverClearBtn = card.querySelector('[data-role="server-clear"]');
-        if (!fileInput || !modeInput || !serverBtn) return;
+        if (!fileInput || !modeInput || !serverInput || !serverBtn) return;
 
         const hasServer = Boolean(String(getServerInput(field)?.value || "").trim());
         const hasLocal = Boolean(fileInput.files && fileInput.files[0]);
         if (hasServer && !hasLocal && allowServerSource) {
             setMode(field, "server-path");
-            setServerSelection(field, getServerInput(field).value);
+            setServerSelection(field, getServerInput(field).value, getDisplayInput(field)?.value || "");
         } else if (hasLocal) {
             setMode(field, "upload");
             setLocalSelection(field, fileInput.files[0].name);
@@ -971,6 +983,25 @@ document.addEventListener("DOMContentLoaded", () => {
             const file = fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
             setLocalSelection(field, file ? file.name : "");
         });
+
+        modeInput.addEventListener("change", () => {
+            setMode(field, modeInput.value);
+        });
+
+        const syncRestoredServerSelection = () => {
+            const restoredPath = String(serverInput.value || "").trim();
+            const restoredDisplay = String(displayInput?.value || "").trim();
+            if (restoredPath) {
+                setMode(field, "server-path");
+            }
+            setServerSelection(field, restoredPath, restoredDisplay);
+        };
+        serverInput.addEventListener("input", syncRestoredServerSelection);
+        serverInput.addEventListener("change", syncRestoredServerSelection);
+        if (displayInput) {
+            displayInput.addEventListener("input", syncRestoredServerSelection);
+            displayInput.addEventListener("change", syncRestoredServerSelection);
+        }
 
         ["dragenter", "dragover"].forEach((eventName) => {
             card.addEventListener(eventName, (event) => {
