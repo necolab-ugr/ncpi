@@ -8056,6 +8056,61 @@ def _remember_module_restore_form(computation_type, form):
     }
 
 
+def _restorable_form_for_computation(
+    computation_type,
+    form,
+    file_paths=None,
+    *,
+    file_display_names=None,
+    job_id=None,
+    restore_dir=None,
+):
+    restore_form = dict(form or {})
+    key = str(computation_type or "").strip().lower()
+    if key != "inference_training":
+        return restore_form
+
+    paths = file_paths if isinstance(file_paths, dict) else {}
+    display_names = file_display_names if isinstance(file_display_names, dict) else {}
+    training_file_fields = {
+        "training_features_file": (
+            "training_features_source_mode",
+            "training_features_server_file_path",
+            "training_features_display_name",
+        ),
+        "training_parameters_file": (
+            "training_parameters_source_mode",
+            "training_parameters_server_file_path",
+            "training_parameters_display_name",
+        ),
+    }
+    for file_key, (mode_key, server_path_key, display_name_key) in training_file_fields.items():
+        staged_path = str(paths.get(file_key) or "").strip()
+        if not staged_path or not os.path.isfile(staged_path):
+            continue
+        display_name = str(display_names.get(file_key) or os.path.basename(staged_path)).strip()
+        restore_path = staged_path
+        if restore_dir:
+            try:
+                os.makedirs(restore_dir, exist_ok=True)
+                safe_name = secure_filename(display_name) or secure_filename(os.path.basename(staged_path)) or f"{file_key}.dat"
+                restore_name = f"inference_training_restore_{file_key}_{job_id or uuid.uuid4().hex}_{safe_name}"
+                restore_path = os.path.join(restore_dir, restore_name)
+                shutil.copy2(staged_path, restore_path)
+            except Exception as exc:
+                app.logger.warning(
+                    "Could not preserve %s for inference-training restore: %s",
+                    file_key,
+                    exc,
+                )
+                restore_path = staged_path
+        restore_form[mode_key] = "server-path"
+        restore_form[server_path_key] = restore_path
+        restore_form[display_name_key] = display_name
+
+    return restore_form
+
+
 def _pop_module_restore_form(computation_type):
     payload = session.pop("module_restore_form", None)
     if not isinstance(payload, dict):
@@ -17315,6 +17370,7 @@ def start_computation_redirect(computation_type):
 
     # If everything is OK, save/prepare the file(s)
     file_paths = {}
+    file_display_names = {}
     kernel_params_module_override = None
     prepared_features_df = None
     empirical_upload_paths = None
@@ -17990,6 +18046,14 @@ def start_computation_redirect(computation_type):
             "features_sim": "features_sim",
             "parameters": "parameters",
         }
+        inference_training_file_key_map = {
+            "training_features_file": "training_features_file",
+            "file-upload-x": "training_features_file",
+            "features_train_file": "training_features_file",
+            "training_parameters_file": "training_parameters_file",
+            "file-upload-y": "training_parameters_file",
+            "parameters_train_file": "training_parameters_file",
+        }
 
         for i, file_key in enumerate(files_obj):
             if computation_type == "inference" and file_key in {
@@ -18011,7 +18075,10 @@ def start_computation_redirect(computation_type):
             normalized_key = file_key
             if computation_type == "inference":
                 normalized_key = inference_file_key_map.get(file_key, file_key)
+            elif computation_type == "inference_training":
+                normalized_key = inference_training_file_key_map.get(file_key, file_key)
             file_paths[normalized_key] = file_path
+            file_display_names[normalized_key] = os.path.basename(str(file.filename).replace("\\", "/")) or os.path.basename(file_path)
         if computation_type in {"field_potential_proxy", "field_potential_kernel", "field_potential_meeg"}:
             server_file_keys = []
             redirect_target = "field_potential_kernel"
@@ -18193,11 +18260,13 @@ def start_computation_redirect(computation_type):
                 copied_path = os.path.join(module_upload_dir, copied_name)
                 shutil.copy2(inference_training_features_server_path, copied_path)
                 file_paths["training_features_file"] = copied_path
+                file_display_names["training_features_file"] = os.path.basename(inference_training_features_server_path)
             if inference_training_parameters_source_mode == "server-path" and inference_training_parameters_server_path:
                 copied_name = f"inference_training_parameters_{job_id}_{os.path.basename(inference_training_parameters_server_path)}"
                 copied_path = os.path.join(module_upload_dir, copied_name)
                 shutil.copy2(inference_training_parameters_server_path, copied_path)
                 file_paths["training_parameters_file"] = copied_path
+                file_display_names["training_parameters_file"] = os.path.basename(inference_training_parameters_server_path)
 
     data = request.form.to_dict() # Get parameters from form POST
     if computation_type == "features" and features_input_subsample_applied:
@@ -18282,7 +18351,14 @@ def start_computation_redirect(computation_type):
             "field_potential_kernel",
             "field_potential_meeg",
         } else "time",
-        "restore_form": dict(request.form),
+        "restore_form": _restorable_form_for_computation(
+            computation_type,
+            request.form,
+            file_paths,
+            file_display_names=file_display_names,
+            job_id=job_id,
+            restore_dir=module_upload_dir,
+        ),
     }
 
     # Submit the long-running task according to the computation type.
