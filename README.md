@@ -1,5 +1,3 @@
-> **The current code is quite mature and we are on the road to launch ncpi version 1.0 by June 22, 2026.**
-
 <div align="center">
 
 # ncpi: neural circuit parameter inference
@@ -30,7 +28,7 @@ https://github.com/user-attachments/assets/d4e485ea-accf-4615-aed3-7b4e9c6c9885
 
 `ncpi` requires **Python 3.10+**.
 
-## 1) Create and activate a Conda environment (Windows + Unix)
+## 1) Conda setup notes (Windows + Unix)
 
 We strongly recommend installing `ncpi` in a dedicated **Conda** environment.
 If you need to install Anaconda first, download it from the official page:
@@ -217,7 +215,7 @@ Both the `analysis` and `tests` extras include `rpy2` (R-backed dependency). Bef
 manager). Installing `rpy2` via pip or conda can fail if a suitable R installation is not present. If you use Conda,
 you can install R with: `conda install -c conda-forge r-base`.
 
-R packages required by `Analysis` class methods:
+The `Analysis` class uses the following R packages for specific methods:
 - `lmer_tests(...)`: `lme4`, `emmeans`
 - `lmer_selection(...)`: `lme4`, `buildmer`
 
@@ -245,8 +243,8 @@ For headless runs where no plot window is needed, use a non-GUI Matplotlib backe
 MPLBACKEND=Agg python example.py
 ```
 
-### tests/playwright note
-After installing test dependencies, install Playwright browsers with:
+### playwright note
+To use Playwright-based tests, install the required browsers with:
 
 ```bash
 python -m playwright install
@@ -268,13 +266,15 @@ folder are available.
 
 # Folder Structure
 
-- `ncpi/`: core library modules (`Simulation`, `Features`, `FieldPotential`, `Inference`, `Analysis`, parser utilities).
-- `examples/`: example scripts and runnable workflows.
-- `docs/`: project documentation sources and published pages.
-- `img/`: static visual assets.
-- `webui/`: web application and related runtime code.
-- `tests/`: automated test suite.
-- `.github/`: GitHub workflows and repository automation.
+- `ncpi/`: package source code, including simulation, feature extraction, field-potential, inference, analysis, parser,
+  and shared utility modules.
+- `examples/`: runnable workflows for synthetic simulations, EEG Alzheimer disease analyses, and developing-brain LFP
+  examples.
+- `docs/`: generated documentation pages, tutorial pages, documentation assets, and tutorial automation scripts.
+- `webui/`: Flask WebUI application, launcher, templates, static assets, and runtime helpers.
+- `tests/`: automated tests covering core modules, example workflows, parser backends, and WebUI behavior.
+- `img/`: repository-level static images, including the project logo.
+- `.github/`: GitHub Actions workflows and repository automation.
 
 # Tutorials
 The documentation includes installation guides, API references, and end-to-end tutorials for simulation and empirical
