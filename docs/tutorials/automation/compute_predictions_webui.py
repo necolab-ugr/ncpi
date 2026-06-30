@@ -453,6 +453,7 @@ def select_server_file_via_modal(
     open_btn: Locator,
     target_file_path: str,
     target_input_id: str,
+    browse_btn: Optional[Locator] = None,
 ) -> None:
     target_file = Path(target_file_path)
     if not target_file.is_file():
@@ -461,6 +462,8 @@ def select_server_file_via_modal(
     target_name = target_file.name
 
     smooth_click(page, open_btn, after_ms=500)
+    if browse_btn is not None and browse_btn.count() > 0:
+        browse_btn.first.evaluate("el => el.click()")
     modal = page.locator("#inferenceServerFileBrowserModal")
     modal.wait_for(state="visible", timeout=15_000)
     _wait_file_modal_idle(page)
@@ -736,6 +739,7 @@ def run_tutorial_recording(
             select_server_file_via_modal(
                 page,
                 open_btn=page.locator("#assets-model-source-server-btn"),
+                browse_btn=page.locator("#assets-model-server-browse-btn"),
                 target_file_path=model_path,
                 target_input_id="inference-model-server-file-path",
             )
@@ -744,6 +748,7 @@ def run_tutorial_recording(
             select_server_file_via_modal(
                 page,
                 open_btn=page.locator("#assets-scaler-source-server-btn"),
+                browse_btn=page.locator("#assets-scaler-server-browse-btn"),
                 target_file_path=scaler_path,
                 target_input_id="inference-scaler-server-file-path",
             )

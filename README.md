@@ -14,7 +14,7 @@ electrophysiological recordings, such as LFP, ECoG, MEG, and EEG. `ncpi` provide
 framework for estimating the most probable neural circuit parameters associated with an empirical observation,
 streamlining traditionally complex workflows into a minimal amount of code.
 
-https://github.com/user-attachments/assets/d4e485ea-accf-4615-aed3-7b4e9c6c9885
+https://github.com/user-attachments/assets/e2918977-0421-4c9e-a18f-850656608bee
 
 # Key Features of `ncpi`
 - **All-in-one solution**: a unified package for forward and inverse modeling of extracellular signals from neural

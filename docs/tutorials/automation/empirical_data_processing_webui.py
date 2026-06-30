@@ -977,6 +977,34 @@ def select_mat_data_source(page: Page) -> None:
     raise RuntimeError("No 'Data source selection' dropdown with a .mat option was found.")
 
 
+def set_mat_parser_axis_mapping(page: Page) -> None:
+    channels_axis_select = find_visible_labeled_select(
+        page, "Channels axis", "parser_axis_channels", timeout_sec=120
+    )
+    choose_select_option_with_menu_cursor(
+        page,
+        channels_axis_select,
+        value="0",
+        label_fallback_contains="dim 0",
+        after_ms=120,
+    )
+    print("[automation] channels axis set to Dim 0.", flush=True)
+    wait_for_parser_loading_idle(page, timeout_sec=120)
+
+    samples_axis_select = find_visible_labeled_select(
+        page, "Samples axis", "parser_axis_samples", timeout_sec=120
+    )
+    choose_select_option_with_menu_cursor(
+        page,
+        samples_axis_select,
+        value="1",
+        label_fallback_contains="dim 1",
+        after_ms=120,
+    )
+    print("[automation] samples axis set to Dim 1.", flush=True)
+    wait_for_parser_loading_idle(page, timeout_sec=120)
+
+
 def set_aggregate_over_sensor(page: Page) -> None:
     select = page.locator("select[multiple][x-model='parserAggregateOverSelected']").first
     if select.count() == 0:
@@ -1123,12 +1151,15 @@ def select_server_file_via_modal(
     target_file_path: str,
     target_input_id: str,
     kind: str,
+    browse_btn: Optional[Locator] = None,
 ) -> None:
     target_file = _resolve_artifact_file(target_file_path, kind=kind)
     target_dir = str(target_file.parent)
     target_name = target_file.name
 
     smooth_click(page, open_btn, after_ms=500)
+    if browse_btn is not None and browse_btn.count() > 0:
+        browse_btn.first.evaluate("el => el.click()")
     modal = page.locator("#inferenceServerFileBrowserModal")
     modal.wait_for(state="visible", timeout=15_000)
     _wait_file_modal_idle(page)
@@ -1317,6 +1348,9 @@ def run_tutorial_recording(
             select_mat_data_source(page)
             wait_for_parser_loading_idle(page, timeout_sec=180)
 
+            print("[automation] configuring .mat parser axes...", flush=True)
+            set_mat_parser_axis_mapping(page)
+
             print("[automation] configuring parser fields...", flush=True)
             channel_names_source_select = find_visible_labeled_select(
                 page, "Channel names source", "parser_ch_names_source", timeout_sec=150
@@ -1418,6 +1452,7 @@ def run_tutorial_recording(
             select_server_file_via_modal(
                 page,
                 open_btn=page.locator("#assets-model-source-server-btn"),
+                browse_btn=page.locator("#assets-model-server-browse-btn"),
                 target_file_path=model_path,
                 target_input_id="inference-model-server-file-path",
                 kind="model",
@@ -1427,6 +1462,7 @@ def run_tutorial_recording(
             select_server_file_via_modal(
                 page,
                 open_btn=page.locator("#assets-scaler-source-server-btn"),
+                browse_btn=page.locator("#assets-scaler-server-browse-btn"),
                 target_file_path=scaler_path,
                 target_input_id="inference-scaler-server-file-path",
                 kind="scaler",

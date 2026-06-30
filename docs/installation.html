@@ -67,7 +67,7 @@
         </section>
 
         <section id="conda">
-          <h2>1) Create and activate a Conda environment (Windows + Unix)</h2>
+          <h2>1) Conda setup notes (Windows + Unix)</h2>
           <p>We strongly recommend installing <code>ncpi</code> in a dedicated <strong>Conda</strong> environment.</p>
           <p>
             If you need to install Anaconda first, download it from the official page:
@@ -217,7 +217,7 @@ pip install "ncpi[all]"             # all optional dependencies [Windows: WSL re
             via pip or conda can fail if a suitable R installation is not present. If you use Conda, you can install R with:
             <code>conda install -c conda-forge r-base</code>.
           </p>
-          <p>R packages required by <code>Analysis</code> class methods:</p>
+          <p>The <code>Analysis</code> class uses the following R packages for specific methods:</p>
           <ul>
             <li><code>lmer_tests(...)</code>: <code>lme4</code>, <code>emmeans</code></li>
             <li><code>lmer_selection(...)</code>: <code>lme4</code>, <code>buildmer</code></li>
@@ -232,8 +232,19 @@ pip install "ncpi[all]"             # all optional dependencies [Windows: WSL re
             R-dependent tests (e.g. <code>tests/Analysis/test_lmer.py</code>) are skipped automatically when <code>rpy2</code>/R is unavailable.
           </p>
 
-          <h3>tests/playwright note</h3>
-          <p>After installing test dependencies, install Playwright browsers with:</p>
+          <p>
+            If you install <code>ncpi[analysis]</code> or <code>ncpi[tests]</code>, Matplotlib may select a Qt backend because Qt-related
+            packages such as <code>PyQt5</code>, <code>qtpy</code>, or <code>pyvistaqt</code> are available. On minimal Linux, WSL, Docker, or remote-server
+            environments, Qt may fail to initialize the <code>xcb</code> platform plugin unless the corresponding system libraries are
+            installed. On Ubuntu/Debian systems, install them with:
+          </p>
+          <pre><code>sudo apt install libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0</code></pre>
+
+          <p>For headless runs where no plot window is needed, use a non-GUI Matplotlib backend instead:</p>
+          <pre><code>MPLBACKEND=Agg python example.py</code></pre>
+
+          <h3>playwright note</h3>
+          <p>To use Playwright-based tests, install the required browsers with:</p>
           <pre><code>python -m playwright install</code></pre>
 
           <h3>hctsa note</h3>
@@ -258,11 +269,11 @@ pip install "ncpi[all]"             # all optional dependencies [Windows: WSL re
     <aside class="sidebar-right">
       <h2 class="right-title">On This Page</h2>
       <ul class="right-nav">
-        <li><a class="active" href="#conda">1) Conda Environment</a></li>
-        <li><a href="#unix">2) Unix Installation</a></li>
-        <li><a href="#windows">3) Windows Installation</a></li>
+        <li><a class="active" href="#conda">1) Conda setup notes</a></li>
+        <li><a href="#unix">2) Install ncpi on Unix</a></li>
+        <li><a href="#windows">3) Install ncpi on Windows</a></li>
         <li><a href="#optional">4) Optional Dependencies</a></li>
-        <li><a href="#webui">5) WebUI</a></li>
+        <li><a href="#webui">5) WebUI: installation and usage</a></li>
         <li><a href="#backends">6) Optional backends notes</a></li>
       </ul>
     </aside>
