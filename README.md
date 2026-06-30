@@ -230,6 +230,21 @@ Install options for the R backend:
 If you want to run tests without setting up R, avoid `ncpi[tests]` and install only the specific test dependencies you
 need. R-dependent tests (e.g. `tests/Analysis/test_lmer.py`) are skipped automatically when `rpy2`/R is unavailable.
 
+If you install `ncpi[analysis]` or `ncpi[tests]`, Matplotlib may select a Qt backend because Qt-related
+packages such as `PyQt5`, `qtpy`, or `pyvistaqt` are available. On minimal Linux, WSL, Docker, or remote-server
+environments, Qt may fail to initialize the `xcb` platform plugin unless the corresponding system libraries are
+installed. On Ubuntu/Debian systems, install them with:
+
+```bash
+sudo apt install libxcb-cursor0 libxcb-xinerama0 libxkbcommon-x11-0
+```
+
+For headless runs where no plot window is needed, use a non-GUI Matplotlib backend instead:
+
+```bash
+MPLBACKEND=Agg python example.py
+```
+
 ### tests/playwright note
 After installing test dependencies, install Playwright browsers with:
 
@@ -275,6 +290,14 @@ mean gI is 2-6x mean gE, and each LFP is power-normalized to unity.
 After simulation, each LFP is transformed into a compact catch22 feature vector, then split into train/test sets to fit a
 RandomForest regressor that maps features to the ground-truth E:I ratio. Predictions on held-out samples are evaluated
 with MSE and visualized in a predicted-versus-real scatter plot with a diagonal reference line for ideal agreement.
+
+The example ends with `plt.show()`, which opens an interactive Matplotlib window. If you are running in a headless
+environment, over SSH, in Docker, in WSL without GUI support, or on a minimal Linux installation where Qt backends are
+not fully configured, run the saved script with a non-GUI backend:
+
+```bash
+MPLBACKEND=Agg python example.py
+```
 
 ```python
 import numpy as np
