@@ -129,7 +129,7 @@ biomarkers reflect specific neural circuit parameters, while preserving access
 to established backend libraries for users who require methodological control.
 
 ![Overview of the graphical interface dashboard, showing the different modules
-that can be configured.\label{fig:webui}](webui.png){ width=90% }
+that can be configured.\label{fig:webui}](../img/webui.svg){ width=90% }
 
 The toolbox is intended for computational neuroscientists, experimental
 neuroscientists, clinical neurophysiology researchers, and students seeking to
