@@ -3221,7 +3221,11 @@ def custom_feature(sample, params):
                 }
 
                 if (!this.parserPrimaryFieldsUserEdited) {
-                    if (String(this.parserChNamesLocator || '').trim()) {
+                    if (['pipeline', 'new-simulation'].includes(this.resolvedDataSourceKind())) {
+                        this.parserChNamesSource = '__manual__';
+                        this.parserSensorNames = 'ch0';
+                        this.parserChNamesLocator = '';
+                    } else if (String(this.parserChNamesLocator || '').trim()) {
                         this.parserChNamesSource = this.parserChNamesLocator;
                         this.parserSensorNames = '';
                     } else {
