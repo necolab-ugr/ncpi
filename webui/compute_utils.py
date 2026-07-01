@@ -2702,12 +2702,37 @@ def _looks_like_four_area_feature_sample(value):
     return len(value) == 4
 
 
+def _looks_like_structured_feature_sample(value):
+    if _looks_like_four_area_feature_sample(value):
+        return True
+    try:
+        arr = np.asarray(value, dtype=object).squeeze()
+    except Exception:
+        return False
+    if arr.ndim != 1 or arr.size == 0:
+        return False
+    if arr.size != 4:
+        return False
+    structured_items = 0
+    for item in arr.tolist():
+        if isinstance(item, MappingABC):
+            structured_items += 1
+            continue
+        try:
+            item_arr = np.asarray(item)
+        except Exception:
+            continue
+        if item_arr.ndim > 0:
+            structured_items += 1
+    return structured_items > 0
+
+
 def _extract_feature_samples(df):
     if "data" not in df.columns:
         raise ValueError("Input dataframe must contain a 'data' column from EphysDatasetParser.")
     samples = []
     for idx, value in enumerate(df["data"].tolist()):
-        if _looks_like_four_area_feature_sample(value):
+        if _looks_like_structured_feature_sample(value):
             raise ValueError(
                 "Selected data is a 4-area dict; choose sum, area_sums.<area>, or another numeric field."
             )

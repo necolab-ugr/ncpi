@@ -4139,7 +4139,16 @@ def _dataframe_has_four_area_data_with_sum(source_obj):
     if data_series.empty:
         return False
     sample = data_series.iloc[0]
-    if not isinstance(sample, MappingABC) or len(sample) != 4:
+    sample_is_four_area = False
+    if isinstance(sample, MappingABC) and len(sample) == 4:
+        sample_is_four_area = True
+    else:
+        try:
+            sample_arr = np.asarray(sample, dtype=object).squeeze()
+        except Exception:
+            sample_arr = None
+        sample_is_four_area = bool(sample_arr is not None and sample_arr.ndim == 1 and sample_arr.size == 4)
+    if not sample_is_four_area:
         return False
     sum_series = source_obj["sum"].dropna()
     if sum_series.empty:
@@ -4162,7 +4171,24 @@ def _dataframe_locator_selects_four_area_data(source_obj, locator):
     if series.empty:
         return False
     sample = series.iloc[0]
-    return isinstance(sample, MappingABC) and len(sample) == 4
+    if isinstance(sample, MappingABC) and len(sample) == 4:
+        return True
+    try:
+        arr = np.asarray(sample, dtype=object).squeeze()
+    except Exception:
+        return False
+    if arr.ndim != 1 or arr.size != 4:
+        return False
+    for item in arr.tolist():
+        if isinstance(item, MappingABC):
+            continue
+        try:
+            item_arr = np.asarray(item)
+        except Exception:
+            return False
+        if item_arr.ndim == 0:
+            return False
+    return True
 
 def _expand_mat_struct(value, prefix=""):
     """Recursivamente extrae campos de un mat_struct o cell array."""
