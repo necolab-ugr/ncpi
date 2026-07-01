@@ -2727,11 +2727,53 @@ def _looks_like_structured_feature_sample(value):
     return structured_items > 0
 
 
-def _extract_feature_samples(df):
+def _coerce_legacy_four_area_sum_sample(value):
+    if isinstance(value, MappingABC):
+        items = list(value.values())
+    else:
+        try:
+            arr = np.asarray(value, dtype=object).squeeze()
+        except Exception:
+            return None
+        if arr.ndim != 1 or arr.size <= 1:
+            return None
+        items = arr.tolist()
+
+    traces = []
+    for item in items:
+        try:
+            item_arr = np.asarray(item, dtype=float).squeeze()
+        except (TypeError, ValueError):
+            return None
+        if item_arr.ndim == 1:
+            trace = item_arr
+        elif item_arr.ndim == 2 and 3 in item_arr.shape:
+            trace = item_arr[2, :] if item_arr.shape[0] == 3 else item_arr[:, 2]
+        else:
+            return None
+        if trace.size == 0:
+            return None
+        traces.append(np.asarray(trace, dtype=float))
+
+    if len(traces) <= 1:
+        return None
+    min_len = min(int(trace.size) for trace in traces)
+    if min_len <= 0:
+        return None
+    return np.sum(np.vstack([trace[:min_len] for trace in traces]), axis=0)
+
+
+def _extract_feature_samples(df, data_locator=None):
     if "data" not in df.columns:
         raise ValueError("Input dataframe must contain a 'data' column from EphysDatasetParser.")
+    locator = str(data_locator or "").strip()
     samples = []
     for idx, value in enumerate(df["data"].tolist()):
+        if locator == "sum":
+            legacy_sum = _coerce_legacy_four_area_sum_sample(value)
+            if legacy_sum is not None:
+                samples.append(legacy_sum)
+                continue
         if _looks_like_structured_feature_sample(value):
             raise ValueError(
                 "Selected data is a 4-area dict; choose sum, area_sums.<area>, or another numeric field."
@@ -3847,7 +3889,7 @@ def features_computation(job_id, job_status, params, temp_uploaded_files):
         _append_job_output(job_status, job_id, f"Loaded parsed dataframe with shape {df.shape}.")
 
         _check_cancellation(job_id, job_status)
-        samples = _extract_feature_samples(df)
+        samples = _extract_feature_samples(df, params.get("parser_data_locator"))
         _append_job_output(job_status, job_id, f"Extracted {len(samples)} signal sample(s) from dataframe.")
 
         features_subsample_percent_raw = _parse_float_param(params, "features_preload_subsample_percent", default=None)
