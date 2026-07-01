@@ -2737,6 +2737,13 @@ def _extract_feature_samples(df):
                 "Selected data is a 4-area dict; choose sum, area_sums.<area>, or another numeric field."
             )
         arr = np.asarray(value).squeeze()
+        if arr.dtype == object:
+            try:
+                arr = arr.astype(float)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    "Selected data is a 4-area dict; choose sum, area_sums.<area>, or another numeric field."
+                )
         if arr.ndim == 0:
             arr = np.asarray([arr])
         if arr.ndim != 1:
