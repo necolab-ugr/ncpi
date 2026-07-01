@@ -2699,23 +2699,13 @@ def _resolve_fs_from_df(df):
 def _coerce_four_area_feature_sample(value):
     if not isinstance(value, MappingABC):
         return None
-
-    required_areas = ("frontal", "parietal", "temporal", "occipital")
-    area_values = {}
-    for area_name in required_areas:
-        matched = [
-            area_value
-            for key, area_value in value.items()
-            if str(key).strip().lower() == area_name
-        ]
-        if not matched:
-            return None
-        area_values[area_name] = matched[0]
+    if len(value) != 4:
+        return None
 
     traces = []
-    for area_name in required_areas:
+    for area_value in value.values():
         try:
-            arr = np.asarray(area_values[area_name], dtype=float).squeeze()
+            arr = np.asarray(area_value, dtype=float).squeeze()
         except (TypeError, ValueError):
             return None
         if arr.ndim == 1:
@@ -2734,12 +2724,28 @@ def _coerce_four_area_feature_sample(value):
     return np.sum(np.vstack([trace[:min_len] for trace in traces]), axis=0)
 
 
+def _looks_like_four_area_feature_sample(value):
+    if not isinstance(value, MappingABC):
+        return False
+    return len(value) == 4
+
+
 def _extract_feature_samples(df):
     if "data" not in df.columns:
         raise ValueError("Input dataframe must contain a 'data' column from EphysDatasetParser.")
     samples = []
-    for idx, value in enumerate(df["data"].tolist()):
-        arr = _coerce_four_area_feature_sample(value)
+    for idx, row in df.iterrows():
+        value = row["data"]
+        arr = None
+        if _looks_like_four_area_feature_sample(value) and "sum" in df.columns:
+            try:
+                arr = np.asarray(row.get("sum"), dtype=float).squeeze()
+            except (TypeError, ValueError):
+                arr = None
+            if arr is not None and arr.ndim != 1:
+                arr = None
+        if arr is None:
+            arr = _coerce_four_area_feature_sample(value)
         if arr is None:
             arr = np.asarray(value).squeeze()
         if arr.ndim == 0:
