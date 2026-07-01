@@ -1759,6 +1759,26 @@ def custom_feature(sample, params):
                     }
                     return bestScore > 0 ? bestRow : null;
                 };
+                const findRowByField = (fieldName) => {
+                    const target = String(fieldName || '').trim();
+                    if (!target) return null;
+                    return rows.find((row) => rowField(row) === target) || null;
+                };
+                const fourAreaDataRow = findRowByField('data');
+                const summedDataRow = findRowByField('sum');
+                const hasFourAreaDataWithSum = (() => {
+                    if (!fourAreaDataRow || !summedDataRow) return false;
+                    const dataType = rowType(fourAreaDataRow);
+                    const dataShape = rowShape(fourAreaDataRow);
+                    const sumType = rowType(summedDataRow);
+                    const sumShape = rowShape(summedDataRow);
+                    return dataType.includes('dict')
+                        && dataShape.length === 1
+                        && dataShape[0] === 4
+                        && (sumType.includes('ndarray') || sumType.includes('array'))
+                        && sumShape.length === 1
+                        && sumShape[0] > 0;
+                })();
                 const dataRow = pickBestData();
                 const dataShape = dataRow ? rowShape(dataRow) : [];
                 const scoreChannelRow = (row) => {
@@ -1799,7 +1819,7 @@ def custom_feature(sample, params):
                     return score;
                 };
 
-                out.data = dataRow ? rowField(dataRow) : '';
+                out.data = hasFourAreaDataWithSum ? 'sum' : (dataRow ? rowField(dataRow) : '');
                 out.fs = pickBestByScore(scoreFsRow);
                 out.ch_names = pickBestByScore(scoreChannelRow);
                 if (out.data || out.fs || out.ch_names) return out;

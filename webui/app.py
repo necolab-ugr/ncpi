@@ -4129,6 +4129,41 @@ def _pick_data_field_guess(candidates, patterns, source_obj):
 
     return best_item if best_score > 0 else ""
 
+
+def _dataframe_has_four_area_data_with_sum(source_obj):
+    if not isinstance(source_obj, pd.DataFrame):
+        return False
+    if "data" not in source_obj.columns or "sum" not in source_obj.columns:
+        return False
+    data_series = source_obj["data"].dropna()
+    if data_series.empty:
+        return False
+    sample = data_series.iloc[0]
+    if not isinstance(sample, MappingABC) or len(sample) != 4:
+        return False
+    sum_series = source_obj["sum"].dropna()
+    if sum_series.empty:
+        return False
+    try:
+        arr = np.asarray(sum_series.iloc[0], dtype=float).squeeze()
+    except (TypeError, ValueError):
+        return False
+    return arr.ndim == 1 and arr.size > 0
+
+
+def _dataframe_locator_selects_four_area_data(source_obj, locator):
+    if not isinstance(source_obj, pd.DataFrame):
+        return False
+    if str(locator or "").strip() != "data":
+        return False
+    if "data" not in source_obj.columns:
+        return False
+    series = source_obj["data"].dropna()
+    if series.empty:
+        return False
+    sample = series.iloc[0]
+    return isinstance(sample, MappingABC) and len(sample) == 4
+
 def _expand_mat_struct(value, prefix=""):
     """Recursivamente extrae campos de un mat_struct o cell array."""
     fields = []
@@ -5315,12 +5350,18 @@ def _validate_data_locator_against_dataframe_source(data_locator, source_obj, so
     if isinstance(source_obj, pd.DataFrame):
         columns = [str(col) for col in source_obj.columns]
         if locator not in columns:
-            preview = ", ".join(columns[:12])
-            if len(columns) > 12:
-                preview += ", ..."
+            resolved_series = _extract_dataframe_locator_series(source_obj, locator)
+            if resolved_series is None:
+                preview = ", ".join(columns[:12])
+                if len(columns) > 12:
+                    preview += ", ..."
+                raise ValueError(
+                    f"Data locator '{locator}' is not a dataframe column or nested dataframe field in {source_label}. "
+                    f"Available columns: {preview or '(none)'}."
+                )
+        if _dataframe_locator_selects_four_area_data(source_obj, locator):
             raise ValueError(
-                f"Data locator '{locator}' is not a dataframe column in {source_label}. "
-                f"Available columns: {preview or '(none)'}."
+                "Selected data is a 4-area dict; choose sum, area_sums.<area>, or another numeric field."
             )
         return
     if locator == "__self__":
@@ -5775,10 +5816,10 @@ def _resolve_data_candidate_for_channels(source_obj, data_locator):
 
 
 def _extract_dataframe_data_column(df, column_name):
-    if column_name not in df.columns:
+    series = _extract_dataframe_locator_series(df, column_name)
+    if series is None:
         raise ValueError(f"Data locator '{column_name}' is not a dataframe column.")
 
-    series = df[column_name]
     if series.empty:
         raise ValueError(f"Data column '{column_name}' is empty.")
 
@@ -5800,10 +5841,46 @@ def _extract_dataframe_data_column(df, column_name):
     return np.asarray(values, dtype=object)
 
 
-def _extract_dataframe_scalar_column(df, column_name):
-    if not column_name or column_name not in df.columns:
+def _extract_dataframe_locator_series(df, locator):
+    locator = str(locator or "").strip()
+    if not locator:
         return None
-    series = df[column_name].dropna()
+    if locator in df.columns:
+        return df[locator]
+    root, sep, rest = locator.partition(".")
+    root = root.strip()
+    if not sep or root not in df.columns or not rest.strip():
+        return None
+    parts = [part.strip() for part in rest.split(".") if part.strip()]
+    if not parts:
+        return None
+
+    def _resolve_row_value(value):
+        current = value
+        for part in parts:
+            if isinstance(current, MappingABC):
+                if part not in current:
+                    return None
+                current = current.get(part)
+                continue
+            if isinstance(current, (list, tuple, np.ndarray)) and part.isdigit():
+                arr = np.asarray(current)
+                idx = int(part)
+                if idx < 0 or idx >= arr.size:
+                    return None
+                current = arr.reshape(-1)[idx]
+                continue
+            return None
+        return current
+
+    return df[root].map(_resolve_row_value)
+
+
+def _extract_dataframe_scalar_column(df, column_name):
+    series = _extract_dataframe_locator_series(df, column_name)
+    if series is None:
+        return None
+    series = series.dropna()
     if series.empty:
         return None
     value = series.iloc[0]
@@ -5848,7 +5925,7 @@ def _build_mapping_source_from_dataframe(df, parse_cfg):
 
     data_value = _extract_dataframe_data_column(df, fields.data)
     mapped = {"data": data_value}
-    data_series = df[fields.data] if fields.data in df.columns else None
+    data_series = _extract_dataframe_locator_series(df, fields.data)
     has_rowwise_sequence_data = False
     if data_series is not None:
         for sample_value in data_series.tolist()[:64]:
@@ -5990,6 +6067,8 @@ def _describe_parser_source(path):
         fs_hint_hz, fs_hint_note = _extract_dataframe_fs_hint(source_obj)
         columns = [str(col) for col in source_obj.columns]
         defaults = _build_defaults(columns)
+        if _dataframe_has_four_area_data_with_sum(source_obj):
+            defaults["data"] = "sum"
         data_for_axes = None
         ch_for_axes = None
         try:
