@@ -2696,12 +2696,52 @@ def _resolve_fs_from_df(df):
     return float(series.iloc[0])
 
 
+def _coerce_four_area_feature_sample(value):
+    if not isinstance(value, MappingABC):
+        return None
+
+    required_areas = ("frontal", "parietal", "temporal", "occipital")
+    area_values = {}
+    for area_name in required_areas:
+        matched = [
+            area_value
+            for key, area_value in value.items()
+            if str(key).strip().lower() == area_name
+        ]
+        if not matched:
+            return None
+        area_values[area_name] = matched[0]
+
+    traces = []
+    for area_name in required_areas:
+        try:
+            arr = np.asarray(area_values[area_name], dtype=float).squeeze()
+        except (TypeError, ValueError):
+            return None
+        if arr.ndim == 1:
+            trace = arr
+        elif arr.ndim == 2 and 3 in arr.shape:
+            trace = arr[2, :] if arr.shape[0] == 3 else arr[:, 2]
+        else:
+            return None
+        if trace.size == 0:
+            return None
+        traces.append(np.asarray(trace, dtype=float))
+
+    min_len = min(trace.size for trace in traces)
+    if min_len <= 0:
+        return None
+    return np.sum(np.vstack([trace[:min_len] for trace in traces]), axis=0)
+
+
 def _extract_feature_samples(df):
     if "data" not in df.columns:
         raise ValueError("Input dataframe must contain a 'data' column from EphysDatasetParser.")
     samples = []
     for idx, value in enumerate(df["data"].tolist()):
-        arr = np.asarray(value).squeeze()
+        arr = _coerce_four_area_feature_sample(value)
+        if arr is None:
+            arr = np.asarray(value).squeeze()
         if arr.ndim == 0:
             arr = np.asarray([arr])
         if arr.ndim != 1:
