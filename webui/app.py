@@ -224,7 +224,7 @@ HAGEN_DEFAULTS = {
 CAVALLARI_DEFAULTS = {
     "tstop": 6000.0,
     "dt": 2 ** -4,
-    "local_num_threads": 1,
+    "local_num_threads": 64,
     "X": ["E", "I"],
     "N_X": [4000, 1000],
     "model": "iaf_bw_2003",
