@@ -142,8 +142,8 @@
             parserArrayAxesEnabled: false,
             parserAxisUserEdited: false,
             parserPrimaryFieldsUserEdited: false,
-            parserAxisChannels: '0',
-            parserAxisSamples: '1',
+            parserAxisChannels: '-1',
+            parserAxisSamples: '-1',
             parserAxisEpochs: '-1',
             parserAxisIds: '-1',
             parserEnableEpoching: false,
@@ -2589,8 +2589,8 @@ def custom_feature(sample, params):
                 this.parserLongValueCol = '';
                 this.parserArrayAxesEnabled = false;
                 this.parserAxisUserEdited = false;
-                this.parserAxisChannels = '0';
-                this.parserAxisSamples = '1';
+                this.parserAxisChannels = '-1';
+                this.parserAxisSamples = '-1';
                 this.parserAxisEpochs = '-1';
                 this.parserAxisIds = '-1';
                 this.parserEnableEpoching = false;
@@ -2732,7 +2732,7 @@ def custom_feature(sample, params):
                 this.parserLoading = true;
                 this.parserAxisUserEdited = false;
                 this.parserPrimaryFieldsUserEdited = false;
-                this.parserAxisSamples = '0';
+                this.parserAxisSamples = '-1';
                 this.parserAxisChannels = '-1';
                 this.parserAxisIds = '-1';
                 this.parserAxisEpochs = '-1';
@@ -2896,7 +2896,7 @@ def custom_feature(sample, params):
                 this.parserLoading = true;
                 this.parserAxisUserEdited = false;
                 this.parserPrimaryFieldsUserEdited = false;
-                this.parserAxisSamples = '0';
+                this.parserAxisSamples = '-1';
                 this.parserAxisChannels = '-1';
                 this.parserAxisIds = '-1';
                 this.parserAxisEpochs = '-1';
@@ -3479,7 +3479,7 @@ def custom_feature(sample, params):
                         this.parserSubjectIdLocator,
                     );
 
-                    const axisSamples = parseAxis(inferredAxes?.axis_samples ?? defaults.axis_samples, 0);
+                    const axisSamples = parseAxis(inferredAxes?.axis_samples ?? defaults.axis_samples, -1);
                     const axisChannels = parseAxis(inferredAxes?.axis_channels ?? defaults.axis_channels, -1);
                     const axisIds = parseAxis(inferredAxes?.axis_ids ?? defaults.axis_ids, -1);
                     const axisEpochs = parseAxis(inferredAxes?.axis_epochs ?? defaults.axis_epochs, -1);
@@ -3488,7 +3488,7 @@ def custom_feature(sample, params):
                     const shouldOverwriteAxes = !this.parserAxisUserEdited;
 
                     if (shouldOverwriteAxes) {
-                        this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
+                        this.parserAxisSamples = String(axisSamples);
                         this.parserAxisChannels = String(axisChannels);
                         this.parserAxisIds = String(axisIds);
                         this.parserAxisEpochs = String(axisEpochs);
@@ -3935,7 +3935,7 @@ def custom_feature(sample, params):
                         if (Number.isFinite(channelsAxis) && channelsAxis >= 0) {
                             axisItems.push(`            'channels': ${channelsAxis},`);
                         }
-                        const samplesAxis = Number.parseInt(String(this.parserAxisSamples || '1'), 10);
+                        const samplesAxis = Number.parseInt(String(this.parserAxisSamples || '-1'), 10);
                         if (Number.isFinite(samplesAxis) && samplesAxis >= 0) {
                             axisItems.push(`            'samples': ${samplesAxis},`);
                         }
@@ -4072,7 +4072,7 @@ def custom_feature(sample, params):
                     if (Number.isFinite(channelsAxis) && channelsAxis >= 0) {
                         axisItems.push(`            'channels': ${channelsAxis},`);
                     }
-                    const samplesAxis = Number.parseInt(String(this.parserAxisSamples || '1'), 10);
+                    const samplesAxis = Number.parseInt(String(this.parserAxisSamples || '-1'), 10);
                     if (Number.isFinite(samplesAxis) && samplesAxis >= 0) {
                         axisItems.push(`            'samples': ${samplesAxis},`);
                     }
@@ -5146,6 +5146,7 @@ def custom_feature(sample, params):
                                                     <select name="parser_axis_samples" x-model="parserAxisSamples"
                                                         @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
@@ -5460,6 +5461,7 @@ def custom_feature(sample, params):
                                                     <select name="parser_axis_samples" x-model="parserAxisSamples"
                                                         @change="markParserAxisUserEdited()"
                                                         class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
+                                                        <option value="-1">None</option>
                                                         <option value="0">Dim 0</option>
                                                         <option value="1">Dim 1</option>
                                                         <option value="2">Dim 2</option>
