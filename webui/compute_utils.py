@@ -2109,6 +2109,20 @@ def _extract_signal_and_meta_from_source(obj):
         "component_index": None,
     }
     dipole_probe_priority = ("CurrentDipoleMoment", "KernelApproxCurrentDipoleMoment")
+    four_area_order = ("frontal", "parietal", "temporal", "occipital")
+
+    def _complete_four_area_mapping(value):
+        if not isinstance(value, MappingABC):
+            return None
+        mapped = {}
+        for area_name in four_area_order:
+            for key, entry in value.items():
+                if str(key).strip().lower() == area_name:
+                    mapped[area_name] = entry
+                    break
+        if len(mapped) == len(four_area_order):
+            return mapped
+        return None
 
     def _first_non_empty_from_column(df, column_name):
         if column_name not in df.columns:
@@ -2199,6 +2213,10 @@ def _extract_signal_and_meta_from_source(obj):
                     if not matched.empty:
                         selected_row = matched.iloc[0]
                         break
+            if "area_sums" in obj.columns:
+                area_sums = _complete_four_area_mapping(selected_row.get("area_sums"))
+                if area_sums is not None:
+                    return area_sums, meta
             return selected_row.get(signal_column), meta
         if not obj.empty:
             return obj.iloc[0, 0], meta
@@ -2255,6 +2273,9 @@ def _extract_signal_and_meta_from_source(obj):
         meta["fs_hz"] = fs_hz
         meta["t_start_ms"] = t_start_ms
         meta["t_stop_ms"] = t_stop_ms
+        area_sums = _complete_four_area_mapping(obj.get("area_sums"))
+        if area_sums is not None:
+            return area_sums, meta
         if "sum" in obj:
             return obj.get("sum"), meta
         if "data" in obj:

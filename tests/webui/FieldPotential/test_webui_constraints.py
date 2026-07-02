@@ -270,6 +270,43 @@ def test_meeg_per_sensor_independent_mode_constraints(
     assert "not available for the four-area model" in str(four_area_failed["error"])
 
 
+def test_meeg_four_area_uses_area_sums_when_sum_is_collapsed(
+    tmp_path,
+    compute_utils_module,
+    fake_field_potential_backend,
+):
+    area_sums = {
+        "frontal": np.linspace(0.1, 0.5, 16),
+        "parietal": np.linspace(0.2, 0.6, 16),
+        "temporal": np.linspace(0.3, 0.7, 16),
+        "occipital": np.linspace(0.4, 0.8, 16),
+    }
+    cdm_path = _write_pickle(
+        tmp_path / "cdm.pkl",
+        [
+            {
+                "sum": sum(area_sums.values()),
+                "area_sums": area_sums,
+                "raw_signals": {f"E({area}):E({area})": signal for area, signal in area_sums.items()},
+                "metadata": {"dt_ms": 1.0, "component_axis": "z"},
+            }
+        ],
+    )
+
+    status = _run_meeg_compute(
+        compute_utils_module,
+        "meeg_four_area_area_sums",
+        cdm_path,
+        meeg_model="FourSphereVolumeConductor",
+        meeg_simulation_model="four_area",
+        meeg_sensor_locations="",
+    )
+
+    finished = _assert_finished(status, "meeg_four_area_area_sums")
+    assert finished["status"] == "finished"
+    assert "Detected four-area CDM dictionary" in finished["output"]
+
+
 @pytest.mark.parametrize(
     ("model_name", "expected_sensor"),
     (
