@@ -3343,7 +3343,9 @@ def custom_feature(sample, params):
                 const preferredCh = channelSourceCandidates.includes(preferredChRaw) ? preferredChRaw : '';
                 const chLocatorValid = currentChLocator && channelSourceCandidates.includes(currentChLocator);
                 if (!chLocatorValid) {
-                    this.parserChNamesLocator = preferredCh;
+                    //this.parserChNamesLocator = preferredCh;
+                    this.parserChNamesLocator = '__autocomplete__';
+                    console.log(chLocatorValid, preferredCh, preferredChRaw, currentChLocator, channelSourceCandidates, 'chLocatorValid, preferredCh, preferredChRaw, currentChLocator, channelSourceCandidates');
                     if (!this.parserPrimaryFieldsUserEdited) {
                         if (String(this.parserChNamesLocator || '').trim()) {
                             this.parserChNamesSource = this.parserChNamesLocator;
