@@ -1226,6 +1226,7 @@ def custom_feature(sample, params):
             },
             resolvedDataSourceKind() {
                 if (this.selectedPipelinePath) return 'pipeline';
+                if (this.dataSourceKind === 'new-empirical') return 'new-empirical';
                 if (this.dataSourceKind === 'new-simulation' && (this.simulationFileCount > 0 || this.isUploaded('data-file'))) return 'new-simulation';
                 if (this.simulationFileCount > 0) return 'new-simulation';
                 if (this.isUploaded('data-file')) return 'new-simulation';
@@ -2320,6 +2321,17 @@ def custom_feature(sample, params):
                     if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return 'Epoching is enabled. Set both epoch length and epoch step.';
                     return '';
                 }
+                if (kind === 'new-empirical') {
+                    if (this.empiricalSourceMode === 'server-path') {
+                        const hasEmpiricalPath = String(this.empiricalFolderPath || '').trim().length > 0 && this.empiricalFileCount > 0;
+                        if (!hasEmpiricalPath) return 'Load an empirical data folder in New data before computing features.';
+                    }
+                    if (this.empiricalSourceMode === 'upload' && !this.isUploaded('empirical-files')) {
+                        return 'Load empirical data files in New data before computing features.';
+                    }
+                    if (this.parserEnableEpoching && (!this.parserEpochLengthS || !this.parserEpochStepS)) return 'Epoching is enabled. Set both epoch length and epoch step.';
+                    return '';
+                }
                 return 'Data source configuration is incomplete.';
             },
             optionalFiniteNumber(value) {
@@ -2904,7 +2916,24 @@ def custom_feature(sample, params):
                 const defaults = payload?.defaults || {};
                 const sampleTableGuesses = this.inferPrimaryFieldsFromSampleTable(payload);
                 const dataCandidates = this.parserDataLocatorCandidates();
-                const fieldDetails = Array.isArray(payload?.field_details) ? payload.field_details : [];
+                const collectFieldDetails = (sourcePayload) => {
+                    const rows = [];
+                    const appendRows = (items) => {
+                        if (!Array.isArray(items)) return;
+                        for (const row of items) rows.push(row);
+                    };
+                    appendRows(sourcePayload?.field_details);
+                    const profiles = Array.isArray(sourcePayload?.extension_profiles) ? sourcePayload.extension_profiles : [];
+                    for (const profile of profiles) appendRows(profile?.field_details);
+                    const folderProfiles = Array.isArray(sourcePayload?.folder_profiles) ? sourcePayload.folder_profiles : [];
+                    for (const folderProfile of folderProfiles) {
+                        appendRows(folderProfile?.field_details);
+                        const nestedProfiles = Array.isArray(folderProfile?.extension_profiles) ? folderProfile.extension_profiles : [];
+                        for (const profile of nestedProfiles) appendRows(profile?.field_details);
+                    }
+                    return rows;
+                };
+                const fieldDetails = collectFieldDetails(payload);
                 const candidateSet = new Set(
                     (Array.isArray(payload?.candidate_fields) ? payload.candidate_fields : [])
                         .map((field) => String(field || '').trim())
@@ -2981,6 +3010,29 @@ def custom_feature(sample, params):
                     if (!key) return null;
                     return fieldDetails.find((row) => String(row?.field || '').trim() === key) || null;
                 };
+                const parseShapeValue = (shapeValue) => {
+                    if (Array.isArray(shapeValue)) {
+                        return shapeValue
+                            .map((v) => Number.parseInt(String(v), 10))
+                            .filter((v) => Number.isFinite(v) && v > 0);
+                    }
+                    const text = String(shapeValue || '');
+                    const match = text.match(/\[([0-9,\s]+)\]/);
+                    if (!match) return [];
+                    return match[1]
+                        .split(',')
+                        .map((item) => Number.parseInt(item.trim(), 10))
+                        .filter((item) => Number.isFinite(item) && item > 0);
+                };
+                const shapeForField = (fieldName) => {
+                    const detail = findFieldDetail(fieldName);
+                    const shape = parseShapeValue(detail?.shape);
+                    if (shape.length > 0) return shape;
+                    const detailText = String(detail?.detail || '');
+                    const effectiveMatch = detailText.match(/effective\s+shape\s*\[([0-9,\s]+)\]/i);
+                    if (effectiveMatch) return parseShapeValue(`[${effectiveMatch[1]}]`);
+                    return parseShapeValue(detailText);
+                };
                 const inferCountFromShape = (shapeValue) => {
                     if (!Array.isArray(shapeValue) || shapeValue.length === 0) return null;
                     const dims = shapeValue
@@ -2993,8 +3045,7 @@ def custom_feature(sample, params):
                     return Math.max(...dims);
                 };
                 const inferAxesFromShapes = (dataLocator, chLocator, idLocator) => {
-                    const dataDetail = findFieldDetail(dataLocator);
-                    const dataShape = Array.isArray(dataDetail?.shape) ? dataDetail.shape : null;
+                    const dataShape = shapeForField(dataLocator);
                     if (!dataShape || dataShape.length < 2) return null;
 
                     const dims = dataShape
@@ -3043,14 +3094,87 @@ def custom_feature(sample, params):
                         axis_epochs: axisEpochs,
                     };
                 };
-                const defaultData = String(sampleTableGuesses.data || '').trim() || String(defaults.data || '').trim();
-                const defaultDataAllowed = defaultData && dataCandidates.includes(defaultData);
+                const inferEmpiricalAxesFromShape = (dataLocator) => {
+                    let dataShape = shapeForField(dataLocator);
+                    if (dataShape.length < 2) {
+                        const fallbackField = bestEmpiricalArrayField();
+                        dataShape = shapeForField(fallbackField);
+                    }
+                    const dims = dataShape
+                        .map((size, idx) => ({ idx, size: Number.parseInt(String(size), 10) }))
+                        .filter((item) => Number.isFinite(item.size) && item.size > 0);
+                    if (dims.length < 2) return null;
+
+                    const sortedBySize = [...dims].sort((a, b) => {
+                        if (b.size !== a.size) return b.size - a.size;
+                        return a.idx - b.idx;
+                    });
+                    const axisSamples = sortedBySize[0].idx;
+                    const remaining = dims.filter((item) => item.idx !== axisSamples);
+                    const smallestRemaining = [...remaining].sort((a, b) => {
+                        if (a.size !== b.size) return a.size - b.size;
+                        return a.idx - b.idx;
+                    });
+
+                    let axisChannels = -1;
+                    let axisEpochs = -1;
+                    if (remaining.length === 1) {
+                        axisChannels = remaining[0].idx;
+                    } else if (remaining.length >= 2) {
+                        axisChannels = smallestRemaining[0].idx;
+                        const epochCandidates = remaining
+                            .filter((item) => item.idx !== axisChannels)
+                            .sort((a, b) => a.idx - b.idx);
+                        axisEpochs = epochCandidates[0]?.idx ?? -1;
+                    }
+
+                    return {
+                        axis_samples: axisSamples,
+                        axis_channels: axisChannels,
+                        axis_ids: -1,
+                        axis_epochs: axisEpochs,
+                    };
+                };
+                const bestEmpiricalArrayField = () => {
+                    let bestField = '';
+                    let bestScore = -1;
+                    for (let index = 0; index < fieldDetails.length; index += 1) {
+                        const row = fieldDetails[index] || {};
+                        const field = String(row?.field || '').trim();
+                        if (!field || !candidateSet.has(field) || this.parserIsVirtualField(field)) continue;
+                        const shape = parseShapeValue(row?.shape);
+                        if (shape.length < 2) continue;
+                        const maxDim = Math.max(...shape);
+                        const minDim = Math.min(...shape);
+                        const type = String(row?.python_type || '').toLowerCase();
+                        let score = maxDim;
+                        if (type.includes('ndarray') || type.includes('array')) score += 1000000;
+                        if (maxDim >= 8 * Math.max(1, minDim)) score += 100000;
+                        score -= index;
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestField = field;
+                        }
+                    }
+                    return bestField;
+                };
+                const empiricalArrayData = bestEmpiricalArrayField();
+                const sampleTableData = String(sampleTableGuesses.data || '').trim();
+                const backendDefaultData = String(defaults.data || '').trim();
+                const sampleTableDataAllowed = sampleTableData && dataCandidates.includes(sampleTableData);
+                const defaultDataAllowed = backendDefaultData && dataCandidates.includes(backendDefaultData);
                 const detailDataAllowed = detailData && dataCandidates.includes(detailData);
-                const preferredDataLocator = (defaultDataAllowed ? defaultData : '') || (detailDataAllowed ? detailData : '') || autoData || (dataCandidates[0] || '');
+                const empiricalArrayDataAllowed = empiricalArrayData && dataCandidates.includes(empiricalArrayData);
+                const preferredDataLocator = this.resolvedDataSourceKind() === 'new-empirical'
+                    ? ((empiricalArrayDataAllowed ? empiricalArrayData : '') || (sampleTableDataAllowed ? sampleTableData : '') || (detailDataAllowed ? detailData : '') || autoData || (defaultDataAllowed ? backendDefaultData : '') || (dataCandidates[0] || ''))
+                    : ((sampleTableDataAllowed ? sampleTableData : '') || (defaultDataAllowed ? backendDefaultData : '') || (detailDataAllowed ? detailData : '') || autoData || (dataCandidates[0] || ''));
                 const currentDataLocator = String(this.parserDataLocator || '').trim();
                 const dataLocatorValid = currentDataLocator && dataCandidates.includes(currentDataLocator);
+                const currentDataShape = shapeForField(currentDataLocator);
                 if (!dataLocatorValid) {
                     // Current value is from a previous folder — reset to automatic
+                    this.parserDataLocator = preferredDataLocator;
+                } else if (this.resolvedDataSourceKind() === 'new-empirical' && currentDataShape.length < 2 && preferredDataLocator) {
                     this.parserDataLocator = preferredDataLocator;
                 } else if (this.isNewDataParserFlow()) {
                     if (!this.parserPrimaryFieldsUserEdited) {
@@ -3288,10 +3412,13 @@ def custom_feature(sample, params):
                     }
                 }
                 const kind = this.resolvedDataSourceKind();
+                if (kind === 'new-empirical') {
+                    this.parserArrayAxesEnabled = true;
+                } else if (kind === 'new-simulation') {
+                    this.parserArrayAxesEnabled = false;
+                }
                 if (kind === 'new-simulation' || kind === 'new-empirical') {
-                    this.parserArrayAxesEnabled = true;                    
-                    // Calculate the inferred axes for the current quick scan data
-                    const inferredAxes = inferAxesFromShapes(
+                    const inferredAxes = inferEmpiricalAxesFromShape(this.parserDataLocator) || inferAxesFromShapes(
                         this.parserDataLocator,
                         this.parserChNamesLocator,
                         this.parserSubjectIdLocator,
@@ -3302,17 +3429,8 @@ def custom_feature(sample, params):
                     const axisIds = parseAxis(inferredAxes?.axis_ids ?? defaults.axis_ids, -1);
                     const axisEpochs = parseAxis(inferredAxes?.axis_epochs ?? defaults.axis_epochs, -1);
 
-                    // Fetch the dimensions (shape length) of the newly selected data
-                    const dataDetail = findFieldDetail(this.parserDataLocator);
-                    const ndim = Array.isArray(dataDetail?.shape) ? dataDetail.shape.length : 0;
-
-                    // Determine if current axes are strictly out of bounds for the new data
-                    // If a user selected Axis 3 in the previous folder, but new data only has 2 dimensions, it is invalid.
-                    // const isAxisSamplesInvalid = ndim > 0 && Number(this.parserAxisSamples) >= ndim;
-                    // const isAxisChannelsInvalid = ndim > 0 && Number(this.parserAxisChannels) >= ndim;
-                    
-                    // Overwrite if the user hasn't edited them
-                    const shouldOverwriteAxes = !this.parserAxisUserEdited;
+                    const currentSampleAxis = parseAxis(this.parserAxisSamples, -1);
+                    const shouldOverwriteAxes = !this.parserAxisUserEdited || currentSampleAxis !== axisSamples;
 
                     if (shouldOverwriteAxes) {
                         this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
@@ -4327,7 +4445,7 @@ def custom_feature(sample, params):
                     <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
                     <input type="hidden" name="parser_deep_scan_status" :value="parserDeepScanStatus">
                     <input type="hidden" name="parser_array_axes_enabled"
-                        :value="(resolvedDataSourceKind() === 'new-simulation' || resolvedDataSourceKind() === 'new-empirical') ? '1' : (parserArrayAxesEnabled ? '1' : '0')">
+                        :value="resolvedDataSourceKind() === 'new-empirical' ? '1' : (parserArrayAxesEnabled ? '1' : '0')">
                     <input type="hidden" name="parser_filename_format" :value="String(parserFilenameFormat || '').trim()">
                 
 

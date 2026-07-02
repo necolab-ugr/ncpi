@@ -5234,11 +5234,21 @@ def _describe_nwb_parser_source(path):
                 "axis_epochs": -1,
                 "axis_confidence": "medium",
             }
+        axis_samples = max(range(len(shape_tuple)), key=lambda idx: (shape_tuple[idx], -idx))
+        remaining = [idx for idx in range(len(shape_tuple)) if idx != axis_samples]
+        axis_channels = -1
+        axis_epochs = -1
+        if len(remaining) == 1:
+            axis_channels = remaining[0]
+        elif remaining:
+            axis_channels = min(remaining, key=lambda idx: (shape_tuple[idx], idx))
+            epoch_candidates = [idx for idx in remaining if idx != axis_channels]
+            axis_epochs = min(epoch_candidates) if epoch_candidates else -1
         return {
-            "axis_samples": 0,
-            "axis_channels": 1,
+            "axis_samples": int(axis_samples),
+            "axis_channels": int(axis_channels),
             "axis_ids": -1,
-            "axis_epochs": -1,
+            "axis_epochs": int(axis_epochs),
             "axis_confidence": "high",
         }
 
@@ -5554,6 +5564,12 @@ def _infer_axis_defaults_from_values(data_value, ch_names_value=None, ids_value=
         channel_matches = [idx for idx, dim in enumerate(shape) if dim == ch_count and idx != axis_samples]
         if channel_matches:
             axis_channels = min(channel_matches)
+    if axis_channels < 0:
+        remaining_for_channels = [idx for idx in range(ndim) if idx != axis_samples]
+        if len(remaining_for_channels) == 1:
+            axis_channels = remaining_for_channels[0]
+        elif remaining_for_channels:
+            axis_channels = min(remaining_for_channels, key=lambda idx: (shape[idx], idx))
 
     axis_ids = -1
     ids_count = _safe_channel_name_count(ids_value)
