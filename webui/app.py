@@ -224,7 +224,7 @@ HAGEN_DEFAULTS = {
 CAVALLARI_DEFAULTS = {
     "tstop": 6000.0,
     "dt": 2 ** -4,
-    "local_num_threads": 64,
+    "local_num_threads": 1,
     "X": ["E", "I"],
     "N_X": [4000, 1000],
     "model": "iaf_bw_2003",
@@ -6549,7 +6549,10 @@ def _build_parse_config_from_form(form):
         recording_type_value = recording_type_locator if recording_type_locator else recording_type
 
     # Array axis mapping
-    array_axes_enabled = str(form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
+    array_axes_enabled = (
+        data_source_kind != "pipeline"
+        and str(form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
+    )
     array_axes = None
     if array_axes_enabled:
         try:
@@ -17088,17 +17091,11 @@ def start_computation_redirect(computation_type):
                     return redirect(request.referrer or url_for('features_methods'))
             elif ch_names_source == "__autocomplete__":
                 try:
-                    array_axes_enabled = str(request.form.get("parser_array_axes_enabled", "")).lower() in {"1", "on", "true", "yes"}
-                    if array_axes_enabled:
-                        axis_channels_value = int(request.form.get("parser_axis_channels") or 0)
-                        if axis_channels_value < -1:
-                            raise ValueError("Channels axis must be greater than or equal to -1 (None).")
-                    else:
-                        _parse_nonnegative_int(
-                            request.form.get("parser_ch_names_autocomplete_axis"),
-                            default=0,
-                            field_name="Autocomplete channel axis",
-                        )
+                    _parse_nonnegative_int(
+                        request.form.get("parser_ch_names_autocomplete_axis"),
+                        default=0,
+                        field_name="Autocomplete channel axis",
+                    )
                 except Exception as exc:
                     flash(str(exc), 'error')
                     return redirect(request.referrer or url_for('features_methods'))

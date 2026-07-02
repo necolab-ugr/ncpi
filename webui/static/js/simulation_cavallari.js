@@ -53,7 +53,7 @@ document.addEventListener('DOMContentLoaded', function() {
     const ncpiPresets = {
         tstop: 6000.0,
         dt: 0.0625,
-        local_num_threads: 64,
+        local_num_threads: 1,
         X: "['E', 'I']",
         N_X: "[4000, 1000]",
         model: "iaf_bw_2003",

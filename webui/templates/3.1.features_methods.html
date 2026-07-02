@@ -3877,6 +3877,7 @@ def custom_feature(sample, params):
                 const epochStep = this.parserEpochStepS || '5.0';
                 const segmentT0 = String(this.parserSegmentT0S || '').trim();
                 const segmentT1 = String(this.parserSegmentT1S || '').trim();
+                const includeArrayAxes = kind !== 'pipeline' && this.parserArrayAxesEnabled;
                 const toPyString = (value) => "'" + String(value || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
                 const chSource = String(this.parserChNamesSource || '').trim();
                 let chNamesExpr = 'None';
@@ -3889,11 +3890,11 @@ def custom_feature(sample, params):
                         ? `[${sensors.map((s) => toPyString(s)).join(', ')}]`
                         : '[]';
                 } else if (chSource === '__autocomplete__') {
-                    const axis = this.parserArrayAxesEnabled
+                    const axis = includeArrayAxes
                         ? Number.parseInt(String(this.parserAxisChannels || '0'), 10)
                         : 0;
                     const locatorExpr = dataLocator === '__self__' ? 'data' : `data.${dataLocator}`;
-                    if (this.parserArrayAxesEnabled && Number.isFinite(axis) && axis < 0) {
+                    if (includeArrayAxes && Number.isFinite(axis) && axis < 0) {
                         chNamesExpr = `['ch0']`;
                     } else {
                         const axisValue = Number.isFinite(axis) && axis >= 0 ? axis : 0;
@@ -3928,7 +3929,7 @@ def custom_feature(sample, params):
                         `        fs=${fsValue},`,
                         `        ch_names=${chNamesExpr},`,
                     ];
-                    if (this.parserArrayAxesEnabled) {
+                    if (includeArrayAxes) {
                         const axisItems = [];
                         const channelsAxis = Number.parseInt(String(this.parserAxisChannels || '-1'), 10);
                         if (Number.isFinite(channelsAxis) && channelsAxis >= 0) {
@@ -4065,7 +4066,7 @@ def custom_feature(sample, params):
                     `        fs=${fsValue},`,
                     `        ch_names=${chNamesExpr},`,
                 ];
-                if (this.parserArrayAxesEnabled) {
+                if (includeArrayAxes) {
                     const axisItems = [];
                     const channelsAxis = Number.parseInt(String(this.parserAxisChannels || '-1'), 10);
                     if (Number.isFinite(channelsAxis) && channelsAxis >= 0) {
@@ -4500,7 +4501,7 @@ def custom_feature(sample, params):
                     <input type="hidden" name="simulation_data_file_selections" :value="JSON.stringify(simulationDataFileSelections || {})">
                     <input type="hidden" name="parser_deep_scan_status" :value="parserDeepScanStatus">
                     <input type="hidden" name="parser_array_axes_enabled"
-                        :value="resolvedDataSourceKind() === 'new-empirical' ? '1' : (parserArrayAxesEnabled ? '1' : '0')">
+                        :value="resolvedDataSourceKind() === 'pipeline' ? '0' : (resolvedDataSourceKind() === 'new-empirical' ? '1' : (parserArrayAxesEnabled ? '1' : '0'))">
                     <input type="hidden" name="parser_filename_format" :value="String(parserFilenameFormat || '').trim()">
                 
 
@@ -5122,14 +5123,9 @@ def custom_feature(sample, params):
                                         </label>
                                     </div>
 
-                                    <!-- Array dimension mapping (pipeline/simulation) -->
-                                    <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
-                                        <label x-show="resolvedDataSourceKind() === 'pipeline'" class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-300">
-                                            <input type="checkbox" x-model="parserArrayAxesEnabled" data-param="parser_array_axes_enabled"
-                                                class="rounded border-gray-300 text-primary focus:ring-primary/50">
-                                            Specify array dimension mapping
-                                        </label>
-                                        <div x-show="parserArrayAxesEnabled || resolvedDataSourceKind() === 'new-simulation'" class="space-y-2">
+                                    <!-- Array dimension mapping (external simulation data only) -->
+                                    <div x-show="resolvedDataSourceKind() === 'new-simulation'" class="rounded-lg border border-gray-200 dark:border-[#323b67] p-3 space-y-3">
+                                        <div class="space-y-2">
                                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                                 <label class="text-sm">
                                                     <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Channels axis</span>
