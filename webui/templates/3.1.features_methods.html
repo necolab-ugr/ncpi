@@ -3485,7 +3485,7 @@ def custom_feature(sample, params):
                     const axisEpochs = parseAxis(inferredAxes?.axis_epochs ?? defaults.axis_epochs, -1);
 
                     const currentSampleAxis = parseAxis(this.parserAxisSamples, -1);
-                    const shouldOverwriteAxes = !this.parserAxisUserEdited || currentSampleAxis !== axisSamples;
+                    const shouldOverwriteAxes = !this.parserAxisUserEdited;
 
                     if (shouldOverwriteAxes) {
                         this.parserAxisSamples = String(axisSamples < 0 ? 0 : axisSamples);
