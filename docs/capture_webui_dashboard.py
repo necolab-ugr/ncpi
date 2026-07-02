@@ -155,9 +155,36 @@ def capture_dashboard_svg(
                     padding-top: 2.5rem !important;
                     padding-bottom: 2.5rem !important;
                 }
+                main p.max-w-2xl {
+                    max-width: 72rem !important;
+                    font-size: 2.25rem !important;
+                    line-height: 1.3 !important;
+                }
+                main a[href] div:last-child h2 {
+                    font-size: 1.65rem !important;
+                    line-height: 1.25 !important;
+                }
+                main a[href] div:last-child p {
+                    font-size: 1.18rem !important;
+                    line-height: 1.45 !important;
+                }
+                .pipeline-node + div span[class*="text-\\[13px\\]"],
+                .pipeline-node + div span[class*="text-\\[10px\\]"],
+                .pipeline-node + div div[class*="text-\\[10px\\]"],
+                .pipeline-node + div button[class*="text-\\[10px\\]"] {
+                    font-size: 1.25rem !important;
+                    line-height: 1.3 !important;
+                }
             """
         )
         page.locator("main").wait_for(state="visible", timeout=30_000)
+        page.locator("p", has_text="Select a module to begin").first.evaluate(
+            """(el) => {
+                el.style.setProperty("max-width", "72rem", "important");
+                el.style.setProperty("font-size", "2.25rem", "important");
+                el.style.setProperty("line-height", "1.3", "important");
+            }"""
+        )
         page.evaluate("() => window.scrollTo(0, 0)")
         page.wait_for_timeout(500)
 

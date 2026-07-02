@@ -1,21 +1,25 @@
 ---
 title: >
-  `ncpi`: An integrated forward and inverse modelling toolkit for inferring
+  `ncpi`: An integrated forward and inverse modeling toolkit for inferring
   neural circuit parameters from electrophysiological data
 tags:
   - Python
   - computational neuroscience
   - neural simulation
-  - forward modelling of field potentials
-  - biomarker extraction
+  - forward modeling of field potentials
+  - biomarker
+  - feature extraction
+  - inverse modeling
   - neural circuit parameter inference
   - electrophysiology
+  - electrophysiological neuroimaging
   - LFP
   - ECoG
   - MEG
   - EEG
 authors:
   - name: Laura Torres Soria
+    orcid: 0009-0005-7827-3601 
     equal-contrib: true
     affiliation: 1
   - name: Alejandro Orozco Valero
@@ -54,79 +58,78 @@ bibliography: paper.bib
 Modern computational neuroscience now provides efficient tools for multiscale
 simulation of neural activity and increasingly powerful inference approaches for
 connecting these models to empirical data. Despite these advances, the
-mechanistic relationship between recorded
-population-level brain signals and the neural processes that generate them
-remains incompletely understood. In particular, it is still unclear which
-features of neurophysiological population dynamics, often interpreted as
-candidate biomarkers, reliably reflect specific properties of the underlying
-neural circuit configuration. Addressing this gap is a central challenge in
-both basic neuroscience and clinical neurophysiology, where a more mechanistic
-interpretation of neural signals could improve the identification,
-stratification, and monitoring of neurological and psychiatric conditions.
+mechanistic relationship between recorded population-level brain signals and the
+neural processes that generate them remains incompletely understood. Addressing
+this gap is a central challenge in both basic neuroscience and clinical
+neurophysiology, where a more mechanistic interpretation of neural signals could
+improve the identification, stratification, and monitoring of neurological and
+psychiatric conditions.
 
-Simulators and inverse-modelling libraries provide many of the individual
+Simulators and inverse-modeling libraries provide many of the individual
 components required to interpret brain signals in terms of their underlying
-neural mechanisms. However, combining these components into a complete
-workflow typically requires substantial expertise in neural simulation,
-forward modelling, biomarker extraction, machine learning, data-format
-conversion, and statistical analysis. `ncpi` is an open-source Python toolbox
-designed to make this process more accessible by bringing these steps together
-within a unified and reproducible workflow.
+neural mechanisms. However, combining these components into a complete workflow
+typically requires substantial expertise in neural simulation, forward modeling,
+biomarker discovery, machine learning, data-format conversion, and statistical
+analysis. `ncpi` is an open-source Python toolbox designed to make this process
+more accessible to both computational specialists and clinical or neuroscience
+researchers by bringing these steps together within a unified and reproducible
+workflow.
 
 The initial presentation of `ncpi` introduced the core software platform and
-demonstrated its use for model-driven interpretation of mouse LFP data and human
-EEG recordings [@OrozcoValero:2025]. Since then, the package has evolved
-substantially through improvements to the core API and the addition of two major
-capabilities: heterogeneous empirical dataset handling and a graphical web
-interface for configuring and running complete workflows. The dataset-handling
-functionality allows `ncpi` to load and parse electrophysiological data from
-different recording modalities, file formats, and experimental structures into a
-common tabular representation, enabling downstream analyses to be reused without
+demonstrated its use for model-driven interpretation of mouse local field
+potentials (LFP) data and human electroencephalography (EEG) recordings
+[@OrozcoValero:2025]. Since then, the package has evolved substantially through
+improvements to the core API and the addition of two major capabilities:
+heterogeneous empirical dataset handling and a graphical web interface for
+configuring and running complete workflows. The dataset-handling functionality
+allows `ncpi` to load and parse electrophysiological data from different
+recording modalities, file formats, and experimental structures into a common
+tabular representation, enabling downstream analyses to be reused without
 rewriting modality- or dataset-specific code. In this way, `ncpi` supports both
 synthetic data generation and the analysis of user-provided electrophysiology
-datasets, including multiscale recordings such as local field potentials (LFP),
-electrocorticography (ECoG), magnetoencephalography (MEG), and
-electroencephalography (EEG). The graphical interface extends this functionality
-by providing an accessible entry point for configuring and running simulation and
-empirical-data workflows, while the underlying Python API remains available for
-expert users who require full scriptable control. The Python components of
-`ncpi` are operating-system-independent, can run locally or on a server, and are
-supported by documentation including video-based tutorials and interactive Jupyter 
-Notebooks.
+datasets, including recordings at different spatial scales such as LFP,
+electrocorticography (ECoG), magnetoencephalography (MEG), and EEG. The graphical
+interface provides a user-friendly entry point for configuring and running
+simulation and empirical-data workflows, while the underlying Python API remains
+available for expert users who require full scriptable control. The Python
+components of `ncpi` are operating-system-independent (although some
+dependencies, such as `NEST`, require Windows users to install WSL), can run
+locally or on a server, and are supported by documentation including video-based
+tutorials and interactive Jupyter Notebooks.
 
 # Statement of need
 
 A full mechanistic interpretation of electrophysiological recordings requires
-modelling both the forward and inverse pathways: how activity generated by
-neural microcircuits gives rise to measurable brain signals, and how those
-signals can be used to infer properties of the underlying neural processes. In
-practice, this requires integrating multiple steps into a complex workflow
-spanning neural simulation, time-series analysis, machine learning, and
-statistical analysis. A typical workflow may involve simulating spiking or
-multicompartmental neural networks with simulators such as `NEST`
-[@Gewaltig:2007] or `NEURON` [@Carnevale:2006], estimating extracellular
-potentials with tools such as `LFPy` and `LFPykernels` [@Hagen:2018;
-@Hagen:2022], computing macroscale signals such as EEG using forward head models
-[@Huang:2016], extracting neurophysiologically relevant time-series features
-with packages such as `catch22`, `hctsa`, or `specparam` [@Lubba:2019;
-@Fulcher:2017; @Donoghue:2020], and fitting inverse models using tools such as
-`scikit-learn` or `sbi` (for simulation-based inference) [@Pedregosa:2011;
-@Boelts:2025]. These tools are individually valuable, but they are not designed
-as a single interoperable workflow. As a result, researchers often face a steep
-learning curve, fragmented installation procedures, custom data-conversion
-requirements, and the need for substantial domain knowledge before they can run
-an end-to-end analysis.
+modeling both the forward and inverse pathways: how activity generated by neural
+microcircuits gives rise to measurable brain signals, and how those signals can
+be used to infer properties of the underlying neural processes. In practice, this
+requires integrating multiple steps into a complex workflow spanning neural
+simulation, time-series analysis, machine learning, and statistical analysis. A
+typical workflow may involve simulating spiking or multicompartmental neural
+networks with simulators such as `NEST` [@Eppler:2009] or `NEURON` [@Hines:1997],
+estimating extracellular potentials with tools such as `LFPy` and `LFPykernels`
+[@Hagen:2018; @Hagen:2022], computing macroscale signals such as EEG using
+forward head models [@Huang:2016], extracting neurophysiologically relevant
+time-series features with packages such as `catch22`, `hctsa`, or `specparam`
+[@Lubba:2019; @Fulcher:2017; @Donoghue:2020], and fitting inverse models using
+tools such as `scikit-learn` or the simulation-based inference (`sbi`) toolbox
+[@Tejero-Cantero2020]. These tools are individually valuable, but they are not
+designed as a single interoperable workflow. As a result, researchers often face
+a steep learning curve, fragmented installation procedures, custom
+data-conversion requirements, and the need for substantial domain knowledge
+before they can run an end-to-end analysis.
 
 `ncpi` addresses this gap by providing a unified software layer for forward
 simulation and inverse parameter inference from electrophysiological signals. It
 connects single-cell neural network simulation, biophysical field-potential
-computation, neurophysiological feature extraction, inverse modelling,
-empirical-data parsing, and statistical analysis within a consistent Python API
-and an accessible graphical interface \autoref{fig:webui}. By integrating these
-components into a single workflow, `ncpi` lowers the technical barrier for
-researchers interested in testing whether candidate electrophysiological
-biomarkers reflect specific neural circuit parameters, while preserving access
-to established backend libraries for users who require methodological control.
+computation, extraction of neurophysiologically relevant features, inverse
+modeling, empirical-data parsing, and statistical analysis within a consistent
+Python API and an accessible graphical interface \autoref{fig:webui}. By
+integrating these components into a single workflow, `ncpi` lowers the technical
+barrier for researchers interested in testing whether candidate
+electrophysiological biomarkers reflect specific neural circuit parameters, while
+preserving access to established backend libraries for users who require
+methodological control.
 
 ![Overview of the graphical interface dashboard, showing the different modules
 that can be configured.\label{fig:webui}](../img/webui.svg){ width=90% }
@@ -142,22 +145,22 @@ states, or disease stages.
 
 # State of the field
 
-A mature ecosystem of computational tools already supports many of the
-individual steps required for this type of mechanistic modelling workflow.
-`NEST` provides efficient simulation of large spiking networks
-[@Gewaltig:2007], while `NEURON` supports detailed multicompartment neuron
-modelling [@Carnevale:2006]. `LFPy` and `LFPykernels` enable biophysical forward
-modelling of extracellular signals [@Hagen:2018; @Hagen:2022]. Feature libraries
-such as `hctsa` and `catch22` provide broad time-series phenotyping
-[@Fulcher:2017; @Lubba:2019], while `specparam` supports parametrization of
-periodic and aperiodic components in neural power spectra [@Donoghue:2020].
-`scikit-learn` and `sbi` provide mature machine-learning and probabilistic
-inference tools [@Pedregosa:2011; @Boelts:2025].
+A mature ecosystem of computational tools already supports many of the individual
+steps required for this type of mechanistic modeling workflow. `NEST` provides
+efficient simulation of large spiking networks [@Eppler:2009], while `NEURON`
+supports detailed multicompartment neuron modeling [@Hines:1997]. `LFPy` and
+`LFPykernels` enable biophysical forward modeling of extracellular signals
+[@Hagen:2018; @Hagen:2022]. Feature libraries such as `hctsa` and `catch22`
+provide broad time-series phenotyping [@Fulcher:2017; @Lubba:2019], while
+`specparam` supports parametrization of periodic and aperiodic components in
+neural power spectra [@Donoghue:2020]. `scikit-learn` and `sbi`
+[@Tejero-Cantero2020] provide mature machine-learning and probabilistic inference
+tools.
 
-The main limitation is not the absence of high-quality software, but the lack
-of a connected, user-friendly workflow that spans all stages of the analysis.
-Users commonly have to install several packages with different assumptions,
-write custom scripts to move data between them, and understand modelling,
+The main limitation is not the absence of high-quality software but the lack of a
+connected, user-friendly workflow that spans all stages of the analysis. Users
+commonly have to install several packages with different assumptions, write
+custom scripts to move data between them, and understand modeling,
 signal-processing, and inference details before they can answer a biological
 question. `ncpi` was developed to fill this integration gap. It does not replace
 the underlying simulators, forward models, feature extractors, or inference
@@ -165,11 +168,11 @@ engines; instead, it coordinates them through a coherent API, standardized data
 objects, parser utilities, example workflows, and a graphical interface.
 
 Compared with single-purpose simulation or signal-analysis packages, `ncpi`
-focuses on the full model-based inference pipeline for
-electrophysiological population signals. It is also distinct from custom
-analysis scripts accompanying individual studies because it exposes reusable
-classes, parser configuration, cross-platform installation options, and a
-`WebUI` for reproducible workflows across datasets.
+encompasses all steps of the forward and inverse modeling pipeline for
+electrophysiological population signals. It is also distinct from custom analysis
+scripts accompanying individual studies because it exposes reusable classes,
+parser configuration, cross-platform installation options, and a `WebUI` for
+reproducible workflows across datasets.
 
 # Software design
 
@@ -177,79 +180,84 @@ classes, parser configuration, cross-platform installation options, and a
 object-oriented API, interoperability with established scientific software, and
 support for both code-based and graphical workflows. The core package is
 organized around classes that correspond to the main stages of the analysis:
-`Simulation` for running neural circuit model scripts, `FieldPotential` for
-computing extracellular signals, `Features` for extracting neurophysiological
-biomarkers, `Inference` for training and applying inverse models, `Analysis` for
-statistical testing and visualization, and
-`EphysDatasetParser` for converting heterogeneous empirical recordings into a
+`Simulation` for executing neural circuit model scripts, `FieldPotential` for
+forward modeling of field potentials, `Features` for extracting
+neurophysiologically relevant time-series features, `Inference` for training and
+applying inverse models, `Analysis` for statistical analysis and visualization,
+and `EphysDatasetParser` for converting heterogeneous empirical recordings into a
 common schema.
 
-The main design trade-off was to provide an integrated workflow without hiding
-the specialist tools on which each stage depends. Rather than reimplementing
-simulation engines, field-potential solvers, feature libraries, or inference
-methods, `ncpi` wraps and coordinates established backends while exposing their
-key configuration points. This design reduces duplicated code and preserves
-methodological transparency, but it requires the package to manage differences
-in data formats, execution models, and dependency availability across tools.
-The class-based API was chosen to make these boundaries explicit: each class
-owns one stage of the workflow, while shared data conventions allow results to
-move between stages without ad hoc conversion scripts.
+The main design trade-off was to connect the full workflow while preserving
+visibility and control over the specialist tools used at each stage. `ncpi`
+therefore gives users an integrated workflow, so they do not need to manually
+glue together simulation engines, field-potential solvers, feature libraries, and
+inference methods. At the same time, it still exposes important settings and
+assumptions of each backend tool, allowing expert users to understand and control
+what is happening. This design reduces duplicated code and preserves
+methodological transparency, but it requires the package to manage differences in
+data formats, execution models, and dependency availability across tools.
+Optional dependencies are therefore loaded only by the components that need them,
+for example `NEST`-based simulations, `LFPy`/`LFPykernels` field-potential
+kernels, `lfpykit` M/EEG forward models, feature libraries such as `catch22`,
+`hctsa` and `specparam`, `scikit-learn` regressors, `sbi` density estimators, and
+R-backed statistical models. The class-based API was chosen to make these
+boundaries explicit: each class owns one stage of the workflow, while shared data
+conventions allow results to move between stages without ad hoc conversion
+scripts.
 
 This modular structure allows users to run complete pipelines or use individual
 components independently. For example, a user can simulate a spiking network,
-compute a current dipole moment or MEG/EEG signal, extract `catch22` or
-`1/f-slope` features, train an `MLP`, `Ridge`, or simulation-based inference
-(`sbi`) model, and then apply the trained inverse model to a real dataset.
-Alternatively, a user can bypass simulation and use only the parser, feature
-extraction, inference, or analysis modules on pre-existing data. Parallel
-execution is supported across computationally intensive stages, either through
-backend tools with native parallelism, such as `NEST`, or through
+compute proxy signals, current dipole moments, LFPs, or M/EEG signals, extract
+`catch22`, `hctsa` or spectral-parameterization features, train a `scikit-learn`
+regressor or an `sbi` model, and then apply the trained inverse model to
+empirical data. Alternatively, a user can bypass simulation and use only the
+parser, feature extraction, inference, or analysis modules on pre-existing data.
+Parallel execution is supported across computationally intensive stages, either
+through backend tools with native parallelism, such as `NEST`, or through
 multiprocessing-based parallelism implemented in `ncpi`.
 
 The `EphysDatasetParser` is a major addition in the current release. It accepts
 arrays, `pandas` data frames, dictionaries, `MATLAB` files, `NumPy` files,
-`JSON`, `NWB`, `EDF`, `MNE`-compatible objects and files,
-`BrainVision`-style data, and tabular inputs, then maps them to canonical fields
-such as subject, group, condition, epoch, sensor, recording type, sampling
-frequency, signal data, time bounds, frequency-domain metadata, and source file.
-The trade-off in this parser is between accepting heterogeneous user data and
-requiring a stable internal representation for reproducible downstream
-analysis. `ncpi` therefore keeps ingestion flexible, but normalizes the parsed
-output into a common schema before feature extraction, inference, or statistical
-analysis. This makes the package usable with arbitrary empirical datasets
-rather than only with example data distributed by the project.
+`JSON`, `NWB`, `EDF`, `MNE`-compatible objects and files, `BrainVision`-style
+data, and tabular inputs, then maps them to canonical fields such as subject,
+group, condition, epoch, sensor, recording type, sampling frequency, signal data,
+time bounds, frequency-domain metadata, and source file. The trade-off in this
+parser is between accepting heterogeneous user data and requiring a stable
+internal representation for reproducible downstream analysis. Optional
+preprocessing such as temporal segmentation, z-scoring, epoching, and aggregation
+is applied before feature extraction, inference, or statistical analysis. This
+makes the package usable with arbitrary empirical datasets rather than only with
+example data distributed by the project.
 
 The `WebUI` exposes the same conceptual workflow through a browser-based
-interface. It supports simulation workflows, loading precomputed simulation
-outputs or empirical datasets, computing field potentials, extracting features,
-training inverse models, computing predictions, and plotting results. The
-interface is intentionally simple, with guided pages for each stage of the
-pipeline, and can be run locally or on a remote server through SSH tunnelling.
-This supports use on workstations and high-performance computing
-infrastructure. This graphical layer is central to the current software design
-because it makes the package accessible to users who do not want to assemble the
-full pipeline from Python scripts. At the same time, the `WebUI` is built around
-the same conceptual stages as the Python API, so graphical workflows remain
-close to the scriptable implementation rather than forming a separate analysis
-path.
+interface. It is organized into simulation, field-potential, feature, inference,
+and analysis modules. These modules support loading precomputed outputs or
+empirical datasets, running predefined and custom simulation workflows, computing
+proxy and kernel-based field-potential outputs, projecting current dipole moments
+to EEG/MEG sensors, extracting features, training inverse models, computing
+predictions, and plotting results. The interface is intentionally simple, with
+guided pages for each stage of the pipeline, and can be run locally or on a
+remote server through SSH tunneling. This supports its use on workstations and
+high-performance computing infrastructures. At the same time, the `WebUI` is
+built around the same conceptual stages as the Python API, so graphical workflows
+remain close to the scriptable implementation rather than forming a separate
+analysis path.
 
 # Research impact statement
 
-`ncpi` has already been used to link simulated and empirical
-electrophysiological data to interpretable neural circuit parameters. Its first
-full software presentation, published in 2025 [@OrozcoValero:2025], introduced a
-two-million-sample simulation resource based on recurrent leaky
-integrate-and-fire networks, compared single- and multi-feature inverse models,
-and demonstrated applications to mouse developmental LFP recordings and human
-EEG data from Alzheimer’s disease cohorts. This established `ncpi` as both a
-benchmarking platform for candidate electrophysiological biomarkers and a
-practical framework for model-based interpretation of population-level brain
-signals.
+`ncpi` has already been used to link empirical electrophysiological data to
+interpretable neural circuit parameters. Its first full software presentation,
+published in 2025 [@OrozcoValero:2025], introduced a two-million-sample
+simulation resource based on recurrent leaky integrate-and-fire networks,
+compared single- and multi-feature inverse models, and demonstrated applications
+to mouse developmental LFP recordings and human EEG data from Alzheimer’s
+disease cohorts. This established `ncpi` as both a benchmarking platform for
+candidate electrophysiological biomarkers and a practical framework for
+model-based interpretation of population-level brain signals at different scales.
 
-Since then, `ncpi` has supported studies of cortical dysfunction in
-Alzheimer’s disease [@CardenasSanchez:2026] and excitation/inhibition
-imbalance in young adults exposed to childhood interpersonal trauma
-[@OrozcoValeroTrauma:2026].
+Since then, `ncpi` has supported studies of cortical dysfunction in Alzheimer’s
+disease [@CardenasSanchez:2026] and excitation/inhibition imbalance in young
+adults exposed to childhood interpersonal trauma [@OrozcoValeroTrauma:2026].
 
 Together, these applications illustrate the central purpose of the toolbox: to
 test whether measurable electrophysiological features can reveal circuit-level
@@ -258,19 +266,18 @@ contexts.
 
 # AI usage disclosure
 
-Generative AI tools were used to support development of parts of the software,
-in particular the graphical interface (`WebUI`) components. All generated or
-AI-assisted software was subsequently reviewed syntactically and functionally by
-the authors, with special attention to the core Python `ncpi` classes.
-Generative AI tools were also used to support the writing of this manuscript,
-although the original content was provided by the authors. The manuscript
-content was fully reviewed and revised by the authors.
+Generative AI tools assisted with selected aspects of software development,
+particularly the graphical interface (`WebUI`) components. All generated or
+AI-assisted software was subsequently reviewed by the authors. Generative AI
+tools were also used to support the writing of this manuscript, although the
+original content was provided by the authors. The manuscript content was fully
+reviewed and revised by the authors.
 
 # Acknowledgements
 
-This study was supported by grants PID2022-139055OA-I00 and
-PID2022-137461NB-C31, funded by MCIN/AEI/10.13039/501100011033 and by “ERDF A
-way of making Europe”; and by grant RYC2024-049595-I funded by
-MCIN/AEI/10.13039/501100011033 and FSE+.
+This study was supported by grants PID2022-139055OA-I00 and PID2022-137461NB-C31,
+funded by MCIN/AEI/10.13039/501100011033 and by “ERDF A way of making
+Europe”; and by grant RYC2024-049595-I funded by MCIN/AEI/10.13039/501100011033
+and FSE+.
 
 # References
