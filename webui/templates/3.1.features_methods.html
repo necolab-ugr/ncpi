@@ -1328,8 +1328,88 @@ def custom_feature(sample, params):
                     || key.startsWith('__file_token_');
             },
             parserCandidateFieldsWithoutFileExtracted() {
-                const fields = Array.isArray(this.parserInfo?.candidate_fields) ? this.parserInfo.candidate_fields : [];
-                return fields.filter((field) => !this.parserIsFileExtractedField(field));
+                return this.parserAllCandidateFields(this.parserInfo, { includeFileExtracted: false });
+            },
+            uniqueParserFields(items) {
+                const out = [];
+                const seen = new Set();
+                for (const item of Array.isArray(items) ? items : []) {
+                    const field = String(item || '').trim();
+                    if (!field || seen.has(field)) continue;
+                    seen.add(field);
+                    out.push(field);
+                }
+                return out;
+            },
+            parserSourceFieldDetails(sourcePayload = null) {
+                const payload = sourcePayload || this.parserInfo || {};
+                const rows = [];
+                const appendRows = (items) => {
+                    if (!Array.isArray(items)) return;
+                    for (const row of items) {
+                        if (row && typeof row === 'object') rows.push(row);
+                    }
+                };
+                const appendProfile = (profile) => {
+                    if (!profile || typeof profile !== 'object') return;
+                    appendRows(profile.field_details);
+                };
+                appendRows(payload.field_details);
+                appendRows(payload.data_file_field_details);
+                const profiles = Array.isArray(payload.extension_profiles) ? payload.extension_profiles : [];
+                for (const profile of profiles) appendProfile(profile);
+                const folderProfiles = Array.isArray(payload.folder_profiles) ? payload.folder_profiles : [];
+                for (const folderProfile of folderProfiles) {
+                    appendRows(folderProfile?.field_details);
+                    const nestedProfiles = Array.isArray(folderProfile?.extension_profiles) ? folderProfile.extension_profiles : [];
+                    for (const profile of nestedProfiles) appendProfile(profile);
+                }
+                return rows;
+            },
+            parserAllCandidateFields(sourcePayload = null, options = {}) {
+                const payload = sourcePayload || this.parserInfo || {};
+                const includeFileExtracted = options.includeFileExtracted !== false;
+                const out = [];
+                const seen = new Set();
+                const addField = (value) => {
+                    const field = String(value || '').trim();
+                    if (!field || seen.has(field)) return;
+                    if (!includeFileExtracted && this.parserIsFileExtractedField(field)) return;
+                    seen.add(field);
+                    out.push(field);
+                };
+                const addFields = (items) => {
+                    if (!Array.isArray(items)) return;
+                    for (const item of items) addField(item);
+                };
+                const addProfile = (profile) => {
+                    if (!profile || typeof profile !== 'object') return;
+                    addFields(profile.candidate_fields);
+                    for (const detail of Array.isArray(profile.field_details) ? profile.field_details : []) {
+                        addField(detail?.field);
+                    }
+                };
+                addFields(payload.candidate_fields);
+                addFields(payload.data_file_candidate_fields);
+                addFields(payload.dataframe_candidate_fields);
+                addFields(payload.data_file_dataframe_candidate_fields);
+                for (const detail of this.parserSourceFieldDetails(payload)) addField(detail?.field);
+                const profiles = Array.isArray(payload.extension_profiles) ? payload.extension_profiles : [];
+                for (const profile of profiles) addProfile(profile);
+                const folderProfiles = Array.isArray(payload.folder_profiles) ? payload.folder_profiles : [];
+                for (const folderProfile of folderProfiles) {
+                    addFields(folderProfile?.candidate_fields);
+                    for (const detail of Array.isArray(folderProfile?.field_details) ? folderProfile.field_details : []) {
+                        addField(detail?.field);
+                    }
+                    const nestedProfiles = Array.isArray(folderProfile?.extension_profiles) ? folderProfile.extension_profiles : [];
+                    for (const profile of nestedProfiles) addProfile(profile);
+                }
+                const defaults = payload.defaults && typeof payload.defaults === 'object' ? payload.defaults : {};
+                for (const key of ['data', 'fs', 'ch_names', 'recording_type', 'subject_id', 'group', 'species', 'condition']) {
+                    addField(defaults[key]);
+                }
+                return out;
             },
             parserFsSourceCandidates() {
                 const base = this.parserCandidateFieldsWithoutFileExtracted()
@@ -1343,9 +1423,7 @@ def custom_feature(sample, params):
                     out.push(field);
                 }
                 const samplingTokenField = this.parserFilenameTokenField('sampling_frequency');
-                const allCandidates = Array.isArray(this.parserInfo?.candidate_fields)
-                    ? this.parserInfo.candidate_fields.map((field) => String(field || '').trim())
-                    : [];
+                const allCandidates = this.parserAllCandidateFields(this.parserInfo, { includeFileExtracted: true });
                 if (
                     samplingTokenField &&
                     allCandidates.includes(samplingTokenField) &&
@@ -1389,9 +1467,7 @@ def custom_feature(sample, params):
             normalizeParserRecordingTypeSource() {
                 const source = String(this.parserRecordingTypeSource || '').trim();
                 const allowedSources = new Set(
-                    (Array.isArray(this.parserInfo?.candidate_fields) ? this.parserInfo.candidate_fields : [])
-                        .map((field) => String(field || '').trim())
-                        .filter((field) => field.length > 0)
+                    this.parserAllCandidateFields(this.parserInfo, { includeFileExtracted: true })
                 );
                 if (source === '__value__' || source === '__none__' || allowedSources.has(source)) return;
                 this.parserRecordingTypeSource = '__value__';
@@ -1554,12 +1630,15 @@ def custom_feature(sample, params):
                         .map((field) => String(field || '').trim())
                         .filter((field) => field.length > 0)
                     : [];
-                if (explicit.length > 0) return explicit;
-                return Array.isArray(this.parserInfo?.candidate_fields)
-                    ? this.parserInfo.candidate_fields
-                        .map((field) => String(field || '').trim())
+                const detailFields = Array.isArray(this.parserInfo?.data_file_field_details)
+                    ? this.parserInfo.data_file_field_details
+                        .map((item) => String(item?.field || '').trim())
                         .filter((field) => field.length > 0)
                     : [];
+                if (explicit.length > 0 || detailFields.length > 0) {
+                    return this.uniqueParserFields([...explicit, ...detailFields]);
+                }
+                return this.parserAllCandidateFields(this.parserInfo, { includeFileExtracted: true });
             },
             parserDataframeCandidateFields() {
                 const dataFileSourceType = String(this.parserInfo?.data_file_source_type || '').trim().toLowerCase();
@@ -1579,7 +1658,7 @@ def custom_feature(sample, params):
                     : [];
                 if (explicit.length > 0) return explicit;
 
-                const details = Array.isArray(this.parserInfo?.field_details) ? this.parserInfo.field_details : [];
+                const details = this.parserSourceFieldDetails(this.parserInfo);
                 const seen = new Set();
                 const fromDetails = [];
                 for (const item of details) {
@@ -2887,11 +2966,7 @@ def custom_feature(sample, params):
                     ? customCandidates
                         .map((field) => String(field || '').trim())
                         .filter((field) => field.length > 0 && !this.parserIsVirtualField(field))
-                    : (Array.isArray(this.parserInfo?.candidate_fields)
-                        ? this.parserInfo.candidate_fields
-                        .map((field) => String(field || '').trim())
-                        .filter((field) => field.length > 0 && !this.parserIsVirtualField(field))
-                        : []);
+                    : this.parserAllCandidateFields(this.parserInfo, { includeFileExtracted: false });
                 const keyList = Array.isArray(keywords)
                     ? keywords.map((value) => String(value || '').trim().toLowerCase()).filter((value) => value.length > 0)
                     : [];
@@ -2916,29 +2991,8 @@ def custom_feature(sample, params):
                 const defaults = payload?.defaults || {};
                 const sampleTableGuesses = this.inferPrimaryFieldsFromSampleTable(payload);
                 const dataCandidates = this.parserDataLocatorCandidates();
-                const collectFieldDetails = (sourcePayload) => {
-                    const rows = [];
-                    const appendRows = (items) => {
-                        if (!Array.isArray(items)) return;
-                        for (const row of items) rows.push(row);
-                    };
-                    appendRows(sourcePayload?.field_details);
-                    const profiles = Array.isArray(sourcePayload?.extension_profiles) ? sourcePayload.extension_profiles : [];
-                    for (const profile of profiles) appendRows(profile?.field_details);
-                    const folderProfiles = Array.isArray(sourcePayload?.folder_profiles) ? sourcePayload.folder_profiles : [];
-                    for (const folderProfile of folderProfiles) {
-                        appendRows(folderProfile?.field_details);
-                        const nestedProfiles = Array.isArray(folderProfile?.extension_profiles) ? folderProfile.extension_profiles : [];
-                        for (const profile of nestedProfiles) appendRows(profile?.field_details);
-                    }
-                    return rows;
-                };
-                const fieldDetails = collectFieldDetails(payload);
-                const candidateSet = new Set(
-                    (Array.isArray(payload?.candidate_fields) ? payload.candidate_fields : [])
-                        .map((field) => String(field || '').trim())
-                        .filter((field) => field.length > 0)
-                );
+                const fieldDetails = this.parserSourceFieldDetails(payload);
+                const candidateSet = new Set(this.parserAllCandidateFields(payload, { includeFileExtracted: true }));
                 const formatTokens = new Set(
                     (Array.isArray(payload?.filename_format_tokens) ? payload.filename_format_tokens : [])
                         .map((token) => String(token || '').trim().toLowerCase())
@@ -3285,7 +3339,8 @@ def custom_feature(sample, params):
                 
                 const channelSourceCandidates = this.parserChannelNameSourceCandidates();
                 const currentChLocator = String(this.parserChNamesLocator || '').trim();
-                const preferredCh = String(sampleTableGuesses.ch_names || '').trim() || String(defaults.ch_names || '').trim() || detailChannels || autoChannels || '';
+                const preferredChRaw = String(sampleTableGuesses.ch_names || '').trim() || String(defaults.ch_names || '').trim() || detailChannels || autoChannels || '';
+                const preferredCh = channelSourceCandidates.includes(preferredChRaw) ? preferredChRaw : '';
                 const chLocatorValid = currentChLocator && channelSourceCandidates.includes(currentChLocator);
                 if (!chLocatorValid) {
                     this.parserChNamesLocator = preferredCh;
@@ -3345,13 +3400,13 @@ def custom_feature(sample, params):
                 }
 
                 if (!this.parserPrimaryFieldsUserEdited) {
-                    if (['pipeline', 'new-simulation'].includes(this.resolvedDataSourceKind())) {
+                    if (String(this.parserChNamesLocator || '').trim()) {
+                        this.parserChNamesSource = this.parserChNamesLocator;
+                        this.parserSensorNames = '';
+                    } else if (['pipeline', 'new-simulation'].includes(this.resolvedDataSourceKind())) {
                         this.parserChNamesSource = '__manual__';
                         this.parserSensorNames = 'ch0';
                         this.parserChNamesLocator = '';
-                    } else if (String(this.parserChNamesLocator || '').trim()) {
-                        this.parserChNamesSource = this.parserChNamesLocator;
-                        this.parserSensorNames = '';
                     } else {
                         this.parserChNamesSource = '__autocomplete__';
                         this.parserChNamesLocator = '';
@@ -5206,7 +5261,7 @@ def custom_feature(sample, params):
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__value__" :style="parserManualOptionStyle()">Custom (Select Recording type value)</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'pipeline-rec-type-source-'+field">
+                                                <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'pipeline-rec-type-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
@@ -5262,7 +5317,7 @@ def custom_feature(sample, params):
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-subject-source-'+field">
+                                                    <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'meta-subject-source-'+field">
                                                         <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
@@ -5282,7 +5337,7 @@ def custom_feature(sample, params):
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-group-source-'+field">
+                                                    <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'meta-group-source-'+field">
                                                         <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
@@ -5302,7 +5357,7 @@ def custom_feature(sample, params):
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-species-source-'+field">
+                                                    <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'meta-species-source-'+field">
                                                         <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
@@ -5322,7 +5377,7 @@ def custom_feature(sample, params):
                                                     <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
                                                     <option value="__value__" :style="parserManualOptionStyle()">Custom value</option>
                                                     <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                    <template x-for="field in parserInfo.candidate_fields || []" :key="'meta-condition-source-'+field">
+                                                    <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'meta-condition-source-'+field">
                                                         <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                     </template>
                                                 </select>
@@ -5516,7 +5571,7 @@ def custom_feature(sample, params):
                                             <select name="parser_recording_type_source" x-model="parserRecordingTypeSource" @change="onPipelineRecordingTypeSourceChange()"
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="__value__" :style="parserManualOptionStyle()">Custom (Select Recording type value)</option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'rec-source-'+field">
+                                                <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'rec-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                                 <option value="__none__" :style="parserNeutralOptionStyle()">None</option>
@@ -5548,7 +5603,7 @@ def custom_feature(sample, params):
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'subject-id-source-'+field">
+                                                <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'subject-id-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
@@ -5559,7 +5614,7 @@ def custom_feature(sample, params):
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'group-source-'+field">
+                                                <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'group-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
@@ -5570,7 +5625,7 @@ def custom_feature(sample, params):
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'species-source-'+field">
+                                                <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'species-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>
@@ -5581,7 +5636,7 @@ def custom_feature(sample, params):
                                                 class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                                 <option value="" :style="parserNeutralOptionStyle()">None</option>
                                                 <option value="__file_id__" :style="parserVirtualOptionStyle()" x-text="parserFileIdOptionLabel()"></option>
-                                                <template x-for="field in parserInfo.candidate_fields || []" :key="'condition-source-'+field">
+                                                <template x-for="field in parserAllCandidateFields(parserInfo, { includeFileExtracted: true })" :key="'condition-source-'+field">
                                                     <option :value="field" :style="parserFieldOptionStyle(field)" x-text="parserFieldLabel(field)"></option>
                                                 </template>
                                             </select>

@@ -4950,6 +4950,17 @@ def _build_folder_inspection_profiles(folder_entries, folder_summaries, filename
                     combined_candidates.append(token)
                 if folder_name not in candidate_field_folders[token]:
                     candidate_field_folders[token].append(folder_name)
+            for detail in ext_description.get("field_details") or []:
+                if not isinstance(detail, dict):
+                    continue
+                token = str(detail.get("field") or "").strip()
+                if not token:
+                    continue
+                if token not in seen_candidates:
+                    seen_candidates.add(token)
+                    combined_candidates.append(token)
+                if folder_name not in candidate_field_folders[token]:
+                    candidate_field_folders[token].append(folder_name)
 
         folder_profiles.append({
             "folder_name": folder_name,
@@ -5062,6 +5073,11 @@ def _aggregate_candidate_metadata_from_file_entries(folder_entries):
             field_name = str(detail.get("field") or "").strip()
             if not field_name:
                 continue
+            if field_name not in seen_candidates:
+                seen_candidates.add(field_name)
+                combined_candidates.append(field_name)
+            if folder_name not in candidate_field_folders[field_name]:
+                candidate_field_folders[field_name].append(folder_name)
             if field_name not in field_detail_map:
                 field_detail_map[field_name] = detail
             origin = str(detail.get("origin") or "").strip().lower()
