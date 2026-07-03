@@ -6097,6 +6097,10 @@ def _describe_parser_source(path):
         return _describe_nwb_parser_source(path)
 
     source_obj = _load_features_source(path)
+    field_potential_df = _build_features_dataframe_from_field_potential_pipeline(source_obj, path, {})
+    if isinstance(field_potential_df, pd.DataFrame):
+        return _describe_field_potential_pipeline_parser_source(field_potential_df)
+
     fs_hint_hz = None
     fs_hint_note = None
 
@@ -6736,9 +6740,552 @@ def _build_parse_config_from_form(form):
     )
 
 
+FIELD_POTENTIAL_FOUR_AREA_SENSORS = ("frontal", "parietal", "temporal", "occipital")
+
+
+def _field_potential_stage_from_path(source_path):
+    name = os.path.basename(str(source_path or "")).lower()
+    if name == "proxy.pkl" or name.endswith("_proxy.pkl") or "proxy" in name:
+        return "proxy"
+    if name == "cdm.pkl" or name.endswith("_cdm.pkl") or "cdm" in name:
+        return "kernel"
+    if name == "meeg.pkl" or name.endswith("_meeg.pkl") or "meeg" in name:
+        return "meeg"
+    return None
+
+
+def _field_potential_row_stage(row, source_path=None):
+    path_stage = _field_potential_stage_from_path(source_path)
+    if not isinstance(row, MappingABC):
+        return path_stage
+    if row.get("proxy_method") is not None:
+        return "proxy"
+    if row.get("source_cdm_file") is not None or row.get("meeg_model") is not None:
+        return "meeg"
+    if row.get("probe_outputs") is not None or row.get("probe") is not None:
+        return "kernel"
+    if path_stage:
+        return path_stage
+    fp_keys = {
+        "dt_ms",
+        "fs_hz",
+        "t_start_ms",
+        "decimation_factor",
+        "raw_signals",
+        "area_sums",
+        "configuration_index",
+        "repeat_index",
+        "trial_index",
+    }
+    has_signal = any(key in row for key in ("data", "sum", "raw_signals", "area_sums"))
+    if has_signal and any(key in row for key in fp_keys):
+        return "field_potential"
+    return None
+
+
+def _iter_field_potential_rows(source_obj):
+    if isinstance(source_obj, pd.DataFrame):
+        for pos, (_, row) in enumerate(source_obj.iterrows()):
+            yield pos, dict(row.to_dict())
+        return
+    if isinstance(source_obj, (list, tuple)):
+        row_pos = 0
+        for item in source_obj:
+            if isinstance(item, pd.DataFrame):
+                for _, row in item.iterrows():
+                    yield row_pos, dict(row.to_dict())
+                    row_pos += 1
+                continue
+            if isinstance(item, MappingABC):
+                yield row_pos, dict(item)
+                row_pos += 1
+                continue
+            yield row_pos, {"data": item}
+            row_pos += 1
+        return
+    if isinstance(source_obj, MappingABC):
+        yield 0, dict(source_obj)
+        return
+    yield 0, {"data": source_obj}
+
+
+def _field_potential_safe_float(value):
+    try:
+        parsed = float(value)
+    except Exception:
+        return None
+    return parsed if np.isfinite(parsed) else None
+
+
+def _field_potential_safe_int(value, default=None):
+    try:
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return default
+        return int(value)
+    except Exception:
+        return default
+
+
+def _field_potential_extract_mapping_signals(mapping_obj, *, area_sensors=True):
+    if not isinstance(mapping_obj, MappingABC):
+        return {}
+    signals = {}
+    for raw_key, raw_value in mapping_obj.items():
+        key = str(raw_key or "").strip()
+        if not key:
+            continue
+        sensor = key
+        if area_sensors:
+            area = _extract_area_from_signal_key(key, FIELD_POTENTIAL_FOUR_AREA_SENSORS)
+            sensor = area or key
+        try:
+            signal = _to_1d_signal(raw_value)
+        except Exception:
+            continue
+        if signal.size == 0:
+            continue
+        signals[str(sensor)] = np.asarray(signal, dtype=float)
+    return signals
+
+
+def _field_potential_extract_array_signals(value, stage):
+    try:
+        arr = np.asarray(value, dtype=float)
+    except Exception:
+        return {}
+    arr = np.squeeze(arr)
+    if arr.size == 0:
+        return {}
+    if arr.ndim == 0:
+        return {"global": np.asarray([float(arr)])}
+    if arr.ndim == 1:
+        return {"global": np.asarray(arr, dtype=float)}
+    if arr.ndim == 2:
+        if stage == "kernel" and 3 in arr.shape:
+            return {"global": _to_1d_signal(arr)}
+        matrix = arr if arr.shape[0] <= arr.shape[1] else arr.T
+        return {
+            f"sensor_{idx}": np.asarray(matrix[idx], dtype=float).squeeze()
+            for idx in range(matrix.shape[0])
+            if np.asarray(matrix[idx]).size > 0
+        }
+    if arr.ndim == 3:
+        if arr.shape[1] == 3:
+            matrix = np.linalg.norm(arr, axis=1)
+        elif arr.shape[2] == 3:
+            matrix = np.linalg.norm(arr, axis=2)
+        else:
+            matrix = arr.reshape((-1, arr.shape[-1]))
+        return {
+            f"sensor_{idx}": np.asarray(matrix[idx], dtype=float).squeeze()
+            for idx in range(matrix.shape[0])
+            if np.asarray(matrix[idx]).size > 0
+        }
+    return {"global": _to_1d_signal(arr)}
+
+
+def _field_potential_signals_by_sensor(row, stage):
+    if not isinstance(row, MappingABC):
+        return {}
+
+    for key in ("data", "area_sums", "sum"):
+        mapped = _field_potential_extract_mapping_signals(row.get(key))
+        if mapped:
+            return mapped
+
+    raw_mapped = _field_potential_extract_mapping_signals(row.get("raw_signals"))
+    if raw_mapped:
+        return raw_mapped
+
+    for key in ("data", "sum"):
+        value = row.get(key)
+        if value is None:
+            continue
+        signals = _field_potential_extract_array_signals(value, stage)
+        if signals:
+            return signals
+    return {}
+
+
+def _field_potential_fs_from_row(row):
+    if not isinstance(row, MappingABC):
+        return None
+    fs = _field_potential_safe_float(row.get("fs_hz"))
+    if fs is None:
+        fs = _field_potential_safe_float(row.get("fs"))
+    metadata = row.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = ast.literal_eval(metadata)
+        except Exception:
+            metadata = None
+    if fs is None and isinstance(metadata, MappingABC):
+        fs = _field_potential_safe_float(metadata.get("fs_hz"))
+        if fs is None:
+            fs = _field_potential_safe_float(metadata.get("fs"))
+    if fs is not None and fs > 0:
+        return float(fs)
+    dt_ms = _effective_dt_ms_from_payload_row(row)
+    if dt_ms is not None and dt_ms > 0:
+        return float(1000.0 / dt_ms)
+    return None
+
+
+def _field_potential_sim_data_for_configuration(source_path):
+    candidates = []
+    try:
+        sim_data = _load_simulation_outputs()
+        if isinstance(sim_data, MappingABC) and isinstance(sim_data.get("grid_metadata"), MappingABC):
+            candidates.append(sim_data)
+    except Exception:
+        pass
+    try:
+        grid_meta = compute_utils._load_simulation_grid_metadata_from_source_path(source_path)
+    except Exception:
+        grid_meta = None
+    if isinstance(grid_meta, MappingABC):
+        candidates.append({"grid_metadata": dict(grid_meta)})
+    return candidates
+
+
+def _field_potential_configuration_value(row, trial_index, configuration_index, sim_data_candidates):
+    for sim_data in sim_data_candidates or []:
+        try:
+            changed = _simulation_trial_changed_params_text(sim_data, int(trial_index), max_params=999)
+        except Exception:
+            changed = ""
+        if changed:
+            return changed
+
+    if isinstance(row, MappingABC):
+        explicit = row.get("configuration")
+        if explicit not in (None, ""):
+            return explicit
+        condition = str(row.get("condition") or "").strip()
+        if condition.startswith("cfg_"):
+            return condition.split("__", 1)[0]
+    if configuration_index is not None:
+        return f"cfg_{int(configuration_index) + 1}"
+    return "simulation"
+
+
+def _field_potential_source_value_for_column(df, value, source_label):
+    if value == FILE_ID_METADATA_LITERAL:
+        return source_label
+    if isinstance(value, str) and value in df.columns:
+        return df[value]
+    if isinstance(value, str) and value == "__source_file__":
+        return df["source_file"] if "source_file" in df.columns else source_label
+    return value
+
+
+def _field_potential_apply_parser_overrides(df, form, source_label):
+    if df.empty:
+        return df
+
+    override_specs = {
+        "subject_id": ("parser_metadata_subject_id_source", "parser_metadata_subject_id"),
+        "group": ("parser_metadata_group_source", "parser_metadata_group"),
+        "species": ("parser_metadata_species_source", "parser_metadata_species"),
+        "condition": ("parser_metadata_condition_source", "parser_metadata_condition"),
+        "epoch": ("parser_metadata_epoch_source", "parser_metadata_epoch"),
+    }
+    for column, (source_key, value_key) in override_specs.items():
+        value = _parse_metadata_field_source(form, source_key, value_key)
+        if value in (None, ""):
+            continue
+        resolved = _field_potential_source_value_for_column(df, value, source_label)
+        if column == "subject_id" and not isinstance(resolved, pd.Series):
+            numeric = _field_potential_safe_int(resolved)
+            if numeric is not None:
+                resolved = numeric
+        df[column] = resolved
+
+    recording_source = (form.get("parser_recording_type_source") or "").strip()
+    if recording_source == "__none__":
+        df["recording_type"] = None
+    elif recording_source == "__value__":
+        df["recording_type"] = (form.get("parser_recording_type") or "").strip() or "LFP"
+    elif recording_source:
+        df["recording_type"] = _field_potential_source_value_for_column(df, recording_source, source_label)
+    else:
+        recording_locator = (form.get("parser_recording_type_locator") or "").strip()
+        recording_value = (form.get("parser_recording_type") or "").strip()
+        if recording_locator:
+            df["recording_type"] = _field_potential_source_value_for_column(df, recording_locator, source_label)
+        elif recording_value:
+            df["recording_type"] = recording_value
+
+    fs_source = (form.get("parser_fs_source") or "").strip()
+    if fs_source == "__numeric__":
+        fs_manual = _optional_float(form.get("parser_fs_manual"))
+        if fs_manual is not None:
+            df["fs"] = float(fs_manual)
+    elif fs_source == "__none__":
+        df["fs"] = None
+    elif fs_source:
+        df["fs"] = _field_potential_source_value_for_column(df, fs_source, source_label)
+    else:
+        fs_locator = (form.get("parser_fs_locator") or "").strip()
+        if fs_locator:
+            df["fs"] = _field_potential_source_value_for_column(df, fs_locator, source_label)
+
+    return df
+
+
+class _FieldPotentialPipelineFormDefaults:
+    def __init__(self, form):
+        self._form = form
+        self._defaults = {
+            "data_source_kind": "pipeline",
+            "parser_data_locator": "data",
+            "parser_fs_source": "fs",
+            "parser_recording_type_source": "recording_type",
+            "parser_ch_names_source": "sensor",
+            "parser_metadata_subject_id_source": "subject_id",
+            "parser_metadata_group_source": "group",
+            "parser_metadata_species_source": "species",
+            "parser_metadata_condition_source": "condition",
+        }
+
+    def get(self, key, default=None):
+        getter = getattr(self._form, "get", None)
+        value = getter(key, None) if callable(getter) else None
+        if value is None and isinstance(self._form, MappingABC):
+            value = self._form.get(key)
+        if value is None or str(value).strip() == "":
+            return self._defaults.get(key, default)
+        return value
+
+    def getlist(self, key):
+        getter = getattr(self._form, "getlist", None)
+        if callable(getter):
+            return getter(key)
+        value = self.get(key, None)
+        if value is None:
+            return []
+        return value if isinstance(value, list) else [value]
+
+
+def _build_field_potential_pipeline_parse_config(form):
+    return _build_parse_config_from_form(_FieldPotentialPipelineFormDefaults(form))
+
+
+def _normalize_field_potential_epoch_labels(parsed_df):
+    if not isinstance(parsed_df, pd.DataFrame) or "epoch" not in parsed_df.columns:
+        return parsed_df
+
+    def _epoch_index(value):
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return value
+        if isinstance(value, (int, np.integer)):
+            return int(value)
+        text = str(value).strip()
+        if not text:
+            return value
+        candidate = text.rsplit(":", 1)[-1]
+        try:
+            return int(candidate)
+        except (TypeError, ValueError):
+            return value
+
+    out = parsed_df.copy()
+    out["epoch"] = out["epoch"].map(_epoch_index)
+    return out
+
+
+def _apply_parser_processing_to_prepared_dataframe(df, parse_cfg):
+    parser = EphysDatasetParser(parse_cfg)
+    rows = df.to_dict("records")
+    rows = parser._apply_time_segment_rows(rows)
+    parsed_df = parser._rows_to_df(rows)
+
+    if parse_cfg.zscore:
+        parsed_df = parser._apply_zscore(parsed_df)
+
+    if parse_cfg.epoch_length_s is not None:
+        rows = parsed_df.to_dict("records")
+        rows = parser._apply_epoching_rows(rows)
+        parsed_df = parser._rows_to_df(rows)
+        parsed_df = _normalize_field_potential_epoch_labels(parsed_df)
+        if bool(getattr(parse_cfg, "align_epoch_count_to_minimum", True)):
+            parsed_df = parser._limit_epoch_count_to_minimum(parsed_df)
+
+    if getattr(parse_cfg, "exclude_last_epoch", False):
+        parsed_df = parser._exclude_last_epoch(parsed_df)
+    elif parse_cfg.epoch_length_s is not None:
+        parsed_df = parser._exclude_incomplete_final_epoch(parsed_df)
+
+    if getattr(parse_cfg, "zscore_after_epoch", False):
+        parsed_df = parser._apply_zscore(parsed_df)
+
+    if parse_cfg.aggregate_over:
+        parsed_df = parser._apply_aggregation(parsed_df)
+
+    return parsed_df
+
+
+def _build_features_dataframe_from_field_potential_pipeline(source_obj, source_path, form):
+    rows = []
+    source_label = os.path.basename(str(source_path or "")) or "field_potential_pipeline"
+    sim_data_candidates = _field_potential_sim_data_for_configuration(source_path)
+    recognized_any = False
+
+    for row_pos, row in _iter_field_potential_rows(source_obj):
+        stage = _field_potential_row_stage(row, source_path)
+        if not stage:
+            continue
+        signals = _field_potential_signals_by_sensor(row, stage)
+        if not signals:
+            continue
+        recognized_any = True
+        trial_index = _field_potential_safe_int(row.get("trial_index"), row_pos)
+        repeat_index = _field_potential_safe_int(row.get("repeat_index"), 0)
+        configuration_index = _field_potential_safe_int(row.get("configuration_index"), None)
+        fs_hz = _field_potential_fs_from_row(row)
+        dt_ms = _effective_dt_ms_from_payload_row(row)
+        t_start_ms = _effective_t_start_ms_from_payload_row(row)
+        configuration = _field_potential_configuration_value(
+            row,
+            trial_index,
+            configuration_index,
+            sim_data_candidates,
+        )
+        if stage == "meeg":
+            model_text = str(row.get("model") or row.get("meeg_model") or "").lower()
+            recording_type = "MEG" if "meg" in model_text else "EEG"
+        else:
+            recording_type = "LFP"
+
+        for sensor, signal in signals.items():
+            signal_arr = np.asarray(signal, dtype=float).squeeze()
+            if signal_arr.ndim == 0:
+                signal_arr = np.asarray([float(signal_arr)])
+            if signal_arr.ndim != 1 or signal_arr.size == 0:
+                continue
+            if fs_hz is not None and fs_hz > 0:
+                t1 = (float(t_start_ms) / 1000.0) + (max(0, float(signal_arr.size) - 1.0) / float(fs_hz))
+            elif dt_ms is not None and dt_ms > 0:
+                t1 = (float(t_start_ms) + max(0, float(signal_arr.size) - 1.0) * float(dt_ms)) / 1000.0
+            else:
+                t1 = None
+            rows.append({
+                "subject_id": 0,
+                "species": "simulated",
+                "group": "simulation",
+                "condition": "simulation",
+                "epoch": "simulation",
+                "sensor": str(sensor),
+                "recording_type": recording_type,
+                "fs": fs_hz,
+                "data": signal_arr,
+                "t0": float(t_start_ms) / 1000.0,
+                "t1": t1,
+                "data_domain": "time",
+                "f0": None,
+                "f1": None,
+                "spectral_kind": None,
+                "source_file": source_label,
+                "trial": int(repeat_index) if repeat_index is not None else 0,
+                "configuration": configuration,
+                "field_potential_stage": stage,
+            })
+
+    if not recognized_any or not rows:
+        return None
+
+    df = pd.DataFrame(rows)
+    return _field_potential_apply_parser_overrides(df, form, source_label)
+
+
+def _persist_normalized_features_dataframe(parsed_df, job_id, upload_dir=None):
+    target_upload_dir = upload_dir or _module_uploads_dir_for("features")
+    os.makedirs(target_upload_dir, exist_ok=True)
+    normalized_path = os.path.join(target_upload_dir, f"features_data_file_0_{job_id}_parsed.pkl")
+    parsed_df.to_pickle(normalized_path)
+    return normalized_path
+
+
+def _describe_field_potential_pipeline_parser_source(df):
+    columns = [str(col) for col in df.columns]
+    fs_hint_hz = None
+    fs_hint_note = None
+    if "fs" in df.columns:
+        fs_series = pd.to_numeric(df["fs"], errors="coerce").dropna()
+        if not fs_series.empty:
+            fs_hint_hz = float(fs_series.iloc[0])
+            if np.isfinite(fs_hint_hz) and fs_hint_hz > 0:
+                fs_hint_note = f"Suggested fs from Field Potential output: {fs_hint_hz:g} Hz."
+            else:
+                fs_hint_hz = None
+
+    sensor_count = None
+    if "sensor" in df.columns:
+        try:
+            sensor_count = int(df["sensor"].nunique(dropna=True))
+        except Exception:
+            sensor_count = None
+    if sensor_count is None:
+        sensor_count = 1
+
+    defaults = {
+        "data": "data",
+        "fs": "fs" if "fs" in df.columns else "",
+        "ch_names": "sensor" if "sensor" in df.columns else "",
+        "recording_type": "recording_type" if "recording_type" in df.columns else "",
+        "subject_id": "subject_id" if "subject_id" in df.columns else "",
+        "group": "group" if "group" in df.columns else "",
+        "species": "species" if "species" in df.columns else "",
+        "condition": "condition" if "condition" in df.columns else "",
+        "axis_samples": 0,
+        "axis_channels": -1,
+        "axis_ids": -1,
+        "axis_epochs": -1,
+        "axis_confidence": "high",
+    }
+    stage = ""
+    if "field_potential_stage" in df.columns:
+        stages = [
+            str(item).strip()
+            for item in df["field_potential_stage"].dropna().unique().tolist()
+            if str(item).strip()
+        ]
+        if stages:
+            stage = "/".join(stages[:3])
+    summary_prefix = "Field Potential pipeline output"
+    if stage:
+        summary_prefix += f" ({stage})"
+
+    payload = {
+        "source_type": "dataframe",
+        "pipeline_source_type": "field_potential",
+        "candidate_fields": columns,
+        "defaults": defaults,
+        "summary": f"{summary_prefix}: prepared canonical dataframe with {df.shape[0]} rows and {df.shape[1]} columns.",
+        "sensor_count_estimate": sensor_count,
+        "multi_sensor_detected": bool(sensor_count and sensor_count > 1),
+        "fs_hint_hz": fs_hint_hz,
+        "fs_hint_note": fs_hint_note,
+    }
+    payload["field_details"] = _describe_source_fields_for_ui(df, columns, "dataframe")
+    payload["manual_field_details"] = _manual_field_details_for_ui()
+    return payload
+
+
 def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
     source_obj = _load_features_source(source_path)
     data_source_kind = (form.get("data_source_kind") or "").strip()
+
+    if data_source_kind == "pipeline":
+        prepared_df = _build_features_dataframe_from_field_potential_pipeline(
+            source_obj,
+            source_path,
+            form,
+        )
+        if isinstance(prepared_df, pd.DataFrame):
+            parse_cfg = _build_field_potential_pipeline_parse_config(form)
+            parsed_df = _apply_parser_processing_to_prepared_dataframe(prepared_df, parse_cfg)
+            return _persist_normalized_features_dataframe(parsed_df, job_id, upload_dir=upload_dir)
 
     if not (form.get("parser_data_locator") or "").strip():
         raise ValueError(
@@ -6828,11 +7375,7 @@ def _normalize_features_input_path(source_path, form, job_id, upload_dir=None):
                     f"Source file '{source_label}' does not match the filename format for token '{token_name}'."
                 )
             parsed_df[col_name] = token_value
-    target_upload_dir = upload_dir or _module_uploads_dir_for("features")
-    os.makedirs(target_upload_dir, exist_ok=True)
-    normalized_path = os.path.join(target_upload_dir, f"features_data_file_0_{job_id}_parsed.pkl")
-    parsed_df.to_pickle(normalized_path)
-    return normalized_path
+    return _persist_normalized_features_dataframe(parsed_df, job_id, upload_dir=upload_dir)
 
 
 def _ensure_length(value, name, expected):
@@ -17003,7 +17546,7 @@ def start_computation_redirect(computation_type):
         empirical_source_mode = (request.form.get("empirical_source_mode") or "upload").strip()
         existing_data_path = (request.form.get("existing_data_path") or "").strip()
         parser_deep_scan_status = (request.form.get("parser_deep_scan_status") or "").strip().lower()
-        if not (request.form.get("parser_data_locator") or "").strip():
+        if data_source_kind != "pipeline" and not (request.form.get("parser_data_locator") or "").strip():
             flash('Select the data locator for EphysDatasetParser.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
         epoching_enabled = str(request.form.get("parser_enable_epoching", "")).lower() in {"1", "true", "on", "yes"}
@@ -17063,14 +17606,14 @@ def start_computation_redirect(computation_type):
                 if fs_locator and fs_manual is not None:
                     flash('Sampling frequency locator and sampling frequency value are mutually exclusive.', 'error')
                     return redirect(request.referrer or url_for('features_methods'))
-                if not fs_locator and fs_manual is None:
+                if data_source_kind != "pipeline" and not fs_locator and fs_manual is None:
                     flash('Provide sampling frequency source (field, numeric value, or None).', 'error')
                     return redirect(request.referrer or url_for('features_methods'))
 
             recording_type_source = (request.form.get("parser_recording_type_source") or "").strip()
             recording_type_value = (request.form.get("parser_recording_type") or "").strip()
             if recording_type_source == "__value__":
-                if not recording_type_value:
+                if data_source_kind != "pipeline" and not recording_type_value:
                     flash('Select a recording type value.', 'error')
                     return redirect(request.referrer or url_for('features_methods'))
             elif recording_type_source == "__none__":
