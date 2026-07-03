@@ -406,26 +406,8 @@
 </div>
 </li>
 <li>
-<code>Inference._coerce_sample_shape(sample_shape)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L210">source</a><br/>
-              Normalize scalar/tuple sample shape into torch-compatible shape object.
-            </li>
-<li>
-<code>Inference._sample_posterior(posterior_obj, *, x=None, **sbi_eval_sampling_kwargs)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L216">source</a><br/>
-              Draw posterior samples from SBI posterior objects for single or batched observations.<br/>
-<div class="api-params-block">
-<div class="api-params-title">Parameters</div>
-<ul class="api-params-list">
-<li><code>posterior_obj</code> trained posterior object <span class="api-param-type">type: object</span></li>
-<li><code>x</code> conditioning observation(s) <span class="api-param-type">type: array-like | None</span></li>
-<li><code>sbi_eval_sampling_kwargs</code> forwarded sampler kwargs. <span class="api-param-type">type: dict | None</span></li>
-</ul>
-</div>
-</li>
-<li>
 <code>Inference.add_simulation_data(features, parameters, *, append=False, copy=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L339">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L617">source</a><br/>
               Register training feature/target arrays, with optional append mode.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -439,7 +421,7 @@
 </li>
 <li>
 <code>Inference.initialize_sbi(hyperparams)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L408">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L686">source</a><br/>
               Build an SBI inference object and estimator configuration.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -453,7 +435,7 @@
 </li>
 <li>
 <code>Inference.train(param_grid=None, *, n_splits=10, n_repeats=10, train_params=None, result_dir='data', scaler=None, seed=0, sklearn_verbose=None, sbi_eval_sampling_kwargs=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L511">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L789">source</a><br/>
               Train a model (single-fit or repeated CV search) and persist artifacts.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -471,7 +453,7 @@
 </li>
 <li>
 <code>Inference.predict(features, *, result_dir='data', scaler=False, n_jobs=None, chunksize=None, start_method='spawn', sbi_eval_sampling_kwargs=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L852">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Inference.py#L1136">source</a><br/>
               Load trained artifacts and generate predictions from new feature rows.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -495,7 +477,7 @@
 <ul>
 <li>
 <code>extract_variables(formula)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L15">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L16">source</a><br/>
               Tokenize an R-style formula and extract variable-like terms.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -505,8 +487,36 @@
 </div>
 </li>
 <li>
+<code>PosthocConfig</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L54">source</a><br/>
+              Configuration object for post-hoc testing in <code>Analysis.lmer_tests</code>.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Fields</div>
+<ul class="api-params-list">
+<li><code>adjust</code> p-value adjustment method passed to emmeans/contrast/test. <span class="api-param-type">type: str</span></li>
+<li><code>pairwise_method</code> all-pairs comparison backend (<code>pairs</code> or <code>contrast</code>). <span class="api-param-type">type: str</span></li>
+<li><code>pairwise_contrast_method</code> contrast method used when <code>pairwise_method='contrast'</code>. <span class="api-param-type">type: str</span></li>
+<li><code>treatment_method</code> treatment-vs-control contrast method. <span class="api-param-type">type: str</span></li>
+<li><code>treatment_ref</code> optional control/reference-level override. <span class="api-param-type">type: str | int | None</span></li>
+</ul>
+</div>
+</li>
+<li>
+<code>LmerTestsResult</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L92">source</a><br/>
+              Return object used by <code>Analysis.lmer_tests</code> when likelihood-ratio tests or model metadata are requested.<br/>
+<div class="api-params-block">
+<div class="api-params-title">Fields</div>
+<ul class="api-params-list">
+<li><code>posthoc</code> post-hoc result DataFrames keyed by spec. <span class="api-param-type">type: dict[str, pandas.DataFrame]</span></li>
+<li><code>lrt</code> likelihood-ratio test table, if requested. <span class="api-param-type">type: pandas.DataFrame | None</span></li>
+<li><code>model_info</code> optional model-selection metadata. <span class="api-param-type">type: dict | None</span></li>
+</ul>
+</div>
+</li>
+<li>
 <code>Analysis.__init__(data)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L142">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L143">source</a><br/>
               Store an analysis data object (typically a pandas DataFrame for statistical methods).<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -517,7 +527,7 @@
 </li>
 <li>
 <code>Analysis.lmer_tests(models, group_col=None, control_group=None, numeric=None, specs=None, *, posthoc=None, print_info=True, lrt=False, lrt_drop=None, return_model_info=False)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L201">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L210">source</a><br/>
               Fit lm/lmer models through R, run post-hoc tests, optionally run LRT and return model metadata.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -537,7 +547,7 @@
 </li>
 <li>
 <code>Analysis.lmer_selection(full_model, numeric=None, *, crit=None, random_crit='BIC', fixed_crit='LRT', include=None, print_info=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L573">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L582">source</a><br/>
               Backward model selection using R buildmer for random and/or fixed terms.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -554,7 +564,7 @@
 </li>
 <li>
 <code>Analysis.cohend(*, control_group='HC', data_col='Y', data_index=-1, group_col='group', sensor_col='sensor', min_n=3, drop_zeros=True)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L739">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L748">source</a><br/>
               Compute sensor-wise Cohen’s d for each non-control group vs control.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -571,7 +581,7 @@
 </li>
 <li>
 <code>Analysis.eeg_topomap(values=None, ch_names=None, *, position_offset, sensor_col='sensor', data_col='data', data_index=-1, montage='standard_1005', ch_type='eeg', sphere=0.28, cmap='jet', vmin=None, vmax=None, colorbar=True, colorbar_fmt='%0.2f', colorbar_label=None, colorbar_label_fontsize=None, colorbar_tick_fontsize=8, sensors=None, outlines=None, contours=None, res=300, extrapolate=None, image_interp=None, axes=None, show=True, title=None, names=None)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L864">source</a><br/>
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L891">source</a><br/>
               Render EEG scalp topography from passed values or from <code>self.data</code>.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
@@ -588,13 +598,14 @@
 </div>
 </li>
 <li>
-<code>Analysis.meg_surface(values, *, atlas='dk', subject='fsaverage', subjects_dir=None, surface='inflated', hemisphere='both', views='lat', cmap='coolwarm', vmin=None, vmax=None, center=None, alpha=1.0, smoothing_steps=5, colorbar=True, colorbar_kwargs=None, cortex='low_contrast', background='white', size=(1000, 600), show=True, axes=None, auto_fetch=True, hcp_accept=False, verbose=None, **brain_kwargs)</code>:
-              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L1014">source</a><br/>
+<code>Analysis.meg_surface(values=None, ch_names=None, *, sensor_col='sensor', data_col='data', data_index=-1, atlas='dk', subject='fsaverage', subjects_dir=None, surface='inflated', hemisphere='both', views='lat', cmap='coolwarm', vmin=None, vmax=None, center=None, alpha=1.0, smoothing_steps=5, colorbar=True, colorbar_kwargs=None, cortex='low_contrast', background='white', size=(1000, 600), show=True, axes=None, auto_fetch=True, hcp_accept=False, backend='auto', verbose=None, **brain_kwargs)</code>:
+              <a class="link" href="https://github.com/necolab-ugr/ncpi/blob/main/ncpi/Analysis.py#L1140">source</a><br/>
               Plot parcel-wise MEG values on cortical surfaces using MNE/FreeSurfer parcellations.<br/>
 <div class="api-params-block">
 <div class="api-params-title">Parameters</div>
 <ul class="api-params-list">
-<li><code>values</code> one value per parcel <span class="api-param-type">type: array-like | None</span></li>
+<li><code>values</code>/<code>ch_names</code> explicit parcel values and names (or infer from <code>self.data</code>) <span class="api-param-type">type: array-like | None</span></li>
+<li><code>sensor_col</code>/<code>data_col</code>/<code>data_index</code> DataFrame mapping used when <code>values</code> is omitted <span class="api-param-type">type: str | int | None</span></li>
 <li><code>atlas</code> parcellation name <span class="api-param-type">type: str</span></li>
 <li><code>subject</code>/<code>subjects_dir</code> source anatomy <span class="api-param-type">type: str</span></li>
 <li><code>surface</code>/<code>hemisphere</code>/<code>views</code> viewing geometry <span class="api-param-type">type: str</span></li>
@@ -604,6 +615,7 @@
 <li><code>show</code>/<code>axes</code> matplotlib target behavior <span class="api-param-type">type: bool</span></li>
 <li><code>auto_fetch</code> auto-download fsaverage <span class="api-param-type">type: bool</span></li>
 <li><code>hcp_accept</code> HCP-MMP license acceptance <span class="api-param-type">type: bool</span></li>
+<li><code>backend</code> rendering backend selector. <span class="api-param-type">type: str</span></li>
 <li><code>verbose</code> MNE verbosity <span class="api-param-type">type: bool | str | int | None</span></li>
 <li><code>brain_kwargs</code> additional Brain constructor args. <span class="api-param-type">type: dict</span></li>
 </ul>
