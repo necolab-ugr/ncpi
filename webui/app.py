@@ -8588,15 +8588,17 @@ def _clear_features_data_files():
     features_data_dir = _features_data_dir(create=False)
     if not os.path.isdir(features_data_dir):
         return
-    for name in os.listdir(features_data_dir):
-        if not (name.endswith(".pkl") or name.endswith(".pickle")):
-            continue
-        path = os.path.join(features_data_dir, name)
-        if os.path.isfile(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+    for root, _, files in os.walk(features_data_dir):
+        for name in files:
+            lower = name.lower()
+            if not (lower.endswith(".pkl") or lower.endswith(".pickle")):
+                continue
+            path = os.path.join(root, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
 
 def _clear_predictions_data_files():
