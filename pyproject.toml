@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ncpi"
-version = "1.0.0b1"
+version = "1.0.0b2"
 description = "Neural circuit parameter inference using electrophysiological data"
 readme = "README.md"
 license = {file = "LICENSE"}
