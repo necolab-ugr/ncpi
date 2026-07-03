@@ -28,6 +28,8 @@ https://github.com/user-attachments/assets/998f5636-f36d-4470-840c-e29bf7446efa
 
 `ncpi` requires **Python 3.10+**.
 
+The current PyPI release of `ncpi` is a beta pre-release. Install it with `pip install --pre ncpi` so pip includes pre-release versions.
+
 ## 1) Conda setup notes (Windows + Unix)
 
 We strongly recommend installing `ncpi` in a dedicated **Conda** environment.
@@ -43,7 +45,7 @@ options.
 ```bash
 conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
-pip install ncpi
+pip install --pre ncpi
 ```
 
 ### NEST on Unix/macOS (for LIF simulation examples)
@@ -77,7 +79,7 @@ In **Anaconda Prompt**, create the environment and install ncpi:
 ```powershell
 conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
-pip install ncpi
+pip install --pre ncpi
 ```
 
 Use this option when you do not need NEST, NEURON, or the ncpi extras that depend on them, such as
@@ -98,25 +100,26 @@ WSL environment and install ncpi and NEST:
 ```bash
 conda create -n ncpi-env python=3.10 -y
 conda activate ncpi-env
-pip install ncpi
+pip install --pre ncpi
 conda install -c conda-forge nest-simulator=3.8
 ```
 
 ## 4) Optional Dependencies
 
-`ncpi` supports optional extras. Install only what your workflow needs.
+`ncpi` supports optional extras. Install only what your workflow needs. Because the current PyPI release is a beta
+pre-release, include `--pre` when installing extras too.
 
 ### Extras shortcuts
 ```bash
-pip install "ncpi[parser]"          # extended parser backends
-pip install "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models [Windows: WSL required]
-pip install "ncpi[webui]"           # WebUI runtime backends
-pip install "ncpi[examples]"        # dependencies for example scripts [Windows: WSL required]
+pip install --pre "ncpi[parser]"          # extended parser backends
+pip install --pre "ncpi[fieldpotential]"  # kernel/CDM/LFP + M/EEG forward models [Windows: WSL required]
+pip install --pre "ncpi[webui]"           # WebUI runtime backends
+pip install --pre "ncpi[examples]"        # dependencies for example scripts [Windows: WSL required]
 # Note: the dependencies listed below refer to Section 6 (Optional backends notes).
-pip install "ncpi[tests]"           # test stack dependencies [Windows: WSL required]
-pip install "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
-pip install "ncpi[hctsa]"           # hctsa backend support
-pip install "ncpi[all]"             # all optional dependencies [Windows: WSL required]
+pip install --pre "ncpi[tests]"           # test stack dependencies [Windows: WSL required]
+pip install --pre "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
+pip install --pre "ncpi[hctsa]"           # hctsa backend support
+pip install --pre "ncpi[all]"             # all optional dependencies [Windows: WSL required]
 ```
 
 ## 5) WebUI: installation and usage
@@ -125,7 +128,7 @@ The WebUI must be run from the ncpi repository source. After activating your Con
 dependencies with:
 
 ```bash
-pip install "ncpi[webui]"
+pip install --pre "ncpi[webui]"
 ```
 
 ### Start WebUI
