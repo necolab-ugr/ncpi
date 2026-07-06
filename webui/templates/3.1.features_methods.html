@@ -381,6 +381,14 @@ def custom_feature(sample, params):
                         if ((this.simulationFolderPaths || []).length > 0 || this.simulationFolderPath) await this.inspectSimulationFolderPath();
                     }
                 } finally {
+                    // Restore additional metadata files
+                    const metadataPath = String(this.restoreValue(form, 'additional_metadata_server_path', '')).trim();
+                    if (metadataPath) {
+                        this.additionalServerFilePaths = [metadataPath];
+                        this.additionalFileSourceMode = 'server-path';
+                        // Optional: inspect metadata immediately
+                        await this.inspectAllAdditionalFiles();
+                    }
                     this.restoreParserControls(form);
                     this.computeFlowSelectorOpen = false;
                     this.computeFlowConfigOpen = true;
