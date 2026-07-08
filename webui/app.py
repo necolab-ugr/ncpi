@@ -4506,15 +4506,16 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
         normalized_names.append(token)
 
     file_id_examples = normalized_names[:6]
-    file_id_usage = [
-        "Use `file_ID` as Subject ID locator to assign one subject per file.",
-    ]
+    
     if file_id_examples:
-        file_id_usage.append(
+        file_id_usage = [
             "Example subject IDs from current selection: "
             + ", ".join(file_id_examples[:4])
             + ("..." if len(file_id_examples) > 4 else "")
-        )
+        ]
+    file_id_usage.append(
+        "Use `file_ID` as `Subject ID` source to assign one subject per file.",
+    )
 
     details = [{
         "field": "__file_id__",
@@ -4541,28 +4542,28 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
         locator_spec = _file_extracted_locator_spec(key)
         token_name = _file_token_locator_name(key)
         usage_examples = []
-        if token_name:
+        if token_name and preview:
             usage_examples.append(
-                f"Represents the `{token_name}` token extracted from the filename format."
+                f"Values extracted for token `{token_name}`: {preview}"
             )
         elif locator_spec is not None and int(locator_spec.get("index", -1)) >= 0:
             position = int(locator_spec.get("index", 0))
             separator_char = str(locator_spec.get("separator") or "_")
             usage_examples.append(
-                f"Represents block {position + 1} extracted from file names using separator '{separator_char}'."
+                f"Tokens extracted from file names: {preview}" if preview else "Tokens extracted from file names."
             )
         usage_examples.append(
-            "Use this virtual field as Group/Condition locator when file names encode categories."
+            "Use this virtual field as `Group/Condition` source when file names encode categories."
         )
         if values:
-            usage_examples.append(
-                "Example options in current selection: "
-                + ", ".join(values[:6])
-                + ("..." if len(values) > 6 else "")
-            )
+            # usage_examples.append(
+            #     "Example options in current selection: "
+            #     + ", ".join(values[:6])
+            #     + ("..." if len(values) > 6 else "")
+            # )
             if len(values) >= 2:
                 usage_examples.append(
-                    f"Example usage: map `{key}` to `group` (e.g., {values[0]} vs {values[1]})."
+                    f"Example usage: map `{key}` to `Group source` (e.g., {values[0]} vs {values[1]})."
                 )
         details.append({
             "field": key,
@@ -4570,9 +4571,9 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
             "origin": "virtual",
             "python_type": "str",
             "detail": (
-                f"Values extracted for token `{token_name}`: {preview}"
-                if token_name and preview
-                else (f"Tokens extracted from file names: {preview}" if preview else "Tokens extracted from file names.")
+                f"Represents the `{token_name}` token extracted from the filename format."
+                if token_name
+                else (f"Represents block {position + 1} extracted from file names using separator '{separator_char}'.")
             ),
             "example_values": values[:8],
             "usage_examples": usage_examples,
