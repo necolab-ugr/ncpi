@@ -221,7 +221,9 @@ def _load_mat_with_fallback(path: Path) -> Any:
 
 
 def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
-    _require_pyedflib("EDF .edf loading")
+    file_format = path.suffix.lower().lstrip(".") or "edf"
+    display_format = file_format.upper()
+    _require_pyedflib(f"{display_format} .{file_format} loading")
     import pyedflib  # type: ignore
 
     def _as_text(value: Any) -> str:
@@ -244,7 +246,7 @@ def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
     try:
         n_signals = int(getattr(reader, "signals_in_file", 0) or 0)
         if n_signals <= 0:
-            raise ValueError(f"EDF file '{path}' does not contain readable signals.")
+            raise ValueError(f"{display_format} file '{path}' does not contain readable signals.")
 
         labels_raw = _safe_reader_call(reader, "getSignalLabels") or []
         ch_names = [
@@ -255,30 +257,30 @@ def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
         sample_freqs = np.asarray(_safe_reader_call(reader, "getSampleFrequencies"), dtype=float).reshape(-1)
         if sample_freqs.size != n_signals:
             raise ValueError(
-                f"EDF file '{path}' returned {sample_freqs.size} sample-frequency values for {n_signals} channels."
+                f"{display_format} file '{path}' returned {sample_freqs.size} sample-frequency values for {n_signals} channels."
             )
         if not np.isfinite(sample_freqs).all() or float(sample_freqs[0]) <= 0:
-            raise ValueError(f"EDF file '{path}' contains invalid sample-frequency values.")
+            raise ValueError(f"{display_format} file '{path}' contains invalid sample-frequency values.")
 
         fs = float(sample_freqs[0])
         if np.any(np.abs(sample_freqs - fs) > 1e-9):
             unique_freqs = sorted({float(v) for v in sample_freqs.tolist()})
             raise ValueError(
-                f"EDF file '{path}' contains mixed sampling frequencies across channels: {unique_freqs}. "
+                f"{display_format} file '{path}' contains mixed sampling frequencies across channels: {unique_freqs}. "
                 "A single shared frequency is required."
             )
 
         n_samples_arr = np.asarray(_safe_reader_call(reader, "getNSamples"), dtype=int).reshape(-1)
         if n_samples_arr.size != n_signals:
             raise ValueError(
-                f"EDF file '{path}' returned {n_samples_arr.size} sample-count values for {n_signals} channels."
+                f"{display_format} file '{path}' returned {n_samples_arr.size} sample-count values for {n_signals} channels."
             )
         if np.any(n_samples_arr <= 0):
-            raise ValueError(f"EDF file '{path}' contains non-positive sample counts.")
+            raise ValueError(f"{display_format} file '{path}' contains non-positive sample counts.")
         if np.any(n_samples_arr != int(n_samples_arr[0])):
             unique_counts = sorted({int(v) for v in n_samples_arr.tolist()})
             raise ValueError(
-                f"EDF file '{path}' contains inconsistent sample counts across channels: {unique_counts}."
+                f"{display_format} file '{path}' contains inconsistent sample counts across channels: {unique_counts}."
             )
 
         n_samples = int(n_samples_arr[0])
@@ -287,7 +289,7 @@ def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
             sig = np.asarray(reader.readSignal(ch_idx), dtype=float).reshape(-1)
             if sig.size != n_samples:
                 raise ValueError(
-                    f"EDF file '{path}' channel {ch_idx} has {sig.size} samples, expected {n_samples}."
+                    f"{display_format} file '{path}' channel {ch_idx} has {sig.size} samples, expected {n_samples}."
                 )
             data[ch_idx, :] = sig
 
@@ -336,7 +338,7 @@ def _load_edf_with_pyedflib(path: Path) -> Dict[str, Any]:
         subject_id = header.get("patient_code") or header.get("patient_name")
         duration_s = float(n_samples) / fs
         out: Dict[str, Any] = {
-            "__source_format__": "edf",
+            "__source_format__": file_format,
             "data": data,
             "fs": fs,
             "ch_names": ch_names,
@@ -990,7 +992,7 @@ class EphysDatasetParser:
       - numpy arrays (ndarray)
       - dict-like (including scipy.io.loadmat output, json-loaded dict)
       - pandas DataFrame (wide/long), and file paths to csv/parquet if pandas installed
-      - .npy, .json, .mat, .nwb, .set, .fif, .edf, .ds, .tsv paths
+      - .npy, .json, .mat, .nwb, .set, .fif, .edf, .bdf, .ds, .tsv paths
 
     Output:
       - pandas DataFrame with DEFAULT_COLUMNS
@@ -1106,10 +1108,11 @@ class EphysDatasetParser:
 
                 return mne.io.read_raw_fif(str(path), preload=self.config.preload, verbose=False), source_file
 
-            if suffix == ".edf":
+            if suffix in {".edf", ".bdf"}:
                 if not path.is_file():
+                    display_format = suffix.lstrip(".").upper()
                     raise ValueError(
-                        f"EDF file does not exist or is not a regular file: '{path}'. "
+                        f"{display_format} file does not exist or is not a regular file: '{path}'. "
                         "Verify the dataset path and that the file is available on disk."
                     )
                 return _load_edf_with_pyedflib(path), source_file
