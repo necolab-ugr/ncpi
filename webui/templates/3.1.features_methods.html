@@ -5748,6 +5748,11 @@ def custom_feature(sample, params):
                                             <span>After epoching</span>
                                         </label>
                                     </div>
+                                    <!-- Warning message: after epoching is selected without having Enable epoching checked -->
+                                    <p x-show="parserZscoreEnabled && parserZscoreAfterEpoch && !parserEnableEpoching" x-cloak
+                                        class="mt-1 text-xs text-red-600 dark:text-red-400">
+                                        Enable epoching to apply z‑score after epoching.
+                                    </p>
                                 </div>
 
                                 <div class="rounded-lg border border-gray-200 dark:border-[#323b67] p-4 space-y-4">
