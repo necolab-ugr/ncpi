@@ -8875,11 +8875,6 @@ def restore_job_config(job_id):
     return redirect(url_for(endpoint, **values))
 
 
-@app.route("/simulation/restore_config/<job_id>", methods=["POST"])
-def restore_simulation_config(job_id):
-    return restore_job_config(job_id)
-
-
 def _simulation_computation(job_id, job_status, params):
     simulation_runs_root = SIMULATION_RUNS_DIR
     try:
