@@ -8057,13 +8057,15 @@ def _build_saved_session_entries():
 @app.route("/")
 def dashboard():
     simulation_data_dir = SIMULATION_DATA_DIR
+    simulation_pkl_files = []
     if os.path.isdir(simulation_data_dir):
-        simulation_pkl_files = sorted(
-            f for f in os.listdir(simulation_data_dir)
-            if f.endswith(".pkl") and os.path.isfile(os.path.join(simulation_data_dir, f))
-        )
-    else:
-        simulation_pkl_files = []
+        for root, _, files in os.walk(simulation_data_dir):
+            for f in files:
+                if f.endswith(".pkl"):
+                    rel_path = os.path.relpath(os.path.join(root, f), simulation_data_dir)
+                    simulation_pkl_files.append(rel_path)
+        simulation_pkl_files = sorted(simulation_pkl_files)
+    
     field_potential_files = []
     for fp_dir in _field_potential_dirs():
         if not os.path.isdir(fp_dir):
@@ -8071,15 +8073,19 @@ def dashboard():
         for root, _, files in os.walk(fp_dir):
             for name in files:
                 if name.endswith(".pkl"):
-                    field_potential_files.append(name)
+                    rel_path = os.path.relpath(os.path.join(root, name), fp_dir)
+                    field_potential_files.append(rel_path)
+    field_potential_files = sorted(set(field_potential_files))
+    
     features_data_files = _list_features_data_files()
     _bootstrap_predictions_data_from_previous_steps()
     predictions_data_files = _list_predictions_data_files()
+    
     return render_template(
         "0.dashboard.html",
         simulation_pkl_files=simulation_pkl_files,
         has_simulation_pkl=bool(simulation_pkl_files),
-        field_potential_files=sorted(set(field_potential_files)),
+        field_potential_files=field_potential_files,
         has_field_potential_data=bool(field_potential_files),
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
@@ -19251,6 +19257,45 @@ def download_session(session_id):
         return str(e), 400
     except Exception as e:
         return f"Error downloading session: {e}", 500
+
+@app.route("/download_single_file")
+def download_single_file():
+    """Download a single file from the current session by its relative path within a module folder."""
+    relative_path = request.args.get("path", "").strip()
+    if not relative_path:
+        return "Missing file path.", 400
+    
+    safe_path = relative_path.replace("\\", "/").strip("/")
+    if ".." in safe_path.split("/"):
+        return "Invalid path.", 400
+    
+    # Map of module folders to their base directories
+    module_dirs = {
+        "simulation": SIMULATION_DATA_DIR,
+        "field_potential": [
+            FIELD_POTENTIAL_PROXY_DIR,
+            FIELD_POTENTIAL_KERNEL_DIR,
+            FIELD_POTENTIAL_MEEG_DIR,
+        ],
+        "features": _features_data_dir(create=False),
+        "inference": _predictions_data_dir(create=False),
+        "analysis": ANALYSIS_DATA_DIR,
+    }
+    
+    for module_name, dirs in module_dirs.items():
+        candidates = dirs if isinstance(dirs, list) else [dirs]
+        for base_dir in candidates:
+            if not base_dir or not os.path.isdir(base_dir):
+                continue
+            candidate = os.path.join(base_dir, safe_path)
+            if os.path.isfile(candidate):
+                return send_file(
+                    candidate,
+                    as_attachment=True,
+                    download_name=os.path.basename(safe_path)
+                )
+    
+    return "File not found.", 404
 
 if __name__ == '__main__':
     from launcher import run_webui
