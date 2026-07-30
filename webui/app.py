@@ -19176,6 +19176,82 @@ def download_results(job_id):
         download_name=f'{computation_type}_results_{job_id}_output.pkl'
     )
 
+@app.route("/sessions/download/<session_id>")
+def download_session(session_id):
+    """Download session computation results as a ZIP archive, excluding metadata files."""
+    try:
+        session_root = tmp_paths._session_root_from_id(tmp_paths.TMP_BASE_ROOT, session_id)
+        session_root = tmp_paths._validate_session_root(session_root)
+        
+        if not os.path.isdir(session_root):
+            return "Session folder not found.", 404
+        
+        # Create temp directory for filtered archive
+        tmp_dir = tempfile.mkdtemp(prefix=f"session_dl_{session_id}_", dir=tmp_paths.TMP_BASE_ROOT)
+        
+        @after_this_request
+        def cleanup(response):
+            try:
+                if os.path.exists(tmp_dir):
+                    shutil.rmtree(tmp_dir)
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
+            except Exception as exc:
+                app.logger.error(f"Error cleaning up session download temp: {exc}")
+            return response
+
+        # Helper to copy directory tree ignoring 'uploads' folders
+        def copytree_ignore_uploads(src, dst):
+            for item in os.listdir(src):
+                if item == 'uploads':
+                    continue  # Skip uploads folders entirely
+                s = os.path.join(src, item)
+                d = os.path.join(dst, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d)
+                else:
+                    os.makedirs(os.path.dirname(d), exist_ok=True)
+                    shutil.copy2(s, d)
+        
+        # Copy only computation module folders (excluding uploads)
+        basename = os.path.basename(session_root)
+        dest_root = os.path.join(tmp_dir, basename)
+        os.makedirs(dest_root, exist_ok=True)
+        
+        copied_anything = False
+        for module_name in sorted(_MODULE_TMP_NAMES):
+            src = os.path.join(session_root, module_name)
+            if os.path.isdir(src):
+                dst = os.path.join(dest_root, module_name)
+                os.makedirs(dst, exist_ok=True)
+                copytree_ignore_uploads(src, dst)
+                # Check if we actually copied something besides empty dirs
+                if os.listdir(dst):
+                    copied_anything = True
+                else:
+                    os.rmdir(dst)  # Remove empty module folder
+        
+        if not copied_anything:
+            return "No computation results found in this session.", 404
+        
+        # Create the ZIP archive
+        archive_base = os.path.join(tempfile.gettempdir(), f"session_{session_id}")
+        archive_path = shutil.make_archive(archive_base, "zip", root_dir=tmp_dir)
+        
+        display_name = tmp_paths.get_session_display_name(session_root)
+        safe_name = "".join(c if c.isalnum() or c in ".-_" else "_" for c in display_name)
+        
+        return send_file(
+            archive_path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"session_{safe_name}.zip"
+        )
+    except ValueError as e:
+        return str(e), 400
+    except Exception as e:
+        return f"Error downloading session: {e}", 500
+
 if __name__ == '__main__':
     from launcher import run_webui
 
