@@ -1752,15 +1752,6 @@ def _rewrite_pickle_as_single_scenario_list(path):
         pickle.dump([payload], handle)
 
 
-# def _normalize_simulation_output_files_as_lists(output_dir, file_names):
-#     normalized = []
-#     for name in file_names or []:
-#         path = os.path.join(output_dir, name)
-#         _rewrite_pickle_as_single_scenario_list(path)
-#         normalized.append(path)
-#     return normalized
-
-
 def _ensure_sequence(value, name):
     if not isinstance(value, (list, tuple)):
         raise ValueError(f"'{name}' must be a list or tuple.")
@@ -2614,56 +2605,6 @@ def _bootstrap_predictions_data_from_previous_steps():
     return True
 
 
-# def _collect_empirical_folder_files(folder_path):
-#     root = os.path.realpath((folder_path or "").strip())
-#     if not root:
-#         raise ValueError("Provide a folder path for empirical recordings.")
-#     if not os.path.isdir(root):
-#         raise ValueError(f"Empirical folder does not exist: {root}")
-
-#     matches = []
-#     if _is_supported_ctf_dataset_path(root):
-#         return [root]
-#     for current_root, dirs, files in os.walk(root):
-#         ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
-#         dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
-#         for name in ctf_dirs:
-#             matches.append(os.path.join(current_root, name))
-#         for name in files:
-#             ext = Path(name).suffix.lower()
-#             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
-#                 matches.append(os.path.join(current_root, name))
-#     matches.sort()
-#     if not matches:
-#         raise ValueError(f"No supported empirical files found in folder: {root}")
-#     return matches
-
-
-# def _collect_simulation_folder_files(folder_path):
-#     root = os.path.realpath((folder_path or "").strip())
-#     if not root:
-#         raise ValueError("Provide a folder path for simulation outputs.")
-#     if not os.path.isdir(root):
-#         raise ValueError(f"Simulation outputs folder does not exist: {root}")
-
-#     matches = []
-#     if _is_supported_ctf_dataset_path(root):
-#         return [root]
-#     for current_root, dirs, files in os.walk(root):
-#         ctf_dirs = [name for name in dirs if Path(name).suffix.lower() == ".ds"]
-#         dirs[:] = [name for name in dirs if Path(name).suffix.lower() != ".ds"]
-#         for name in ctf_dirs:
-#             matches.append(os.path.join(current_root, name))
-#         for name in files:
-#             ext = Path(name).suffix.lower()
-#             if ext in FEATURES_PARSER_FILE_EXTENSIONS:
-#                 matches.append(os.path.join(current_root, name))
-#     matches.sort()
-#     if not matches:
-#         raise ValueError(f"No supported simulation output files found in folder: {root}")
-#     return matches
-
-
 def _parse_folder_paths_payload(raw_value):
     raw = str(raw_value or "").strip()
     if not raw:
@@ -2785,13 +2726,6 @@ def _to_posix_relpath(path):
     return token or "."
 
 
-# def _format_extension_count_map(ext_map):
-#     items = []
-#     for ext, count in sorted((ext_map or {}).items(), key=lambda item: str(item[0])):
-#         items.append(f"{ext}:{int(count)}")
-#     return ", ".join(items) if items else "(no files)"
-
-
 def _numeric_wildcard_stem(stem):
     token = str(stem or "").strip()
     if not token:
@@ -2801,27 +2735,6 @@ def _numeric_wildcard_stem(stem):
         return wildcard, None
     regex_src = "^" + re.escape(wildcard).replace(r"\*", r"\d+") + "$"
     return wildcard, re.compile(regex_src)
-
-
-# def _validate_uniform_supported_extension_per_folder(entries, label):
-#     ext_by_folder = defaultdict(set)
-#     folder_labels = {}
-#     for row in entries or []:
-#         folder_key = str(row.get("folder_path") or row.get("folder_name") or "selected_folder").strip() or "selected_folder"
-#         folder_labels[folder_key] = str(row.get("folder_name") or row.get("folder_path") or folder_key).strip() or folder_key
-#         ext = str(row.get("extension") or "").strip().lower()
-#         if ext:
-#             ext_by_folder[folder_key].add(ext)
-
-#     for folder_key, ext_set in sorted(ext_by_folder.items(), key=lambda item: str(item[0])):
-#         if len(ext_set) <= 1:
-#             continue
-#         folder_label = folder_labels.get(folder_key, folder_key)
-#         ext_list = ", ".join(sorted(ext_set))
-#         raise ValueError(
-#             f"{label} folder '{folder_label}' contains multiple supported file extensions: {ext_list}. "
-#             "Use one file extension per folder."
-#         )
 
 
 def _folder_display_name(folder_path, fallback_index=1):
@@ -4556,11 +4469,6 @@ def _build_virtual_field_details_for_ui(file_names, filename_format_spec=None):
             "Use this virtual field as `Group/Condition` source when file names encode categories."
         )
         if values:
-            # usage_examples.append(
-            #     "Example options in current selection: "
-            #     + ", ".join(values[:6])
-            #     + ("..." if len(values) > 6 else "")
-            # )
             if len(values) >= 2:
                 usage_examples.append(
                     f"Example usage: map `{key}` to `Group source` (e.g., {values[0]} vs {values[1]})."
@@ -4810,17 +4718,6 @@ def _filter_selected_entries_by_filename_format(selected_entries, filename_forma
     # Even for nested folder layouts (e.g., BIDS), filename-format filtering
     # should operate on every candidate file name, not only top-level subfolder names.
     return filtered, skipped_names, "file", len(rows)
-
-
-# def _filter_empirical_upload_payloads_by_filename_format(payloads, filename_format_spec):
-#     if not filename_format_spec:
-#         return list(payloads or []), []
-#     filtered, skipped = _filter_named_items_by_filename_format(
-#         payloads,
-#         lambda item: str(item.get("name") or ""),
-#         filename_format_spec,
-#     )
-#     return filtered, skipped
 
 
 def _validate_listed_file_names_by_folder_extension(listed_file_names, label="Selected"):
@@ -5748,74 +5645,6 @@ def _load_features_source(path):
     loaded = _coerce_trial_dataframe_sequence(loaded)
     loaded = _coerce_trial_mapping_sequence(loaded)
     return _stack_array_like_source(loaded)
-
-
-# def _load_uploaded_source_in_memory(upload):
-#     safe_name = secure_filename(upload.filename or "")
-#     if not safe_name:
-#         raise ValueError("Invalid uploaded file name.")
-#     ext = Path(safe_name).suffix.lower()
-
-#     raw = upload.read()
-#     if not raw:
-#         raise ValueError(f"Uploaded file '{safe_name}' is empty.")
-
-#     if ext in {".pkl", ".pickle"}:
-#         bio = io.BytesIO(raw)
-#         try:
-#             loaded = _coerce_trial_dataframe_sequence(pd.read_pickle(bio))
-#             loaded = _coerce_trial_mapping_sequence(loaded)
-#             return _stack_array_like_source(loaded)
-#         except Exception:
-#             bio.seek(0)
-#             loaded = _coerce_trial_dataframe_sequence(pickle.load(bio))
-#             loaded = _coerce_trial_mapping_sequence(loaded)
-#             return _stack_array_like_source(loaded)
-
-#     if ext == ".json":
-#         try:
-#             return json.loads(raw.decode("utf-8"))
-#         except Exception as exc:
-#             raise ValueError(f"Failed to parse JSON file '{safe_name}': {exc}")
-
-#     if ext == ".npy":
-#         bio = io.BytesIO(raw)
-#         return _stack_array_like_source(np.load(bio, allow_pickle=True))
-
-#     if ext == ".csv":
-#         return pd.read_csv(io.BytesIO(raw))
-#     if ext == ".tsv":
-#         return pd.read_csv(io.BytesIO(raw), sep="\t")
-
-#     if ext == ".parquet":
-#         return pd.read_parquet(io.BytesIO(raw))
-
-#     if ext == ".feather":
-#         return pd.read_feather(io.BytesIO(raw))
-
-#     if ext in {".xlsx", ".xls"}:
-#         return pd.read_excel(io.BytesIO(raw))
-
-#     if ext == ".mat":
-#         return compute_utils._load_mat_with_fallback(raw, in_memory=True, source_name=safe_name)
-
-#     if ext == ".nwb":
-#         temp_path = ""
-#         try:
-#             with tempfile.NamedTemporaryFile(prefix="ncpi_nwb_", suffix=".nwb", delete=False) as handle:
-#                 handle.write(raw)
-#                 temp_path = handle.name
-#             parser = EphysDatasetParser(ParseConfig())
-#             loaded, _ = parser._load_source(temp_path)
-#             return loaded
-#         finally:
-#             if temp_path and os.path.isfile(temp_path):
-#                 try:
-#                     os.remove(temp_path)
-#                 except OSError:
-#                     pass
-
-#     raise ValueError(f"Unsupported file type for in-memory parsing: {ext}")
 
 
 def _copy_parse_config(base_cfg, *, fields):
@@ -8228,13 +8057,15 @@ def _build_saved_session_entries():
 @app.route("/")
 def dashboard():
     simulation_data_dir = SIMULATION_DATA_DIR
+    simulation_pkl_files = []
     if os.path.isdir(simulation_data_dir):
-        simulation_pkl_files = sorted(
-            f for f in os.listdir(simulation_data_dir)
-            if f.endswith(".pkl") and os.path.isfile(os.path.join(simulation_data_dir, f))
-        )
-    else:
-        simulation_pkl_files = []
+        for root, _, files in os.walk(simulation_data_dir):
+            for f in files:
+                if f.endswith(".pkl"):
+                    rel_path = os.path.relpath(os.path.join(root, f), simulation_data_dir)
+                    simulation_pkl_files.append(rel_path)
+        simulation_pkl_files = sorted(simulation_pkl_files)
+    
     field_potential_files = []
     for fp_dir in _field_potential_dirs():
         if not os.path.isdir(fp_dir):
@@ -8242,15 +8073,19 @@ def dashboard():
         for root, _, files in os.walk(fp_dir):
             for name in files:
                 if name.endswith(".pkl"):
-                    field_potential_files.append(name)
+                    rel_path = os.path.relpath(os.path.join(root, name), fp_dir)
+                    field_potential_files.append(rel_path)
+    field_potential_files = sorted(set(field_potential_files))
+    
     features_data_files = _list_features_data_files()
     _bootstrap_predictions_data_from_previous_steps()
     predictions_data_files = _list_predictions_data_files()
+    
     return render_template(
         "0.dashboard.html",
         simulation_pkl_files=simulation_pkl_files,
         has_simulation_pkl=bool(simulation_pkl_files),
-        field_potential_files=sorted(set(field_potential_files)),
+        field_potential_files=field_potential_files,
         has_field_potential_data=bool(field_potential_files),
         features_data_files=features_data_files,
         has_features_data=bool(features_data_files),
@@ -8873,11 +8708,6 @@ def restore_job_config(job_id):
     endpoint, values = target
     _remember_module_restore_form(computation_type, restore_form)
     return redirect(url_for(endpoint, **values))
-
-
-@app.route("/simulation/restore_config/<job_id>", methods=["POST"])
-def restore_simulation_config(job_id):
-    return restore_job_config(job_id)
 
 
 def _simulation_computation(job_id, job_status, params):
@@ -12704,40 +12534,6 @@ def _simulation_trial_changed_params_text(sim_data, trial_idx, max_params=3):
     return ", ".join(parts)
 
 
-# def _simulation_trial_changed_param_names_text(sim_data, trial_idx, max_params=2):
-#     meta = sim_data.get("grid_metadata")
-#     if not isinstance(meta, dict):
-#         return ""
-#     changed_keys = meta.get("changed_keys")
-#     trials = meta.get("trials")
-#     if not isinstance(changed_keys, list) or not changed_keys:
-#         return ""
-#     if not isinstance(trials, list) or trial_idx < 0 or trial_idx >= len(trials):
-#         return ""
-#     trial_entry = trials[trial_idx]
-#     if not isinstance(trial_entry, dict):
-#         return ""
-#     changed = trial_entry.get("changed")
-#     if not isinstance(changed, dict):
-#         return ""
-
-#     names = []
-#     for key in changed_keys:
-#         if key not in changed:
-#             continue
-#         key_text = str(key)
-#         if key_text.startswith("inter_area."):
-#             key_text = key_text.split(".", 1)[1]
-#         names.append(key_text)
-
-#     if not names:
-#         return ""
-#     if len(names) > max_params:
-#         remaining = len(names) - max_params
-#         names = names[:max_params] + [f"+{remaining} more"]
-#     return ", ".join(names)
-
-
 def _wrap_plot_title_text(text, width=88):
     lines = []
     for raw_line in str(text or "").splitlines() or [""]:
@@ -13219,32 +13015,6 @@ def _spike_rate(times, dt, tstop):
     bins = np.arange(0.0, tstop + dt, dt)
     hist, _ = np.histogram(np.asarray(times), bins=bins)
     return bins[:-1], hist.astype(float)
-
-
-# def _compute_trial_cdm_proxy(trial):
-#     dt = float(trial["dt"])
-#     tstop = float(trial["tstop"])
-#     times = trial["times"]
-#     model = _simulation_model_type({"network": trial["network"]})
-#     bins = np.arange(0.0, tstop + dt, dt)
-#     centers = bins[:-1]
-
-#     if model in {"hagen", "cavallari"}:
-#         cdm = np.zeros_like(centers, dtype=float)
-#         for pop_name, pop_times in times.items():
-#             hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
-#             sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
-#             cdm += sign * hist.astype(float)
-#         return centers, cdm
-
-#     # four_area
-#     cdm = np.zeros_like(centers, dtype=float)
-#     for area_data in times.values():
-#         for pop_name, pop_times in area_data.items():
-#             hist, _ = np.histogram(np.asarray(pop_times), bins=bins)
-#             sign = 1.0 if str(pop_name).upper().startswith("E") else -1.0
-#             cdm += sign * hist.astype(float)
-#     return centers, cdm
 
 
 def _normalize_field_potential_selection_path(path):
@@ -14452,16 +14222,6 @@ def _find_column(df, candidates):
             return lower_map[cand_lower]
     return None
 
-
-# def _pick_value_column(df, exclude):
-#     preferred = ["Predictions", "prediction", "predictions", "Y", "y", "value", "Value", "Values", "data", "Data"]
-#     for cand in preferred:
-#         if cand in df.columns and cand not in exclude:
-#             return cand
-#     numeric_cols = [c for c in df.select_dtypes(include=[np.number]).columns if c not in exclude]
-#     if numeric_cols:
-#         return numeric_cols[0]
-#     return None
 
 
 MEG_TOPO_ATLAS_OPTIONS = [
@@ -19421,6 +19181,121 @@ def download_results(job_id):
         as_attachment=True,
         download_name=f'{computation_type}_results_{job_id}_output.pkl'
     )
+
+@app.route("/sessions/download/<session_id>")
+def download_session(session_id):
+    """Download session computation results as a ZIP archive, excluding metadata files."""
+    try:
+        session_root = tmp_paths._session_root_from_id(tmp_paths.TMP_BASE_ROOT, session_id)
+        session_root = tmp_paths._validate_session_root(session_root)
+        
+        if not os.path.isdir(session_root):
+            return "Session folder not found.", 404
+        
+        # Create temp directory for filtered archive
+        tmp_dir = tempfile.mkdtemp(prefix=f"session_dl_{session_id}_", dir=tmp_paths.TMP_BASE_ROOT)
+        
+        @after_this_request
+        def cleanup(response):
+            try:
+                if os.path.exists(tmp_dir):
+                    shutil.rmtree(tmp_dir)
+                if os.path.exists(archive_path):
+                    os.remove(archive_path)
+            except Exception as exc:
+                app.logger.error(f"Error cleaning up session download temp: {exc}")
+            return response
+
+        # Helper to copy directory tree ignoring 'uploads' folders
+        def copytree_ignore_uploads(src, dst):
+            for item in os.listdir(src):
+                if item == 'uploads':
+                    continue  # Skip uploads folders entirely
+                s = os.path.join(src, item)
+                d = os.path.join(dst, item)
+                if os.path.isdir(s):
+                    shutil.copytree(s, d)
+                else:
+                    os.makedirs(os.path.dirname(d), exist_ok=True)
+                    shutil.copy2(s, d)
+        
+        # Copy only computation module folders (excluding uploads)
+        basename = os.path.basename(session_root)
+        dest_root = os.path.join(tmp_dir, basename)
+        os.makedirs(dest_root, exist_ok=True)
+        
+        copied_anything = False
+        for module_name in sorted(_MODULE_TMP_NAMES):
+            src = os.path.join(session_root, module_name)
+            if os.path.isdir(src):
+                dst = os.path.join(dest_root, module_name)
+                os.makedirs(dst, exist_ok=True)
+                copytree_ignore_uploads(src, dst)
+                # Check if we actually copied something besides empty dirs
+                if os.listdir(dst):
+                    copied_anything = True
+                else:
+                    os.rmdir(dst)  # Remove empty module folder
+        
+        if not copied_anything:
+            return "No computation results found in this session.", 404
+        
+        # Create the ZIP archive
+        archive_base = os.path.join(tempfile.gettempdir(), f"session_{session_id}")
+        archive_path = shutil.make_archive(archive_base, "zip", root_dir=tmp_dir)
+        
+        display_name = tmp_paths.get_session_display_name(session_root)
+        safe_name = "".join(c if c.isalnum() or c in ".-_" else "_" for c in display_name)
+        
+        return send_file(
+            archive_path,
+            mimetype="application/zip",
+            as_attachment=True,
+            download_name=f"session_{safe_name}.zip"
+        )
+    except ValueError as e:
+        return str(e), 400
+    except Exception as e:
+        return f"Error downloading session: {e}", 500
+
+@app.route("/download_single_file")
+def download_single_file():
+    """Download a single file from the current session by its relative path within a module folder."""
+    relative_path = request.args.get("path", "").strip()
+    if not relative_path:
+        return "Missing file path.", 400
+    
+    safe_path = relative_path.replace("\\", "/").strip("/")
+    if ".." in safe_path.split("/"):
+        return "Invalid path.", 400
+    
+    # Map of module folders to their base directories
+    module_dirs = {
+        "simulation": SIMULATION_DATA_DIR,
+        "field_potential": [
+            FIELD_POTENTIAL_PROXY_DIR,
+            FIELD_POTENTIAL_KERNEL_DIR,
+            FIELD_POTENTIAL_MEEG_DIR,
+        ],
+        "features": _features_data_dir(create=False),
+        "inference": _predictions_data_dir(create=False),
+        "analysis": ANALYSIS_DATA_DIR,
+    }
+    
+    for module_name, dirs in module_dirs.items():
+        candidates = dirs if isinstance(dirs, list) else [dirs]
+        for base_dir in candidates:
+            if not base_dir or not os.path.isdir(base_dir):
+                continue
+            candidate = os.path.join(base_dir, safe_path)
+            if os.path.isfile(candidate):
+                return send_file(
+                    candidate,
+                    as_attachment=True,
+                    download_name=os.path.basename(safe_path)
+                )
+    
+    return "File not found.", 404
 
 if __name__ == '__main__':
     from launcher import run_webui

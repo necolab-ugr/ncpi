@@ -2807,13 +2807,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         applyModeVisuals(initialMode);
         if (initialMode === 'server-path') {
-            renderServerMode();
+            setMode('server-path');
         } else if (initialMode === 'auto-detected') {
-            renderAutoDetectedMode();
+            setMode('auto-detected');
         } else if (hasDetectedDefault && !getSelectedLocalFile() && !String(serverPathInput.value || '').trim()) {
             setMode('auto-detected');
         } else {
-            renderUploadMode();
+            setMode('upload');
         }
     });
 

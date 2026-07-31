@@ -232,8 +232,8 @@ def main() -> None:
                     data_stat = _append_lmer_stat_for_sensor(stat_df, sensor_name, P_VALUE_TH, data_stat)
                 else:
                     # Cohen's d: stat_df has columns ['sensor', "d"]
-                    row = stat_df[stat_df['sensor'] == sensor_name]
-                    data_stat.append(float(row["d"].iloc[0]) if not row.empty else 0.0)
+                    row_cohen = stat_df[stat_df['sensor'] == sensor_name]
+                    data_stat.append(float(row_cohen["d"].iloc[0]) if not row_cohen.empty else 0.0)
 
             # Limits
             ylims_stat = [-6.0, 6.0] if STATISTICAL_ANALYSIS == "lmer" else [-1.0, 1.0]
@@ -246,6 +246,7 @@ def main() -> None:
                 data_stat,
                 ch_names=ch_names,
                 axes=ax1,
+                position_offset=(0.007, -0.021),
                 show=False,
                 vmin=ylims_stat[0],
                 vmax=ylims_stat[1],
@@ -253,6 +254,7 @@ def main() -> None:
                 sensors=True,
                 montage="standard_1020",
                 extrapolate="local",
+                sphere=0.14,
             )
 
         # Update y spacing

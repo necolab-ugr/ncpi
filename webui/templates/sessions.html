@@ -114,25 +114,32 @@ async function editSessionName(btn) {
                         </div>
                     </dl>
                 </div>
-                <div class="flex gap-2 shrink-0 w-56">
-                    <form action="{{ url_for('load_saved_session') }}" method="post" class="w-full">
-                        <input type="hidden" name="session_root" value="{{ entry.path }}">
-                        <button
-                            type="submit"
-                            class="inline-flex min-w-44 items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition-colors w-full {% if entry.is_active or has_running_jobs %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% else %}bg-primary text-white hover:bg-blue-700{% endif %}"
-                            {% if entry.is_active or has_running_jobs %}disabled{% endif %}>
-                            {% if entry.is_active %}
-                            Current session
-                            {% else %}
-                            Load this folder
-                            {% endif %}
-                        </button>
-                    </form>
+                <div class="flex gap-2 shrink-0 w-56 self-center">
+                    <div class="flex flex-col gap-2 w-full">
+                        <form action="{{ url_for('load_saved_session') }}" method="post" class="w-full">
+                            <input type="hidden" name="session_root" value="{{ entry.path }}">
+                            <button
+                                type="submit"
+                                class="inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition-colors {% if entry.is_active or has_running_jobs %}cursor-not-allowed bg-gray-200 text-gray-500 dark:bg-white/10 dark:text-gray-500{% else %}bg-primary text-white hover:bg-blue-700{% endif %}"
+                                {% if entry.is_active or has_running_jobs %}disabled{% endif %}>
+                                {% if entry.is_active %}
+                                Current session
+                                {% else %}
+                                Load this folder
+                                {% endif %}
+                            </button>
+                        </form>
+                        <a href="{{ url_for('download_session', session_id=entry.id) }}"
+                        class="inline-flex w-full items-center justify-center rounded-2xl px-5 py-3 text-sm font-semibold transition-colors border border-primary text-primary hover:bg-primary/10 dark:text-primary dark:hover:bg-primary/20">
+                            <span class="material-symbols-outlined text-base mr-2">download</span>
+                            Download all session files
+                        </a>
+                    </div>
                     {% if not entry.is_active %}
                     <button type="button" 
                         onclick='openDeleteModal("{{ entry.path }}", "{{ entry.name | e }}", false)'
-                        class="inline-flex items-center justify-center rounded-2xl px-3 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20"
-                        {% if entry.is_active %}disabled title="Cannot delete active session"{% endif %}>
+                        class="inline-flex items-center justify-center rounded-2xl px-3 py-3 text-sm font-semibold text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20 shrink-0"
+                        title="Delete session">
                         <span class="material-symbols-outlined">delete</span>
                     </button>
                     {% endif %}

@@ -1581,7 +1581,7 @@ function inferencePredictionsData() {
             fileEntriesEl.innerHTML = "";
             const dirItems = Array.isArray(dirs) ? dirs : [];
             const fileItems = Array.isArray(files) ? files : [];
-            const hideSelectionControl = activeFileTarget === "assets-model" || activeFileTarget === "assets-scaler";
+            const hideSelectionControl = false;
             const selectedRowClasses = ["bg-primary/10", "text-primary", "dark:text-primary"];
             dirItems.forEach((entry) => {
                 const btn = document.createElement("button");

@@ -97,6 +97,7 @@
             metadataInfo: null,
             additionalFileLinkField: '',
             additionalFileDropActive: false,
+            selectedServerFile: null, 
             serverFileBrowserOpen: false,
             serverFileBrowserPath: '',
             serverFileBrowserParent: '',
@@ -682,157 +683,6 @@ def custom_feature(sample, params):
                 });
                 input.files = dataTransfer.files;
             },
-            // async onSimulationUploadSelected(event) {
-            //     const incomingFiles = Array.from(event?.target?.files || []);
-            //     const shouldAppend = !!this.appendSimulationSelection;
-            //     this.appendSimulationSelection = false;
-            //     this.parserFilenameFormat = '';
-            //     const previous = shouldAppend ? Array.from(this.simulationLocalFiles || []) : [];
-            //     const merged = [];
-            //     const seen = new Set();
-            //     for (const file of [...previous, ...incomingFiles]) {
-            //         const rel = String(file?.webkitRelativePath || file?.name || '').trim();
-            //         const key = `${rel}::${Number(file?.size || 0)}::${Number(file?.lastModified || 0)}`;
-            //         if (!file || !rel || seen.has(key)) continue;
-            //         seen.add(key);
-            //         merged.push(file);
-            //     }
-            //     this.persistSimulationLocalFiles(merged);
-            //     this.simulationLocalFiles = merged;
-            //     this.submitError = '';
-            //     this.parserError = '';
-            //     this.simulationFolderExtensionError = '';
-            //     this.computeFlowChoice = 'new-data';
-            //     this.dataSourceKind = 'new-simulation';
-            //     this.selectedPipelinePath = '';
-            //     this.simulationSourceMode = 'upload';
-            //     this.simulationDropActive = false;
-            //     this.simulationFolderPath = '';
-            //     this.simulationFolderPaths = [];
-            //     this.simulationDataFileSelections = {};
-            //     this.simulationFileCount = merged.length;
-            //     this.simulationSampleName = merged.length > 0 ? (merged[0].webkitRelativePath || merged[0].name || '') : '';
-            //     this.simulationInspectedSamples = [];
-            //     this.simulationListedFileNames = merged
-            //         .map((item) => String(item?.webkitRelativePath || item?.name || '').trim())
-            //         .filter((item) => item.length > 0);
-            //     const nestedEntry = this.simulationListedFileNames.find((entry) => {
-            //         const normalized = String(entry || '').replace(/\\/g, '/');
-            //         const parts = normalized.split('/').map((part) => String(part || '').trim()).filter((part) => part && part !== '.');
-            //         return parts.length > 2;
-            //     });
-            //     if (nestedEntry) {
-            //         const message = `Local upload supports only flat folders. Nested path detected: ${nestedEntry}`;
-            //         this.simulationFolderExtensionError = message;
-            //         this.parserError = message;
-            //         this.simulationFileCount = 0;
-            //         this.simulationSampleName = '';
-            //         this.simulationInspectedSamples = [];
-            //         this.simulationListedFileNames = [];
-            //         this.simulationLocalFiles = [];
-            //         this.persistSimulationLocalFiles([]);
-            //         delete this.uploads['data-file'];
-            //         this.parserInfo = null;
-            //         return;
-            //     }
-            //     if (merged.length > 0) {
-            //         this.uploads['data-file'] = { name: `${merged.length} file(s) selected from local folder(s)`, uploaded: false };
-            //         this.empiricalFolderPath = '';
-            //         this.empiricalFileCount = 0;
-            //         this.empiricalSampleName = '';
-            //         this.empiricalUploadSummary = '';
-            //         this.empiricalDataFileSelections = {};
-            //         this.clearEmpiricalUploadInput();
-            //         this.resetParserConfig();
-            //         const inspectCandidate = merged.find((item) => {
-            //             const name = String(item?.name || '');
-            //             const idx = name.lastIndexOf('.');
-            //             if (idx < 0) return false;
-            //             return supportedParserFileExtensions.has(name.slice(idx).toLowerCase());
-            //         });
-            //         if (inspectCandidate) {
-            //             this.simulationSampleName = inspectCandidate.webkitRelativePath || inspectCandidate.name || this.simulationSampleName;
-            //             await this.inspectParserSource('', inspectCandidate);
-            //         } else {
-            //             this.parserInfo = null;
-            //             this.parserError = 'No supported simulation output files found in the selected local folder.';
-            //         }
-            //     } else {
-            //         delete this.uploads['data-file'];
-            //         this.parserInfo = null;
-            //         this.simulationListedFileNames = [];
-            //         this.simulationLocalFiles = [];
-            //         this.simulationDataFileSelections = {};
-            //     }
-            // },
-            // onSimulationDrop(event) {
-            //     if (this.simulationSourceMode !== 'upload') return;
-            //     const files = Array.from(event?.dataTransfer?.files || []);
-            //     if (!files.length) return;
-            //     const dataTransfer = new DataTransfer();
-            //     files.forEach((file) => dataTransfer.items.add(file));
-            //     const input = document.getElementById('data-file');
-            //     if (input) {
-            //         input.files = dataTransfer.files;
-            //     }
-            //     this.simulationDropActive = false;
-            //     this.appendSimulationSelection = false;
-            //     this.onSimulationUploadSelected({ target: { files: dataTransfer.files } });
-            // },
-            // setEmpiricalSourceMode(mode) {
-            //     const nextMode = ((this.allowServerSource || this.isLocalRuntime) && mode === 'server-path') ? 'server-path' : 'upload';
-            //     if (this.empiricalSourceMode === nextMode) return;
-            //     this.empiricalSourceMode = nextMode;
-            //     this.parserFilenameFormat = '';
-            //     this.parserError = '';
-            //     this.resetParserConfig();
-            //     this.empiricalFileCount = 0;
-            //     this.empiricalSampleName = '';
-            //     this.empiricalListedFileNames = [];
-            //     this.empiricalDataFileSelections = {};
-            //     if (nextMode === 'server-path') {
-            //         this.clearEmpiricalUploadInput();
-            //         this.empiricalFolderPath = '';
-            //     } else {
-            //         this.empiricalFolderPath = '';
-            //     }
-            // },
-            // async onEmpiricalUploadSelected(event) {
-            //     const files = Array.from(event?.target?.files || []);
-            //     this.parserFilenameFormat = '';
-            //     this.submitError = '';
-            //     this.parserError = '';
-            //     this.dataSourceKind = 'new-empirical';
-            //     this.selectedPipelinePath = '';
-            //     this.empiricalSourceMode = 'upload';
-            //     this.empiricalFolderPath = '';
-            //     this.empiricalDataFileSelections = {};
-            //     this.empiricalFileCount = files.length;
-            //     this.empiricalSampleName = files.length > 0 ? files[0].name : '';
-            //     this.empiricalUploadSummary = files.length > 0 ? `${files.length} file(s) selected from local folder` : '';
-            //     this.empiricalListedFileNames = files.map((item) => String(item?.name || '').trim()).filter((item) => item.length > 0);
-            //     if (files.length > 0) {
-            //         this.uploads['empirical-files'] = { name: this.empiricalUploadSummary, uploaded: false };
-            //         this.resetParserConfig();
-            //         const inspectCandidate = files.find((file) => {
-            //             const name = String(file?.name || '');
-            //             const idx = name.lastIndexOf('.');
-            //             if (idx < 0) return false;
-            //             return supportedParserFileExtensions.has(name.slice(idx).toLowerCase());
-            //         });
-            //         if (inspectCandidate) {
-            //             this.empiricalSampleName = inspectCandidate.name || this.empiricalSampleName;
-            //             await this.inspectParserSource('', inspectCandidate);
-            //         } else {
-            //             this.parserInfo = null;
-            //             this.parserError = 'No supported empirical files found in the selected local folder.';
-            //         }
-            //     } else {
-            //         delete this.uploads['empirical-files'];
-            //         this.parserInfo = null;
-            //         this.empiricalListedFileNames = [];
-            //     }
-            // },
             closeServerDirectoryBrowser() {
                 this.serverDirBrowserOpen = false;
                 this.serverDirBrowserError = '';
@@ -1155,31 +1005,6 @@ def custom_feature(sample, params):
                 this.additionalFileSourceMode = nextMode;
                 this.additionalFileDropActive = false;
             },
-            // openAdditionalLocalFilePicker() {
-            //     const el = document.getElementById('additional-file-input');
-            //     if (el) el.click();
-            // },
-            // async onAdditionalFileDrop(event) {
-            //     if (this.additionalFileSourceMode !== 'upload') return;
-            //     this.additionalFileDropActive = false;
-            //     const files = Array.from(event?.dataTransfer?.files || []);
-            //     if (!files.length) return;
-            //     this.computeFlowChoice = 'new-data';
-            //     const existing = this.additionalLocalFiles.map(f => f.name);
-            //     const toAdd = files.filter(f => !existing.includes(f.name));
-            //     this.additionalLocalFiles = [...this.additionalLocalFiles, ...toAdd];
-            //     if (toAdd.length > 0) {
-            //         const unsupported = toAdd.filter(f => {
-            //             const idx = f.name.lastIndexOf('.');
-            //             return idx < 0 || !supportedParserFileExtensions.has(f.name.slice(idx).toLowerCase());
-            //         });
-            //         if (unsupported.length > 0) {
-            //             this.metadataError = `Unsupported file extension: ${unsupported.map(f => f.name).join(', ')}`;
-            //         } else {
-            //             await this.inspectAllAdditionalFiles();
-            //         }
-            //     }
-            // },
             async removeAdditionalLocalFile(index) {
                 this.additionalLocalFiles = this.additionalLocalFiles.filter((_, i) => i !== index);
                 await this.inspectAllAdditionalFiles();
@@ -1221,8 +1046,11 @@ def custom_feature(sample, params):
                 }
             },
             async selectServerFile(filePath) {
-                const path = String(filePath || '').trim();
+                const path = String(filePath || this.selectedServerFile || '').trim();
                 if (!path) return;
+
+                // Clean up selection
+                this.selectedServerFile = null;
                 if (!this.additionalServerFilePaths.includes(path)) {
                     this.additionalServerFilePaths = [...this.additionalServerFilePaths, path];
                 }
@@ -6782,6 +6610,11 @@ def custom_feature(sample, params):
                             class="h-9 px-3 border border-gray-300 dark:border-[#323b67] text-xs rounded-lg text-gray-600 dark:text-gray-300 disabled:opacity-50">
                             Refresh
                         </button>
+                        <button type="button" @click="selectServerFile(selectedServerFile)" 
+                            :disabled="!selectedServerFile"
+                            class="h-9 px-3 border border-primary text-xs rounded-lg text-primary hover:bg-primary/10 disabled:opacity-50 disabled:cursor-not-allowed">
+                            Select file
+                        </button>
                     </div>
                     <div x-show="serverFileBrowserError" class="text-xs text-red-600 dark:text-red-400" x-text="serverFileBrowserError"></div>
                     <div x-show="serverFileBrowserLoading" class="text-xs text-gray-500 dark:text-gray-400">Loading server files...</div>
@@ -6794,11 +6627,18 @@ def custom_feature(sample, params):
                             </button>
                         </template>
                         <template x-for="file in serverFileBrowserFiles" :key="'sfb-file-'+file.path">
-                            <button type="button" @click="selectServerFile(file.path)"
-                                class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-primary hover:bg-primary/5 dark:hover:bg-primary/10 font-medium">
-                                <span class="material-symbols-outlined text-base">description</span>
+                            <label class="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#191e33] cursor-pointer">
+                                <input 
+                                    type="radio" 
+                                    name="server-file-selection" 
+                                    :value="file.path"
+                                    :checked="selectedServerFile === file.path"
+                                    @change="selectedServerFile = file.path"
+                                    class="text-primary focus:ring-primary"
+                                />
+                                <span class="material-symbols-outlined text-base text-gray-400">description</span>
                                 <span class="font-mono" x-text="file.name"></span>
-                            </button>
+                            </label>
                         </template>
                         <p x-show="!serverFileBrowserLoading && serverFileBrowserDirs.length === 0 && serverFileBrowserFiles.length === 0" class="px-3 py-2 text-xs text-gray-500 dark:text-gray-400">
                             No entries found.
