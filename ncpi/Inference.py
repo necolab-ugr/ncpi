@@ -179,8 +179,8 @@ class Inference:
 
     def _init_sbi_modules(self):
         """Load torch plus only the SBI inference/builder callables required by the active SBI model."""
-        if not tools.ensure_module("sbi", package="sbi", version_spec="==0.24.0"):
-            raise ImportError("sbi==0.24.0 is required.")
+        if not tools.ensure_module("sbi", package="sbi", version_spec="==0.26.0"):
+            raise ImportError("sbi==0.26.0 is required.")
         if not tools.ensure_module("torch", package="torch", raise_on_error=False):
             raise ImportError("PyTorch ('torch') is required but not importable.")
 
