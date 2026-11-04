@@ -258,6 +258,12 @@ class Features:
                 raise ImportError(
                     "pycatch22 is required for computing catch22 features but is not installed."
                 )
+            # pycatch22 >= 0.6 changes feature values
+            installed = tools._distribution_version("pycatch22")
+            if installed is not None and not tools._version_satisfies(installed, "<0.6"):
+                raise ImportError(
+                    f"pycatch22 {installed} is not supported, install pycatch22<0.6."
+                )
             self._pycatch22 = tools.dynamic_import("pycatch22")
 
         elif method == 'specparam':

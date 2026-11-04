@@ -27,7 +27,7 @@ dependencies = [
     "sbi==0.26.0",
     "arviz<0.22",
     "torch==2.10.0",
-    "pycatch22",
+    "pycatch22>=0.4.5,<0.6",  # >= 0.6 changes feature values
     "specparam",
     "matplotlib",
     "numpy",
