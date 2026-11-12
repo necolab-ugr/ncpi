@@ -470,9 +470,9 @@ if __name__ == "__main__":
     ax.scatter(y_test, y_pred, s=18, alpha=0.7, label="Predictions")
     lo, hi = float(min(np.min(y_test), np.min(y_pred))), float(max(np.max(y_test), np.max(y_pred)))
     ax.plot([lo, hi], [lo, hi], "k--", linewidth=1.1, label="Ideal fit")
-    ax.set_xlabel("Real E/I ratio")
+    ax.set_xlabel("Known simulated E/I ratio")
     ax.set_ylabel("Predicted E/I ratio")
-    ax.set_title("Predicted vs real E/I ratio")
+    ax.set_title("Predicted vs known simulated E/I ratio")
     ax.legend(frameon=False)
     ax.text(
         0.03,
