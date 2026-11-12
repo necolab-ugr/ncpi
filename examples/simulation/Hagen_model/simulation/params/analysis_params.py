@@ -8,6 +8,18 @@ The following methods and parameters were downloaded from the following LFPykern
 https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network_parameters.py
 https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network_methods.py
 Copyright (C) 2021 https://github.com/espenhgn
+
+Adapted for ncpi; an earlier version was present by 2025-04-03.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
 """
 
 
