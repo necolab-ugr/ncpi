@@ -10,6 +10,18 @@ https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Com
 They were adapted to replicate the Cavallari LIF network model while retaining
 the Hagen multicompartment morphologies and active mechanisms.
 Copyright (C) 2021 https://github.com/espenhgn
+
+Adapted for ncpi; an earlier version was present by 2026-03-31.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
 """
 
 

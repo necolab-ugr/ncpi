@@ -7,6 +7,22 @@ This script intentionally stays close to the LFPykernels reference script
 flow, population creation, connectivity, recording probes, file outputs, and
 plotting blocks are kept in the same inline style as the reference.
 
+Original source:
+https://github.com/LFPy/LFPykernels/blob/main/examples/Hagen_et_al_2022_PLOS_Comput_Biol/example_network.py
+Copyright (C) 2017 Computational Neuroscience Group, NMBU.
+
+Adapted for ncpi; an earlier version was present by 2026-04-07.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
 Intentional differences from the reference script:
 
 * Model files are loaded from ``zenodo_dir`` instead of paths relative to the

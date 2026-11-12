@@ -142,7 +142,7 @@ def test_compute_features_specparam_outputs_list_of_dicts():
 
 
 def test_compute_features_dfa_outputs_list_of_dicts():
-    samples = _make_samples(n_samples=2, n_points=512, seed=4)
+    samples = [x + 2 for x in _make_samples(n_samples=2, n_points=512, seed=4)]
     f = Features(
         method="dfa",
         params={
@@ -163,7 +163,7 @@ def test_compute_features_dfa_outputs_list_of_dicts():
 
 
 def test_compute_features_fei_outputs_list_of_dicts():
-    samples = _make_samples(n_samples=2, n_points=1000, seed=5)
+    samples = [x + 2 for x in _make_samples(n_samples=2, n_points=1000, seed=5)]
     f = Features(
         method="fEI",
         params={

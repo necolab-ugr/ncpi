@@ -18,18 +18,19 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: MIT License"
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)"
 ]
 requires-python = ">=3.10"
 
 dependencies = [
     "scikit-learn==1.5.0",
     "sbi==0.26.0",
-    "arviz<0.22",
+    "six",  # Used by sbi.analysis plotting helpers.
+    "arviz==0.20.0",
     "torch==2.10.0",
     "pycatch22>=0.4.5,<0.6",  # >= 0.6 changes feature values
     "specparam",
-    "matplotlib",
+    "matplotlib==3.9.2",
     "numpy",
     "packaging",
     "pandas",
