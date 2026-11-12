@@ -19,7 +19,7 @@ tags:
   - EEG
 authors:
   - name: Laura Torres Soria
-    orcid: 0009-0005-7827-3601 
+    orcid: 0009-0005-7827-3601
     equal-contrib: true
     affiliation: 1
   - name: Alejandro Orozco Valero
@@ -28,6 +28,12 @@ authors:
     affiliation: 1
   - name: Marta Cárdenas Sánchez
     orcid: 0009-0002-7825-5540
+    affiliation: 1
+  - name: Noemi Montobbio
+    orcid: 0000-0003-0302-393X
+    affiliation: 3
+  - name: Juan Miguel García
+    orcid: 0009-0002-8489-412X
     affiliation: 1
   - name: Francisco Pelayo
     orcid: 0000-0001-7402-9648
@@ -48,6 +54,10 @@ affiliations:
      Department of Computer Engineering, Automation and Robotics, University of
      Granada, Granada, Spain
    index: 2
+ - name: >
+     Department of Health Sciences (DISSAL), University of Genoa, Genoa, Italy
+   index: 3
+
 
 date: 3 July 2026
 bibliography: paper.bib
@@ -113,7 +123,7 @@ forward head models [@Huang:2016], extracting neurophysiologically relevant
 time-series features with packages such as `catch22`, `hctsa`, or `specparam`
 [@Lubba:2019; @Fulcher:2017; @Donoghue:2020], and fitting inverse models using
 tools such as `scikit-learn` or the simulation-based inference (`sbi`) toolbox
-[@Tejero-Cantero2020]. These tools are individually valuable, but they are not
+[@Pedregosa:2011; @Tejero-Cantero2020]. These tools are individually valuable, but they are not
 designed as a single interoperable workflow. As a result, researchers often face
 a steep learning curve, fragmented installation procedures, custom
 data-conversion requirements, and the need for substantial domain knowledge
@@ -180,25 +190,23 @@ fMRI, while supporting custom features and interchangeable simulators
 [@Ziaeemehr:2025]. Its electrophysiological examples focus on regional source
 dynamics.
 
-`ncpi` extends this landscape by integrating detailed microcircuit-to-sensor
-forward modeling with flexible inverse inference and systematic biomarker
-benchmarking in one workflow [@OrozcoValero:2025]. It connects single-neuron
-spiking networks and multicompartment biophysics to extracellular LFP/ECoG and
-non-invasive EEG/MEG signals through kernel-based methods and head-model
-projections [@Huang:2016], then links these signals to candidate biomarkers of
-excitation/inhibition balance and related microcircuit parameters, including
-aperiodic spectral measures and broad time-series feature sets
-[@CardenasSanchez:2026]. Beyond the dipole-waveform inference studied with HNN
-and the whole-brain posterior-estimation workflow presented by VBI, `ncpi`
-allows built-in or user-defined numerical features to be paired with supervised
-regressors or SBI, with flexibility to configure inference methods and neural
-network architectures for the task at hand. Its
-independently usable modules let users replace circuit simulations, forward
-models, features, or inference methods, and reuse precomputed or empirical data
-through a shared API and graphical interface. This combination supports users
-who need to test which biomarkers best recover microcircuit parameters across
-recording scales and adapt the complete forward and inverse pipeline to their
-own models and data.
+`ncpi` integrates microcircuit-to-sensor forward modeling, inverse inference,
+and biomarker benchmarking into a unified workflow [@OrozcoValero:2025].
+Its modular architecture allows users to independently configure or replace
+circuit simulations, forward models, feature extraction, and inference methods,
+as well as incorporate precomputed or empirical data through a shared API and
+graphical interface. The forward-modeling tools connect spiking neuronal networks
+and multicompartment biophysics to extracellular LFP/ECoG and non-invasive EEG/MEG
+signals through kernel-based methods and head-model projections [@Huang:2016].
+This modularity also extends to inverse inference, where built-in or user-defined
+numerical features can be combined with supervised regressors or SBI, allowing users
+to select inference algorithms and neural network architectures according to their needs.
+Unlike the dipole-waveform inference studied with HNN and the whole-brain
+posterior-estimation workflow presented by VBI, `ncpi` also supports systematic
+biomarker benchmarking across recording scales. This enables users to evaluate how
+effectively different signal features, including aperiodic spectral measures and
+broad time-series feature sets, recover excitation/inhibition balance and other
+microcircuit parameters [@CardenasSanchez:2026].
 
 # Software design
 
@@ -242,40 +250,41 @@ Parallel execution is supported across computationally intensive stages, either
 through backend tools with native parallelism, such as `NEST`, or through
 multiprocessing-based parallelism implemented in `ncpi`.
 
-`ncpi` provides local cortical circuit models developed for scientific use and
-a four-area model intended to demonstrate multi-area workflows. The local models
-represent generic cortical microcircuits rather than a particular brain area
-and capture shared properties of spiking networks, including sparse,
-asynchronous-irregular (AI) firing and approximately 1/f-like population-signal
-spectra during spontaneous activity, as well as increased synchrony under
-stronger external drive [@OrozcoValero:2025]. They can therefore serve as
-starting points across cortical regions when their dynamics and circuit
-assumptions are appropriate, although their applicability must be assessed for
-each region and brain state. Supplied simulation and training resources for
-these local models include current dipole moment (CDM) and EEG signals, allowing
-users to extract matching features from empirical data and apply the
-corresponding trained inverse models without repeating simulation and training,
-provided the signal representation, preprocessing, and selected parameters and
-their ranges match the training setup. The four-area model serves solely as a
-workflow example and has not been used in our scientific applications. Adopting
-a different circuit model requires new simulations, recomputation of
-model-specific kernels [@Hagen:2022], and inverse-model training; changes in
-modality or geometry may also require new forward projections and training
-signals. `ncpi` facilitates this process through its modular simulation,
-forward-modeling, feature-extraction, and inference components.
+`ncpi` provides local cortical circuit models developed for scientific applications,
+alongside a four-area model intended to demonstrate multi-area workflows. The local
+models represent generic cortical microcircuits rather than specific brain regions.
+They capture characteristics of spiking-network dynamics, including sparse,
+asynchronous-irregular (AI) firing and approximately 1/f-like population-signal spectra
+during spontaneous activity. They also exhibit increased synchrony under stronger
+external drive [@OrozcoValero:2025]. These models can serve as starting points for
+different cortical regions, although their dynamics and underlying assumptions must be
+evaluated for each region and brain state. The four-area model is provided solely as a
+workflow example and has not been used in our scientific applications.
 
-The `EphysDatasetParser` is a major addition in the current release. It accepts
-arrays, `pandas` data frames, dictionaries, `MATLAB` files, `NumPy` files,
-`JSON`, `NWB`, `EDF`, `MNE`-compatible objects and files, `BrainVision`-style
-data, and tabular inputs, then maps them to canonical fields such as subject,
-group, condition, epoch, sensor, recording type, sampling frequency, signal data,
-time bounds, frequency-domain metadata, and source file. The trade-off in this
-parser is between accepting heterogeneous user data and requiring a stable
-internal representation for reproducible downstream analysis. Optional
-preprocessing such as temporal segmentation, z-scoring, epoching, and aggregation
-is applied before feature extraction, inference, or statistical analysis. This
-makes the package usable with arbitrary empirical datasets rather than only with
-example data distributed by the project.
+For the local models, `ncpi` provides simulation and training resources, including current
+dipole moment (CDM) and EEG signals. These resources allow users to extract corresponding
+features from empirical recordings and apply pretrained inverse models without repeating
+simulation and training. However, this reuse requires consistency with the original training
+setup in terms of signal representation, preprocessing, and the selected parameters and
+their ranges.
+
+When adopting a different circuit model, users must generate new simulations, recompute
+model-specific kernels [@Hagen:2022], and train new inverse models. Changes in recording
+modality or geometry may also require new forward projections and training signals.
+`ncpi` facilitates these adaptations through its modular simulation, forward-modeling,
+feature-extraction, and inference components.
+
+The `EphysDatasetParser` is a major addition in the current release. It supports heterogeneous
+electrophysiological datasets, including common scientific file formats (MATLAB, NumPy,
+JSON, NWB, and EDF), MNE-compatible recordings, and structured data objects such as arrays,
+dictionaries, and pandas data frames. These inputs are converted into a standardized tabular
+representation containing information about subjects, experimental conditions, recording
+characteristics, and signal data. This design balances flexibility in accepting heterogeneous
+datasets with the need for a consistent internal structure for reproducible downstream analysis.
+Optional preprocessing operations, including temporal segmentation, normalization, and
+aggregation, can be applied before feature extraction, inference, or statistical analysis.
+Consequently, `ncpi` can process user-provided empirical datasets without being restricted
+to the example data distributed with the package.
 
 The `WebUI` exposes the same conceptual workflow through a browser-based
 interface. It is organized into simulation, field-potential, feature, inference,
