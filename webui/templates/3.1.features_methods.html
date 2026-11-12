@@ -2010,27 +2010,19 @@ def custom_feature(sample, params):
                     add('dfa_fs', this.featureMethodNumber('dfa_fs', { min: 0, minExclusive: true, label: 'DFA sampling frequency' }));
                     add('dfa_trim_seconds', this.featureMethodNumber('dfa_trim_seconds', { min: 0, label: 'DFA trim' }));
                     const dfaBand = this.featureMethodRangeIssue('dfa_frequency_min', 'dfa_frequency_max', 'DFA band frequency', { minAllowed: 0 });
-                    const dfaSpectrum = this.featureMethodRangeIssue('dfa_spectrum_min', 'dfa_spectrum_max', 'DFA spectrum range', { minAllowed: 0 });
                     const dfaFit = this.featureMethodRangeIssue('dfa_fit_interval_min', 'dfa_fit_interval_max', 'DFA fit interval', { minAllowed: 0 });
                     const dfaCompute = this.featureMethodRangeIssue('dfa_compute_interval_min', 'dfa_compute_interval_max', 'DFA compute interval', { minAllowed: 0 });
                     add('dfa_frequency_min', dfaBand); add('dfa_frequency_max', dfaBand);
-                    add('dfa_spectrum_min', dfaSpectrum); add('dfa_spectrum_max', dfaSpectrum);
                     add('dfa_fit_interval_min', dfaFit); add('dfa_fit_interval_max', dfaFit);
                     add('dfa_compute_interval_min', dfaCompute); add('dfa_compute_interval_max', dfaCompute);
                     const dfaWindowTouched = ['dfa_fit_interval_min', 'dfa_fit_interval_max', 'dfa_compute_interval_min', 'dfa_compute_interval_max'].some((name) => this.featureMethodFieldTouched(name));
                     if (dfaWindowTouched && !dfaFit && !dfaCompute) {
                         add('dfa_fit_interval_min', this.featureNestedRangeBlockReason('DFA', this.dfaFitIntervalMin, this.dfaFitIntervalMax, this.dfaComputeIntervalMin, this.dfaComputeIntervalMax));
                     }
-                    if (!this.dfaUsesEnvelope() && this.dfaHasBandRange() && this.dfaHasSpectrumRange()) {
-                        add('dfa_frequency_min', 'Use either Band frequency or Spectrum range, not both.');
-                        add('dfa_spectrum_min', 'Use either Band frequency or Spectrum range, not both.');
-                    }
-                    if (!this.dfaUsesEnvelope() && !this.dfaHasBandRange() && !this.dfaHasSpectrumRange()) {
-                        add('dfa_frequency_min', 'Raw-signal mode requires Band frequency or Spectrum range.');
+                    if (!this.dfaUsesEnvelope() && !this.dfaHasBandRange()) {
+                        add('dfa_frequency_min', 'Raw-signal mode requires a band frequency range.');
                     }
                     add('dfa_bad_idxes', this.featureMethodIndexListIssue('dfa_bad_idxes', 'Bad channel indexes'));
-                    add('dfa_hilbert_n_fft', this.featureMethodNumber('dfa_hilbert_n_fft', { integer: true, min: 1, label: 'Hilbert n_fft' }));
-                    add('dfa_filter_kwargs', this.featureMethodJsonDictIssue('dfa_filter_kwargs', 'Filter kwargs'));
                     add('dfa_output_path', this.featureMethodCustomPathIssue('dfa_output_key', 'dfa_output_path', 'Custom output path'));
                 }
 
@@ -2041,27 +2033,19 @@ def custom_feature(sample, params):
                     add('fei_window_overlap', this.featureMethodNumber('fei_window_overlap', { min: 0, max: 1, maxExclusive: true, label: 'Window overlap' }));
                     add('fei_dfa_threshold', this.featureMethodNumber('fei_dfa_threshold', { label: 'DFA threshold' }));
                     const feiBand = this.featureMethodRangeIssue('fei_frequency_min', 'fei_frequency_max', 'fEI band frequency', { minAllowed: 0 });
-                    const feiSpectrum = this.featureMethodRangeIssue('fei_spectrum_min', 'fei_spectrum_max', 'fEI spectrum range', { minAllowed: 0 });
                     const feiFit = this.featureMethodRangeIssue('fei_dfa_fit_interval_min', 'fei_dfa_fit_interval_max', 'fEI DFA fit interval', { minAllowed: 0 });
                     const feiCompute = this.featureMethodRangeIssue('fei_dfa_compute_interval_min', 'fei_dfa_compute_interval_max', 'fEI DFA compute interval', { minAllowed: 0 });
                     add('fei_frequency_min', feiBand); add('fei_frequency_max', feiBand);
-                    add('fei_spectrum_min', feiSpectrum); add('fei_spectrum_max', feiSpectrum);
                     add('fei_dfa_fit_interval_min', feiFit); add('fei_dfa_fit_interval_max', feiFit);
                     add('fei_dfa_compute_interval_min', feiCompute); add('fei_dfa_compute_interval_max', feiCompute);
                     const feiWindowTouched = ['fei_dfa_fit_interval_min', 'fei_dfa_fit_interval_max', 'fei_dfa_compute_interval_min', 'fei_dfa_compute_interval_max'].some((name) => this.featureMethodFieldTouched(name));
                     if (feiWindowTouched && !feiFit && !feiCompute) {
                         add('fei_dfa_fit_interval_min', this.featureNestedRangeBlockReason('fEI DFA', this.feiDfaFitIntervalMin, this.feiDfaFitIntervalMax, this.feiDfaComputeIntervalMin, this.feiDfaComputeIntervalMax));
                     }
-                    if (!this.feiUsesEnvelope() && this.feiHasBandRange() && this.feiHasSpectrumRange()) {
-                        add('fei_frequency_min', 'Use either Band frequency or Spectrum range, not both.');
-                        add('fei_spectrum_min', 'Use either Band frequency or Spectrum range, not both.');
-                    }
-                    if (!this.feiUsesEnvelope() && !this.feiHasBandRange() && !this.feiHasSpectrumRange()) {
-                        add('fei_frequency_min', 'Raw-signal mode requires Band frequency or Spectrum range.');
+                    if (!this.feiUsesEnvelope() && !this.feiHasBandRange()) {
+                        add('fei_frequency_min', 'Raw-signal mode requires a band frequency range.');
                     }
                     add('fei_bad_idxes', this.featureMethodIndexListIssue('fei_bad_idxes', 'Bad channel indexes'));
-                    add('fei_hilbert_n_fft', this.featureMethodNumber('fei_hilbert_n_fft', { integer: true, min: 1, label: 'Hilbert n_fft' }));
-                    add('fei_filter_kwargs', this.featureMethodJsonDictIssue('fei_filter_kwargs', 'Filter kwargs'));
                     add('fei_output_path', this.featureMethodCustomPathIssue('fei_output_key', 'fei_output_path', 'Custom output path'));
                 }
 
@@ -2162,22 +2146,15 @@ def custom_feature(sample, params):
                     || this.featureNestedRangeBlockReason('fEI DFA', this.feiDfaFitIntervalMin, this.feiDfaFitIntervalMax, this.feiDfaComputeIntervalMin, this.feiDfaComputeIntervalMax);
             },
             dfaConfigurationBlockReason() {
-                if (!this.dfaUsesEnvelope() && this.dfaHasBandRange() && this.dfaHasSpectrumRange()) {
-                    return 'DFA: use either Band frequency or Spectrum range, not both.';
-                }
-                if (!this.dfaUsesEnvelope() && !this.dfaHasBandRange() && !this.dfaHasSpectrumRange()) {
-                    return 'DFA: raw-signal mode requires Band frequency or Spectrum range.';
+                if (!this.dfaUsesEnvelope() && !this.dfaHasBandRange()) {
+                    return 'DFA: raw-signal mode requires a band frequency range.';
                 }
                 return (!this.dfaUsesEnvelope() && this.featureRangeBlockReason('DFA band frequency', this.dfaFrequencyMin, this.dfaFrequencyMax))
-                    || (!this.dfaUsesEnvelope() && this.featureRangeBlockReason('DFA spectrum range', this.dfaSpectrumMin, this.dfaSpectrumMax))
                     || this.dfaWindowBlockReason();
             },
             feiConfigurationBlockReason() {
-                if (!this.feiUsesEnvelope() && this.feiHasBandRange() && this.feiHasSpectrumRange()) {
-                    return 'fEI: use either Band frequency or Spectrum range, not both.';
-                }
-                if (!this.feiUsesEnvelope() && !this.feiHasBandRange() && !this.feiHasSpectrumRange()) {
-                    return 'fEI: raw-signal mode requires Band frequency or Spectrum range.';
+                if (!this.feiUsesEnvelope() && !this.feiHasBandRange()) {
+                    return 'fEI: raw-signal mode requires a band frequency range.';
                 }
                 const windowSize = this.numericFeatureValue(this.feiWindowSizeSec);
                 if (!Number.isFinite(windowSize) || windowSize <= 0) {
@@ -2188,7 +2165,6 @@ def custom_feature(sample, params):
                     return 'fEI: Window overlap must be in [0, 1).';
                 }
                 return (!this.feiUsesEnvelope() && this.featureRangeBlockReason('fEI band frequency', this.feiFrequencyMin, this.feiFrequencyMax))
-                    || (!this.feiUsesEnvelope() && this.featureRangeBlockReason('fEI spectrum range', this.feiSpectrumMin, this.feiSpectrumMax))
                     || this.feiDfaWindowBlockReason();
             },
             canSubmitFeatures() {
@@ -5838,41 +5814,23 @@ def custom_feature(sample, params):
                                     <span class="material-symbols-outlined text-base text-emerald-600 dark:text-emerald-300">filter_alt</span>
                                     <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Frequency selection</h3>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-300">Band frequency computes DFA for one filtered band. Spectrum range asks crosci-style logic to create several bands inside the requested range. Use only one.</p>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': dfaUsesEnvelope() || dfaHasSpectrumRange() }">
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Band frequency computes DFA for one filtered band. Automatic spectrum ranges are unavailable. Choose one explicit band and fitting interval. The filter is Butterworth; results can differ from earlier ncpi versions. MNE filter kwargs and Hilbert FFT length are unavailable. Explicit fit and compute intervals are required.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': dfaUsesEnvelope() }">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency min (Hz)</span>
                                         <input type="number" step="any" name="dfa_frequency_min" x-model="dfaFrequencyMin" value="5"
-                                            :disabled="dfaUsesEnvelope() || dfaHasSpectrumRange()"
+                                            :disabled="dfaUsesEnvelope()"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="Optional">
                                     </label>
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency max (Hz)</span>
                                         <input type="number" step="any" name="dfa_frequency_max" x-model="dfaFrequencyMax" value="45"
-                                            :disabled="dfaUsesEnvelope() || dfaHasSpectrumRange()"
+                                            :disabled="dfaUsesEnvelope()"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="Optional">
                                     </label>
                                 </div>
-                                <p x-show="!dfaUsesEnvelope() && dfaHasSpectrumRange()" class="text-xs text-amber-700 dark:text-amber-300">Band frequency is disabled because Spectrum range is filled.</p>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': dfaUsesEnvelope() || dfaHasBandRange() }">
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
-                                        <input type="number" step="any" name="dfa_spectrum_min" x-model="dfaSpectrumMin"
-                                            :disabled="dfaUsesEnvelope() || dfaHasBandRange()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional">
-                                    </label>
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
-                                        <input type="number" step="any" name="dfa_spectrum_max" x-model="dfaSpectrumMax"
-                                            :disabled="dfaUsesEnvelope() || dfaHasBandRange()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional">
-                                    </label>
-                                </div>
-                                <p x-show="!dfaUsesEnvelope() && dfaHasBandRange()" class="text-xs text-amber-700 dark:text-amber-300">Spectrum range is disabled because Band frequency is filled.</p>
                             </div>
 
                             <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
@@ -5880,7 +5838,7 @@ def custom_feature(sample, params):
                                     <span class="material-symbols-outlined text-base text-slate-600 dark:text-slate-300">settings</span>
                                     <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Advanced options</h3>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-300">Exclude bad channels or override the Hilbert/filter implementation used when raw signals are converted to envelopes.</p>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Exclude bad channels from the calculation.</p>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indexes</span>
@@ -5888,23 +5846,7 @@ def custom_feature(sample, params):
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="Optional, e.g. 0,2,5">
                                     </label>
-                                    <label class="text-sm" :class="{ 'opacity-50': dfaUsesEnvelope() }">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
-                                        <input type="number" step="1" min="1" name="dfa_hilbert_n_fft"
-                                            :disabled="dfaUsesEnvelope()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional">
-                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Only used when raw signals are filtered and transformed to envelopes.</span>
-                                    </label>
                                 </div>
-                                <label class="text-sm block" :class="{ 'opacity-50': dfaUsesEnvelope() }">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (dict)</span>
-                                    <input type="text" name="dfa_filter_kwargs"
-                                        :disabled="dfaUsesEnvelope()"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder='Optional, e.g. {"fir_design":"firwin"}'>
-                                    <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Optional keyword arguments passed to the filtering step before Hilbert envelope extraction.</span>
-                                </label>
                             </div>
 
                             <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
@@ -6065,41 +6007,23 @@ def custom_feature(sample, params):
                                     <span class="material-symbols-outlined text-base text-emerald-600 dark:text-emerald-300">filter_alt</span>
                                     <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Frequency selection</h3>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-300">Band frequency computes fEI for one filtered band. Spectrum range asks crosci-style logic to create several bands inside the requested range. Use only one.</p>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': feiUsesEnvelope() || feiHasSpectrumRange() }">
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Band frequency computes fEI for one filtered band. Automatic spectrum ranges are unavailable. Choose one explicit band and fitting interval. The filter is Butterworth; results can differ from earlier ncpi versions. MNE filter kwargs and Hilbert FFT length are unavailable. Explicit fit and compute intervals are required.</p>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': feiUsesEnvelope() }">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency min (Hz)</span>
                                         <input type="number" step="any" name="fei_frequency_min" x-model="feiFrequencyMin" value="5"
-                                            :disabled="feiUsesEnvelope() || feiHasSpectrumRange()"
+                                            :disabled="feiUsesEnvelope()"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="Optional">
                                     </label>
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Band frequency max (Hz)</span>
                                         <input type="number" step="any" name="fei_frequency_max" x-model="feiFrequencyMax" value="45"
-                                            :disabled="feiUsesEnvelope() || feiHasSpectrumRange()"
+                                            :disabled="feiUsesEnvelope()"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="Optional">
                                     </label>
                                 </div>
-                                <p x-show="!feiUsesEnvelope() && feiHasSpectrumRange()" class="text-xs text-amber-700 dark:text-amber-300">Band frequency is disabled because Spectrum range is filled.</p>
-                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4" :class="{ 'opacity-50': feiUsesEnvelope() || feiHasBandRange() }">
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range min (Hz)</span>
-                                        <input type="number" step="any" name="fei_spectrum_min" x-model="feiSpectrumMin"
-                                            :disabled="feiUsesEnvelope() || feiHasBandRange()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional">
-                                    </label>
-                                    <label class="text-sm">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Spectrum range max (Hz)</span>
-                                        <input type="number" step="any" name="fei_spectrum_max" x-model="feiSpectrumMax"
-                                            :disabled="feiUsesEnvelope() || feiHasBandRange()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional">
-                                    </label>
-                                </div>
-                                <p x-show="!feiUsesEnvelope() && feiHasBandRange()" class="text-xs text-amber-700 dark:text-amber-300">Spectrum range is disabled because Band frequency is filled.</p>
                             </div>
 
                             <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
@@ -6107,7 +6031,7 @@ def custom_feature(sample, params):
                                     <span class="material-symbols-outlined text-base text-slate-600 dark:text-slate-300">settings</span>
                                     <h3 class="text-sm font-semibold text-slate-800 dark:text-slate-100">Advanced options</h3>
                                 </div>
-                                <p class="text-xs text-slate-500 dark:text-slate-300">Exclude bad channels or override the Hilbert/filter implementation used when raw signals are converted to envelopes.</p>
+                                <p class="text-xs text-slate-500 dark:text-slate-300">Exclude bad channels from the calculation.</p>
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <label class="text-sm">
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Bad channel indexes</span>
@@ -6115,23 +6039,7 @@ def custom_feature(sample, params):
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
                                             placeholder="Optional, e.g. 0,2,5">
                                     </label>
-                                    <label class="text-sm" :class="{ 'opacity-50': feiUsesEnvelope() }">
-                                        <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Hilbert n_fft</span>
-                                        <input type="number" step="1" min="1" name="fei_hilbert_n_fft"
-                                            :disabled="feiUsesEnvelope()"
-                                            class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="Optional">
-                                        <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Only used when raw signals are filtered and transformed to envelopes.</span>
-                                    </label>
                                 </div>
-                                <label class="text-sm block" :class="{ 'opacity-50': feiUsesEnvelope() }">
-                                    <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Filter kwargs (dict)</span>
-                                    <input type="text" name="fei_filter_kwargs"
-                                        :disabled="feiUsesEnvelope()"
-                                        class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                        placeholder='Optional, e.g. {"fir_design":"firwin"}'>
-                                    <span class="mt-1 block text-xs text-slate-500 dark:text-slate-300">Optional keyword arguments passed to the filtering step before Hilbert envelope extraction.</span>
-                                </label>
                             </div>
 
                             <div class="space-y-4 border-t border-slate-200 dark:border-[#323b67] pt-5">
@@ -6146,7 +6054,7 @@ def custom_feature(sample, params):
                                         <select name="fei_output_key"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm">
                                             <option value="fei" selected>fEI (scalar)</option>
-                                            <option value="fei_outliers_removed">fEI outliers removed</option>
+                                            <option value="fei_outliers_removed" disabled>fEI outliers removed (unavailable)</option>
                                             <option value="fei_val">fEI with outliers</option>
                                             <option value="dfa">DFA value</option>
                                             <option value="num_outliers">Number of outliers</option>
@@ -6160,7 +6068,7 @@ def custom_feature(sample, params):
                                         <span class="block text-xs text-gray-500 dark:text-gray-100 mb-1">Custom output path</span>
                                         <input type="text" name="fei_output_path"
                                             class="w-full rounded-lg border-gray-300 dark:border-[#323b67] bg-white dark:bg-[#191e33] text-sm"
-                                            placeholder="e.g. fEI_outliers_removed, DFA, wAmp">
+                                            placeholder="e.g. fEI_val, DFA, wAmp">
                                     </label>
                                 </div>
                             </div>

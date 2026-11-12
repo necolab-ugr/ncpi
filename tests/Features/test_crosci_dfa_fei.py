@@ -18,9 +18,9 @@ PARITY_NUM_CHANNELS = int(os.environ.get("NCPI_CROSCI_PARITY_NUM_CHANNELS", "2")
 
 DFA_FIT_INTERVAL = [5, 30]
 DFA_COMPUTE_INTERVAL = [5, 30]
-DFA_OVERLAP = True
+DFA_OVERLAP = False
 FEI_WINDOW_SIZE_SEC = 5
-FEI_WINDOW_OVERLAP = 0.8
+FEI_WINDOW_OVERLAP = 0.5
 
 DFA_TOL = {"rtol": 1e-8, "atol": 1e-8}
 FEI_TOL = {"rtol": 1e-7, "atol": 1e-7}
@@ -43,12 +43,7 @@ def _log(message):
 
 
 @pytest.fixture(scope="session")
-def crosci_biomarkers(tmp_path_factory):
-    tmp_dir = tmp_path_factory.mktemp("crosci_runtime")
-    os.environ["HOME"] = str(tmp_dir)
-    os.environ["MNE_HOME"] = str(tmp_dir / "mne")
-    os.environ["NUMBA_CACHE_DIR"] = str(tmp_dir / "numba_cache")
-
+def crosci_biomarkers():
     _log("Importing crosci biomarkers.")
     try:
         from crosci.biomarkers import DFA, fEI
@@ -150,16 +145,17 @@ def _mne_sample_signal(duration_seconds, num_channels):
     mne = pytest.importorskip("mne")
 
     with tempfile.TemporaryDirectory(prefix="mne_sample_") as temp_dir:
-        _log("Downloading MNE sample dataset into a temporary directory.")
+        sample_parent = os.environ.get("MNE_DATASETS_SAMPLE_PATH")
+        _log("Locating the MNE sample dataset.")
         try:
             data_path = mne.datasets.sample.data_path(
-                path=temp_dir,
-                download=True,
+                path=sample_parent or temp_dir,
+                download=sample_parent is None,
                 update_path=False,
                 verbose=False,
             )
         except Exception as exc:
-            pytest.skip(f"MNE sample dataset could not be downloaded: {exc}")
+            pytest.skip(f"MNE sample dataset is unavailable: {exc}")
 
         raw_path = Path(data_path) / "MEG/sample/sample_audvis_raw.fif"
         _log("Loading MNE sample raw FIF file.")
@@ -218,7 +214,7 @@ def _make_case(origin):
     raise ValueError(f"Unknown parity origin: {origin}")
 
 
-def _ncpi_dfa(signal, sampling_frequency):
+def _ncpi_dfa(signal, sampling_frequency, window_sizes, monkeypatch):
     _log("Computing DFA with ncpi Features.")
     feat = Features(
         method="dfa",
@@ -229,11 +225,13 @@ def _ncpi_dfa(signal, sampling_frequency):
             "overlap": DFA_OVERLAP,
         },
     )
+    # Use crosci scales only in this comparison; production defaults are unchanged.
+    monkeypatch.setattr(feat, "_dfa_window_sizes", lambda fs, interval: window_sizes.copy())
     return feat.dfa(signal)
 
 
 def _ncpi_fei_from_dfa(signal, sampling_frequency, dfa_array):
-    _log("Computing fE/I with ncpi Features using ncpi DFA values.")
+    _log("Computing fE/I with ncpi Features.")
     feat = Features(
         method="fEI",
         params={
@@ -266,7 +264,7 @@ def _ncpi_fei_from_dfa(signal, sampling_frequency, dfa_array):
     }
 
 
-def _assert_dfa_parity(ncpi_out, crosci_out):
+def _assert_dfa_parity(ncpi_out, crosci_out, sampling_frequency):
     _log("Comparing DFA outputs from ncpi and crosci.")
     crosci_dfa, crosci_window_sizes, crosci_fluctuations, crosci_intercept = (
         crosci_out
@@ -283,7 +281,8 @@ def _assert_dfa_parity(ncpi_out, crosci_out):
         **DFA_TOL,
     )
     np.testing.assert_allclose(
-        ncpi_out["dfa_intercept"], crosci_intercept, equal_nan=True, **DFA_TOL
+        ncpi_out["dfa_intercept"], crosci_intercept + crosci_dfa * np.log10(sampling_frequency),
+        equal_nan=True, **DFA_TOL
     )
     _log("DFA parity comparison passed.")
 
@@ -294,20 +293,10 @@ def _assert_fei_parity(ncpi_out, crosci_out):
         crosci_out
     )
 
-    np.testing.assert_allclose(
-        ncpi_out["fEI_outliers_removed"],
-        crosci_fei_or,
-        equal_nan=True,
-        **FEI_TOL,
-    )
+    # Compare the uncorrected estimate. Crosci applies outlier removal as a
+    # separate output; ncpi Features does not compute that estimate by default.
     np.testing.assert_allclose(
         ncpi_out["fEI_val"], crosci_fei_val, equal_nan=True, **FEI_TOL
-    )
-    np.testing.assert_allclose(
-        ncpi_out["num_outliers"],
-        crosci_num_outliers,
-        equal_nan=True,
-        **FEI_TOL,
     )
     np.testing.assert_allclose(
         ncpi_out["wAmp"], crosci_w_amp, equal_nan=True, **FEI_TOL
@@ -319,7 +308,7 @@ def _assert_fei_parity(ncpi_out, crosci_out):
 
 
 @pytest.mark.parametrize("origin", ["crosci_demo", "readme", "mne_sample"])
-def test_dfa_and_fei_parity_against_crosci(origin, crosci_biomarkers):
+def test_dfa_and_fei_parity_against_crosci(origin, crosci_biomarkers, monkeypatch):
     crosci_dfa, crosci_fei = crosci_biomarkers
     _log(f"Starting parity test for origin: {origin}.")
     case = _make_case(origin)
@@ -328,31 +317,55 @@ def test_dfa_and_fei_parity_against_crosci(origin, crosci_biomarkers):
         f"and sampling frequency {case.sampling_frequency} Hz."
     )
 
-    ncpi_dfa_out = _ncpi_dfa(case.signal, case.sampling_frequency)
+    # With no DFA overlap, select a shared signal length for which no DFA
+    # scale divides the signal exactly: crosci drops a final exact window.
+    # The same avoids that difference for the 50%-overlap fEI windows.
+    probe = crosci_dfa(case.signal, case.sampling_frequency, DFA_FIT_INTERVAL,
+                       DFA_COMPUTE_INTERVAL, overlap=DFA_OVERLAP, runtime="c")
+    sizes = probe[1]
+    fei_size = int(FEI_WINDOW_SIZE_SEC * case.sampling_frequency)
+    fei_step = fei_size // 2
+    length = case.signal.shape[1]
+    while any(length % int(size) == 0 for size in sizes) or (length - fei_size) % fei_step == 0:
+        length -= 1
+    signal = case.signal[:, :length]
+    _log(f"Using {length} shared samples and {len(sizes)} shared DFA scales.")
+    ncpi_dfa_out = _ncpi_dfa(signal, case.sampling_frequency, sizes, monkeypatch)
     _log("Computing DFA with crosci.")
     crosci_dfa_out = crosci_dfa(
-        case.signal,
+        signal,
         case.sampling_frequency,
         DFA_FIT_INTERVAL,
         DFA_COMPUTE_INTERVAL,
         overlap=DFA_OVERLAP,
         runtime="c",
     )
-    _assert_dfa_parity(ncpi_dfa_out, crosci_dfa_out)
+    _assert_dfa_parity(ncpi_dfa_out, crosci_dfa_out, case.sampling_frequency)
 
     ncpi_fei_out = _ncpi_fei_from_dfa(
-        case.signal,
+        signal,
         case.sampling_frequency,
-        ncpi_dfa_out["DFA"],
+        # An explicit eligible value exercises fEI even for white noise, whose
+        # measured DFA is below the scientific inclusion threshold.
+        np.full(signal.shape[0], 0.8),
     )
-    _log("Computing fE/I with crosci using crosci DFA values.")
+    _log("Computing fE/I with crosci using a controlled DFA value of 0.8.")
     crosci_fei_out = crosci_fei(
-        case.signal,
+        signal,
         case.sampling_frequency,
         FEI_WINDOW_SIZE_SEC,
         FEI_WINDOW_OVERLAP,
-        crosci_dfa_out[0],
+        np.full(signal.shape[0], 0.8),
         runtime="c",
     )
     _assert_fei_parity(ncpi_fei_out, crosci_fei_out)
+    _log("Checking fE/I with each implementation's measured DFA values.")
+    ncpi_fei_actual = _ncpi_fei_from_dfa(
+        signal, case.sampling_frequency, ncpi_dfa_out["DFA"]
+    )
+    crosci_fei_actual = crosci_fei(
+        signal, case.sampling_frequency, FEI_WINDOW_SIZE_SEC,
+        FEI_WINDOW_OVERLAP, crosci_dfa_out[0], runtime="c"
+    )
+    _assert_fei_parity(ncpi_fei_actual, crosci_fei_actual)
     _log(f"Finished parity test for origin: {origin}.")

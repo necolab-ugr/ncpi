@@ -2931,6 +2931,8 @@ def _build_feature_method_params(method, params, df):
         input_is_envelope = False if input_is_envelope is None else bool(input_is_envelope)
         fit_interval = _parse_range_pair(params, "dfa_fit_interval_min", "dfa_fit_interval_max")
         compute_interval = _parse_range_pair(params, "dfa_compute_interval_min", "dfa_compute_interval_max")
+        if fit_interval is None or compute_interval is None:
+            raise ValueError("DFA requires explicit fit and compute intervals.")
         _validate_fit_interval_inside_compute("DFA", fit_interval, compute_interval)
 
         if input_is_envelope:
@@ -2957,7 +2959,7 @@ def _build_feature_method_params(method, params, df):
         if frequency_range is not None:
             method_params["frequency_range"] = tuple(frequency_range)
         if spectrum_range is not None:
-            method_params["spectrum_range"] = tuple(spectrum_range)
+            raise ValueError("Automatic spectrum ranges are unavailable; choose one explicit frequency band.")
         if overlap is not None:
             method_params["overlap"] = bool(overlap)
         method_params["input_is_envelope"] = bool(input_is_envelope)
@@ -2991,6 +2993,8 @@ def _build_feature_method_params(method, params, df):
 
         dfa_fit_interval = _parse_range_pair(params, "fei_dfa_fit_interval_min", "fei_dfa_fit_interval_max")
         dfa_compute_interval = _parse_range_pair(params, "fei_dfa_compute_interval_min", "fei_dfa_compute_interval_max")
+        if dfa_fit_interval is None or dfa_compute_interval is None:
+            raise ValueError("fEI requires explicit DFA fit and compute intervals.")
         _validate_fit_interval_inside_compute("fEI DFA", dfa_fit_interval, dfa_compute_interval)
 
         window_size_sec = _parse_float_param(params, "fei_window_size_sec", default=None)
@@ -3005,7 +3009,7 @@ def _build_feature_method_params(method, params, df):
         if frequency_range is not None:
             method_params["frequency_range"] = tuple(frequency_range)
         if spectrum_range is not None:
-            method_params["spectrum_range"] = tuple(spectrum_range)
+            raise ValueError("Automatic spectrum ranges are unavailable; choose one explicit frequency band.")
         if dfa_fit_interval is not None:
             method_params["dfa_fit_interval"] = tuple(dfa_fit_interval)
         if dfa_compute_interval is not None:
@@ -3074,7 +3078,7 @@ _DFA_OUTPUT_PATHS = {
 }
 
 _FEI_OUTPUT_PATHS = {
-    "fei": "fEI",
+    "fei": "fEI_val",
     "fei_outliers_removed": "fEI_outliers_removed",
     "fei_val": "fEI_val",
     "dfa": "DFA",
