@@ -298,9 +298,10 @@ After simulation, each LFP is transformed into a compact catch22 feature vector,
 RandomForest regressor that maps features to the ground-truth E:I ratio. Predictions on held-out samples are evaluated
 with MSE and visualized in a predicted-versus-real scatter plot with a diagonal reference line for ideal agreement.
 
-The example ends with `plt.show()`, which opens an interactive Matplotlib window. If you are running in a headless
-environment, over SSH, in Docker, in WSL without GUI support, or on a minimal Linux installation where Qt backends are
-not fully configured, run the saved script with a non-GUI backend:
+The example saves the plot as `ncpi_example.png` in the directory from which you run the script, then calls
+`plt.show()` to open an interactive Matplotlib window. If you are running in a headless environment, over SSH, in
+Docker, in WSL without GUI support, or on a minimal Linux installation where Qt backends are not fully configured,
+run the saved script with a non-GUI backend:
 
 ```bash
 MPLBACKEND=Agg python example.py
@@ -484,6 +485,7 @@ if __name__ == "__main__":
     )
 
     plt.tight_layout()
+    plt.savefig("ncpi_example.png", dpi=300)
     plt.show()
 ```
 
