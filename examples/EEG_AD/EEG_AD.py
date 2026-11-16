@@ -30,9 +30,8 @@ else:
 # Choose to either download data from Zenodo (True) or load it from a local path (False).
 zenodo_dw_sim = True  # simulation data
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
-zenodo_dir_sim = os.path.expandvars(os.path.expanduser(
-    os.path.join("$HOME", "zenodo_sim_files")
-))
+# Zenodo files are shared in ncpi_data/ at the repository root (25.2 GB download).
+zenodo_dir_sim = os.path.join(PARENT_DIR, "..", "ncpi_data", "simulation_models")
 
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization"]

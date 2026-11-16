@@ -30,12 +30,9 @@ zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-zenodo_dir_sim = os.path.expandvars(os.path.expanduser(
-    os.path.join("$HOME", "zenodo_sim_files")
-))
-zenodo_dir_emp = os.path.expandvars(os.path.expanduser(
-    os.path.join("$HOME", "zenodo_emp_files")
-))
+# Zenodo files are shared in ncpi_data/ at the repository root (25.2 GB download).
+zenodo_dir_sim = os.path.join(PARENT_DIR, "..", "ncpi_data", "simulation_models")
+zenodo_dir_emp = os.path.join(PARENT_DIR, "..", "ncpi_data", "empirical")
 
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization"]
