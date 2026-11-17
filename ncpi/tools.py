@@ -486,7 +486,7 @@ def download_zenodo_record(
         return
 
     requests, tqdm = get_requests_and_tqdm()
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {"User-Agent": "curl/8.0.0"}
 
     # --- Primary: fetch record JSON (with 403 fallback) ---
     try:

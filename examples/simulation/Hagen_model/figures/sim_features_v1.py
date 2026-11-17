@@ -18,8 +18,8 @@ zenodo_dw_sim = True # simulation data
 # Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
-# Paths to zenodo files
-zenodo_dir_sim = os.path.join("zenodo_sim_files")
+# Shared repository folder: ncpi_data/simulation_models (25.2 GB download).
+zenodo_dir_sim = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "ncpi_data", "simulation_models")
 
 # Download simulation data and ML models
 if zenodo_dw_sim:
