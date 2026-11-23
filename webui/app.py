@@ -18369,8 +18369,6 @@ def start_computation_redirect(computation_type):
                                     pass
                             break
 
-                    if selected_token:
-                        upload_items = [row for row in upload_items if row[3] == selected_token]
                     if filename_format_spec:
                         upload_items, skipped_names = _filter_named_items_by_filename_format(
                             upload_items,
