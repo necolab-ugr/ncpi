@@ -995,3 +995,125 @@ def test_sbi_pairing_modified_hyperparams_and_sampling_kwargs(tmp_path, sbi_mode
     )
 
     _assert_samples_close(native_samples, ncpi_samples, atol_mean=0.6, atol_std=0.6)
+
+
+# --- Issue #214: scaler fitted per CV fold (scaler_per_fold) ---
+
+def _rf_cv_train(result_dir, *, scaler_per_fold, n=64, seed=21):
+    from sklearn.preprocessing import StandardScaler
+
+    X, Y = _make_linear_data(n=n, d=3, theta_dim=1, seed=seed)
+    X = X * 10.0 + 5.0
+    inf = Inference("RandomForestRegressor", hyperparams={"n_estimators": 5})
+    inf.add_simulation_data(X, Y)
+    inf.train(
+        param_grid=[{"n_estimators": 5, "max_depth": 3}],
+        n_splits=2,
+        n_repeats=1,
+        result_dir=result_dir,
+        scaler=StandardScaler(),
+        scaler_per_fold=scaler_per_fold,
+        seed=0,
+    )
+    with open(os.path.join(result_dir, "scaler.pkl"), "rb") as f:
+        saved_scaler = pickle.load(f)
+    with open(os.path.join(result_dir, "model.pkl"), "rb") as f:
+        saved_model = pickle.load(f)
+    return inf, X, saved_scaler, saved_model
+
+
+def test_cv_scaler_default_fits_on_all_rows(tmp_result_dir):
+    _, _, saved_scaler, saved_model = _rf_cv_train(tmp_result_dir, scaler_per_fold=False)
+    assert not isinstance(saved_scaler, list)
+    assert int(saved_scaler.n_samples_seen_) == 64
+    assert isinstance(saved_model, list) and len(saved_model) == 2
+
+
+def test_cv_scaler_per_fold_fits_on_training_rows_only(tmp_result_dir):
+    inf, X, saved_scaler, saved_model = _rf_cv_train(tmp_result_dir, scaler_per_fold=True)
+    assert isinstance(saved_scaler, list) and len(saved_scaler) == len(saved_model) == 2
+    assert [int(s.n_samples_seen_) for s in saved_scaler] == [32, 32]
+
+    preds = np.asarray(inf.predict(X[:5], result_dir=tmp_result_dir, scaler=True, n_jobs=1))
+    expected = np.mean(
+        [m.predict(s.transform(X[:5])) for m, s in zip(saved_model, saved_scaler)], axis=0
+    )
+    np.testing.assert_allclose(preds, expected)
+
+
+def test_cv_scaler_per_fold_ignored_without_param_grid(tmp_result_dir):
+    from sklearn.preprocessing import StandardScaler
+
+    X, Y = _make_linear_data(n=64, d=2, theta_dim=1, seed=22)
+    inf = Inference("Ridge", hyperparams={"alpha": 1.0})
+    inf.add_simulation_data(X, Y)
+    inf.train(param_grid=None, result_dir=tmp_result_dir, scaler=StandardScaler(),
+              scaler_per_fold=True, seed=0)
+    with open(os.path.join(tmp_result_dir, "scaler.pkl"), "rb") as f:
+        saved_scaler = pickle.load(f)
+    assert not isinstance(saved_scaler, list)
+    assert int(saved_scaler.n_samples_seen_) == 64
+
+
+def test_cv_scaler_per_fold_rejects_non_boolean(tmp_result_dir):
+    X, Y = _make_linear_data(n=20, d=2, theta_dim=1, seed=23)
+    inf = Inference("Ridge", hyperparams={"alpha": 1.0})
+    inf.add_simulation_data(X, Y)
+    with pytest.raises(TypeError):
+        inf.train(result_dir=tmp_result_dir, scaler=True, scaler_per_fold="yes")
+
+
+def test_predict_single_scaler_with_ensemble_is_backward_compatible(tmp_result_dir):
+    inf, X, saved_scaler, saved_model = _rf_cv_train(tmp_result_dir, scaler_per_fold=False)
+    preds = np.asarray(inf.predict(X[:5], result_dir=tmp_result_dir, scaler=True, n_jobs=1))
+    Xs = saved_scaler.transform(X[:5])
+    expected = np.mean([m.predict(Xs) for m in saved_model], axis=0)
+    np.testing.assert_allclose(preds, expected)
+
+
+def test_predict_rejects_scaler_list_length_mismatch(tmp_result_dir):
+    inf, X, saved_scaler, _ = _rf_cv_train(tmp_result_dir, scaler_per_fold=True)
+    with open(os.path.join(tmp_result_dir, "scaler.pkl"), "wb") as f:
+        pickle.dump(saved_scaler[:1], f)
+    with pytest.raises(ValueError):
+        inf.predict(X[:3], result_dir=tmp_result_dir, scaler=True, n_jobs=1)
+
+
+def test_sbi_cv_scaler_per_fold(tmp_result_dir):
+    _require_sbi()
+    import torch
+    from sbi.utils import BoxUniform
+    from sklearn.preprocessing import StandardScaler
+
+    X, Y = _make_linear_data(n=24, d=2, theta_dim=2, seed=24)
+    prior = BoxUniform(low=torch.tensor([-5.0, -5.0]), high=torch.tensor([5.0, 5.0]))
+    inf = Inference("NPE", hyperparams={
+        "prior": prior,
+        "inference_kwargs": {"device": "cpu"},
+        "build_posterior_kwargs": {},
+    })
+    inf.add_simulation_data(X, Y)
+    inf.train(
+        param_grid=[{"estimator_kwargs": {"estimator": "nsf"}}],
+        n_splits=2,
+        n_repeats=1,
+        train_params={"max_num_epochs": 1, "training_batch_size": 16, "show_train_summary": False},
+        result_dir=tmp_result_dir,
+        scaler=StandardScaler(),
+        scaler_per_fold=True,
+        seed=0,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 20, show_progress_bars=False),
+    )
+    with open(os.path.join(tmp_result_dir, "scaler.pkl"), "rb") as f:
+        saved_scaler = pickle.load(f)
+    assert isinstance(saved_scaler, list)
+    assert [int(s.n_samples_seen_) for s in saved_scaler] == [12, 12]
+
+    samples = inf.predict(
+        X[:3],
+        result_dir=tmp_result_dir,
+        scaler=True,
+        sbi_eval_sampling_kwargs=_sbi_sampling_kwargs("NPE", 30, show_progress_bars=False),
+    )
+    assert samples.shape == (30, 3, 2)
+    assert np.all(np.isfinite(samples))
