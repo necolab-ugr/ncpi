@@ -5702,6 +5702,13 @@ def custom_feature(sample, params):
 
                         <section x-show="selectedMethod === 'catch22'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white mb-4">catch22 options</h2>
+                            {% set _dep_error = (method_dependency_errors or {}).get('catch22') %}
+                            {% if _dep_error %}
+                            <div class="mb-4 p-3 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 text-xs text-red-700 dark:text-red-300">
+                                <p class="font-semibold mb-1">Missing or unsupported dependency</p>
+                                <p class="break-words">{{ _dep_error }}</p>
+                            </div>
+                            {% endif %}
                             <fieldset :disabled="selectedMethod !== 'catch22'">
                             <label class="inline-flex items-center gap-2 text-sm text-[#34495E] dark:text-gray-100">
                                 <input type="checkbox" name="catch22_normalize" value="1"
@@ -6098,6 +6105,13 @@ def custom_feature(sample, params):
 
                         <section x-show="selectedMethod === 'specparam'" class="bg-white dark:bg-[#111422] border border-gray-200 dark:border-[#323b67] rounded-xl p-6 space-y-5">
                             <h2 class="text-lg font-semibold text-[#34495E] dark:text-white">specparam options</h2>
+                            {% set _dep_error = (method_dependency_errors or {}).get('specparam') %}
+                            {% if _dep_error %}
+                            <div class="mb-4 p-3 rounded-lg border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 text-xs text-red-700 dark:text-red-300">
+                                <p class="font-semibold mb-1">Missing or unsupported dependency</p>
+                                <p class="break-words">{{ _dep_error }}</p>
+                            </div>
+                            {% endif %}
                             <fieldset :disabled="selectedMethod !== 'specparam'" class="space-y-5">
                             <div class="space-y-4">
                                 <div class="flex items-center gap-2 border-b border-slate-200 dark:border-[#323b67] pb-2">

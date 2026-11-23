@@ -10048,6 +10048,33 @@ def features():
     return render_template("3.features.html", options=options)
 
 
+def _features_method_dependency_error(method):
+    """Return an actionable message if a feature method dependency is missing or unsupported."""
+    from ncpi.Features import PYCATCH22_VERSION_SPEC
+
+    pip_hint = "In the environment running the WebUI, run: python -m pip install"
+    if method == "catch22":
+        requirement = f"pycatch22{PYCATCH22_VERSION_SPEC}"
+        if importlib.util.find_spec("pycatch22") is None:
+            return f'pycatch22 is not installed. {pip_hint} "{requirement}"'
+        installed = ncpi.tools._distribution_version("pycatch22")
+        if installed and not ncpi.tools._version_satisfies(installed, PYCATCH22_VERSION_SPEC):
+            return f'Installed pycatch22 version {installed} is unsupported. {pip_hint} "{requirement}"'
+    elif method == "specparam":
+        if importlib.util.find_spec("specparam") is None:
+            return f"specparam is not installed. {pip_hint} specparam"
+    return None
+
+
+def _features_method_dependency_errors():
+    errors = {}
+    for method in ("catch22", "specparam"):
+        message = _features_method_dependency_error(method)
+        if message:
+            errors[method] = message
+    return errors
+
+
 # Features configuration page
 @app.route("/features/methods", methods=["GET", "POST"])
 def features_methods():
@@ -10067,6 +10094,7 @@ def features_methods():
         has_features_data=bool(features_data_files),
         features_runtime=runtime_context,
         module_restore_form=_pop_module_restore_form("features"),
+        method_dependency_errors=_features_method_dependency_errors(),
     )
 
 
@@ -17324,6 +17352,10 @@ def start_computation_redirect(computation_type):
             return redirect(request.referrer or url_for('features_methods'))
         if selected_method == "custom" and not (request.form.get("custom_feature_script") or "").strip():
             flash('Provide a custom feature extraction script before computing.', 'error')
+            return redirect(request.referrer or url_for('features_methods'))
+        dependency_error = _features_method_dependency_error(selected_method)
+        if dependency_error:
+            flash(dependency_error, 'error')
             return redirect(request.referrer or url_for('features_methods'))
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()

@@ -8,6 +8,9 @@ from scipy import stats
 
 _WORKER_FEATURES_OBJ = None
 
+# pycatch22 >= 0.6 changes feature values
+PYCATCH22_VERSION_SPEC = ">=0.4.5,<0.6"
+
 def _features_worker_init(method, params):
     """
     Initializer that runs once per worker process.
@@ -145,11 +148,11 @@ class Features:
                 raise ImportError(
                     "pycatch22 is required for computing catch22 features but is not installed."
                 )
-            # pycatch22 >= 0.6 changes feature values
             installed = tools._distribution_version("pycatch22")
-            if installed is not None and not tools._version_satisfies(installed, "<0.6"):
+            if installed is not None and not tools._version_satisfies(installed, PYCATCH22_VERSION_SPEC):
                 raise ImportError(
-                    f"pycatch22 {installed} is not supported, install pycatch22<0.6."
+                    f"pycatch22 {installed} is not supported, install "
+                    f"\"pycatch22{PYCATCH22_VERSION_SPEC}\"."
                 )
             self._pycatch22 = tools.dynamic_import("pycatch22")
 
