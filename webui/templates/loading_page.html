@@ -251,7 +251,7 @@
             Save results
         </button>
 
-        <form x-show="!pending && (status === 'failed' || status === 'cancelled') && canRestoreConfig"
+        <form x-show="!pending && ['finished', 'failed', 'cancelled'].includes(status) && canRestoreConfig"
             method="POST"
             action="{{ url_for('restore_job_config', job_id=job_id) }}">
             <button type="submit"

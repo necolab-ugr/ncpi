@@ -8581,6 +8581,8 @@ def _simulation_restore_endpoint_for_model(model_type):
     }.get(str(model_type or "").strip().lower())
 
 
+RESTORABLE_JOB_STATUSES = {"finished", "failed", "cancelled"}
+
 _RESTORABLE_COMPUTATION_TARGETS = {
     "field_potential_proxy": ("field_potential_proxy", {}),
     "field_potential_kernel": ("field_potential_kernel", {}),
@@ -8716,8 +8718,8 @@ def restore_job_config(job_id):
         return redirect(url_for("dashboard"))
 
     computation_type = str(status.get("computation_type") or "").strip().lower()
-    if status.get("status") not in {"failed", "cancelled"}:
-        flash("Configuration can only be restored after a failed or cancelled job.", "error")
+    if status.get("status") not in RESTORABLE_JOB_STATUSES:
+        flash("Configuration can only be restored after a finished, failed or cancelled job.", "error")
         return redirect(url_for("job_status_page", job_id=job_id, computation_type=computation_type))
 
     if computation_type == "simulation":
@@ -18979,7 +18981,7 @@ def get_status(job_id):
         "simulation_completed": status.get("simulation_completed"),
         "simulation_mode": status.get("simulation_mode"),
         "can_restore_config": bool(
-            status.get("status") in {"failed", "cancelled"}
+            status.get("status") in RESTORABLE_JOB_STATUSES
             and (
                 (
                     status.get("computation_type") == "simulation"
