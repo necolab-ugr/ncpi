@@ -18,6 +18,7 @@ import traceback
 import functools
 import textwrap
 import tempfile
+import zipfile
 from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -2419,6 +2420,36 @@ def _attach_result_inspection(entries):
             }
         enriched.append(item)
     return enriched
+
+
+def _zip_result_summary_entries(path):
+    """List archive members as preview entries, describing pickled objects."""
+    real_path = os.path.realpath(path)
+    entries = []
+    with zipfile.ZipFile(real_path) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            size_text = f"{info.file_size / 1024:.1f} KB"
+            if Path(info.filename).suffix.lower() in PICKLE_EXTENSIONS:
+                try:
+                    with archive.open(info) as handle:
+                        inspection = _describe_result_object(pickle.load(handle))
+                except Exception as exc:
+                    inspection = {"summary": f"Failed to inspect file: {exc}", "error": str(exc)}
+            else:
+                inspection = {"summary": ""}
+            inspection["detail_summary"] = (
+                (inspection.get("detail_summary") or "").strip() + f" Stored in ZIP ({size_text})."
+            ).strip()
+            entries.append({
+                "key": f"result::{real_path}::{info.filename}",
+                "name": info.filename,
+                "label": "ZIP archive member",
+                "path": real_path,
+                "inspection": inspection,
+            })
+    return entries
 
 
 def _simulation_output_label_for_name(name):
@@ -18958,6 +18989,13 @@ def preview_results(job_id):
             })
 
         ext = os.path.splitext(str(path))[1].lower()
+        if ext == ".zip":
+            items = _zip_result_summary_entries(path)
+            return jsonify({
+                "kind": "summary",
+                "summary_text": f"ZIP archive with {len(items)} file(s)",
+                "items": items,
+            })
         if ext in {".pkl", ".pickle"}:
             obj = pd.read_pickle(path)
         elif ext == ".parquet":
