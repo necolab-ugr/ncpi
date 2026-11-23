@@ -687,7 +687,7 @@
             <div class="p-4 space-y-3">
                 <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
                     Current folder:
-                    <span id="kernel-server-folder-current" class="font-mono">/</span>
+                    <span id="kernel-server-folder-current" class="font-mono" data-editable-path>/</span>
                 </p>
                 <div class="flex flex-wrap gap-2">
                     <button id="kernel-server-folder-up" type="button"
@@ -755,7 +755,7 @@
             <div class="p-4 space-y-3">
                 <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
                     Current folder:
-                    <span id="kernel-server-file-current" class="font-mono">/</span>
+                    <span id="kernel-server-file-current" class="font-mono" data-editable-path>/</span>
                 </p>
                 <div class="flex flex-wrap gap-2">
                     <button id="kernel-server-file-up" type="button"
@@ -1951,6 +1951,12 @@ document.addEventListener('DOMContentLoaded', () => {
             if (serverFileUp) {
                 serverFileUp.disabled = !serverFileParent;
             }
+            const typedFile = String(payload.selected_file || '');
+            if (typedFile && (payload.files || []).some((entry) => entry.path === typedFile)) {
+                serverFileSelectedPath = typedFile;
+            } else if (typedFile) {
+                setServerFileError(`Unsupported file type: ${typedFile}`);
+            }
             renderServerFileEntries(
                 Array.isArray(payload.dirs) ? payload.dirs : [],
                 Array.isArray(payload.files) ? payload.files : [],
@@ -1982,6 +1988,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (serverFolderRefresh) {
         serverFolderRefresh.addEventListener('click', () => loadServerFolder(serverFolderPath, pendingFolderHistoryKey));
+    }
+    if (serverFolderCurrent) {
+        serverFolderCurrent.addEventListener('ncpi-path-submit', (event) => loadServerFolder(event.detail.path, pendingFolderHistoryKey));
     }
     if (serverFolderUp) {
         serverFolderUp.addEventListener('click', () => {
@@ -2084,6 +2093,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (serverFileRefresh) {
         serverFileRefresh.addEventListener('click', () => loadServerFile(serverFilePath, pendingFileExtensions, pendingFileHistoryKey));
+    }
+    if (serverFileCurrent) {
+        serverFileCurrent.addEventListener('ncpi-path-submit', (event) => loadServerFile(event.detail.path, pendingFileExtensions, pendingFileHistoryKey));
     }
     if (serverFileUp) {
         serverFileUp.addEventListener('click', () => {

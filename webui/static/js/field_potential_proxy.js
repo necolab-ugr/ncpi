@@ -160,6 +160,12 @@ function createProxyServerFileBrowser() {
             currentPath = String(payload.path || '');
             parentPath = String(payload.parent || '');
             pathEl.textContent = currentPath || '/';
+            const typedFile = String(payload.selected_file || '');
+            if (typedFile && (payload.files || []).some((entry) => entry.path === typedFile)) {
+                selectedFilePath = typedFile;
+            } else if (typedFile) {
+                setError(`Unsupported file type: ${typedFile}`);
+            }
             renderEntries(payload.dirs || [], payload.files || []);
             upBtn.disabled = !parentPath;
         } catch (error) {
@@ -176,6 +182,9 @@ function createProxyServerFileBrowser() {
     });
     refreshBtn.addEventListener('click', () => {
         void load(currentPath);
+    });
+    pathEl.addEventListener('ncpi-path-submit', (event) => {
+        void load(event.detail.path);
     });
     selectBtn.addEventListener('click', () => {
         if (!selectedFilePath) {

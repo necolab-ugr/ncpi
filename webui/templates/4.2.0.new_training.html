@@ -523,7 +523,7 @@
             </div>
             <div class="p-4 space-y-3">
                 <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
-                    Current folder: <span id="inferenceTrainingServerFileBrowserPath" class="font-mono"></span>
+                    Current folder: <span id="inferenceTrainingServerFileBrowserPath" class="font-mono" data-editable-path></span>
                 </p>
                 <div class="flex flex-wrap gap-2">
                     <button type="button" id="inferenceTrainingServerFileBrowserUp"
@@ -885,6 +885,7 @@ document.addEventListener("DOMContentLoaded", () => {
             parentPath = String(payload.parent || "");
             modalPath.textContent = currentPath || "/";
             modalUp.disabled = !parentPath;
+            if (payload.selected_file) selectedPath = String(payload.selected_file);
             renderModalEntries(payload.dirs || [], payload.files || []);
 
             if (selectedPath) {
@@ -1038,6 +1039,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
     modalRefresh.addEventListener("click", () => {
         loadServerFiles(currentPath);
+    });
+
+    modalPath.addEventListener("ncpi-path-submit", (event) => {
+        loadServerFiles(event.detail.path);
     });
 
     modalSelect.addEventListener("click", () => {

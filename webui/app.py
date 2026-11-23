@@ -10119,9 +10119,17 @@ def _list_windows_drives():
     return drives
     
 
+def _clean_typed_path(raw):
+    """Normalize a typed/pasted path: trim spaces and surrounding quotes."""
+    text = str(raw or "").strip()
+    while len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        text = text[1:-1].strip()
+    return text
+
+
 @app.route("/features/browse_dirs", methods=["GET"])
 def features_browse_dirs():
-    requested = (request.args.get("path") or "").strip()
+    requested = _clean_typed_path(request.args.get("path"))
     requested_history_key = (request.args.get("history_key") or "").strip()
     is_windows = sys.platform == "win32"
 
@@ -10155,6 +10163,14 @@ def features_browse_dirs():
     except (TypeError, ValueError, OSError) as exc:
         return jsonify({"error": f"Invalid directory path: {exc}"}), 400
 
+    # A typed/pasted file path opens its folder and preselects the file
+    selected_file = None
+    if requested and os.path.isfile(current):
+        selected_file = current
+        current = os.path.dirname(current)
+
+    if not os.path.exists(current):
+        return jsonify({"error": f"Path does not exist: {current}"}), 400
     if not os.path.isdir(current):
         return jsonify({"error": f"Not a directory: {current}"}), 400
 
@@ -10212,6 +10228,8 @@ def features_browse_dirs():
     }
     if include_files:
         payload["files"] = files[:1000]
+    if selected_file:
+        payload["selected_file"] = selected_file
 
     if requested_history_key:
         _remember_path_history_for_key(requested_history_key, current)

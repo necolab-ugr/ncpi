@@ -251,6 +251,12 @@
                     this.serverFileBrowserParent = String(payload.parent || '');
                     this.serverFileBrowserDirs = Array.isArray(payload.dirs) ? payload.dirs : [];
                     this.serverFileBrowserFiles = Array.isArray(payload.files) ? payload.files : [];
+                    const typedFile = String(payload.selected_file || '');
+                    if (typedFile && this.serverFileBrowserFiles.some((entry) => entry.path === typedFile)) {
+                        this.serverFileBrowserSelectedPath = typedFile;
+                    } else if (typedFile) {
+                        this.serverFileBrowserError = `Unsupported file type: ${typedFile}`;
+                    }
                 } catch (err) {
                     const message = err && err.message ? err.message : 'Failed to list server files.';
                     this.serverFileBrowserError = message;
@@ -2679,7 +2685,7 @@
                 <div class="p-4 space-y-3">
                     <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
                         Current folder:
-                        <span class="font-mono" x-text="serverFileBrowserPath || '/'"></span>
+                        <span class="font-mono" data-editable-path @ncpi-path-submit="loadAnalysisServerFileBrowser($event.detail.path)" x-text="serverFileBrowserPath || '/'"></span>
                     </p>
                     <div class="flex flex-wrap gap-2">
                         <button type="button" @click="loadAnalysisServerFileBrowser(serverFileBrowserParent)" :disabled="!serverFileBrowserParent || serverFileBrowserLoading"

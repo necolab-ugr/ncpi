@@ -1039,6 +1039,7 @@ def custom_feature(sample, params):
                     this.serverFileBrowserParent = String(payload.parent || '');
                     this.serverFileBrowserDirs = Array.isArray(payload.dirs) ? payload.dirs : [];
                     this.serverFileBrowserFiles = Array.isArray(payload.files) ? payload.files : [];
+                    if (payload.selected_file) this.selectedServerFile = String(payload.selected_file);
                 } catch (error) {
                     this.serverFileBrowserError = error.message || 'Failed to list server files.';
                 } finally {
@@ -6479,7 +6480,7 @@ def custom_feature(sample, params):
                 <div class="p-4 space-y-3">
                     <p class="text-xs text-gray-500 dark:text-gray-400 break-all">
                         Current folder:
-                        <span class="font-mono" x-text="serverDirBrowserPath || '/'"></span>
+                        <span class="font-mono" data-editable-path @ncpi-path-submit="loadServerDirectory($event.detail.path)" x-text="serverDirBrowserPath || '/'"></span>
                     </p>
                     <div class="flex flex-wrap gap-2">
                         <button type="button" @click="loadServerDirectory(serverDirBrowserParent)" :disabled="!serverDirBrowserParent || serverDirBrowserLoading"
@@ -6521,7 +6522,7 @@ def custom_feature(sample, params):
                 <div class="p-4 space-y-3">
                     <p class="text-xs text-gray-500 dark:text-gray-400 break-all">
                         Current folder:
-                        <span class="font-mono" x-text="serverFileBrowserPath || '/'"></span>
+                        <span class="font-mono" data-editable-path @ncpi-path-submit="loadServerFileBrowser($event.detail.path)" x-text="serverFileBrowserPath || '/'"></span>
                     </p>
                     <div class="flex flex-wrap gap-2">
                         <button type="button" @click="loadServerFileBrowser(serverFileBrowserParent)" :disabled="!serverFileBrowserParent || serverFileBrowserLoading"
