@@ -26,13 +26,22 @@ zenodo_dw_emp = True  # empirical data
 # Zenodo URL that contains the simulation data and ML models (used if zenodo_dw_sim is True)
 zenodo_URL_sim = "https://zenodo.org/api/records/15351118"
 
+# Use the small subset of the empirical data (32 MB, 2 recordings per age cropped to 120 s)
+# instead of the full dataset (11 GB)
+use_small_dataset = True
+
 # Zenodo URL that contains the empirical data (used if zenodo_dw_emp is True)
-zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
+if use_small_dataset:
+    zenodo_URL_emp = "https://zenodo.org/api/records/24505013"
+else:
+    zenodo_URL_emp = "https://zenodo.org/api/records/15382047"
 
 # Paths to zenodo files
-# Zenodo files are shared in ncpi_data/ at the repository root (25.2 GB download).
+# Zenodo files are shared in ncpi_data/ at the repository root (simulation record: 25.2 GB download).
 zenodo_dir_sim = os.path.join(PARENT_DIR, "..", "ncpi_data", "simulation_models")
-zenodo_dir_emp = os.path.join(PARENT_DIR, "..", "ncpi_data", "empirical")
+zenodo_dir_emp = os.path.join(
+    PARENT_DIR, "..", "ncpi_data", "empirical_small" if use_small_dataset else "empirical"
+)
 
 # Methods used to compute the features
 all_methods = ["catch22", "power_spectrum_parameterization"]
