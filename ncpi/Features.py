@@ -1,3 +1,4 @@
+import importlib.util
 import os
 import numpy as np
 import scipy.signal as scipy_signal
@@ -144,15 +145,19 @@ class Features:
 
         # Import the required modules based on the method
         if method == 'catch22':
-            if not tools.ensure_module("pycatch22"):
+            requirement = f"pycatch22{PYCATCH22_VERSION_SPEC}"
+            # Auto-install only when missing, pinned so pip never picks an unsupported release
+            if importlib.util.find_spec("pycatch22") is None and not tools.ensure_module(
+                "pycatch22", version_spec=PYCATCH22_VERSION_SPEC
+            ):
                 raise ImportError(
-                    "pycatch22 is required for computing catch22 features but is not installed."
+                    f'pycatch22 is required for catch22 features. Run: python -m pip install "{requirement}"'
                 )
             installed = tools._distribution_version("pycatch22")
             if installed is not None and not tools._version_satisfies(installed, PYCATCH22_VERSION_SPEC):
                 raise ImportError(
-                    f"pycatch22 {installed} is not supported, install "
-                    f"\"pycatch22{PYCATCH22_VERSION_SPEC}\"."
+                    f"pycatch22 {installed} is not supported (>=0.6 changes catch22 feature values). "
+                    f'Run: python -m pip install "{requirement}"'
                 )
             self._pycatch22 = tools.dynamic_import("pycatch22")
 
