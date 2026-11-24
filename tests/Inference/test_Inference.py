@@ -282,8 +282,23 @@ def test_sklearn_random_forest_ensemble_predict(tmp_result_dir):
         seed=0,
     )
 
-    preds = inf.predict(X[:7], result_dir=tmp_result_dir)
+    preds = inf.predict(X[:7], result_dir=tmp_result_dir, n_jobs=1)
     assert len(preds) == 7
+
+    # Saved artifact is the fold ensemble (n_splits * n_repeats models)
+    with open(os.path.join(tmp_result_dir, "model.pkl"), "rb") as f:
+        models = pickle.load(f)
+    assert isinstance(models, list)
+    assert len(models) == 4
+
+    fold_preds = np.stack([np.asarray(m.predict(X[:7])) for m in models])
+    # Folds must differ, otherwise averaging is not being tested
+    assert not np.allclose(fold_preds[0], fold_preds[1:])
+
+    expected = fold_preds.mean(axis=0)
+    np.testing.assert_allclose(
+        np.asarray(preds).reshape(expected.shape), expected, rtol=1e-12, atol=1e-12
+    )
 
 
 def test_predict_empty_returns_empty_list(tmp_result_dir):
