@@ -489,6 +489,13 @@ if __name__ == "__main__":
     plt.show()
 ```
 
+# Contributing and support
+Contributions are welcome via pull requests: https://github.com/necolab-ugr/ncpi/pulls
+
+To report bugs or ask for support, open a GitHub issue: https://github.com/necolab-ugr/ncpi/issues. For bugs, include
+your `ncpi` version, environment (OS, Python version, installation method and extras), reproduction steps and the full
+error output. See the [contributing guide](https://necolab-ugr.github.io/ncpi/contributing.html) for details.
+
 # Citation
 If you use `ncpi` in your research, please consider citing our work:
 
