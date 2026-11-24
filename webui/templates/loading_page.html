@@ -78,6 +78,9 @@
             <div class="px-3 py-2 text-[11px] text-green-400/80 border-b border-slate-800 flex items-center gap-2">
                 <span class="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" x-show="status === 'in_progress' && progress < 100"></span>
                 <span>ncpi terminal</span>
+                <button type="button" @click="copyTerminalOutput()" :disabled="!output"
+                    class="ml-auto h-6 px-2 rounded border border-slate-700 text-[11px] font-semibold text-green-300 hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed"
+                    x-text="copyStatus || 'Copy terminal output'"></button>
             </div>
             <pre x-ref="log" class="max-h-48 overflow-y-auto whitespace-pre-wrap break-words px-3 py-2 text-xs leading-relaxed font-mono" id="output-terminal"
                 x-text="output || (pending ? 'Uploading data...' : 'Waiting for ncpi output...')"></pre>
@@ -248,7 +251,7 @@
             Save results
         </button>
 
-        <form x-show="!pending && (status === 'failed' || status === 'cancelled') && canRestoreConfig"
+        <form x-show="!pending && ['finished', 'failed', 'cancelled'].includes(status) && canRestoreConfig"
             method="POST"
             action="{{ url_for('restore_job_config', job_id=job_id) }}">
             <button type="submit"
@@ -323,6 +326,7 @@ document.addEventListener('alpine:init', () => {
         status: 'in_progress',
         error: null,
         output: "",
+        copyStatus: '',
         cancelRequested: false,
         cancelling: false,
         canRestoreConfig: false,
@@ -459,6 +463,37 @@ document.addEventListener('alpine:init', () => {
             if (!this.pending) return;
             const pollMs = this.computationType === 'field_potential_meeg' ? 500 : 1500;
             setTimeout(() => this.pollStatus(), pollMs);
+        },
+        async copyTerminalOutput() {
+            const text = String(this.output || '');
+            if (!text) return;
+            let copied = false;
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(text);
+                    copied = true;
+                }
+            } catch (err) {
+                copied = false;
+            }
+            if (!copied) {
+                // Fallback for non-secure contexts (e.g. remote http access)
+                const area = document.createElement('textarea');
+                area.value = text;
+                area.setAttribute('readonly', '');
+                area.style.position = 'fixed';
+                area.style.opacity = '0';
+                document.body.appendChild(area);
+                area.select();
+                try {
+                    copied = document.execCommand('copy');
+                } catch (err) {
+                    copied = false;
+                }
+                document.body.removeChild(area);
+            }
+            this.copyStatus = copied ? 'Copied' : 'Copy failed';
+            setTimeout(() => { this.copyStatus = ''; }, 2000);
         },
         downloadResults() {
             if (this.pending || this.status !== 'finished' || this.hasBeenClicked) return;

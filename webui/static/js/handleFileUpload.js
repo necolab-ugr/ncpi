@@ -475,6 +475,15 @@
                 serverBrowserCurrentPath = String(payload.path || "");
                 serverBrowserParentPath = String(payload.parent || "");
                 elements.modalPath.textContent = serverBrowserCurrentPath || "/";
+                const typedFile = String(payload.selected_file || "");
+                const fileListed = (payload.files || []).some((entry) => entry.path === typedFile);
+                if (typedFile && !fileListed) {
+                    showServerBrowserError(`Unsupported file type: ${typedFile}`);
+                } else if (typedFile && !serverBrowserSelectedPaths.includes(typedFile)) {
+                    serverBrowserSelectedPaths = allowMultipleServerSelection
+                        ? [...serverBrowserSelectedPaths, typedFile]
+                        : [typedFile];
+                }
                 renderServerBrowserEntries(payload.dirs || [], payload.files || []);
                 elements.modalUp.disabled = !serverBrowserParentPath;
             } catch (error) {
@@ -667,6 +676,15 @@
 
         elements.modalRefresh.addEventListener("click", () => {
             void loadServerFiles(serverBrowserCurrentPath);
+        });
+
+        // Typed/pasted path in the browser header
+        elements.modalPath.setAttribute("data-editable-path", "");
+        if (window.ncpiEditablePath) {
+            window.ncpiEditablePath.attach(elements.modalPath);
+        }
+        elements.modalPath.addEventListener("ncpi-path-submit", (event) => {
+            void loadServerFiles(event.detail.path);
         });
 
         elements.modalSelect.addEventListener("click", () => {

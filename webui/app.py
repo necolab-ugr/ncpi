@@ -18,6 +18,7 @@ import traceback
 import functools
 import textwrap
 import tempfile
+import zipfile
 from pathlib import Path
 from collections import deque, defaultdict
 from collections.abc import Mapping as MappingABC
@@ -2419,6 +2420,36 @@ def _attach_result_inspection(entries):
             }
         enriched.append(item)
     return enriched
+
+
+def _zip_result_summary_entries(path):
+    """List archive members as preview entries, describing pickled objects."""
+    real_path = os.path.realpath(path)
+    entries = []
+    with zipfile.ZipFile(real_path) as archive:
+        for info in archive.infolist():
+            if info.is_dir():
+                continue
+            size_text = f"{info.file_size / 1024:.1f} KB"
+            if Path(info.filename).suffix.lower() in PICKLE_EXTENSIONS:
+                try:
+                    with archive.open(info) as handle:
+                        inspection = _describe_result_object(pickle.load(handle))
+                except Exception as exc:
+                    inspection = {"summary": f"Failed to inspect file: {exc}", "error": str(exc)}
+            else:
+                inspection = {"summary": ""}
+            inspection["detail_summary"] = (
+                (inspection.get("detail_summary") or "").strip() + f" Stored in ZIP ({size_text})."
+            ).strip()
+            entries.append({
+                "key": f"result::{real_path}::{info.filename}",
+                "name": info.filename,
+                "label": "ZIP archive member",
+                "path": real_path,
+                "inspection": inspection,
+            })
+    return entries
 
 
 def _simulation_output_label_for_name(name):
@@ -8550,6 +8581,8 @@ def _simulation_restore_endpoint_for_model(model_type):
     }.get(str(model_type or "").strip().lower())
 
 
+RESTORABLE_JOB_STATUSES = {"finished", "failed", "cancelled"}
+
 _RESTORABLE_COMPUTATION_TARGETS = {
     "field_potential_proxy": ("field_potential_proxy", {}),
     "field_potential_kernel": ("field_potential_kernel", {}),
@@ -8685,8 +8718,8 @@ def restore_job_config(job_id):
         return redirect(url_for("dashboard"))
 
     computation_type = str(status.get("computation_type") or "").strip().lower()
-    if status.get("status") not in {"failed", "cancelled"}:
-        flash("Configuration can only be restored after a failed or cancelled job.", "error")
+    if status.get("status") not in RESTORABLE_JOB_STATUSES:
+        flash("Configuration can only be restored after a finished, failed or cancelled job.", "error")
         return redirect(url_for("job_status_page", job_id=job_id, computation_type=computation_type))
 
     if computation_type == "simulation":
@@ -10017,6 +10050,33 @@ def features():
     return render_template("3.features.html", options=options)
 
 
+def _features_method_dependency_error(method):
+    """Return an actionable message if a feature method dependency is missing or unsupported."""
+    from ncpi.Features import PYCATCH22_VERSION_SPEC
+
+    pip_hint = "In the environment running the WebUI, run: python -m pip install"
+    if method == "catch22":
+        requirement = f"pycatch22{PYCATCH22_VERSION_SPEC}"
+        if importlib.util.find_spec("pycatch22") is None:
+            return f'pycatch22 is not installed. {pip_hint} "{requirement}"'
+        installed = ncpi.tools._distribution_version("pycatch22")
+        if installed and not ncpi.tools._version_satisfies(installed, PYCATCH22_VERSION_SPEC):
+            return f'Installed pycatch22 version {installed} is unsupported. {pip_hint} "{requirement}"'
+    elif method == "specparam":
+        if importlib.util.find_spec("specparam") is None:
+            return f"specparam is not installed. {pip_hint} specparam"
+    return None
+
+
+def _features_method_dependency_errors():
+    errors = {}
+    for method in ("catch22", "specparam"):
+        message = _features_method_dependency_error(method)
+        if message:
+            errors[method] = message
+    return errors
+
+
 # Features configuration page
 @app.route("/features/methods", methods=["GET", "POST"])
 def features_methods():
@@ -10036,6 +10096,7 @@ def features_methods():
         has_features_data=bool(features_data_files),
         features_runtime=runtime_context,
         module_restore_form=_pop_module_restore_form("features"),
+        method_dependency_errors=_features_method_dependency_errors(),
     )
 
 
@@ -10058,9 +10119,17 @@ def _list_windows_drives():
     return drives
     
 
+def _clean_typed_path(raw):
+    """Normalize a typed/pasted path: trim spaces and surrounding quotes."""
+    text = str(raw or "").strip()
+    while len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        text = text[1:-1].strip()
+    return text
+
+
 @app.route("/features/browse_dirs", methods=["GET"])
 def features_browse_dirs():
-    requested = (request.args.get("path") or "").strip()
+    requested = _clean_typed_path(request.args.get("path"))
     requested_history_key = (request.args.get("history_key") or "").strip()
     is_windows = sys.platform == "win32"
 
@@ -10094,6 +10163,14 @@ def features_browse_dirs():
     except (TypeError, ValueError, OSError) as exc:
         return jsonify({"error": f"Invalid directory path: {exc}"}), 400
 
+    # A typed/pasted file path opens its folder and preselects the file
+    selected_file = None
+    if requested and os.path.isfile(current):
+        selected_file = current
+        current = os.path.dirname(current)
+
+    if not os.path.exists(current):
+        return jsonify({"error": f"Path does not exist: {current}"}), 400
     if not os.path.isdir(current):
         return jsonify({"error": f"Not a directory: {current}"}), 400
 
@@ -10151,6 +10228,8 @@ def features_browse_dirs():
     }
     if include_files:
         payload["files"] = files[:1000]
+    if selected_file:
+        payload["selected_file"] = selected_file
 
     if requested_history_key:
         _remember_path_history_for_key(requested_history_key, current)
@@ -17294,6 +17373,10 @@ def start_computation_redirect(computation_type):
         if selected_method == "custom" and not (request.form.get("custom_feature_script") or "").strip():
             flash('Provide a custom feature extraction script before computing.', 'error')
             return redirect(request.referrer or url_for('features_methods'))
+        dependency_error = _features_method_dependency_error(selected_method)
+        if dependency_error:
+            flash(dependency_error, 'error')
+            return redirect(request.referrer or url_for('features_methods'))
 
         data_source_kind = (request.form.get("data_source_kind") or "new-simulation").strip()
         app.logger.warning("[compute %s] features data_source_kind=%s", job_id, data_source_kind)
@@ -18369,8 +18452,6 @@ def start_computation_redirect(computation_type):
                                     pass
                             break
 
-                    if selected_token:
-                        upload_items = [row for row in upload_items if row[3] == selected_token]
                     if filename_format_spec:
                         upload_items, skipped_names = _filter_named_items_by_filename_format(
                             upload_items,
@@ -18918,7 +18999,7 @@ def get_status(job_id):
         "simulation_completed": status.get("simulation_completed"),
         "simulation_mode": status.get("simulation_mode"),
         "can_restore_config": bool(
-            status.get("status") in {"failed", "cancelled"}
+            status.get("status") in RESTORABLE_JOB_STATUSES
             and (
                 (
                     status.get("computation_type") == "simulation"
@@ -18960,6 +19041,13 @@ def preview_results(job_id):
             })
 
         ext = os.path.splitext(str(path))[1].lower()
+        if ext == ".zip":
+            items = _zip_result_summary_entries(path)
+            return jsonify({
+                "kind": "summary",
+                "summary_text": f"ZIP archive with {len(items)} file(s)",
+                "items": items,
+            })
         if ext in {".pkl", ".pickle"}:
             obj = pd.read_pickle(path)
         elif ext == ".parquet":

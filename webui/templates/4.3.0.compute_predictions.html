@@ -550,7 +550,7 @@
             </div>
             <div class="p-4 space-y-3">
                 <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
-                    Current folder: <span id="inferenceServerFileBrowserPath" class="font-mono"></span>
+                    Current folder: <span id="inferenceServerFileBrowserPath" class="font-mono" data-editable-path></span>
                 </p>
                 <div class="flex flex-wrap gap-2">
                     <button type="button" id="inferenceServerFileBrowserUp"
@@ -585,7 +585,7 @@
             </div>
             <div class="p-4 space-y-3">
                 <p class="text-xs text-slate-500 dark:text-slate-400 break-all">
-                    Current folder: <span id="inferenceServerFolderBrowserPath" class="font-mono"></span>
+                    Current folder: <span id="inferenceServerFolderBrowserPath" class="font-mono" data-editable-path></span>
                 </p>
                 <div class="flex flex-wrap gap-2">
                     <button type="button" id="inferenceServerFolderBrowserUp"
@@ -1664,6 +1664,7 @@ function inferencePredictionsData() {
                 currentFilePath = String(payload.path || "");
                 parentFilePath = String(payload.parent || "");
                 filePathEl.textContent = currentFilePath || "/";
+                if (payload.selected_file) selectedFilePath = String(payload.selected_file);
                 renderFileEntries(payload.dirs || [], payload.files || []);
                 fileUpBtn.disabled = !parentFilePath;
             } catch (error) {
@@ -1869,6 +1870,7 @@ function inferencePredictionsData() {
             if (parentFilePath) loadServerFiles(parentFilePath);
         });
         fileRefreshBtn.addEventListener("click", () => loadServerFiles(currentFilePath));
+        filePathEl.addEventListener("ncpi-path-submit", (event) => loadServerFiles(event.detail.path));
         fileSelectBtn.addEventListener("click", () => {
             if (!selectedFilePath) {
                 setError(fileErrorEl, "Select a file.");
@@ -1925,6 +1927,7 @@ function inferencePredictionsData() {
             if (parentFolderPath) loadServerFolders(parentFolderPath);
         });
         folderRefreshBtn.addEventListener("click", () => loadServerFolders(currentFolderPath));
+        folderPathEl.addEventListener("ncpi-path-submit", (event) => loadServerFolders(event.detail.path));
         folderSelectBtn.addEventListener("click", async () => {
             if (!currentFolderPath) {
                 setError(folderErrorEl, "No server folder selected.");
