@@ -27,7 +27,7 @@ dependencies = [
     "sbi==0.26.0",
     "six",  # Used by sbi.analysis plotting helpers.
     "arviz==0.20.0",
-    "torch==2.10.0",
+    "torch==2.13.0",
     "pycatch22>=0.4.5,<0.6",  # >= 0.6 changes feature values
     "specparam",
     "matplotlib==3.9.2",
@@ -126,7 +126,7 @@ tests = [
     "rpy2",
 ]
 
-# All optional dependencies
+# All optional dependencies except hctsa (matlabengine needs a local MATLAB install)
 all = [
     "h5py",
     "mne",
@@ -153,7 +153,6 @@ all = [
     "pdf2image",
     "seaborn",
     "statsmodels",
-    "matlabengine",
     "playwright",
     "pytest",
 ]

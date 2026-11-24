@@ -137,8 +137,8 @@ pip install --pre "ncpi[examples]"        # dependencies for example scripts [Wi
 # Note: the dependencies listed below refer to Section 6 (Optional backends notes).
 pip install --pre "ncpi[tests]"           # test stack dependencies [Windows: WSL required]
 pip install --pre "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
-pip install --pre "ncpi[hctsa]"           # hctsa backend support
-pip install --pre "ncpi[all]"             # all optional dependencies [Windows: WSL required]</code></pre>
+pip install --pre "ncpi[hctsa]"           # hctsa backend support (requires MATLAB, see hctsa note)
+pip install --pre "ncpi[all]"             # all optional dependencies except hctsa [Windows: WSL required]</code></pre>
         </section>
 
         <section id="webui">
@@ -260,7 +260,7 @@ pip install --pre "ncpi[all]"             # all optional dependencies [Windows: 
             pass the hctsa repository path as <code>hctsa_folder</code> when invoking hctsa-backed features in ncpi.
           </p>
           <p>
-            Note: the <code>tests</code> extra does not install <code>matlabengine</code>; hctsa tests are skipped unless MATLAB Engine and an hctsa folder are available.
+            Note: neither the <code>tests</code> nor the <code>all</code> extra installs <code>matlabengine</code>, so they work without MATLAB. hctsa tests are skipped unless MATLAB Engine and an hctsa folder are available. Install <code>ncpi[hctsa]</code> separately once MATLAB is set up.
           </p>
         </section>
 

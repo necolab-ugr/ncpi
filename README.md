@@ -118,8 +118,8 @@ pip install --pre "ncpi[examples]"        # dependencies for example scripts [Wi
 # Note: the dependencies listed below refer to Section 6 (Optional backends notes).
 pip install --pre "ncpi[tests]"           # test stack dependencies [Windows: WSL required]
 pip install --pre "ncpi[analysis]"        # statistics + EEG/MEG analysis helpers
-pip install --pre "ncpi[hctsa]"           # hctsa backend support
-pip install --pre "ncpi[all]"             # all optional dependencies [Windows: WSL required]
+pip install --pre "ncpi[hctsa]"           # hctsa backend support (requires MATLAB, see hctsa note)
+pip install --pre "ncpi[all]"             # all optional dependencies except hctsa [Windows: WSL required]
 ```
 
 ## 5) WebUI: installation and usage
@@ -263,8 +263,8 @@ MATLAB installation directory (see MathWorks docs: https://www.mathworks.com/hel
 or otherwise ensure the engine distribution you install matches your MATLAB version. After that, install hctsa and
 pass the hctsa repository path as `hctsa_folder` when invoking hctsa-backed features in ncpi.
 
-Note: the `tests` extra does not install `matlabengine`; hctsa tests are skipped unless MATLAB Engine and an hctsa
-folder are available.
+Note: neither the `tests` nor the `all` extra installs `matlabengine`, so they work without MATLAB. hctsa tests are
+skipped unless MATLAB Engine and an hctsa folder are available. Install `ncpi[hctsa]` separately once MATLAB is set up.
 
 
 # Folder Structure
@@ -488,6 +488,13 @@ if __name__ == "__main__":
     plt.savefig("ncpi_example.png", dpi=300)
     plt.show()
 ```
+
+# Contributing and support
+Contributions are welcome via pull requests: https://github.com/necolab-ugr/ncpi/pulls
+
+To report bugs or ask for support, open a GitHub issue: https://github.com/necolab-ugr/ncpi/issues. For bugs, include
+your `ncpi` version, environment (OS, Python version, installation method and extras), reproduction steps and the full
+error output. See the [contributing guide](https://necolab-ugr.github.io/ncpi/contributing.html) for details.
 
 # Citation
 If you use `ncpi` in your research, please consider citing our work:
