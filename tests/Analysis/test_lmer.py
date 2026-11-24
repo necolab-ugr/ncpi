@@ -435,25 +435,4 @@ def test_lm_path_works_with_emmeans(analysis: Analysis):
     assert isinstance(res["gr"], pd.DataFrame)
 
 
-# -----------------------------
-# cohend tests
-# -----------------------------
-def test_cohend_outputs_expected_keys(toy_df: pd.DataFrame):
-    """cohend should compute per-sensor d for each non-control group vs control."""
-    a = Analysis(toy_df)
-    res = a.cohend(
-        control_group="HC",
-        group_col="gr",
-        sensor_col="sensor",
-        data_col="Y",
-        min_n=2,
-        drop_zeros=False,
-    )
-    assert isinstance(res, dict)
-    assert set(res.keys()) == {"g1vsHC", "g2vsHC"}
-    for k, df in res.items():
-        assert isinstance(df, pd.DataFrame)
-        assert "sensor" in df.columns
-        assert "d" in df.columns
-        # should have one row per sensor
-        assert df["sensor"].nunique() == toy_df["sensor"].nunique()
+# cohend tests live in test_cohend.py (no R backend needed, runs in CI)

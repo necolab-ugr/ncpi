@@ -55,3 +55,6 @@ examples/simulation/Cavallari_model/neuron_model/*.so
 
 # Zenodo datasets downloaded by examples
 /ncpi_data/
+
+# sbi TensorBoard logs written during training/tests
+sbi-logs/
