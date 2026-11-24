@@ -340,12 +340,30 @@ def test_pickle_roundtrip_preserves_predict(tmp_result_dir, tmp_path):
     inf.add_simulation_data(X, Y)
     inf.train(param_grid=None, n_splits=2, n_repeats=1, result_dir=tmp_result_dir, seed=0)
 
+    preds_before = inf.predict(X[:5], result_dir=tmp_result_dir, n_jobs=1)
+
     p = tmp_path / "inf.pkl"
     p.write_bytes(pickle.dumps(inf))
     inf2 = pickle.loads(p.read_bytes())
 
-    preds = inf2.predict(X[:5], result_dir=tmp_result_dir)
-    assert len(preds) == 5
+    # Restored state matches the original object
+    assert inf2.model_name == inf.model_name
+    assert inf2.backend == inf.backend
+    np.testing.assert_array_equal(inf2.features, inf.features)
+    np.testing.assert_array_equal(inf2.theta, inf.theta)
+
+    preds_after = inf2.predict(X[:5], result_dir=tmp_result_dir, n_jobs=1)
+    assert len(preds_after) == 5
+    np.testing.assert_allclose(np.asarray(preds_after), np.asarray(preds_before), rtol=0, atol=1e-12)
+
+    # Independent reference: saved model(s) applied directly
+    with open(os.path.join(tmp_result_dir, "model.pkl"), "rb") as f:
+        model = pickle.load(f)
+    models = model if isinstance(model, list) else [model]
+    expected = np.mean([np.asarray(m.predict(X[:5])) for m in models], axis=0)
+    np.testing.assert_allclose(
+        np.asarray(preds_after).reshape(expected.shape), expected, rtol=1e-12, atol=1e-12
+    )
 
 
 @pytest.mark.parametrize("sbi_model", ["NPE", "NLE", "NRE"])
