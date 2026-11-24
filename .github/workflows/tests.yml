@@ -74,7 +74,8 @@ jobs:
 
       - name: Run tests with pytest
         run: |
-          pytest -v --ignore=tests/EEG_AD/test_EEG.py \
+          pytest -v --ignore=tests/data \
+                    --ignore=tests/EEG_AD/test_EEG.py \
                     --ignore=tests/Analysis/test_lmer.py \
                     --ignore=tests/webui
 
@@ -94,7 +95,7 @@ jobs:
           python -m pip install --upgrade pip setuptools
           pip install pytest
           pip install neuron  # FieldPotential (proxy step) imports NEURON
-          pip install .
+          pip install ".[webui]"  # WebUI runtime backends (h5py, mne, ...)
 
       - name: Run WebUI tests (Flask test client, no browser/NEST/Zenodo)
         run: |
