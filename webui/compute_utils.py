@@ -4851,9 +4851,13 @@ def inference_computation(job_id, job_status, params, temp_uploaded_files):
                 if not scaler_present:
                     raise ValueError("Scaler usage is enabled, but scaler.pkl was not provided.")
                 scaler_obj = _load_pickle_file(scaler_dst)
+                # scaler.pkl may hold one scaler per ensemble member
+                scaler_list = scaler_obj if isinstance(scaler_obj, list) else [scaler_obj]
                 if np.any(finite_mask):
-                    x_valid = scaler_obj.transform(x_local[finite_mask])
-                    valid_after_scale = np.isfinite(x_valid).all(axis=1)
+                    valid_after_scale = np.ones(int(finite_mask.sum()), dtype=bool)
+                    for s in scaler_list:
+                        x_valid = s.transform(x_local[finite_mask])
+                        valid_after_scale &= np.isfinite(x_valid).all(axis=1)
                     valid_indices = np.where(finite_mask)[0]
                     finite_mask[:] = False
                     finite_mask[valid_indices[valid_after_scale]] = True
@@ -5017,6 +5021,9 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
             strategy_mode = "param_grid" if (legacy_enable_cv and legacy_enable_grid) else "single_trial"
 
         use_scaler = _parse_bool_param(params, "training_use_scaler", default=False)
+        scaler_per_fold = use_scaler and strategy_mode == "param_grid" and _parse_bool_param(
+            params, "training_scaler_per_fold", default=False
+        )
         scaler_type = (_get_param(params, "training_scaler_type", "StandardScaler") or "StandardScaler").strip()
         seed = _parse_int_param(params, "training_seed", default=0)
         n_splits = _parse_int_param(params, "training_n_splits", default=10)
@@ -5163,6 +5170,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 f"Training config: strategy={strategy_mode}, seed={seed}, "
                 f"n_splits={n_splits}, n_repeats={n_repeats}, "
                 f"scaler={'on' if use_scaler else 'off'} ({scaler_type if use_scaler else 'n/a'}), "
+                f"scaler_per_fold={'on' if scaler_per_fold else 'off'}, "
                 f"sklearn_verbose={sklearn_verbose_label}."
             ),
         )
@@ -5266,6 +5274,7 @@ def inference_training_computation(job_id, job_status, params, temp_uploaded_fil
                 train_params=train_params,
                 result_dir=artifacts_dir,
                 scaler=scaler_obj,
+                scaler_per_fold=scaler_per_fold,
                 seed=seed,
                 sklearn_verbose=sklearn_verbose,
                 sbi_eval_sampling_kwargs=sbi_eval_sampling_kwargs,

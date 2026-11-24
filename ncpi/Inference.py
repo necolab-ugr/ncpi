@@ -1,4 +1,5 @@
 import os
+import copy
 import random
 import numpy as np
 import inspect
@@ -17,6 +18,16 @@ _CV_PARAMS = None
 _CV_N_SPLITS = None
 _CV_SEED = None
 _CV_DEFAULT_VERBOSE = None
+_CV_SCALER = None
+
+
+def _clone_scaler(scaler):
+    """Return an unfitted copy of a scaler (sklearn clone, deepcopy fallback)."""
+    try:
+        from sklearn.base import clone as sklearn_clone
+        return sklearn_clone(scaler)
+    except Exception:
+        return copy.deepcopy(scaler)
 
 
 def _prediction_worker_init(model, scaler):
@@ -37,18 +48,28 @@ def _predict_one(x):
     elif x.ndim == 1:
         x = x.reshape(1, -1)
 
-    if _PRED_SCALER is not None:
-        x = _PRED_SCALER.transform(x)
-
-    if not np.all(np.isfinite(x)):
-        return None
-
     model = _PRED_MODEL
-    if isinstance(model, list):
-        preds = [np.asarray(m.predict(x)) for m in model]
+    if isinstance(_PRED_SCALER, list):
+        # One scaler per ensemble member (scaler_per_fold=True)
+        preds = []
+        for m, s in zip(model, _PRED_SCALER):
+            xs = s.transform(x)
+            if not np.all(np.isfinite(xs)):
+                return None
+            preds.append(np.asarray(m.predict(xs)))
         y = np.mean(preds, axis=0)
     else:
-        y = np.asarray(model.predict(x))
+        if _PRED_SCALER is not None:
+            x = _PRED_SCALER.transform(x)
+
+        if not np.all(np.isfinite(x)):
+            return None
+
+        if isinstance(model, list):
+            preds = [np.asarray(m.predict(x)) for m in model]
+            y = np.mean(preds, axis=0)
+        else:
+            y = np.asarray(model.predict(x))
 
     y0 = np.asarray(y)[0]
     if y0.ndim == 0:
@@ -56,9 +77,9 @@ def _predict_one(x):
     return y0.astype(float).tolist()
 
 
-def _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose):
+def _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose, scaler=None):
     """Initializer for sklearn CV workers (runs once per process)."""
-    global _CV_BASE_MODEL, _CV_X, _CV_Y, _CV_PARAMS, _CV_N_SPLITS, _CV_SEED, _CV_DEFAULT_VERBOSE
+    global _CV_BASE_MODEL, _CV_X, _CV_Y, _CV_PARAMS, _CV_N_SPLITS, _CV_SEED, _CV_DEFAULT_VERBOSE, _CV_SCALER
     _CV_BASE_MODEL = base_model
     _CV_X = X
     _CV_Y = Y
@@ -66,10 +87,11 @@ def _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose):
     _CV_N_SPLITS = n_splits
     _CV_SEED = seed
     _CV_DEFAULT_VERBOSE = default_verbose
+    _CV_SCALER = scaler
 
 
 def _train_sklearn_cv_fold(task):
-    """Train one sklearn CV fold and return (fold_i, mse, trained_model)."""
+    """Train one sklearn CV fold and return (fold_i, mse, trained_model, fold_scaler)."""
     fold_i, tr, te = task
 
     # Local import in worker process keeps module-level imports lightweight.
@@ -86,12 +108,22 @@ def _train_sklearn_cv_fold(task):
         p["verbose"] = _CV_DEFAULT_VERBOSE
     m.set_params(**p)
 
+    X_tr = _CV_X[tr]
+    X_te = _CV_X[te]
+    fold_scaler = None
+    if _CV_SCALER is not None:
+        # Fit scaler on this fold's training rows only
+        fold_scaler = _clone_scaler(_CV_SCALER)
+        fold_scaler.fit(X_tr)
+        X_tr = fold_scaler.transform(X_tr)
+        X_te = fold_scaler.transform(X_te)
+
     y_tr = _CV_Y[tr]
     if y_tr.ndim == 2 and y_tr.shape[1] == 1:
         y_tr = y_tr.ravel()
-    m.fit(_CV_X[tr], y_tr)
+    m.fit(X_tr, y_tr)
 
-    pred = np.asarray(m.predict(_CV_X[te]))
+    pred = np.asarray(m.predict(X_te))
 
     y_te = _CV_Y[te]
     if y_te.ndim == 2 and y_te.shape[1] == 1:
@@ -100,7 +132,7 @@ def _train_sklearn_cv_fold(task):
         pred = np.asarray(pred).ravel()
 
     mse = float(np.mean((pred - y_te) ** 2))
-    return fold_i, mse, m
+    return fold_i, mse, m, fold_scaler
 
 
 class Inference:
@@ -795,6 +827,7 @@ class Inference:
             train_params: dict | None = None,
             result_dir: str = "data",
             scaler=None,
+            scaler_per_fold: bool = False,
             seed: int = 0,
             sklearn_verbose: int | None = None,
             sbi_eval_sampling_kwargs: dict | None = None,
@@ -823,8 +856,16 @@ class Inference:
             - sklearn: model.pkl (single model or fold-model list) and optionally scaler.pkl
             - sbi: inference.pkl, density_estimator.pkl, posterior.pkl (each single object or list),
               and optionally scaler.pkl
-        scaler : fitted transformer or None
-            If provided, used to scale features before training.
+        scaler : bool, transformer or None
+            If ``True``, a ``StandardScaler`` is used; if a transformer, it is used
+            to scale features before training; if ``None``/``False``, no scaling.
+        scaler_per_fold : bool, default=False
+            Only used when ``param_grid`` and ``scaler`` are provided.
+            If ``False`` (default), the scaler is fitted once on all data before
+            cross-validation (previous behavior, compatible with existing models).
+            If ``True``, a fresh scaler is fitted on each fold's training rows only,
+            so validation rows do not leak into the scaling statistics; ``scaler.pkl``
+            then stores a list of scalers aligned with the saved fold models.
         seed : int
             Random seed for reproducibility.
         sklearn_verbose : int or None
@@ -887,16 +928,31 @@ class Inference:
             raise ValueError(f"features/theta row mismatch: {X.shape[0]} vs {Y.shape[0]}.")
 
         # --------- Scale (do not mutate self.features) ----------
-        fitted_scaler = None
+        if not isinstance(scaler_per_fold, (bool, np.bool_)):
+            raise TypeError("scaler_per_fold must be a boolean.")
+
+        scaler_template = None
         if scaler is True:
             from sklearn.preprocessing import StandardScaler
-            fitted_scaler = StandardScaler()
+            scaler_template = StandardScaler()
         elif scaler is not None and not isinstance(scaler, (bool, np.bool_)):
-            fitted_scaler = scaler
+            scaler_template = scaler
 
-        if fitted_scaler is not None:
+        per_fold = bool(scaler_per_fold) and param_grid is not None and scaler_template is not None
+        if scaler_per_fold and not per_fold:
+            print("scaler_per_fold=True ignored: requires both param_grid and scaler.")
+
+        fitted_scaler = None
+        fold_scaler_template = None
+        if per_fold:
+            # Raw X goes to the folds; each fold fits its own scaler
+            fold_scaler_template = scaler_template
+            print("Fitting a separate scaler on each CV fold's training rows.")
+        elif scaler_template is not None:
+            fitted_scaler = scaler_template
             fitted_scaler.fit(X)
             X = fitted_scaler.transform(X)
+        best_fold_scalers = None
 
         all_splits = None
         total_folds = None
@@ -955,6 +1011,7 @@ class Inference:
                 for params in param_grid:
                     print(f"Evaluating params: {params}")
                     fold_models = []
+                    fold_scalers = []
                     fold_scores = []
                     fold_tasks = [(fold_i, tr, te) for fold_i, (tr, te) in enumerate(all_splits)]
                     max_workers = min(total_folds, os.cpu_count() or 1)
@@ -965,23 +1022,27 @@ class Inference:
                         with ctx.Pool(
                             processes=max_workers,
                             initializer=_cv_worker_init,
-                            initargs=(base_model, X, Y, params, n_splits, seed, default_verbose),
+                            initargs=(base_model, X, Y, params, n_splits, seed, default_verbose,
+                                      fold_scaler_template),
                         ) as pool:
                             fold_results = pool.map(_train_sklearn_cv_fold, fold_tasks)
                     else:
-                        _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose)
+                        _cv_worker_init(base_model, X, Y, params, n_splits, seed, default_verbose,
+                                        fold_scaler_template)
                         fold_results = [_train_sklearn_cv_fold(task) for task in fold_tasks]
 
-                    for fold_i, mse, m in sorted(fold_results, key=lambda x: x[0]):
+                    for fold_i, mse, m, s in sorted(fold_results, key=lambda x: x[0]):
                         print(f"  Fold {fold_i+1}/{total_folds}")
                         fold_scores.append(mse)
                         fold_models.append(m)
+                        fold_scalers.append(s)
 
                     mean_mse = float(np.mean(fold_scores))
                     if mean_mse < best_score:
                         best_score = mean_mse
                         best_params = dict(params)
                         best_fold_models = fold_models
+                        best_fold_scalers = fold_scalers
 
                 if best_fold_models is None:
                     raise ValueError("No best hyperparameters found.")
@@ -1029,6 +1090,7 @@ class Inference:
                     cfg.update(params)
 
                     fold_artifacts = []
+                    fold_scalers = []
                     fold_scores = []
 
                     for fold_i, (tr, te) in enumerate(all_splits):
@@ -1041,17 +1103,28 @@ class Inference:
                         np.random.seed(repeat_seed)
                         random.seed(repeat_seed)
 
+                        te_idx = np.asarray(te)
+                        if per_fold:
+                            # Fit scaler on this fold's training rows only
+                            s = _clone_scaler(fold_scaler_template)
+                            s.fit(X[tr])
+                            X_tr_t = torch.from_numpy(s.transform(X[tr]).astype(np.float32))
+                            X_te_t = torch.from_numpy(s.transform(X[te_idx]).astype(np.float32))
+                        else:
+                            s = None
+                            X_tr_t = X_t[tr]
+                            X_te_t = X_t[te_idx]
+
                         inf = self.initialize_sbi(cfg)
-                        inf.append_simulations(Y_t[tr], X_t[tr])
+                        inf.append_simulations(Y_t[tr], X_tr_t)
                         de = inf.train(**train_params)
 
                         build_kwargs = getattr(self, "_sbi_build_posterior_kwargs", {}) or {}
                         posterior = inf.build_posterior(de, **build_kwargs)
 
                         # posterior mean MSE over test fold (batched)
-                        te_idx = np.asarray(te)
                         total = 0.0
-                        xb = X_t[te_idx]
+                        xb = X_te_t
                         yb = Y_t[te_idx]
 
                         samples = self._sample_posterior(
@@ -1068,12 +1141,14 @@ class Inference:
                         fold_mse = total / te_idx.shape[0]
                         fold_scores.append(fold_mse)
                         fold_artifacts.append((inf, de, posterior))
+                        fold_scalers.append(s)
 
                     mean_mse = float(np.mean(fold_scores))
                     if mean_mse < best_score:
                         best_score = mean_mse
                         best_cfg_delta = dict(params)
                         best_fold_artifacts = fold_artifacts
+                        best_fold_scalers = fold_scalers
 
                 if best_fold_artifacts is None:
                     raise ValueError("No best hyperparameters found.")
@@ -1110,9 +1185,10 @@ class Inference:
         # --------- Save artifacts ----------
         os.makedirs(result_dir, exist_ok=True)
 
-        if fitted_scaler is not None:
+        scaler_artifact = best_fold_scalers if per_fold else fitted_scaler
+        if scaler_artifact is not None:
             with open(os.path.join(result_dir, "scaler.pkl"), "wb") as f:
-                pickle.dump(fitted_scaler, f)
+                pickle.dump(scaler_artifact, f)
             print(f"Scaler saved at '{result_dir}/scaler.pkl'")
 
         if self.backend == "sklearn":
@@ -1169,6 +1245,8 @@ class Inference:
             (``model.pkl``/``posterior.pkl`` and optionally ``scaler.pkl``).
         scaler : bool, default=False
             If ``True``, load and apply ``scaler.pkl`` before prediction/sampling.
+            ``scaler.pkl`` may hold a single scaler or a list with one scaler per
+            ensemble member (``train(..., scaler_per_fold=True)``).
             If ``False``, no scaling is applied.
         n_jobs : int | None, default=None
             sklearn only. Number of worker processes used for multiprocessing
@@ -1279,13 +1357,24 @@ class Inference:
         else:
             scaler = None
 
+        # A list of scalers means one per ensemble member (scaler_per_fold=True)
+        if isinstance(scaler, list):
+            ensemble = model if self.backend == "sklearn" else posterior_obj
+            n_members = len(ensemble) if isinstance(ensemble, list) else 1
+            if len(scaler) != n_members:
+                raise ValueError(
+                    f"scaler.pkl holds {len(scaler)} scalers but the ensemble has {n_members} member(s)."
+                )
+            if not isinstance(ensemble, list):
+                scaler = scaler[0]
 
         # -------- Infer expected number of features (for 1D input disambiguation) --------
         expected_n_features = None
 
         # 1) scaler is best (it was fit on training X)
-        if scaler is not None and not isinstance(scaler, (bool, np.bool_)) and hasattr(scaler, "n_features_in_"):
-            expected_n_features = int(scaler.n_features_in_)
+        scaler0 = scaler[0] if isinstance(scaler, list) else scaler
+        if scaler0 is not None and not isinstance(scaler0, (bool, np.bool_)) and hasattr(scaler0, "n_features_in_"):
+            expected_n_features = int(scaler0.n_features_in_)
 
         # 2) sklearn model(s) sometimes store n_features_in_
         if expected_n_features is None and self.backend == "sklearn":
@@ -1409,11 +1498,24 @@ class Inference:
                     f"(missing 'sample' method): {type(p)}"
                 )
 
-        if scaler is not None and not isinstance(scaler, (bool, np.bool_)) and np.any(finite_mask):
-            X2 = X.copy()
-            X2[finite_mask] = scaler.transform(X[finite_mask])
-            X = X2
-            finite_mask = np.isfinite(X).all(axis=1)
+        # Per-member inputs: one scaled copy of X per posterior when scalers are per fold
+        if isinstance(scaler, list):
+            member_X = []
+            for s in scaler:
+                Xs = X.copy()
+                if np.any(finite_mask):
+                    Xs[finite_mask] = s.transform(X[finite_mask])
+                member_X.append(Xs)
+            for Xs in member_X:
+                finite_mask = finite_mask & np.isfinite(Xs).all(axis=1)
+            X = member_X[0]
+        else:
+            if scaler is not None and not isinstance(scaler, (bool, np.bool_)) and np.any(finite_mask):
+                X2 = X.copy()
+                X2[finite_mask] = scaler.transform(X[finite_mask])
+                X = X2
+                finite_mask = np.isfinite(X).all(axis=1)
+            member_X = [X] * len(posteriors)
 
         if not np.any(finite_mask):
             s = _requested_num_samples_from_kwargs(sbi_eval_sampling_kwargs)
@@ -1422,22 +1524,24 @@ class Inference:
 
         torch = self.torch
 
-        Xf = X[finite_mask]
-        if Xf.dtype != np.float32:
-            Xf = Xf.astype(np.float32, copy=False)
-        Xf_t = torch.from_numpy(Xf)
+        def _to_tensor(Xm):
+            Xf = Xm[finite_mask]
+            if Xf.dtype != np.float32:
+                Xf = Xf.astype(np.float32, copy=False)
+            return torch.from_numpy(Xf)
+
+        member_X_t = [_to_tensor(Xm) for Xm in member_X]
 
         total_samples = _requested_num_samples_from_kwargs(sbi_eval_sampling_kwargs)
 
         # Batched posterior sampling
         with torch.no_grad():
-            xb = Xf_t
             n_post = len(posteriors)
 
             if n_post == 1:
                 samples = self._sample_posterior(
                     posteriors[0],
-                    x=xb,
+                    x=member_X_t[0],
                     **sbi_eval_sampling_kwargs,
                 )
                 if samples.ndim > 3:
@@ -1448,7 +1552,7 @@ class Inference:
                 per_model_counts = [base + (1 if j < rem else 0) for j in range(n_post)]
 
                 parts = []
-                for posterior_obj, n_samples in zip(posteriors, per_model_counts):
+                for posterior_obj, n_samples, xb in zip(posteriors, per_model_counts, member_X_t):
                     if n_samples <= 0:
                         continue
                     kw = dict(sbi_eval_sampling_kwargs)
